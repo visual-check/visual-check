@@ -1,2 +1,7 @@
 .idea
 .scratch
+.turbo
+
+dist
+node_modules
+.fallow/
