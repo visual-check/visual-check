@@ -1,0 +1,90 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>stress</title>
+<style>
+  @font-face { font-family: Fixture; src: url(/font/LiberationSans-Regular.ttf) format("truetype"); }
+  html, body { margin: 0; background: #eef0f4; color: #20242c; }
+  body { width: 1000px; height: 760px; position: relative; overflow: hidden; font-family: Fixture; }
+  .cards { position: absolute; left: 16px; top: 16px; display: grid; grid-template-columns: repeat(4, 150px); gap: 22px; }
+  .card { height: 96px; border-radius: 13.5px; background: #fff; padding: 10px; box-sizing: border-box; font-size: 11.5px; line-height: 1.32;
+          box-shadow: 0 .5px 1px rgba(16,24,40,.08), 0 2px 5px rgba(16,24,40,.09), 0 9px 19px rgba(16,24,40,.12); }
+  .card:nth-child(2n) { background: linear-gradient(170deg, #fff, #dfe7ff); border: .5px solid rgba(0,0,0,.14); }
+  .card:nth-child(3n) { opacity: .83; transform: translate(.37px, .61px); }
+  .scene { position: absolute; left: 700px; top: 16px; width: 284px; height: 214px; border-radius: 16px; overflow: hidden;
+           background: conic-gradient(at 40% 60%, #ff9f1c, #2ec4b6, #e71d36, #011627, #ff9f1c); }
+  .pane { position: absolute; border-radius: 10px; background: rgba(255,255,255,.14); backdrop-filter: blur(9px) saturate(1.7) contrast(.92);
+          box-shadow: inset 0 1px 0 rgba(255,255,255,.4), 0 6px 18px rgba(0,0,0,.35); color: #fff; font-size: 13px; padding: 8px; box-sizing: border-box; }
+  canvas { position: absolute; }
+  #c1 { left: 16px; top: 262px; }
+  #c2 { left: 512px; top: 262px; }
+  .blend { position: absolute; left: 16px; top: 520px; width: 300px; height: 120px; background: linear-gradient(90deg, #4361ee, #f72585); }
+  .blend i { position: absolute; width: 90px; height: 90px; border-radius: 50%; mix-blend-mode: multiply; top: 15px; }
+  .mask { position: absolute; left: 340px; top: 520px; width: 200px; height: 120px; background: repeating-linear-gradient(33deg, #023047 0 7px, #ffb703 7px 11.5px);
+          -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 42%, transparent 71%); }
+  .svgf { position: absolute; left: 560px; top: 520px; }
+  .dense { position: absolute; left: 16px; top: 650px; width: 968px; font-size: 10.5px; line-height: 1.26; column-count: 3; column-gap: 18px; }
+  .sub { font-family: sans-serif; font-weight: 600; letter-spacing: .013em; text-shadow: 0 1px 2px rgba(0,0,0,.35); }
+</style>
+<div class="cards" id="cards"></div>
+<div class="scene">
+  <div class="pane" style="left:14px;top:14px;width:170px;height:80px">Glass pane one</div>
+  <div class="pane" style="left:92px;top:60px;width:176px;height:100px">Glass pane two over pane one</div>
+</div>
+<canvas id="c1" width="480" height="240"></canvas>
+<canvas id="c2" width="472" height="240"></canvas>
+<div class="blend"><i style="left:20px;background:#ffd60a"></i><i style="left:80px;background:#06d6a0"></i><i style="left:150px;background:#ef476f"></i></div>
+<div class="mask"></div>
+<svg class="svgf" width="424" height="120" viewBox="0 0 424 120">
+  <defs>
+    <filter id="f" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="2.3"/><feColorMatrix type="saturate" values="1.6"/></filter>
+    <linearGradient id="g"><stop offset="0" stop-color="#3a86ff"/><stop offset="1" stop-color="#fb5607"/></linearGradient>
+  </defs>
+  <rect x="12" y="14" width="150" height="90" rx="17" fill="url(#g)" filter="url(#f)"/>
+  <path d="M190 100 Q 240 -20 300 70 T 412 40" fill="none" stroke="url(#g)" stroke-width="5.25"/>
+  <text x="196" y="108" font-size="15" fill="#22223b" transform="rotate(-2.5 196 108)">SVG text with a transform</text>
+</svg>
+<div class="dense" id="dense"></div>
+<script>
+  const words = 'pack my box with five dozen liquor jugs how vexingly quick daft zebras jump sphinx of black quartz judge my vow the five boxing wizards jump quickly'.split(' ');
+  const line = (seed, n) => Array.from({ length: n }, (_, i) => words[(seed * 7 + i * 11) % words.length]).join(' ');
+  document.getElementById('cards').innerHTML = Array.from({ length: 8 }, (_, i) =>
+    `<div class="card${i % 5 === 0 ? ' sub' : ''}">${line(i + 1, 16)}</div>`).join('');
+  document.getElementById('dense').textContent = Array.from({ length: 24 }, (_, i) => line(i + 3, 14)).join('. ');
+
+  document.documentElement.dataset.pending = '1';
+  document.fonts.load('16px Fixture').then(() => {
+    const a = document.getElementById('c1').getContext('2d');
+    const grd = a.createLinearGradient(0, 0, 480, 240);
+    grd.addColorStop(0, '#fff'); grd.addColorStop(1, '#cdd9ff');
+    a.fillStyle = grd; a.fillRect(0, 0, 480, 240);
+    a.fillStyle = '#20242c';
+    [11, 13, 16, 22].forEach((size, i) => {
+      a.font = `${size}px Fixture`;
+      a.fillText('Canvas text sphinx of black quartz judge', 12.25, 26 + i * 30);
+    });
+    a.font = '15px sans-serif'; a.fillText('Canvas system font sphinx of black quartz', 12, 150);
+    a.save(); a.translate(250, 190); a.rotate(-0.13); a.font = '18px Fixture'; a.fillText('Canvas rotated text', -80, 0); a.restore();
+    a.shadowColor = 'rgba(0,0,0,.5)'; a.shadowBlur = 11; a.shadowOffsetY = 3;
+    a.fillStyle = '#ff006e'; a.beginPath(); a.arc(420, 70, 34.5, 0, 6.3); a.fill();
+    a.shadowBlur = 0; a.shadowOffsetY = 0;
+
+    const b = document.getElementById('c2').getContext('2d');
+    const src = document.createElement('canvas'); src.width = src.height = 128;
+    const s = src.getContext('2d');
+    for (let y = 0; y < 128; y++) for (let x = 0; x < 128; x++) {
+      s.fillStyle = `rgb(${(x * 2) % 256},${(y * 2) % 256},${(x ^ y) * 2 % 256})`;
+      s.fillRect(x, y, 1, 1);
+    }
+    b.imageSmoothingQuality = 'high';
+    b.drawImage(src, 0, 0, 128, 128, 6.5, 6.5, 57, 57);
+    b.drawImage(src, 0, 0, 128, 128, 72, 6, 163.5, 163.5);
+    b.imageSmoothingQuality = 'low';
+    b.drawImage(src, 0, 0, 128, 128, 244, 6, 91, 91);
+    b.globalAlpha = .62; b.drawImage(src, 0, 0, 128, 128, 300.5, 40.5, 160, 190);
+    b.globalAlpha = 1; b.globalCompositeOperation = 'overlay';
+    const rg = b.createRadialGradient(150, 150, 8, 150, 150, 170);
+    rg.addColorStop(0, 'rgba(255,255,255,.9)'); rg.addColorStop(1, 'rgba(0,0,80,.7)');
+    b.fillStyle = rg; b.fillRect(0, 0, 472, 240);
+    delete document.documentElement.dataset.pending;
+  });
+</script>

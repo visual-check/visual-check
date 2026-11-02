@@ -1,0 +1,35 @@
+# Throwaway measurement for the Render parity measurement ticket. Lives only on this research branch.
+name: render-parity
+
+on:
+  push:
+    branches: [research/render-parity]
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: mcr.microsoft.com/playwright@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+
+jobs:
+  capture:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        job: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Playwright client (JS only)
+        working-directory: research/render-parity
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Pull image by digest
+        run: docker pull --platform linux/amd64 "$IMAGE"
+      - name: Capture in fresh containers
+        run: research/render-parity/run.sh linux/amd64 "$IMAGE" 5 "out/gha-amd64-${{ matrix.job }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gha-amd64-${{ matrix.job }}
+          path: out/
+          retention-days: 7
