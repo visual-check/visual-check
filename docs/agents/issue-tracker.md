@@ -21,9 +21,9 @@ Run `gh issue view <number> --comments`. The user will normally pass the issue n
 
 Used by `/wayfinder`. The **map** is an issue with one **child** issue per ticket.
 
-- **Map**: an issue whose body holds the Notes / Decisions-so-far / Fog sections.
-- **Child ticket**: a sub-issue of the map, with the question in the body. A `Type:` line in the body records the ticket type (`research`/`prototype`/`grilling`/`task`).
-- **Blocking**: a `Blocked by: #N, #N` line near the top of the body. A ticket is unblocked when every issue it lists is closed.
-- **Frontier**: scan the map's open sub-issues for ones that are unblocked and unassigned; lowest number wins.
+- **Map**: an issue labelled `wayfinder:map` whose body holds the Destination / Notes / Decisions so far / Not yet specified / Out of scope sections.
+- **Child ticket**: a sub-issue of the map (`POST repos/{owner}/{repo}/issues/{map}/sub_issues` with the child's database id as `sub_issue_id`), with the question in the body. A `wayfinder:<type>` label records the ticket type (`research`/`prototype`/`grilling`/`task`).
+- **Blocking**: GitHub's native issue dependencies (`POST repos/{owner}/{repo}/issues/{n}/dependencies/blocked_by` with the blocker's database id as `issue_id`). A ticket is unblocked when every issue blocking it is closed.
+- **Frontier**: scan the map's open sub-issues for ones that are unblocked (`issue_dependencies_summary.blocked_by` is 0) and unassigned; lowest number wins.
 - **Claim**: `gh issue edit <number> --add-assignee @me` before any work.
 - **Resolve**: add the answer as a comment under an `## Answer` heading, close the issue, then append a context pointer (gist + link) to Decisions-so-far in the map's body.
