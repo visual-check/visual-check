@@ -1,0 +1,36 @@
+# Throwaway measurement for the Visual diff benchmark ticket. Lives only on this research branch.
+name: visual-diff-benchmark
+
+on:
+  push:
+    branches: [research/visual-diff-benchmark]
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install benchmark dependencies
+        working-directory: research/visual-diff-benchmark
+        run: npm ci --no-audit --no-fund
+      - name: Install Chromium headless shell
+        working-directory: research/visual-diff-benchmark
+        run: npx playwright-core install --with-deps chromium-headless-shell
+      - name: Capture a public Storybook and time visual diffs
+        run: research/visual-diff-benchmark/run.sh out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: visual-diff-benchmark
+          path: |
+            out/*.json
+            out/*.jsonl
+            out/*.md
+          retention-days: 7
