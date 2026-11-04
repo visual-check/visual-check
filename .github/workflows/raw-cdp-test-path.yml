@@ -1,0 +1,58 @@
+# Throwaway measurement for the Raw CDP on the test path ticket. Lives only on this research branch.
+# Captures the Storybook build from the Render parity on real stories run, so every job uses the same bytes.
+name: raw-cdp-test-path
+
+on:
+  push:
+    branches: [research/raw-cdp-test-path]
+
+permissions: {}
+
+env:
+  SOURCE_RUN: "41795987063"
+  IMAGE: mcr.microsoft.com/playwright@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+
+jobs:
+  bench:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        job: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: storybook
+          path: sb
+          run-id: ${{ env.SOURCE_RUN }}
+          github-token: ${{ github.token }}
+      - name: Unpack
+        run: |
+          (cd sb && sha256sum -c storybook.tar.sha256)
+          tar -C sb -xf sb/storybook.tar
+      - name: Install Playwright client (JS only)
+        working-directory: research/raw-cdp-test-path
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Pull image by digest
+        run: docker pull --platform linux/amd64 "$IMAGE"
+      - name: Measure
+        run: research/raw-cdp-test-path/runner.sh "$IMAGE" "$PWD/sb/storybook-static" "$PWD/out/gha-${{ matrix.job }}" 3
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gha-${{ matrix.job }}
+          path: |
+            out/gha-${{ matrix.job }}/*.json
+            out/gha-${{ matrix.job }}/*.jsonl
+            out/gha-${{ matrix.job }}/*.txt
+          retention-days: 7
