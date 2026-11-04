@@ -1,6 +1,6 @@
 # Throwaway measurement for the Render parity on real stories ticket. Lives only on this research branch.
 # The Storybook and HAR artifacts come from SOURCE_RUN, so every arm captures the same bytes.
-# Job 1 repeats in fresh containers for the noise floor; job 2 is a second runner.
+# Each job repeats in fresh containers for the noise floor; job 1 also captures the deliberate changes.
 name: render-parity-stories
 
 on:
@@ -16,7 +16,7 @@ env:
 jobs:
   capture:
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    timeout-minutes: 300
     permissions:
       contents: read
       actions: read
@@ -25,9 +25,11 @@ jobs:
       matrix:
         include:
           - job: 1
-            runs: 2
+            mutate: --mutate
           - job: 2
-            runs: 1
+            mutate: ""
+          - job: 3
+            mutate: ""
     steps:
       - uses: actions/checkout@v4
         with:
@@ -54,7 +56,7 @@ jobs:
       - name: Pull image by digest
         run: docker pull --platform linux/amd64 "$IMAGE"
       - name: Capture in fresh containers
-        run: research/render-parity-stories/run.sh linux/amd64 "$IMAGE" ${{ matrix.runs }} sb/storybook-static har "out/gha-${{ matrix.job }}"
+        run: research/render-parity-stories/run.sh linux/amd64 "$IMAGE" 3 sb/storybook-static har "out/gha-${{ matrix.job }}" ${{ matrix.mutate }}
       - uses: actions/upload-artifact@v4
         with:
           name: gha-${{ matrix.job }}
