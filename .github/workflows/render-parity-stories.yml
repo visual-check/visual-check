@@ -1,0 +1,86 @@
+# Throwaway measurement for the Render parity on real stories ticket. Lives only on this research branch.
+name: render-parity-stories
+
+on:
+  push:
+    branches: [research/render-parity-stories]
+
+permissions: {}
+
+env:
+  HEROUI_SHA: b2c65a5b5236550526f23d475b1ad0c6e5eab1a2
+  IMAGE: mcr.microsoft.com/playwright@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+
+jobs:
+  build:
+    # Third-party install and build scripts run here: no token permissions and no checkout of this repo.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions: {}
+    env:
+      STORYBOOK_DISABLE_TELEMETRY: 1
+      TURBO_TELEMETRY_DISABLED: 1
+      DO_NOT_TRACK: 1
+    steps:
+      - name: Fetch HeroUI at the pinned commit
+        run: |
+          git init -q heroui
+          git -C heroui fetch -q --depth 1 https://github.com/heroui-inc/heroui "$HEROUI_SHA"
+          git -C heroui checkout -q FETCH_HEAD
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: heroui/.nvmrc
+      - run: npm install -g pnpm@10.34.7
+      - name: Install
+        working-directory: heroui
+        run: pnpm install --frozen-lockfile
+      - name: Build Storybook
+        working-directory: heroui
+        run: pnpm build:storybook
+      - name: Pack
+        run: |
+          mkdir out
+          tar -C heroui/packages/storybook -cf out/storybook.tar storybook-static
+          (cd out && sha256sum storybook.tar | tee storybook.tar.sha256)
+          jq '[.entries[] | select(.type == "story")] | length' heroui/packages/storybook/storybook-static/index.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: storybook
+          path: out/
+          retention-days: 7
+
+  record:
+    # Opens every story once with network and saves the external responses, so every arm replays the same bytes.
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: storybook
+          path: sb
+      - name: Unpack
+        run: |
+          (cd sb && sha256sum -c storybook.tar.sha256)
+          tar -C sb -xf sb/storybook.tar
+      - name: Install Playwright client (JS only)
+        working-directory: research/render-parity-stories
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Pull image by digest
+        run: docker pull --platform linux/amd64 "$IMAGE"
+      - name: Record external responses
+        run: |
+          mkdir out
+          docker run --rm --init --ipc=host --pull=never --platform linux/amd64 \
+            -v "$PWD/research/render-parity-stories:/harness:ro" -v "$PWD/sb/storybook-static:/sb:ro" -v "$PWD/out:/out" \
+            "$IMAGE" node /harness/record.mjs /sb /out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: har
+          path: out/
+          retention-days: 7
