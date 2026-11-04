@@ -46,6 +46,8 @@ jobs:
       - name: Pull image by digest
         run: docker pull --platform linux/amd64 "$IMAGE"
       - name: Measure
+        env:
+          ONLY: host
         run: research/raw-cdp-test-path/runner.sh "$IMAGE" "$PWD/sb/storybook-static" "$PWD/out/gha-${{ matrix.job }}" 3
       - uses: actions/upload-artifact@v4
         if: always()
@@ -55,4 +57,5 @@ jobs:
             out/gha-${{ matrix.job }}/*.json
             out/gha-${{ matrix.job }}/*.jsonl
             out/gha-${{ matrix.job }}/*.txt
+            out/gha-${{ matrix.job }}/host/*.jsonl
           retention-days: 7
