@@ -39,6 +39,8 @@ export async function serve(root) {
     const file = normalize(join(root, p))
     if (!file.startsWith(root) || !existsSync(file) || !statSync(file).isFile()) { res.statusCode = 404; return res.end() }
     res.setHeader('content-type', TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream')
+    // Like any static host: modules stay cached across a worker's captures, documents and the index don't.
+    res.setHeader('cache-control', /\.(html|json)$/.test(file) ? 'no-cache' : 'max-age=3600')
     createReadStream(file).pipe(res)
   })
   await new Promise((r) => server.listen(0, '127.0.0.1', r))

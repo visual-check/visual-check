@@ -1,4 +1,6 @@
 # Throwaway measurement for the Render parity on real stories ticket. Lives only on this research branch.
+# The Storybook and HAR artifacts come from SOURCE_RUN, so every arm captures the same bytes.
+# Job 1 repeats in fresh containers for the noise floor; job 2 is a second runner.
 name: render-parity-stories
 
 on:
@@ -8,54 +10,24 @@ on:
 permissions: {}
 
 env:
-  HEROUI_SHA: b2c65a5b5236550526f23d475b1ad0c6e5eab1a2
+  SOURCE_RUN: "41795987063"
   IMAGE: mcr.microsoft.com/playwright@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
 
 jobs:
-  build:
-    # Third-party install and build scripts run here: no token permissions and no checkout of this repo.
+  capture:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    permissions: {}
-    env:
-      STORYBOOK_DISABLE_TELEMETRY: 1
-      TURBO_TELEMETRY_DISABLED: 1
-      DO_NOT_TRACK: 1
-    steps:
-      - name: Fetch HeroUI at the pinned commit
-        run: |
-          git init -q heroui
-          git -C heroui fetch -q --depth 1 https://github.com/heroui-inc/heroui "$HEROUI_SHA"
-          git -C heroui checkout -q FETCH_HEAD
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: heroui/.nvmrc
-      - run: npm install -g pnpm@10.34.7
-      - name: Install
-        working-directory: heroui
-        run: pnpm install --frozen-lockfile
-      - name: Build Storybook
-        working-directory: heroui
-        run: pnpm build:storybook
-      - name: Pack
-        run: |
-          mkdir out
-          tar -C heroui/packages/storybook -cf out/storybook.tar storybook-static
-          (cd out && sha256sum storybook.tar | tee storybook.tar.sha256)
-          jq '[.entries[] | select(.type == "story")] | length' heroui/packages/storybook/storybook-static/index.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: storybook
-          path: out/
-          retention-days: 7
-
-  record:
-    # Opens every story once with network and saves the external responses, so every arm replays the same bytes.
-    needs: build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 120
     permissions:
       contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - job: 1
+            runs: 3
+          - job: 2
+            runs: 1
     steps:
       - uses: actions/checkout@v4
         with:
@@ -64,6 +36,14 @@ jobs:
         with:
           name: storybook
           path: sb
+          run-id: ${{ env.SOURCE_RUN }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: har
+          path: har
+          run-id: ${{ env.SOURCE_RUN }}
+          github-token: ${{ github.token }}
       - name: Unpack
         run: |
           (cd sb && sha256sum -c storybook.tar.sha256)
@@ -73,14 +53,10 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Pull image by digest
         run: docker pull --platform linux/amd64 "$IMAGE"
-      - name: Record external responses
-        run: |
-          mkdir out
-          docker run --rm --init --ipc=host --pull=never --platform linux/amd64 \
-            -v "$PWD/research/render-parity-stories:/harness:ro" -v "$PWD/sb/storybook-static:/sb:ro" -v "$PWD/out:/out" \
-            "$IMAGE" node /harness/record.mjs /sb /out
+      - name: Capture in fresh containers
+        run: research/render-parity-stories/run.sh linux/amd64 "$IMAGE" ${{ matrix.runs }} sb/storybook-static har "out/gha-${{ matrix.job }}"
       - uses: actions/upload-artifact@v4
         with:
-          name: har
+          name: gha-${{ matrix.job }}
           path: out/
           retention-days: 7
