@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { chromium, webkit } from 'playwright-core'
-import { EXTERNAL, newContext, ready, serve, stories } from './lib.mjs'
+import { EXTERNAL, iconMisses, newContext, ready, replay, serve, stories } from './lib.mjs'
 
 const args = process.argv.slice(2)
 const mutate = args.includes('--mutate')
@@ -99,12 +99,16 @@ async function pass(name, { type, har, args }, mutation) {
   const t0 = performance.now()
   await Promise.all(Array.from({ length: WORKERS }, async () => {
     const ctx = await newContext(browser)
-    await ctx.routeFromHAR(join(harDir, `${har}.har.zip`), { url: EXTERNAL, notFound: 'abort' })
+    await replay(ctx, harDir, har)
     const page = await ctx.newPage()
     let missed = []
+    let late = null
     page.on('requestfailed', (r) => { if (EXTERNAL.test(r.url())) missed.push(r.url()) })
+    // An external request that starts during the screenshot means ready came too early for this story.
+    page.on('request', (r) => { if (late !== null && EXTERNAL.test(r.url())) late++ })
     for (let id; (id = queue.shift());) {
       missed = []
+      late = null
       const t = performance.now()
       const row = (shots[id] = {})
       try {
@@ -115,7 +119,10 @@ async function pass(name, { type, har, args }, mutation) {
             await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
           }
           if (!mutation || row.target) {
+            late = 0
             const png = await page.screenshot({ animations: 'disabled', caret: 'hide' })
+            if (late) row.late = late
+            late = null
             row.ms = Math.round(performance.now() - t)
             row.sha = sha(png)
             if (run === 1 || ref[id]?.sha !== row.sha) writeFileSync(join(dir, file(id)), png)
@@ -133,7 +140,7 @@ async function pass(name, { type, har, args }, mutation) {
   }))
   const wallMs = Math.round(performance.now() - t0)
   await browser.close()
-  writeFileSync(join(out, `${label}.json`), JSON.stringify({ pass: label, wallMs, shots }))
+  writeFileSync(join(out, `${label}.json`), JSON.stringify({ pass: label, wallMs, iconMisses: [...iconMisses], shots }))
   console.log(`run ${run} ${label}: ${ids.length} stories in ${(wallMs / 1000).toFixed(1)} s`)
 }
 
