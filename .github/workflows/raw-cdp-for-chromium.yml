@@ -1,0 +1,64 @@
+# Throwaway measurement for the Raw CDP for Chromium ticket. Lives only on this research branch.
+# Node and the Storybook server on the runner, only the browser in the container: how the driver reaches headless shell
+# (CDP over a published WebSocket port, or a pipe through docker run -i) and how the browser reaches the Storybook
+# (host networking, or a SOCKS proxy in the driver's process). Also the Network domain's cost and Playwright's CPU share
+# on WebKit. Uses the Storybook build from the Render parity on real stories run, so every job has the same bytes.
+name: raw-cdp-for-chromium
+
+on:
+  push:
+    branches: [research/raw-cdp-for-chromium]
+
+permissions: {}
+
+env:
+  SOURCE_RUN: "41795987063"
+  IMAGE: mcr.microsoft.com/playwright@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+
+jobs:
+  bench:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        job: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: storybook
+          path: sb
+          run-id: ${{ env.SOURCE_RUN }}
+          github-token: ${{ github.token }}
+      - name: Unpack
+        run: |
+          (cd sb && sha256sum -c storybook.tar.sha256)
+          tar -C sb -xf sb/storybook.tar
+      - name: Install Playwright client (JS only)
+        working-directory: research/raw-cdp-for-chromium
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Pull image by digest
+        run: docker pull --platform linux/amd64 "$IMAGE"
+      - name: Measure
+        env:
+          CHECK_HOSTS: "1"
+        run: research/raw-cdp-for-chromium/runner2.sh "$IMAGE" "$PWD/sb/storybook-static" "$PWD/out/gha-${{ matrix.job }}" 3
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gha-${{ matrix.job }}
+          path: |
+            out/gha-${{ matrix.job }}/*.json
+            out/gha-${{ matrix.job }}/*.jsonl
+            out/gha-${{ matrix.job }}/*.txt
+            out/gha-${{ matrix.job }}/host/*.jsonl
+          retention-days: 7
