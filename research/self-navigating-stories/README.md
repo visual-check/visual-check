@@ -15,3 +15,12 @@ node serve.mjs <storybook-static> 6400 127.0.0.1 &
 ./arms.sh http://127.0.0.1:6400 runs 1 0 raw pw
 python3 -I analyze.py runs
 ```
+
+Runs: [first](https://github.com/visual-check/visual-check/actions/runs/42277068955) (every arm in `arms.sh`, 12 jobs × 8 passes) and [second](https://github.com/visual-check/visual-check/actions/runs/42286239833) (Playwright's setup split into groups, 12 jobs × 12 passes).
+
+## Findings
+
+- Every lost document was `play` clicking a Burgers card that React Router 7's transition had already removed. The detached link navigates the document to `/categories/burgers`.
+- First attempts lose 38–42% under raw CDP and 47–49% under Playwright Chromium. Retries, on a fresh page, lose 37–41% under raw CDP and 18–19% under Playwright, so raw CDP ends "navigated away" after 3 attempts on 5–7% of these stories against 1.6–1.8%.
+- Playwright's utility world and script slow the fresh page enough to halve that, at no speed cost; `Network.enable` accounts for the rest. Pacing raw CDP 15% slower, or waiting 500 ms before a retry, made it worse.
+- Decided on the ticket: raw CDP copies none of it, the retry rule stays, and the story's race is the project's.
