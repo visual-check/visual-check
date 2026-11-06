@@ -1,9 +1,13 @@
 // RESEARCH, throwaway: the Driver interface prototype's raw CDP driver, with switches that add what Playwright 1.64.1
 // sends and raw CDP doesn't, for the Self-navigating stories under raw CDP ticket:
 //   net:     Network.enable on every page session (and on service workers, when pwSetup attaches to them)
-//   pwSetup: Playwright's other page setup (Log, lifecycle events, Runtime, its utility world, auto-attach with
-//            waitForDebuggerOnStart), service workers attached and paused at start as Playwright's browser session
-//            does, and its utility script injected into the main world before the first evaluate of each document.
+//   pwSetup: Playwright's other page setup, in groups ('all' for every group):
+//            runtime:   Runtime.enable and Log.enable
+//            utility:   its utility world, and its utility script injected into the main world before the first
+//                       evaluate of each document
+//            attach:    auto-attach with waitForDebuggerOnStart on pages, and service workers attached and paused at
+//                       start as Playwright's browser session does
+//            lifecycle: lifecycle events, and the window sized to the viewport
 // Copied from crPage.ts FrameSession._initialize, crBrowser.ts, crServiceWorker.ts and javascript.ts at v1.64.1.
 import { type ChildProcess, execFile, spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
@@ -36,7 +40,7 @@ export interface RawOptions {
   image: string
   platform: string
   net?: boolean
-  pwSetup?: boolean
+  pwSetup?: string[]
   /** Extra Chromium arguments, e.g. host-resolver rules for an offline run */
   extraArgs?: string[]
   cpus?: string
@@ -46,6 +50,8 @@ export interface RawOptions {
 
 type Pending = { resolve: (v: any) => void; reject: (e: Error) => void; method: string; sessionId?: string }
 type Session = { crashed: boolean; waiters: Map<string, Array<{ resolve: (v: any) => void; reject: (e: Error) => void }>>; onEvent: (method: string, params: any) => void }
+
+const setupHas = (o: RawOptions, group: string) => !!o.pwSetup && (o.pwSetup.includes('all') || o.pwSetup.includes(group))
 
 export function containerCommand(o: RawOptions): string[] {
   const net = ['--network', 'host']
@@ -133,7 +139,7 @@ export async function launchRawChromium(o: RawOptions): Promise<Driver> {
   await send('Target.setDiscoverTargets', { discover: true })
   // Playwright's browser session auto-attaches to every target with waitForDebuggerOnStart. Pages are attached below;
   // here only service workers, set up as crServiceWorker.ts does: Network (if net), Runtime, then resumed.
-  if (o.pwSetup) await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true, filter: [{ type: 'service_worker' }, { exclude: true }] })
+  if (setupHas(o, 'attach')) await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true, filter: [{ type: 'service_worker' }, { exclude: true }] })
   const byTarget = new Map<string, { sessionId: string; hazard?: PageOptions['onHazard'] }>()
   browserListeners.push((method, params) => {
     if (method === 'Target.targetCreated' && params.targetInfo.openerId) {
@@ -218,16 +224,20 @@ export async function launchRawChromium(o: RawOptions): Promise<Driver> {
         send('Emulation.setFocusEmulationEnabled', { enabled: true }, sessionId),
         send('Emulation.setDeviceMetricsOverride', metrics(po.viewport), sessionId),
         ...(o.net ? [send('Network.enable', {}, sessionId)] : []),
-        ...(o.pwSetup
+        ...(setupHas(o, 'utility')
           ? [
               send('Page.getFrameTree', {}, sessionId).then(({ frameTree }) =>
                 send('Page.createIsolatedWorld', { frameId: frameTree.frame.id, grantUniveralAccess: true, worldName: UTILITY_WORLD }, sessionId).catch(() => {})),
-              send('Log.enable', {}, sessionId),
-              send('Page.setLifecycleEventsEnabled', { enabled: true }, sessionId),
-              send('Runtime.enable', {}, sessionId),
               send('Page.addScriptToEvaluateOnNewDocument', { source: '', worldName: UTILITY_WORLD }, sessionId),
-              send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, sessionId),
-              send('Runtime.runIfWaitingForDebugger', {}, sessionId),
+            ]
+          : []),
+        ...(setupHas(o, 'runtime') ? [send('Log.enable', {}, sessionId), send('Runtime.enable', {}, sessionId)] : []),
+        ...(setupHas(o, 'attach')
+          ? [send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, sessionId), send('Runtime.runIfWaitingForDebugger', {}, sessionId)]
+          : []),
+        ...(setupHas(o, 'lifecycle')
+          ? [
+              send('Page.setLifecycleEventsEnabled', { enabled: true }, sessionId),
               send('Browser.getWindowForTarget', {}, sessionId).then(({ windowId }) => send('Browser.setWindowBounds', { windowId, bounds: po.viewport }, sessionId)).catch(() => {}),
             ]
           : []),
@@ -252,7 +262,7 @@ export async function launchRawChromium(o: RawOptions): Promise<Driver> {
         },
         async evaluate(expression, timeoutMs) {
           // Playwright evaluates through its utility script, which it injects into the main world on first use per document
-          if (o.pwSetup && !utility) utility = send('Runtime.evaluate', { expression: utilitySource() }, sessionId).catch(() => {})
+          if (setupHas(o, 'utility') && !utility) utility = send('Runtime.evaluate', { expression: utilitySource() }, sessionId).catch(() => {})
           if (utility) await utility
           // userGesture as Playwright's evaluate sends it, so pages behave the same under both drivers
           const r = await withTimeout(send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, userGesture: true }, sessionId), timeoutMs, 'evaluate')

@@ -13,7 +13,9 @@ env:
   STORYBOOK_RUN: "42204745376"
   STORYBOOK_SHA256: 3114c45921398afcb5b1b86980dae541dc5f022b41683508f812165d67cfd0f3
   IMAGE: mcr.microsoft.com/playwright@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
-  PASSES: "8"
+  PASSES: "12"
+  # Second run: Playwright's setup split into groups. The first run (42277068955) had every arm in arms.sh.
+  ARMS: raw pw raw-setup raw-s-runtime raw-s-utility raw-s-attach raw-s-lifecycle
   H: research/self-navigating-stories
 
 jobs:
@@ -53,11 +55,11 @@ jobs:
           { nproc; lscpu | grep -E 'Model name'; free -m | head -2; docker version --format '{{.Server.Version}}'; } > "$OUT/machine.txt"
           node "$H/serve.mjs" "$PWD/sb/storybook" 6400 127.0.0.1 > "$OUT/serve.log" 2>&1 &
           until grep -q serving "$OUT/serve.log" 2>/dev/null; do sleep 0.1; done
-          if [ "${{ matrix.job }}" = 1 ]; then
+          if [ "${{ matrix.job }}" = 0 ]; then
             mkdir -p "$OUT/protocol"
             node "$H/capture.ts" --driver pw --repeat 1 --out "$OUT/protocol/pw" --protocol-log "$OUT/protocol/pw-protocol.log" 2>"$OUT/protocol/pw.err" || true
           fi
-          "$H/arms.sh" http://127.0.0.1:6400 "$OUT/runs" "$PASSES" "${{ matrix.job }}" 2>&1 | tee "$OUT/runs.log"
+          "$H/arms.sh" http://127.0.0.1:6400 "$OUT/runs" "$PASSES" "${{ matrix.job }}" $ARMS 2>&1 | tee "$OUT/runs.log"
           python3 -I "$H/analyze.py" "$OUT/runs" | tee "$OUT/summary.txt"
       - uses: actions/upload-artifact@v4
         if: always()

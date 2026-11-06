@@ -3,7 +3,7 @@
 // records each click user-event dispatches (and whether its target is still in the document) and when the "Burgers"
 // element changes, i.e. when the router's transition commits. The probe's log lives in sessionStorage, so it survives
 // the story's own navigation and is read from whatever document the page ends on. Writes <out>/run.json.
-//   node capture.ts --driver raw|pw --base http://127.0.0.1:6400 --out dir [--net] [--pw-setup] [--workers 1] ...
+//   node capture.ts --driver raw|pw --base http://127.0.0.1:6400 --out dir [--net] [--pw-setup all|runtime,utility,attach,lifecycle] [--workers 1] ...
 import { createHash } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -31,7 +31,7 @@ const { values: o } = parseArgs({
     pace: { type: 'string', default: '0' }, // after each story, idle for this fraction of its time
     'retry-wait': { type: 'string', default: '0' }, // ms before each retry
     net: { type: 'boolean', default: false }, // raw: Network.enable on pages (and service workers with --pw-setup)
-    'pw-setup': { type: 'boolean', default: false }, // raw: the rest of Playwright's setup
+    'pw-setup': { type: 'string', default: '' }, // raw: the rest of Playwright's setup, 'all' or groups: runtime,utility,attach,lifecycle
     offline: { type: 'string', default: 'rules' }, // rules: host-resolver rules for both drivers; dns: Playwright's container has no DNS; none: live
     'no-probe': { type: 'boolean', default: false },
     'protocol-log': { type: 'string', default: '' }, // pw: run-server's pw:protocol log
@@ -123,7 +123,7 @@ const url = (c: Cell) => `${o.base}/iframe.html?id=${c.id}&viewMode=story`
 const RULES = ['--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1']
 const launch = (): Promise<Driver> => {
   const common = { image: o.image, platform: o.platform, cpus: o.cpus || undefined, memory: o.memory || undefined, name: o.name }
-  if (o.driver === 'raw') return launchRawChromium({ ...common, net: o.net, pwSetup: o['pw-setup'], extraArgs: o.offline === 'none' ? [] : RULES })
+  if (o.driver === 'raw') return launchRawChromium({ ...common, net: o.net, pwSetup: o['pw-setup'].split(',').filter(Boolean), extraArgs: o.offline === 'none' ? [] : RULES })
   return launchPlaywright({ ...common, browser: 'chromium', port: Number(o.port), mode: 'detached', offline: o.offline === 'dns', extraArgs: o.offline === 'rules' ? RULES : [], protocolLog: o['protocol-log'] || undefined })
 }
 

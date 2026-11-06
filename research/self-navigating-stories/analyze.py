@@ -15,6 +15,8 @@ for root in sys.argv[1:]:
         arm = f.split(os.sep)[-3]
         r = json.load(open(f))
         r['_job'] = root
+        m = os.path.join(root, '..', 'machine.txt')
+        r['_cpu'] = next((l.split(':', 1)[1].strip().replace('AMD EPYC ', '').replace(' 64-Core Processor', '').replace(' 96-Core Processor', '') for l in open(m) if 'Model name' in l), '?') if os.path.exists(m) else '?'
         runs[arm].append(r)
 
 
@@ -107,3 +109,14 @@ for arm in sorted(runs):
     top = max(navs.items(), key=lambda kv: kv[1])[0] if navs else '-'
     fmt = lambda xs: '/'.join(f"{q(xs, p):.0f}" for p in (0.25, 0.5, 0.75)) if xs else '-'
     print(f"{arm:16} {len(ps):5} {fmt(commit):>18} {fmt(press):>18} {det_lost:>12}/{len(det):<13} {lost_att:>14} {str(top):>22}")
+
+print('\nFirst-attempt loss by cycle (0 is the first pass over the stories on a fresh browser), and retry loss by attempt')
+cpus = sorted({r['_cpu'] for rs in runs.values() for r in rs})
+print(f"{'arm':16} {'cycle 0':>10} {'cycles 1+':>10} {'att 2':>10} {'att 3':>10} {'att 4-5':>10}  " + '  '.join(f'{c:>12}' for c in cpus))
+for arm in sorted(runs):
+    xs = [x | {'_cpu': r['_cpu']} for r in runs[arm] for x in r['attempts'] if x['key'] not in SAFE]
+    def rate(sel):
+        a = [x for x in xs if sel(x)]
+        return f"{sum(1 for x in a if x.get('lost')) / len(a):4.0%} {len(a):4}" if a else '-'
+    print(f"{arm:16} {rate(lambda x: x['attempt'] == 1 and x['cycle'] == 0):>10} {rate(lambda x: x['attempt'] == 1 and x['cycle'] > 0):>10} {rate(lambda x: x['attempt'] == 2):>10} {rate(lambda x: x['attempt'] == 3):>10} {rate(lambda x: x['attempt'] > 3):>10}  "
+          + '  '.join(f"{rate(lambda x, c=c: x['attempt'] == 1 and x['_cpu'] == c):>12}" for c in cpus))
