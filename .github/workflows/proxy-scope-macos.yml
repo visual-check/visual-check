@@ -67,3 +67,38 @@ jobs:
             out/job-${{ matrix.job }}/runs/*/*.err
             out/job-${{ matrix.job }}/snapshots/
           retention-days: 7
+
+  # Fetches the CDN images behind the cells where local runs differ from CI, records their bytes and edge headers,
+  # and renders each image alone. Compared with the same on the Mac, it tells CDN bytes from decoding.
+  decode:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        job: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install Playwright client (JS only)
+        working-directory: research/proxy-scope-macos
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Pull image by digest
+        run: docker pull -q --platform linux/amd64 "$IMAGE" && docker tag "$IMAGE" mcr.microsoft.com/playwright:v1.64.1-noble
+      - name: Fetch and render
+        run: |
+          OUT="$PWD/out/decode-${{ matrix.job }}"; mkdir -p "$OUT"
+          lscpu | grep -E 'Model name' > "$OUT/machine.txt"
+          node research/proxy-scope-macos/decode.ts research/proxy-scope-macos/cdn-urls.txt "$OUT" host
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: decode-${{ matrix.job }}
+          path: out/decode-${{ matrix.job }}/
+          retention-days: 7
