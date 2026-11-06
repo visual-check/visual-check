@@ -11,6 +11,7 @@ args() {
     scoped) echo "--driver raw --network bypass --bypass * --proxy-host ${PROXY_HOST:-127.0.0.1}" ;;
     hostnet) echo "--driver raw --network host" ;;
     pw) echo "--driver pw-chromium" ;;
+    settle) echo "--driver raw --network proxy --settle 100 --proxy-host ${PROXY_HOST:-127.0.0.1}" ;;
     *) echo "unknown arm $1" >&2; exit 2 ;;
   esac
 }

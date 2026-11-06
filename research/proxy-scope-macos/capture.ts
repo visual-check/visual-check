@@ -19,6 +19,7 @@ const { values: o } = parseArgs({
     workers: { type: 'string', default: '2' },
     network: { type: 'string', default: process.platform === 'linux' ? 'host' : 'proxy' },
     bypass: { type: 'string', default: '*' }, // --network bypass: sent DIRECT, everything else through the proxy
+    settle: { type: 'string', default: '0' }, // diagnostics: extra wait in ms after readiness, before the screenshot
     'proxy-host': { type: 'string', default: '127.0.0.1' },
     'proxy-port': { type: 'string', default: '1080' },
     image: { type: 'string', default: 'mcr.microsoft.com/playwright:v1.64.1-noble' },
@@ -153,6 +154,7 @@ async function captureOnce(page: Page, cell: Cell): Promise<Once> {
     if (page.navigations() > 1) return { lost: `${page.navigations()} documents after ready` }
     if (status?.status === 'timeout') return { reason: 'timeout', detail: `not ready within ${TIMEOUT} ms, at ${status.step}` }
     if (status?.status !== 'success') return { reason: 'error', detail: JSON.stringify(status) }
+    if (Number(o.settle)) await new Promise((r) => setTimeout(r, Number(o.settle)))
     const res = await page.evaluate<any>(RESOURCES, 5_000)
     await page.evaluate(FREEZE, 5_000)
     const png = await page.screenshot()
