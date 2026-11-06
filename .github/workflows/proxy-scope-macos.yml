@@ -1,0 +1,69 @@
+# Throwaway research for the Proxy scope on macOS ticket. Lives only on this research branch.
+# Captures the Driver interface prototype's mealdrop build (the same bytes, from its run) N times per network arm on
+# runners: raw CDP with host networking (the CI path), raw CDP through the SOCKS proxy, and Playwright Chromium with
+# exposeNetwork. Uploads every distinct snapshot, so local arms can be compared with what CI would capture.
+name: proxy-scope-macos
+
+on:
+  push:
+    branches: [research/proxy-scope-macos]
+
+permissions: {}
+
+env:
+  STORYBOOK_RUN: "42204745376"
+  STORYBOOK_SHA256: 3114c45921398afcb5b1b86980dae541dc5f022b41683508f812165d67cfd0f3
+  IMAGE: mcr.microsoft.com/playwright@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+  PASSES: "5"
+
+jobs:
+  capture:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        job: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: storybook
+          path: sb
+          run-id: ${{ env.STORYBOOK_RUN }}
+          github-token: ${{ github.token }}
+      - name: Unpack
+        run: echo "$STORYBOOK_SHA256  sb/storybook.tar" | sha256sum -c && tar -C sb -xf sb/storybook.tar
+      - name: Install Playwright client (JS only)
+        working-directory: research/proxy-scope-macos
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Pull image by digest
+        run: docker pull -q --platform linux/amd64 "$IMAGE" && docker tag "$IMAGE" mcr.microsoft.com/playwright:v1.64.1-noble
+      - name: Capture
+        run: |
+          H=research/proxy-scope-macos; OUT="$PWD/out/job-${{ matrix.job }}"; mkdir -p "$OUT"
+          { nproc; lscpu | grep -E 'Model name'; free -m | head -2; docker version --format '{{.Server.Version}}'; } > "$OUT/machine.txt"
+          node "$H/serve.mjs" "$PWD/sb/storybook" 6400 127.0.0.1 > "$OUT/serve.log" 2>&1 &
+          until grep -q serving "$OUT/serve.log" 2>/dev/null; do sleep 0.1; done
+          PROXY_HOST=0.0.0.0 "$H/arms.sh" http://127.0.0.1:6400 "$OUT/runs" "$PASSES" hostnet proxy pw 2>&1 | tee "$OUT/runs.log"
+          python3 -I "$H/dedupe.py" "$OUT/runs" "$OUT/snapshots"
+          python3 -I "$H/timing.py" "$OUT/runs" | tee "$OUT/timing.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: job-${{ matrix.job }}
+          path: |
+            out/job-${{ matrix.job }}/*.txt
+            out/job-${{ matrix.job }}/*.log
+            out/job-${{ matrix.job }}/runs/*/*/run.json
+            out/job-${{ matrix.job }}/runs/*/*.err
+            out/job-${{ matrix.job }}/snapshots/
+          retention-days: 7
