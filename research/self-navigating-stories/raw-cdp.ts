@@ -181,7 +181,11 @@ export async function launchRawChromium(o: RawOptions): Promise<Driver> {
         onEvent(method, params) {
           if (process.env.VC_TRACE && /^Page\.(frameNavigated|frameRequestedNavigation|frameStartedNavigating|navigatedWithinDocument|loadEventFired)$/.test(method)) console.error(`TRACE ${(performance.now() / 1000).toFixed(2)} ${method} ${params.frame?.parentId ? 'child' : ''} ${(params.url ?? params.frame?.url ?? '').slice(0, 110)} ${params.reason ?? params.navigationType ?? ''} ${params.disposition ?? ''}`)
           if (method === 'Page.frameNavigated' && !params.frame.parentId) { navs++; utility = null; navWatch?.(params.frame.url) }
-          else if (method === 'Target.attachedToTarget') resumeChild(params)
+          // Playwright's page session keeps workers (and out-of-process iframes) and detaches from anything else
+          else if (method === 'Target.attachedToTarget') {
+            if (params.targetInfo.type === 'worker' || params.targetInfo.type === 'iframe') resumeChild(params)
+            else send('Target.detachFromTarget', { sessionId: params.sessionId }, sessionId).catch(() => {})
+          }
           else if (method === 'Inspector.targetCrashed') crash(sessionId)
           else if (method === 'Page.javascriptDialogOpening') {
             // alert and beforeunload are accepted, confirm and prompt dismissed, as Playwright does with no listener
@@ -224,6 +228,7 @@ export async function launchRawChromium(o: RawOptions): Promise<Driver> {
               send('Page.addScriptToEvaluateOnNewDocument', { source: '', worldName: UTILITY_WORLD }, sessionId),
               send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, sessionId),
               send('Runtime.runIfWaitingForDebugger', {}, sessionId),
+              send('Browser.getWindowForTarget', {}, sessionId).then(({ windowId }) => send('Browser.setWindowBounds', { windowId, bounds: po.viewport }, sessionId)).catch(() => {}),
             ]
           : []),
       ])

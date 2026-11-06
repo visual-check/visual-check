@@ -75,8 +75,8 @@ for arm in sorted(runs):
         for x in r['attempts']:
             by[(id(r), x['key'], x['cycle'])].append(x)
     lost3 = sum(1 for v in by.values() if sum(1 for x in v if x['attempt'] <= 3 and x.get('lost')) == 3)
-    lost5 = sum(1 for r in rs for x in r['results'] if x['reason'] == 'navigated away')
-    other = sum(1 for r in rs for x in r['results'] if x['reason'] and x['reason'] != 'navigated away')
+    lost5 = sum(1 for r in rs for x in r['results'] if x.get('reason') == 'navigated away')
+    other = sum(1 for r in rs for x in r['results'] if x.get('reason') and x.get('reason') != 'navigated away')
     stories = sum(len(r['results']) for r in rs if True) - sum(1 for r in rs for x in r['results'] if x['key'] in SAFE)
     cps = st.median(r['capturesPerS'] for r in rs)
     ok_ms = [x['ms'] for r in rs for x in r['attempts'] if not x.get('lost') and not x.get('reason') and x['key'] not in SAFE]

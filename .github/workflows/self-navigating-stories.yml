@@ -13,7 +13,7 @@ env:
   STORYBOOK_RUN: "42204745376"
   STORYBOOK_SHA256: 3114c45921398afcb5b1b86980dae541dc5f022b41683508f812165d67cfd0f3
   IMAGE: mcr.microsoft.com/playwright@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
-  PASSES: "1"
+  PASSES: "8"
   H: research/self-navigating-stories
 
 jobs:
@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        job: [1, 2]
+        job: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     steps:
       - uses: actions/checkout@v4
         with:
