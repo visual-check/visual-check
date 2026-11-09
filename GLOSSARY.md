@@ -32,6 +32,14 @@ _Avoid_: Screenshot, visual, current image
 The pixel comparison of a snapshot against its baseline.
 _Avoid_: Diff (unqualified), image diff
 
+**Mask**:
+A part of a story left out of the visual diff, chosen by selector or by host.
+_Avoid_: Ignore region, hidden element
+
+**Remote content**:
+What a story shows from an origin other than its Storybook's: images and embedded pages.
+_Avoid_: External assets, third-party content, CDN images
+
 **Broken story**:
 A story that can't be captured: it errors, crashes the browser, never becomes ready, navigates away, or doesn't render the same way twice.
 _Avoid_: Failed story, errored story
