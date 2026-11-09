@@ -1,0 +1,16 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script>
+const q = new URLSearchParams(location.search)
+const G = q.get('src') === 'dead' ? 'https://fonts.gstatic.invalid/x.woff2' : 'https://fonts.gstatic.com/s/montserrat/v15/JTURjIg1_i6t8kCHKm45_epG3gnD_vx3rCs.woff2'
+const rule = `@font-face{font-family:'Montserrat';font-weight:900;${q.get('display') ? 'font-display:' + q.get('display') + ';' : ''}src:${q.get('local') === '0' ? '' : "local('Montserrat Black'),"}url(${G}) format('woff2')}`
+document.write(`<style>${rule}</style>`)
+const step = () => { const s = document.createElement('style'); document.head.append(s); s.sheet.insertRule(rule, 0); const p = document.createElement('p'); p.style.font = '900 40px Montserrat,serif'; p.textContent = 'Mealdrop 900'; document.body.append(p) }
+window.__pageReady = (async () => {
+  if (q.get('sw') !== '0') {
+    await navigator.serviceWorker.register('./sw.js')
+    if (!navigator.serviceWorker.controller) await new Promise((r) => navigator.serviceWorker.addEventListener('controllerchange', r, { once: true }))
+  } else await new Promise((r) => setTimeout(r, 150))
+  step()
+  await new Promise((r) => setTimeout(r, 50))
+})()
+</script></head><body></body></html>

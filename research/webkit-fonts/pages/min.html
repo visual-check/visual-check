@@ -1,0 +1,28 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<script>
+// min.html?static=N&insert=N&t=ms&how=rule|text&src=gstatic|loop&delay=ms&display=auto|swap&ur=1|0&local=1|0
+const q = new URLSearchParams(location.search)
+const n = (k, d) => (q.has(k) ? Number(q.get(k)) : d)
+const src = q.get('src') === 'loop' ? `/slow/${n('delay', 300)}/min/m900.woff2` : 'https://fonts.gstatic.com/s/montserrat/v15/JTURjIg1_i6t8kCHKm45_epG3gnD_vx3rCs.woff2'
+const rule = `@font-face{font-family:'Montserrat';font-style:normal;font-weight:900;${q.get('display') && q.get('display') !== 'auto' ? `font-display:${q.get('display')};` : ''}src:${n('local', 1) ? "local('Montserrat Black'),local('Montserrat-Black')," : ''}url(${src}) format('woff2');${n('ur', 1) ? 'unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;' : ''}}`
+for (let i = 0; i < n('static', 1); i++) document.write(`<style>${rule}</style>`)
+const inject = () => {
+  for (let i = 0; i < n('insert', 0); i++) {
+    const s = document.createElement('style')
+    document.head.append(s)
+    if (q.get('how') === 'text') s.textContent = rule
+    else s.sheet.insertRule(rule, 0)
+  }
+}
+// render=after: the text appears only in the inject step, after the inserted rules, as React renders after styled-components
+const render = () => { const h = document.createElement('h1'); h.style.font = '900 48px Montserrat,serif'; h.textContent = 'Mealdrop 900'; document.body.append(h) }
+window.__pageReady = new Promise((done) => {
+  // churn=N: N more non-font rules, one every churnEvery ms, as styled-components adds component styles while fonts load
+  const churn = (k) => { if (k <= 0) return; const s = document.createElement('style'); document.head.append(s); s.sheet.insertRule(`.c${k}{color:red}`, 0); setTimeout(() => churn(k - 1), n('churnEvery', 10)) }
+  const step = () => { inject(); if (q.get('render') === 'after') render(); churn(n('churn', 0)); setTimeout(done, 50 + n('churn', 0) * n('churnEvery', 10)) }
+  const t = n('t', 50)
+  t < 0 ? step() : setTimeout(step, t)
+})
+</script>
+</head><body><script>if (q.get('render') !== 'after') render()</script></body></html>
