@@ -159,9 +159,14 @@ const FREEZE = ARM === 'none'
   const finite = (a) => { const t = a.effect && a.effect.getComputedTiming(); return !!t && Number.isFinite(t.endTime) }
   const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 0))))
   let rounds = 0, finished = 0
+  // Once anything was finished, stop only after two checks a frame apart find nothing running: page logic reacting to
+  // the end events (a React commit, say) can land after one frame on a busy machine. Nothing running at the first
+  // check costs nothing.
+  let quiet = 0
   for (;;) {
     const running = collect().anims.filter((a) => a.playState === 'running' && finite(a))
-    if (!running.length) break
+    if (!running.length) { if (!finished || ++quiet >= 2) break; await frame(); continue }
+    quiet = 0
     for (const a of running) { try { a.finish() } catch {} }
     finished += running.length
     rounds++
