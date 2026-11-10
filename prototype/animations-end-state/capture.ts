@@ -58,7 +58,7 @@ mkdirSync(path.join(out, 'late'), { recursive: true })
 //               swapped for their first frame drawn on a canvas.
 // settle:       nothing changes styles at document start; Storybook's pause neutralised so the story runs as in plain
 //               Storybook. At capture: finish() every running finite animation, let a frame pass so end events run
-//               page logic, repeat until none is left (cap 1 s); then infinite ones to their first keyframe, media
+//               page logic, repeat until none is left (at most 20 rounds); then the rest to their first keyframe, media
 //               frozen as zero-finish-media does, and images and fonts checked again.
 const ARM = o.anim
 if (!['none', 'sb', 'zero-noguard', 'zero', 'zero-tiny', 'finish', 'zero-finish', 'zero-finish-media', 'settle'].includes(ARM)) throw new Error(`unknown --anim ${ARM}`)
@@ -158,7 +158,6 @@ const FREEZE = ARM === 'none'
   }
   const finite = (a) => { const t = a.effect && a.effect.getComputedTiming(); return !!t && Number.isFinite(t.endTime) }
   const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 0))))
-  const deadline = performance.now() + 1000
   let rounds = 0, finished = 0
   for (;;) {
     const running = collect().anims.filter((a) => a.playState === 'running' && finite(a))
@@ -167,14 +166,14 @@ const FREEZE = ARM === 'none'
     finished += running.length
     rounds++
     await frame()
-    if (performance.now() > deadline) break
+    if (rounds >= 20) break
   }
   let paused = 0
   const { roots } = collect()
-  // Infinite: the first keyframe. Chromium can paint a paused compositor animation from a stale frame, so the first
+  // Infinite, and finite ones still starting after 20 rounds: the first keyframe. Chromium can paint a paused compositor animation from a stale frame, so the first
   // keyframe is written into the element's inline style and the animation removed. A pseudo-element can't take an
   // inline style, so its animation stays paused at 0.
-  const infinite = collect().anims.filter((a) => a.playState === 'running' && !finite(a))
+  const infinite = collect().anims.filter((a) => a.playState === 'running')
   for (const a of infinite) {
     a.pause()
     a.currentTime = 0
@@ -182,7 +181,10 @@ const FREEZE = ARM === 'none'
     paused++
   }
   ${MEDIA_JS}
-  await Promise.all([...roots].flatMap((r) => [...r.querySelectorAll('img')]).map((i) => i.decode().catch(() => undefined)))
+  // The same as readiness: images that settling revealed are made eager, then decoded
+  const imgs = [...roots].flatMap((r) => [...r.querySelectorAll('img')])
+  for (const i of imgs) i.loading = 'eager'
+  await Promise.all(imgs.map((i) => i.decode().catch(() => undefined)))
   await Promise.all([...document.fonts].filter((x) => x.status === 'loading').map((x) => x.loaded.catch(() => undefined)))
   // A paused compositor animation can still paint its last frame once: let a frame through before the screenshot
   if (paused) await frame()
