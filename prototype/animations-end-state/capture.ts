@@ -173,6 +173,11 @@ const FREEZE = ARM === 'none'
     await frame()
     if (rounds >= 20) break
   }
+  // Finished animations that still hold their end through fill-mode: the end is written into the inline style and the
+  // animation removed, for the same reason as infinite ones below (Chromium kept painting a composited transform's
+  // earlier frame after finish() on busy runners)
+  let pinned = 0
+  for (const a of collect().anims) if (a.playState === 'finished' && a.effect && a.effect.getComputedTiming().progress !== null) { try { a.commitStyles(); a.cancel(); pinned++ } catch {} }
   let paused = 0
   const { roots } = collect()
   // Infinite, and finite ones still starting after 20 rounds: the first keyframe. Chromium can paint a paused compositor animation from a stale frame, so the first
@@ -193,8 +198,8 @@ const FREEZE = ARM === 'none'
   await Promise.all([...document.fonts].filter((x) => x.status === 'loading').map((x) => x.loaded.catch(() => undefined)))
   // A change made just before capture can still be rastering when the screenshot is taken on a busy machine: after
   // settling changed anything, let two more frames through
-  if (finished || paused) { await frame(); await frame() }
-  return { rounds, finished, paused } })()`
+  if (finished || paused || pinned) { await frame(); await frame() }
+  return { rounds, finished, paused, pinned } })()`
   : SWEEP
     ? `(async () => { ${CARET}
   const roots = new Set([document, ...(window.__vcRoots || [])])
