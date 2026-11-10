@@ -58,8 +58,8 @@ mkdirSync(path.join(out, 'late'), { recursive: true })
 //               swapped for their first frame drawn on a canvas.
 // settle:       nothing changes styles at document start; Storybook's pause neutralised so the story runs as in plain
 //               Storybook. At capture: finish() every running finite animation, let a frame pass so end events run
-//               page logic, repeat until none is left (cap 1 s); then pause infinite ones at 0, freeze media as
-//               zero-finish-media does, and check images and fonts again.
+//               page logic, repeat until none is left (cap 1 s); then infinite ones to their first keyframe, media
+//               frozen as zero-finish-media does, and images and fonts checked again.
 const ARM = o.anim
 if (!['none', 'sb', 'zero-noguard', 'zero', 'zero-tiny', 'finish', 'zero-finish', 'zero-finish-media', 'settle'].includes(ARM)) throw new Error(`unknown --anim ${ARM}`)
 const NOANIM = '*,*::before,*::after{animation:none!important;transition:none!important}'
@@ -171,10 +171,21 @@ const FREEZE = ARM === 'none'
   }
   let paused = 0
   const { roots } = collect()
-  for (const a of collect().anims) if (a.playState === 'running' && !finite(a)) { a.pause(); a.currentTime = 0; paused++ }
+  // Infinite: the first keyframe. Chromium can paint a paused compositor animation from a stale frame, so the first
+  // keyframe is written into the element's inline style and the animation removed. A pseudo-element can't take an
+  // inline style, so its animation stays paused at 0.
+  const infinite = collect().anims.filter((a) => a.playState === 'running' && !finite(a))
+  for (const a of infinite) {
+    a.pause()
+    a.currentTime = 0
+    try { a.commitStyles(); a.cancel() } catch {}
+    paused++
+  }
   ${MEDIA_JS}
   await Promise.all([...roots].flatMap((r) => [...r.querySelectorAll('img')]).map((i) => i.decode().catch(() => undefined)))
   await Promise.all([...document.fonts].filter((x) => x.status === 'loading').map((x) => x.loaded.catch(() => undefined)))
+  // A paused compositor animation can still paint its last frame once: let a frame through before the screenshot
+  if (paused) await frame()
   return { rounds, finished, paused } })()`
   : SWEEP
     ? `(async () => { ${CARET}

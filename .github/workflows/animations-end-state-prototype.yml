@@ -14,7 +14,7 @@ env:
   MEALDROP_SHA: 5ee1b204675b2d9eaf64fb33424384477946f369
   IMAGE: mcr.microsoft.com/playwright@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
   PASSES: "3"
-  ARMS: "none sb zero-finish-media settle"
+  ARMS: "none sb settle"
 
 jobs:
   build:
