@@ -1,22 +1,23 @@
-# Throwaway measurement for the Render parity on real stories ticket. Lives only on this research branch.
-# The Storybook and HAR artifacts come from SOURCE_RUN, so every arm captures the same bytes.
+# Throwaway measurement for the Visual diff rules ticket (#43). Lives only on this research branch.
+# #23's harness at device scale factor 2, on the same Storybook and HAR artifacts from SOURCE_RUN.
 # Each job repeats in fresh containers for the noise floor; job 1 also captures the deliberate changes.
-name: render-parity-stories
+name: diff-rules
 
 on:
   push:
-    branches: [research/render-parity-stories]
+    branches: [research/diff-rules]
 
 permissions: {}
 
 env:
   SOURCE_RUN: "41795987063"
   IMAGE: mcr.microsoft.com/playwright@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+  SCALE: "2"
 
 jobs:
   capture:
     runs-on: ubuntu-24.04
-    timeout-minutes: 300
+    timeout-minutes: 340
     permissions:
       contents: read
       actions: read
@@ -51,14 +52,14 @@ jobs:
           (cd sb && sha256sum -c storybook.tar.sha256)
           tar -C sb -xf sb/storybook.tar
       - name: Install Playwright client (JS only)
-        working-directory: research/render-parity-stories
+        working-directory: research/diff-rules
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Pull image by digest
         run: docker pull --platform linux/amd64 "$IMAGE"
       - name: Capture in fresh containers
-        run: research/render-parity-stories/run.sh linux/amd64 "$IMAGE" 3 sb/storybook-static har "out/gha-${{ matrix.job }}" ${{ matrix.mutate }}
+        run: research/diff-rules/run.sh linux/amd64 "$IMAGE" 3 sb/storybook-static har "out/s2-gha-${{ matrix.job }}" ${{ matrix.mutate }}
       - uses: actions/upload-artifact@v4
         with:
-          name: gha-${{ matrix.job }}
+          name: s2-gha-${{ matrix.job }}
           path: out/
-          retention-days: 7
+          retention-days: 14

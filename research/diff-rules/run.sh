@@ -14,7 +14,7 @@ while [ "$i" -le "$runs" ]; do
   extra=""
   [ "$i" -eq 1 ] && [ "$mutate" = "--mutate" ] && extra="--mutate"
   docker run --rm --init --ipc=host --network=none --pull=never --platform "$platform" \
-    -e SB_SHA="$sb_sha" -e HAR_SHA="$har_sha" \
+    -e SCALE="${SCALE:-1}" -e SB_SHA="$sb_sha" -e HAR_SHA="$har_sha" \
     -v "$here:/harness:ro" -v "$sb:/sb:ro" -v "$har:/har:ro" -v "$out:/out" \
     "$image" node /harness/capture.mjs /sb /har "/out/run-$i" "$i" /out/run-1 $extra
   i=$((i + 1))

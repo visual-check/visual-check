@@ -7,6 +7,8 @@ import { createServer } from 'node:http'
 import { extname, join, normalize } from 'node:path'
 
 export const VIEWPORT = { width: 1280, height: 720 }
+// Device scale factor for every context: 1 as in #23, 2 for the scale-2 measurement of Visual diff rules (#43).
+export const SCALE = Number(process.env.SCALE ?? 1)
 // Calendars and date pickers default to today, so every arm renders the same fixed day.
 export const FIXED_TIME = new Date('2026-06-15T12:00:00Z')
 // Everything that isn't the loopback server: recorded once with network, replayed offline.
@@ -67,7 +69,7 @@ export async function newContext(browser, extra = {}) {
   const ua = await probe.evaluate(() => navigator.userAgent)
   await probe.context().close()
   const ctx = await browser.newContext({
-    viewport: VIEWPORT, deviceScaleFactor: 1, userAgent: `${ua} StorybookTestRunner`,
+    viewport: VIEWPORT, deviceScaleFactor: SCALE, userAgent: `${ua} StorybookTestRunner`,
     reducedMotion: 'reduce', colorScheme: 'light', locale: 'en-US', timezoneId: 'UTC', ...extra,
   })
   await ctx.clock.setFixedTime(FIXED_TIME)

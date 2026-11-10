@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { chromium, webkit } from 'playwright-core'
-import { EXTERNAL, iconMisses, newContext, ready, replay, serve, stories } from './lib.mjs'
+import { EXTERNAL, SCALE, iconMisses, newContext, ready, replay, serve, stories } from './lib.mjs'
 
 const args = process.argv.slice(2)
 const mutate = args.includes('--mutate') || args.includes('--mutate-only')
@@ -84,7 +84,7 @@ const cpuinfo = readFileSync('/proc/cpuinfo', 'utf8')
 const shellRoot = '/ms-playwright/' + readdirSync('/ms-playwright').find((d) => d.startsWith('chromium_headless_shell-'))
 const shell = join(shellRoot, readdirSync(shellRoot).find((d) => d.startsWith('chrome')), 'chrome-headless-shell')
 const env = {
-  run, workers: WORKERS, node: process.version, arch: process.arch, uname: sh('uname -srm'), nproc: sh('nproc'),
+  run, scale: SCALE, workers: WORKERS, node: process.version, arch: process.arch, uname: sh('uname -srm'), nproc: sh('nproc'),
   cpuModel: cpuinfo.match(/^model name\s*:\s*(.*)$/m)?.[1] ?? null,
   simdFlags: (cpuinfo.match(/^(flags|Features)\s*:\s*(.*)$/m)?.[2] ?? '').split(/\s+/).filter((f) => /^(sse4_2|avx|avx2|fma|avx512f|asimd|asimddp|sve|sve2)$/.test(f)),
   chrome: sh(`${shell} --version`), shellSha256: sha(readFileSync(shell)),
