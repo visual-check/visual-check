@@ -5,7 +5,7 @@ Visual regression testing for projects that use Storybook: it tells a developer 
 ## Language
 
 **Baseline**:
-The approved image of a story, the reference every comparison is made against.
+The approved image of a story or of a combined snapshot, the reference every comparison is made against.
 _Avoid_: Reference image, golden, expected
 
 **Missing baseline**:
@@ -28,12 +28,24 @@ _Avoid_: Worker, partition, chunk
 The image of a story captured during the current run.
 _Avoid_: Screenshot, visual, current image
 
+**Mode**:
+A named, project-wide set of globals and viewport that a story can be captured in besides its default capture, which has no mode.
+_Avoid_: Variant, configuration, breakpoint, extra shot
+
+**Combined snapshot**:
+One image that lays out the snapshots of several stories from one stories file, compared as a whole like any other snapshot.
+_Avoid_: Contact sheet, sprite, montage, gallery
+
 **Visual diff**:
 The pixel comparison of a snapshot against its baseline.
 _Avoid_: Diff (unqualified), image diff
 
+**Tolerance**:
+How much a snapshot may differ from its baseline and still pass: how far a pixel's colour may move before the pixel counts as differing, and how many differing pixels are allowed.
+_Avoid_: Threshold, diff threshold, mismatch budget, maxDiffPixels
+
 **Mask**:
-A part of a story left out of the visual diff, chosen by selector or by host.
+A part of a story painted over in both the baseline and the snapshot, chosen by selector or by host, so its content doesn't count in the visual diff but its size and position do.
 _Avoid_: Ignore region, hidden element
 
 **Remote content**:
