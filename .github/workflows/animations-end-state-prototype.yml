@@ -1,0 +1,99 @@
+# Throwaway prototype for the Animations frozen at their end state ticket. Lives only on this prototype branch.
+# Builds a public Storybook (storybookjs/mealdrop at a pinned commit, plus the prototype's animation fixtures) once,
+# then each job captures it N times per driver (raw CDP Chromium, Playwright WebKit, browser in the Playwright image)
+# and per animation arm, offline.
+name: animations-end-state-prototype
+
+on:
+  push:
+    branches: [prototype/animations-end-state]
+
+permissions: {}
+
+env:
+  MEALDROP_SHA: 5ee1b204675b2d9eaf64fb33424384477946f369
+  IMAGE: mcr.microsoft.com/playwright@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
+  PASSES: "1"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Build the Storybook
+        run: |
+          git init -q mealdrop && cd mealdrop
+          git fetch -q --depth 1 https://github.com/storybookjs/mealdrop.git "$MEALDROP_SHA" && git checkout -q FETCH_HEAD
+          mkdir -p src/vc-animations && cp -R ../prototype/animations-end-state/stories/. src/vc-animations/
+          node .yarn/releases/yarn-4.18.0.cjs install --immutable
+          node .yarn/releases/yarn-4.18.0.cjs build-storybook
+          tar -C build -cf ../storybook.tar storybook && cd .. && sha256sum storybook.tar > storybook.tar.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: storybook
+          path: |
+            storybook.tar
+            storybook.tar.sha256
+          retention-days: 7
+
+  capture:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        job: [1]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: storybook
+          path: sb
+      - name: Unpack
+        run: (cd sb && sha256sum -c storybook.tar.sha256) && tar -C sb -xf sb/storybook.tar
+      - name: Install Playwright client (JS only)
+        working-directory: prototype/animations-end-state
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Pull image by digest
+        run: docker pull -q --platform linux/amd64 "$IMAGE" && docker tag "$IMAGE" mcr.microsoft.com/playwright:v1.65.0-noble
+      - name: Capture
+        run: prototype/animations-end-state/ci.sh "$PWD/sb/storybook" "$PWD/out/job-${{ matrix.job }}" "$PASSES"
+      - name: Compare
+        if: always()
+        working-directory: prototype/animations-end-state
+        run: |
+          node compare.ts "$GITHUB_WORKSPACE/out/job-${{ matrix.job }}/runs" > "$GITHUB_WORKSPACE/out/job-${{ matrix.job }}/compare.txt" || true
+          node fixtures.ts "$GITHUB_WORKSPACE/out/job-${{ matrix.job }}/runs" > "$GITHUB_WORKSPACE/out/job-${{ matrix.job }}/fixtures.md" || true
+          tail -c 20000 "$GITHUB_WORKSPACE/out/job-${{ matrix.job }}/fixtures.md"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: job-${{ matrix.job }}
+          path: |
+            out/job-${{ matrix.job }}/*.txt
+            out/job-${{ matrix.job }}/*.log
+            out/job-${{ matrix.job }}/*.md
+            out/job-${{ matrix.job }}/runs/summary.json
+            out/job-${{ matrix.job }}/runs/fixtures.json
+            out/job-${{ matrix.job }}/runs/*/run-*/run.json
+            out/job-${{ matrix.job }}/runs/*/run-*.err
+            out/job-${{ matrix.job }}/runs/*/run-*/png/vc-animations*
+            out/job-${{ matrix.job }}/runs/*/run-*/late/
+            out/job-${{ matrix.job }}/runs/unstable/
+          retention-days: 7
