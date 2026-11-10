@@ -186,8 +186,9 @@ const FREEZE = ARM === 'none'
   for (const i of imgs) i.loading = 'eager'
   await Promise.all(imgs.map((i) => i.decode().catch(() => undefined)))
   await Promise.all([...document.fonts].filter((x) => x.status === 'loading').map((x) => x.loaded.catch(() => undefined)))
-  // A paused compositor animation can still paint its last frame once: let a frame through before the screenshot
-  if (paused) await frame()
+  // A change made just before capture can still be rastering when the screenshot is taken on a busy machine: after
+  // settling changed anything, let two more frames through
+  if (finished || paused) { await frame(); await frame() }
   return { rounds, finished, paused } })()`
   : SWEEP
     ? `(async () => { ${CARET}
