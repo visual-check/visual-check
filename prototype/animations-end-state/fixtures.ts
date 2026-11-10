@@ -57,7 +57,7 @@ for (const [arm, runs] of [...arms].sort()) {
   }
 }
 writeFileSync(path.join(roots[0], 'fixtures.json'), `${JSON.stringify(rows, null, 1)}\n`)
-const short = (els: any) => els ? Object.entries<any>(els).map(([k, v]) => `${k}: ${[v.connected === false ? 'detached' : '', v.opacity !== '1' ? `op ${v.opacity}` : '', v.transform !== 'none' ? v.transform.replace(/matrix\(([^)]*)\)/, (_: string, m: string) => `m(${m.split(',').map((x: string) => +(+x).toFixed(2)).join(',')})`) : '', v.x !== undefined ? `x ${v.x}` : '', v.cx !== undefined ? `cx ${v.cx}` : '', v.currentTime !== undefined ? `t ${v.currentTime}${v.paused ? ' paused' : ''} rs ${v.readyState}${v.error ? ` err ${v.error}` : ''}` : ''].filter(Boolean).join(' ') || 'base'}`).join('; ') : '-'
+const short = (els: any) => els ? Object.entries<any>(els).map(([k, v]) => `${k}: ${[v.connected === false ? 'detached' : '', v.opacity !== '1' ? `op ${v.opacity}` : '', k === 'box' ? `bg ${v.bg}` : '', v.transform !== 'none' ? v.transform.replace(/matrix\(([^)]*)\)/, (_: string, m: string) => `m(${m.split(',').map((x: string) => +(+x).toFixed(2)).join(',')})`) : '', v.x !== undefined ? `x ${v.x}` : '', v.cx !== undefined ? `cx ${v.cx}` : '', v.currentTime !== undefined ? `t ${v.currentTime}${v.paused ? ' paused' : ''} rs ${v.readyState}${v.error ? ` err ${v.error}` : ''}` : ''].filter(Boolean).join(' ') || 'base'}`).join('; ') : '-'
 for (const cell of [...new Set(rows.map((r) => r.cell))]) {
   console.log(`\n### ${cell}\n\n| Arm | Broken | Snapshots (max px) | State at capture | Events at capture | Changed 1 s later |\n|---|---|---|---|---|---|`)
   for (const r of rows.filter((x) => x.cell === cell))

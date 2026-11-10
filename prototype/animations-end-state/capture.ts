@@ -2,7 +2,7 @@
 // (goto per capture on Storybook's test path, storyFinished, images and fonts), with one way of stopping animations
 // per --anim arm. Fixture cells (vc-animations--*) also record their elements' computed state and events at capture,
 // and a second screenshot 1 s later. Writes <out>/png/*.png, <out>/late/*.png and <out>/run.json.
-//   node capture.ts --driver raw|pw-webkit --anim none|sb|zero-noguard|zero|zero-tiny|finish|zero-finish --base URL --out dir
+//   node capture.ts --driver raw|pw-webkit --anim none|sb|zero-noguard|zero|zero-tiny|finish|zero-finish|zero-finish-media --base URL --out dir
 import { createHash } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -54,14 +54,17 @@ mkdirSync(path.join(out, 'late'), { recursive: true })
 // finish:       no stylesheet; Storybook's pause neutralised; at capture, finish() finite and pause() infinite at 0,
 //               CSS and script animations alike, in the document and every shadow root, open or closed.
 // zero-finish:  zero and finish together.
+// zero-finish-media: zero-finish, and at capture also video paused at frame 0, inline SVG SMIL paused at 0 and GIFs
+//               swapped for their first frame drawn on a canvas.
 const ARM = o.anim
-if (!['none', 'sb', 'zero-noguard', 'zero', 'zero-tiny', 'finish', 'zero-finish'].includes(ARM)) throw new Error(`unknown --anim ${ARM}`)
+if (!['none', 'sb', 'zero-noguard', 'zero', 'zero-tiny', 'finish', 'zero-finish', 'zero-finish-media'].includes(ARM)) throw new Error(`unknown --anim ${ARM}`)
 const NOANIM = '*,*::before,*::after{animation:none!important;transition:none!important}'
 const zero = (t: string) => ['*', '*::before', '*::after', '*::backdrop', '*::marker'].map((sel) => `${sel}{animation-duration:0s!important;animation-delay:0s!important;transition-duration:${t}!important;transition-delay:0s!important}`).join('\n')
 const ZERO = zero(ARM === 'zero-tiny' ? '0.01ms' : '0s')
 const SHEET = ARM === 'none' ? NOANIM : ARM.startsWith('zero') ? ZERO : ''
-const GUARD = ['zero', 'zero-tiny', 'finish', 'zero-finish'].includes(ARM)
-const SWEEP = ARM === 'finish' || ARM === 'zero-finish'
+const GUARD = ['zero', 'zero-tiny', 'finish', 'zero-finish', 'zero-finish-media'].includes(ARM)
+const SWEEP = ARM === 'finish' || ARM.startsWith('zero-finish')
+const MEDIA = ARM === 'zero-finish-media'
 const ADOPT = ARM.startsWith('zero')
 const INIT = `(() => {
   const SHEET = ${JSON.stringify(SHEET)}
@@ -92,11 +95,12 @@ const INIT = `(() => {
   }
   const vc = (window.__vc = {})
   vc.finished = new Promise((resolve) => { vc.resolve = resolve })
+  vc.errors = []
   let channel
   Object.defineProperty(globalThis, '__STORYBOOK_ADDONS_CHANNEL__', {
     configurable: true,
     get: () => channel,
-    set: (c) => { channel = c; c.on('storyFinished', (e) => vc.resolve({ status: e.status, storyId: e.storyId, reporters: (e.reporters || []).filter((r) => r.status && r.status !== 'success').map((r) => r.type + ':' + r.status) })) },
+    set: (c) => { channel = c; for (const ev of ['playFunctionThrewException', 'storyThrewException', 'storyErrored', 'unhandledErrorsWhilePlaying']) c.on(ev, (e) => vc.errors.push(ev + ': ' + String((e && (e.message || e.title || (e[0] && e[0].message))) || e).slice(0, 160))); c.on('storyFinished', (e) => vc.resolve({ status: e.status, storyId: e.storyId, reporters: (e.reporters || []).filter((r) => r.status && r.status !== 'success').map((r) => r.type + ':' + r.status) })) },
   })
 })()`
 // The readiness timeout covers the whole wait. Fonts: each face still loading, not document.fonts.ready, which WebKit
@@ -108,6 +112,7 @@ const readyScript = (id: string) => `(async () => {
   const left = () => new Promise((r) => setTimeout(() => r('timeout'), Math.max(0, deadline - performance.now())))
   const f = await Promise.race([vc.finished, left().then(() => ({ status: 'timeout', step: 'storyFinished' }))])
   if (f.status !== 'success') return f
+  if (vc.errors.length) return { status: 'play threw', errors: vc.errors }
   if (f.storyId !== ${JSON.stringify(id)}) return { status: 'wrong story ' + f.storyId }
   if (document.body.classList.contains('sb-show-errordisplay')) return { status: 'error display' }
   const images = Array.from(document.images)
@@ -123,7 +128,7 @@ const FREEZE = ARM === 'none'
   for (const a of document.getAnimations()) { const t = a.effect && a.effect.getComputedTiming(); if (t && Number.isFinite(t.endTime)) a.finish(); else a.cancel() }
   return 0 })()`
   : SWEEP
-    ? `(() => { ${CARET}
+    ? `(async () => { ${CARET}
   const roots = new Set([document, ...(window.__vcRoots || [])])
   const walk = (n) => { for (const el of n.querySelectorAll('*')) if (el.shadowRoot && !roots.has(el.shadowRoot)) { roots.add(el.shadowRoot); walk(el.shadowRoot) } }
   walk(document)
@@ -135,6 +140,20 @@ const FREEZE = ARM === 'none'
     const t = a.effect && a.effect.getComputedTiming()
     if (t && Number.isFinite(t.endTime)) { try { a.finish() } catch { a.pause(); a.currentTime = 0 } }
     else { a.pause(); a.currentTime = 0 }
+  }
+  if (${MEDIA}) {
+    const all = (sel) => [...roots].flatMap((r) => [...r.querySelectorAll(sel)])
+    const cap = (p) => Promise.race([p, new Promise((r) => setTimeout(r, 2000))])
+    // Video: paused on its first frame; seeking hides the poster
+    await Promise.all(all('video').map((v) => { v.pause(); v.autoplay = false; if (v.readyState === 0) return; const seeked = new Promise((r) => v.addEventListener('seeked', r, { once: true })); v.currentTime = 0; return cap(seeked) }))
+    // Inline SVG SMIL: every outermost svg paused at time 0
+    for (const svg of all('svg')) if (!svg.ownerSVGElement && svg.pauseAnimations) { svg.pauseAnimations(); svg.setCurrentTime(0) }
+    // GIFs: the first frame, drawn from a fresh copy onto a canvas, replaces the source (Argos does the same)
+    await Promise.all(all('img').filter((i) => /\\.gif(\\?|#|$)|^data:image\\/gif/i.test(i.currentSrc || i.src)).map((img) => cap(new Promise((resolve) => {
+      const copy = new Image(); copy.crossOrigin = img.crossOrigin
+      copy.onload = () => { try { const c = document.createElement('canvas'); c.width = copy.naturalWidth; c.height = copy.naturalHeight; c.getContext('2d').drawImage(copy, 0, 0); img.srcset = ''; img.src = c.toDataURL(); img.decode().then(resolve, resolve) } catch { resolve() } }
+      copy.onerror = resolve; copy.src = img.currentSrc || img.src
+    }))))
   }
   return seen.size })()`
     : `(() => { ${CARET} return 0 })()`
