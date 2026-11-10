@@ -2,7 +2,7 @@
 // (goto per capture on Storybook's test path, storyFinished, images and fonts), with one way of stopping animations
 // per --anim arm. Fixture cells (vc-animations--*) also record their elements' computed state and events at capture,
 // and a second screenshot 1 s later. Writes <out>/png/*.png, <out>/late/*.png and <out>/run.json.
-//   node capture.ts --driver raw|pw-webkit --anim none|sb|zero-noguard|zero|zero-tiny|finish|zero-finish|zero-finish-media --base URL --out dir
+//   node capture.ts --driver raw|pw-webkit --anim none|sb|zero-noguard|zero|zero-tiny|finish|zero-finish|zero-finish-media|settle --base URL --out dir
 import { createHash } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -56,15 +56,20 @@ mkdirSync(path.join(out, 'late'), { recursive: true })
 // zero-finish:  zero and finish together.
 // zero-finish-media: zero-finish, and at capture also video paused at frame 0, inline SVG SMIL paused at 0 and GIFs
 //               swapped for their first frame drawn on a canvas.
+// settle:       nothing changes styles at document start; Storybook's pause neutralised so the story runs as in plain
+//               Storybook. At capture: finish() every running finite animation, let a frame pass so end events run
+//               page logic, repeat until none is left (cap 1 s); then pause infinite ones at 0, freeze media as
+//               zero-finish-media does, and check images and fonts again.
 const ARM = o.anim
-if (!['none', 'sb', 'zero-noguard', 'zero', 'zero-tiny', 'finish', 'zero-finish', 'zero-finish-media'].includes(ARM)) throw new Error(`unknown --anim ${ARM}`)
+if (!['none', 'sb', 'zero-noguard', 'zero', 'zero-tiny', 'finish', 'zero-finish', 'zero-finish-media', 'settle'].includes(ARM)) throw new Error(`unknown --anim ${ARM}`)
 const NOANIM = '*,*::before,*::after{animation:none!important;transition:none!important}'
 const zero = (t: string) => ['*', '*::before', '*::after', '*::backdrop', '*::marker'].map((sel) => `${sel}{animation-duration:0s!important;animation-delay:0s!important;transition-duration:${t}!important;transition-delay:0s!important}`).join('\n')
 const ZERO = zero(ARM === 'zero-tiny' ? '0.01ms' : '0s')
 const SHEET = ARM === 'none' ? NOANIM : ARM.startsWith('zero') ? ZERO : ''
-const GUARD = ['zero', 'zero-tiny', 'finish', 'zero-finish', 'zero-finish-media'].includes(ARM)
+const GUARD = ['zero', 'zero-tiny', 'finish', 'zero-finish', 'zero-finish-media', 'settle'].includes(ARM)
 const SWEEP = ARM === 'finish' || ARM.startsWith('zero-finish')
-const MEDIA = ARM === 'zero-finish-media'
+const MEDIA = ARM === 'zero-finish-media' || ARM === 'settle'
+const SETTLE = ARM === 'settle'
 const ADOPT = ARM.startsWith('zero')
 const INIT = `(() => {
   const SHEET = ${JSON.stringify(SHEET)}
@@ -122,11 +127,55 @@ const readyScript = (id: string) => `(async () => {
   if ((await Promise.race([all.then(() => 'ok'), left()])) === 'timeout') return { status: 'timeout', step: 'images and fonts' }
   return { ...f, fontsStatus: document.fonts.status }
 })()`
+const MEDIA_JS = MEDIA ? `{
+    const all = (sel) => [...roots].flatMap((r) => [...r.querySelectorAll(sel)])
+    const cap = (p) => Promise.race([p, new Promise((r) => setTimeout(r, 2000))])
+    // Video: paused on its first frame; seeking hides the poster
+    await Promise.all(all('video').map((v) => { v.pause(); v.autoplay = false; if (v.readyState === 0) return; const seeked = new Promise((r) => v.addEventListener('seeked', r, { once: true })); v.currentTime = 0; return cap(seeked) }))
+    // Inline SVG SMIL: every outermost svg paused at time 0
+    for (const svg of all('svg')) if (!svg.ownerSVGElement && svg.pauseAnimations) { svg.pauseAnimations(); svg.setCurrentTime(0) }
+    // GIFs: the first frame, drawn from a fresh copy onto a canvas, replaces the source (Argos does the same)
+    await Promise.all(all('img').filter((i) => /\\.gif(\\?|#|$)|^data:image\\/gif/i.test(i.currentSrc || i.src)).map((img) => cap(new Promise((resolve) => {
+      const copy = new Image(); copy.crossOrigin = img.crossOrigin
+      copy.onload = () => { try { const c = document.createElement('canvas'); c.width = copy.naturalWidth; c.height = copy.naturalHeight; c.getContext('2d').drawImage(copy, 0, 0); img.srcset = ''; img.src = c.toDataURL(); img.decode().then(resolve, resolve) } catch { resolve() } }
+      copy.onerror = resolve; copy.src = img.currentSrc || img.src
+    }))))
+    }` : ''
 const CARET = `if (!document.getElementById('__vc_caret')) { const s = document.createElement('style'); s.id = '__vc_caret'; s.textContent = '*,*::before,*::after{caret-color:transparent!important}'; document.documentElement.append(s) }`
 const FREEZE = ARM === 'none'
   ? `(() => { ${CARET}
   for (const a of document.getAnimations()) { const t = a.effect && a.effect.getComputedTiming(); if (t && Number.isFinite(t.endTime)) a.finish(); else a.cancel() }
   return 0 })()`
+  : SETTLE
+    ? `(async () => { ${CARET}
+  const collect = () => {
+    const roots = new Set([document, ...(window.__vcRoots || [])])
+    const walk = (n) => { for (const el of n.querySelectorAll('*')) if (el.shadowRoot && !roots.has(el.shadowRoot)) { roots.add(el.shadowRoot); walk(el.shadowRoot) } }
+    walk(document)
+    const seen = new Set()
+    for (const r of roots) for (const a of r.getAnimations()) if (!(a.timeline && !(a.timeline instanceof DocumentTimeline))) seen.add(a)
+    return { roots, anims: [...seen] }
+  }
+  const finite = (a) => { const t = a.effect && a.effect.getComputedTiming(); return !!t && Number.isFinite(t.endTime) }
+  const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 0))))
+  const deadline = performance.now() + 1000
+  let rounds = 0, finished = 0
+  for (;;) {
+    const running = collect().anims.filter((a) => a.playState === 'running' && finite(a))
+    if (!running.length) break
+    for (const a of running) { try { a.finish() } catch {} }
+    finished += running.length
+    rounds++
+    await frame()
+    if (performance.now() > deadline) break
+  }
+  let paused = 0
+  const { roots } = collect()
+  for (const a of collect().anims) if (a.playState === 'running' && !finite(a)) { a.pause(); a.currentTime = 0; paused++ }
+  ${MEDIA_JS}
+  await Promise.all([...roots].flatMap((r) => [...r.querySelectorAll('img')]).map((i) => i.decode().catch(() => undefined)))
+  await Promise.all([...document.fonts].filter((x) => x.status === 'loading').map((x) => x.loaded.catch(() => undefined)))
+  return { rounds, finished, paused } })()`
   : SWEEP
     ? `(async () => { ${CARET}
   const roots = new Set([document, ...(window.__vcRoots || [])])
@@ -141,20 +190,7 @@ const FREEZE = ARM === 'none'
     if (t && Number.isFinite(t.endTime)) { try { a.finish() } catch { a.pause(); a.currentTime = 0 } }
     else { a.pause(); a.currentTime = 0 }
   }
-  if (${MEDIA}) {
-    const all = (sel) => [...roots].flatMap((r) => [...r.querySelectorAll(sel)])
-    const cap = (p) => Promise.race([p, new Promise((r) => setTimeout(r, 2000))])
-    // Video: paused on its first frame; seeking hides the poster
-    await Promise.all(all('video').map((v) => { v.pause(); v.autoplay = false; if (v.readyState === 0) return; const seeked = new Promise((r) => v.addEventListener('seeked', r, { once: true })); v.currentTime = 0; return cap(seeked) }))
-    // Inline SVG SMIL: every outermost svg paused at time 0
-    for (const svg of all('svg')) if (!svg.ownerSVGElement && svg.pauseAnimations) { svg.pauseAnimations(); svg.setCurrentTime(0) }
-    // GIFs: the first frame, drawn from a fresh copy onto a canvas, replaces the source (Argos does the same)
-    await Promise.all(all('img').filter((i) => /\\.gif(\\?|#|$)|^data:image\\/gif/i.test(i.currentSrc || i.src)).map((img) => cap(new Promise((resolve) => {
-      const copy = new Image(); copy.crossOrigin = img.crossOrigin
-      copy.onload = () => { try { const c = document.createElement('canvas'); c.width = copy.naturalWidth; c.height = copy.naturalHeight; c.getContext('2d').drawImage(copy, 0, 0); img.srcset = ''; img.src = c.toDataURL(); img.decode().then(resolve, resolve) } catch { resolve() } }
-      copy.onerror = resolve; copy.src = img.currentSrc || img.src
-    }))))
-  }
+  ${MEDIA_JS}
   return seen.size })()`
     : `(() => { ${CARET} return 0 })()`
 // Fixture state: computed style of each registered element, SMIL and video values, and the events seen so far
@@ -199,7 +235,7 @@ const launch = (): Promise<Driver> => {
   return launchPlaywright({ ...common, browser: o.driver === 'pw-webkit' ? 'webkit' : 'chromium', port: Number(o.port), mode: o['pw-mode'] as 'detached' | 'attached', offline: o.offline })
 }
 
-type Result = { key: string; ok: boolean; reason?: string; detail?: string; attempts: number; ms: number; fx?: any; sha1?: string }
+type Result = { key: string; ok: boolean; reason?: string; detail?: string; attempts: number; ms: number; fx?: any; swept?: any; sha1?: string }
 const results: Result[] = []
 const hazards: Array<{ key: string; kind: string; detail: string }> = []
 const current: string[] = []
@@ -235,7 +271,7 @@ const pageFor = (i: number) =>
   })
 
 const NAVIGATED = /navigated or closed|Execution context was destroyed|interrupted by another navigation|Cannot find context|frame was detached/i
-type Once = { png?: Buffer; late?: Buffer; fx?: any; reason?: string; detail?: string; lost?: string }
+type Once = { png?: Buffer; late?: Buffer; fx?: any; swept?: any; reason?: string; detail?: string; lost?: string }
 async function captureOnce(page: Page, cell: Cell): Promise<Once> {
   try {
     await page.setViewport(VIEWPORT)
@@ -244,10 +280,10 @@ async function captureOnce(page: Page, cell: Cell): Promise<Once> {
     if (page.navigations() > 1) return { lost: `${page.navigations()} documents after ready` }
     if (status?.status === 'timeout') return { reason: 'timeout', detail: `not ready within ${TIMEOUT} ms, at ${status.step}` }
     if (status?.status !== 'success') return { reason: 'error', detail: JSON.stringify(status) }
-    const swept = await page.evaluate<number>(FREEZE, 5_000)
+    const swept = await page.evaluate<any>(FREEZE, 5_000)
     const png = await page.screenshot()
     if (page.navigations() > 1) return { lost: `${page.navigations()} documents after screenshot` }
-    if (!cell.id.startsWith('vc-animations--')) return { png }
+    if (!cell.id.startsWith('vc-animations--')) return { png, swept }
     // Fixtures: state at capture, then whether the page still looks the same 1 s later
     const atCapture = await page.evaluate<any>(PROBE, 5_000)
     await new Promise((r) => setTimeout(r, 1000))
@@ -297,7 +333,7 @@ async function worker(i: number) {
     const file = `${cell.key.replace(/[^a-z0-9@-]/gi, '_')}.png`
     if (r.png) writeFileSync(path.join(out, 'png', file), r.png)
     if (r.late) writeFileSync(path.join(out, 'late', file), r.late)
-    results.push({ key: cell.key, ok: !!r.png, reason: r.reason, detail: r.detail, attempts: r.attempts, ms, fx: r.fx, sha1: r.png && createHash('sha1').update(r.png).digest('hex').slice(0, 12) })
+    results.push({ key: cell.key, ok: !!r.png, reason: r.reason, detail: r.detail, attempts: r.attempts, ms, fx: r.fx, swept: r.fx ? r.fx.swept : r.swept, sha1: r.png && createHash('sha1').update(r.png).digest('hex').slice(0, 12) })
     if (r.reason) console.error(`broken ${cell.key}: ${r.reason} ${r.detail ?? ''}`.slice(0, 300))
     // A crashed page stays crashed, and a timed-out page may still be stuck: the worker opens a fresh page
     if (r.reason === 'crashed' || r.reason === 'timeout') { page?.close().catch(() => {}); page = null }
@@ -319,7 +355,7 @@ const record = {
   workers: Number(o.workers), cells: cells.length, captures: results.filter((r) => r.ok).length, broken: broken.map(({ key, reason, detail }) => ({ key, reason, detail })),
   retried: results.filter((r) => r.attempts > 1).map((r) => ({ key: r.key, attempts: r.attempts })),
   hazards, launches, launchMs, fatal, exitCode: fatal ? 2 : broken.length ? 1 : 0, socks: socks ? { ...socksStats } : null,
-  wallS: +wallS.toFixed(1), capturesPerS: +(results.length / wallS).toFixed(2), msPerCapture: results.map((r) => [r.key, r.ms]), fixtures: results.filter((r) => r.fx).map(({ key, fx }) => ({ key, fx })), hashes: Object.fromEntries(results.filter((r) => r.sha1).map((r) => [r.key, r.sha1])), at: new Date().toISOString(),
+  wallS: +wallS.toFixed(1), capturesPerS: +(results.length / wallS).toFixed(2), msPerCapture: results.map((r) => [r.key, r.ms]), fixtures: results.filter((r) => r.fx).map(({ key, fx }) => ({ key, fx })), swept: results.filter((r) => r.swept && r.swept.rounds).map((r) => [r.key, r.swept]), hashes: Object.fromEntries(results.filter((r) => r.sha1).map((r) => [r.key, r.sha1])), at: new Date().toISOString(),
 }
 writeFileSync(path.join(out, 'run.json'), `${JSON.stringify(record, null, 1)}\n`)
 console.log(JSON.stringify({ label: o.label, anim: ARM, driver: o.driver, version: driver.version, cells: cells.length, captures: record.captures, broken: broken.map((b) => `${b.key}:${b.reason}`), hazards: hazards.length, launches, fatal, wallS: record.wallS }))

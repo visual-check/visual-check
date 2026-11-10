@@ -11,6 +11,7 @@ Answers the [Animations frozen at their end state](https://github.com/visual-che
   - `finish`: no stylesheet; at capture, `finish()` on finite and `pause()` at 0 on infinite animations, in every shadow root.
   - `zero-finish`: `zero` and `finish` together.
   - `zero-finish-media`: `zero-finish`, plus video paused at frame 0, inline SVG SMIL paused at 0 and GIFs swapped for their first frame.
+  - `settle`: nothing at document start but the neutralised Storybook pause; at capture, `finish()` running finite animations and let a frame pass, until none is left; then infinite ones paused at 0, media frozen, images and fonts checked again.
   Fixture cells also record their elements' computed state and events, and a second screenshot 1 s later.
 - `stories/Animations.stories.tsx`: 20 fixtures (drawers opened in `play`, fill-mode entrances, delays, infinite, chains, exit on `animationend`, `play` awaiting events, `element.animate()`, open and closed shadow roots, GIF, video, SVG SMIL), added to [storybookjs/mealdrop](https://github.com/storybookjs/mealdrop) before its build.
 - `fixtures.ts`: per fixture and arm, what the snapshot showed. `compare.ts`: pixel differences between runs per arm.

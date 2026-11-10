@@ -1,9 +1,9 @@
 #!/bin/bash
 # PROTOTYPE, throwaway: N passes, round robin over drivers and animation arms, each a full capture run of the Storybook.
-#   run-anim.sh <base> <out root> <passes>   env DRIVERS (default "raw pw-webkit"), ARMS (default all eight), EXTRA
+#   run-anim.sh <base> <out root> <passes>   env DRIVERS (default "raw pw-webkit"), ARMS (default all nine), EXTRA
 set -uo pipefail
 H=$(cd "$(dirname "$0")" && pwd); BASE=$1; OUT=$(mkdir -p "$2" && cd "$2" && pwd); PASSES=$3
-DRIVERS=(${DRIVERS:-raw pw-webkit}); ARMS=(${ARMS:-none sb zero-noguard zero zero-tiny finish zero-finish zero-finish-media})
+DRIVERS=(${DRIVERS:-raw pw-webkit}); ARMS=(${ARMS:-none sb zero-noguard zero zero-tiny finish zero-finish zero-finish-media settle})
 for i in $(seq 1 "$PASSES"); do
   for d in "${DRIVERS[@]}"; do
     for a in "${ARMS[@]}"; do
