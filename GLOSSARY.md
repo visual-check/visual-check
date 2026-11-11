@@ -4,8 +4,12 @@ Visual regression testing for projects that use Storybook: it tells a developer 
 
 ## Language
 
+**Storybook**:
+One Storybook the config lists by name, with its own stories, URL and baselines. A project can have several.
+_Avoid_: Project, instance, target, app
+
 **Baseline**:
-The approved image of a story or of a combined snapshot, the reference every comparison is made against.
+The approved image of a story, the reference every comparison is made against.
 _Avoid_: Reference image, golden, expected
 
 **Missing baseline**:
@@ -28,13 +32,13 @@ _Avoid_: Worker, partition, chunk
 The image of a story captured during the current run.
 _Avoid_: Screenshot, visual, current image
 
+**End state**:
+How a snapshot shows anything that moves: every finite animation and transition as if it had already finished, and infinite animations and media on their first frame.
+_Avoid_: Frozen frame, final frame, paused animation
+
 **Mode**:
 A named, project-wide set of globals and viewport that a story can be captured in besides its default capture, which has no mode.
 _Avoid_: Variant, configuration, breakpoint, extra shot
-
-**Combined snapshot**:
-One image that lays out the snapshots of several stories from one stories file, compared as a whole like any other snapshot.
-_Avoid_: Contact sheet, sprite, montage, gallery
 
 **Visual diff**:
 The pixel comparison of a snapshot against its baseline.
@@ -53,8 +57,12 @@ What a story shows from an origin other than its Storybook's: images and embedde
 _Avoid_: External assets, third-party content, CDN images
 
 **Broken story**:
-A story that can't be captured: it errors, crashes the browser, never becomes ready, navigates away, or doesn't render the same way twice.
+A story that can't be captured: its stories file fails to load, or it errors, crashes the browser, never becomes ready, navigates away, or doesn't render the same way twice.
 _Avoid_: Failed story, errored story
+
+**Report**:
+What one `test` run leaves for review: every snapshot that didn't plainly pass, with its reason and images. Each shard has its own.
+_Avoid_: Results, output, HTML report
 
 **Base**:
 The commit changed files are measured from: where the current branch split from the branch it targets.
@@ -69,7 +77,7 @@ The stories whose rendering the changed files can alter. When that can't be dete
 _Avoid_: Diff stories, relevant stories
 
 **Browser**:
-What a snapshot is rendered in: Chromium or WebKit.
+What a snapshot is rendered in: one exact Chromium build, which the project chooses.
 _Avoid_: Browser engine, Safari
 
 **Platform**:

@@ -1,0 +1,10 @@
+# The pixel budget is one key, counted in CSS pixels
+
+`tolerance.pixels` takes either a whole number, which is a count of differing pixels, or a percent string such as `'0.1%'`, which is a share of the image. A count is in CSS pixels: at device scale factor s, a snapshot may have up to `pixels × s²` differing image pixels. Two keys, one for a count and one for a ratio with the stricter one applying, as in Playwright and Vitest, lost because options deep-merge across config, `preview`, meta and story (ADR 0004). A story that set only a ratio would still inherit the config's count, so on most images its ratio would do nothing. One number that is a share below 1 and a count from 1 up, as [Per-story options](https://github.com/visual-check/visual-check/issues/37) first had it and as Lost Pixel does, lost because `1` and `0.999` would mean opposite things. Counting image pixels, as every other tool does, lost because the defaults were measured at scale 1 ([Render parity on real stories](https://github.com/visual-check/visual-check/issues/23)), while phone modes are recommended at scale 2. On the same stories at scale 2, a deliberate change covered 3 to 4 times as many image pixels, and arm64's noise 3.6 times as many: 69 px at `color: 0.01` against 19 at scale 1. An unscaled 20 would therefore fail arm64 at scale 2, while 80 absorbs it and catches nearly as much as 20 does at scale 1 ([Visual diff rules: size, anti-aliasing and pixel budget](https://github.com/visual-check/visual-check/issues/43)).
+
+## Consequences
+
+- `pixels: 20` allows 80 differing image pixels at scale 2, and 45 at scale 1.5 (rounded down). The report shows image-pixel counts next to the scaled budget, for example "84 differ, 80 allowed (20 at scale 2)".
+- A share needs no scaling, because it's counted against the image's own pixels.
+- A count must be a whole number of 0 or more, and a share must lie between `'0%'` and `'100%'`. Anything else exits 2.
+- Changing the unit later would silently change how strict every count is at any scale other than 1.
