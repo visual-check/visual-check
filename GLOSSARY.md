@@ -8,6 +8,18 @@ Visual regression testing for projects that use Storybook: it tells a developer 
 One Storybook the config lists by name, with its own stories, URL and baselines. A project can have several.
 _Avoid_: Project, instance, target, app
 
+**Story**:
+One state of a component that a Storybook lists and renders on its own. The docs pages and tests a Storybook also lists aren't stories.
+_Avoid_: Entry, test, example
+
+**Grid story**:
+A story that lays out combinations of one component's props, and maybe forced states, as captioned cells in one snapshot.
+_Avoid_: Combined snapshot, contact sheet, cartesian story, matrix, variants
+
+**Forced state**:
+An interaction state, such as hover or keyboard focus, that a cell of a grid story shows without a pointer or a keyboard.
+_Avoid_: Pseudo state, simulated hover
+
 **Baseline**:
 The approved image of a story, the reference every comparison is made against.
 _Avoid_: Reference image, golden, expected
