@@ -4,6 +4,33 @@
     "minOccurrences": 2
   },
   "rules": {
-    "unused-dependencies": "warn"
+    "unused-dependencies": "warn",
+    "boundary-violation": "error"
+  },
+  "boundaries": {
+    "zones": [
+      { "name": "cli/commands", "patterns": ["packages/cli/src/commands/**"] },
+      { "name": "repo-checks/workspace", "patterns": ["packages/repo-checks/src/workspace/**"] },
+      { "name": "repo-checks/lockstep", "patterns": ["packages/repo-checks/src/lockstep/**"] },
+      { "name": "repo-checks/no-playwright", "patterns": ["packages/repo-checks/src/no-playwright/**"] }
+    ],
+    "rules": [
+      { "from": "cli/commands", "allow": [] },
+      { "from": "repo-checks/workspace", "allow": [] },
+      { "from": "repo-checks/lockstep", "allow": ["repo-checks/workspace"] },
+      { "from": "repo-checks/no-playwright", "allow": ["repo-checks/workspace"] }
+    ],
+    "coverage": {
+      "requireAllFiles": true,
+      "allowUnmatched": [
+        "packages/cli/src/bin.ts",
+        "packages/cli/src/index.ts",
+        "packages/storybook/src/index.ts",
+        "packages/storybook-addon/src/manager.ts",
+        "packages/storybook-addon/src/preset.ts",
+        "packages/repo-checks/src/check-lockstep.ts",
+        "packages/*/test/**"
+      ]
+    }
   }
 }
