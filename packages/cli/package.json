@@ -23,6 +23,9 @@
     "test:type": "tsc --noEmit",
     "test:unit": "vitest run"
   },
+  "dependencies": {
+    "jiti": "^2.7.0"
+  },
   "devDependencies": {
     "@types/node": "22.20.5",
     "@visual-check/typescript-config": "workspace:*",
