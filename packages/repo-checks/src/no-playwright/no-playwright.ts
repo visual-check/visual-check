@@ -2,8 +2,6 @@ import type { Manifest } from '../workspace/manifests.ts'
 
 /**
  * Lists every dependency on Playwright declared by a published package, as `<package name>: <dependency name>`.
- *
- * @public
  */
 export function findPlaywrightDependents(manifests: readonly Manifest[]): string[] {
   return manifests
