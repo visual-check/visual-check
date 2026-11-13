@@ -45,10 +45,10 @@ export interface Manifest {
  * @public
  */
 export function readWorkspaceManifests(root: URL): Manifest[] {
-  const packagesDir = new URL('packages/', root)
+  const packagesDirectory = new URL('packages/', root)
   const manifests: Manifest[] = []
-  for (const entry of readdirSync(packagesDir, { withFileTypes: true })) {
-    const manifestUrl = new URL(`${entry.name}/package.json`, packagesDir)
+  for (const entry of readdirSync(packagesDirectory, { withFileTypes: true })) {
+    const manifestUrl = new URL(`${entry.name}/package.json`, packagesDirectory)
     if (entry.isDirectory() && existsSync(manifestUrl)) {
       manifests.push(JSON.parse(readFileSync(manifestUrl, 'utf8')) as Manifest)
     }

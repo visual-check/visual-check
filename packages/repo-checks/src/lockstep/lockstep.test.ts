@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { readWorkspaceManifests, repoRoot } from '../workspace/manifests.ts'
 import { findLockstepProblems, lockstepPackages } from './lockstep.ts'
 
+/**
+ * Builds a manifest for each lockstep package, in order, with the given versions.
+ */
 const lockstep = (versions: [string, string, string]) =>
   lockstepPackages.map((name, index) => ({ name, version: versions[index] as string }))
 

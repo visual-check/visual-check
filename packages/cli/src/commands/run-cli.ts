@@ -28,10 +28,11 @@ export interface CliResult {
  *
  * @public
  */
-export function runCli(args: string[]): CliResult {
+export function runCli(commandLineArguments: string[]): CliResult {
   let version: boolean | undefined
   try {
-    version = parseArgs({ args, options: { version: { type: 'boolean' } }, strict: true }).values.version
+    version = parseArgs({ args: commandLineArguments, options: { version: { type: 'boolean' } }, strict: true }).values
+      .version
   } catch (error) {
     return usageError(error instanceof Error ? error.message : String(error))
   }
