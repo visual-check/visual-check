@@ -1,8 +1,14 @@
 {
-  "name": "visual-check",
+  "name": "@visual-check/cli",
   "version": "0.0.0",
   "type": "module",
   "license": "MIT",
+  "bin": {
+    "visual-check": "./dist/bin.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
   "files": [
     "dist"
   ],
@@ -18,6 +24,7 @@
     "test:unit": "vitest run"
   },
   "devDependencies": {
+    "@types/node": "22.20.5",
     "@visual-check/typescript-config": "workspace:*",
     "typescript": "7.0.2",
     "vitest": "5.1.0"
