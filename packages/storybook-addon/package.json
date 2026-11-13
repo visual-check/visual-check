@@ -1,0 +1,26 @@
+{
+  "name": "@visual-check/storybook-addon",
+  "version": "0.0.0",
+  "type": "module",
+  "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    "./manager": "./dist/manager.js",
+    "./preset": "./dist/preset.js",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test:type": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@visual-check/cli": "workspace:*",
+    "storybook": "^10.0.0"
+  },
+  "devDependencies": {
+    "@visual-check/typescript-config": "workspace:*",
+    "typescript": "7.0.2"
+  }
+}
