@@ -49,7 +49,7 @@ How a snapshot shows anything that moves: every finite animation and transition 
 _Avoid_: Frozen frame, final frame, paused animation
 
 **Mode**:
-A named, project-wide set of globals and viewport that a story can be captured in besides its default capture, which has no mode.
+A named set of globals and viewport, declared once per Storybook, that a story can be captured in besides its default capture, which has no mode.
 _Avoid_: Variant, configuration, breakpoint, extra shot
 
 **Visual diff**:
@@ -71,6 +71,10 @@ _Avoid_: External assets, third-party content, CDN images
 **Broken story**:
 A story that can't be captured: its stories file fails to load, or it errors, crashes the browser, never becomes ready, navigates away, or doesn't render the same way twice.
 _Avoid_: Failed story, errored story
+
+**Flaky snapshot**:
+A snapshot whose captures didn't agree within one run but settled on another try, so it still passed or was written.
+_Avoid_: Unstable snapshot, intermittent, passed on recapture
 
 **Report**:
 What one `test` run leaves for review: every snapshot that didn't plainly pass, with its reason and images. Each shard has its own.

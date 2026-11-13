@@ -4,6 +4,6 @@ Baselines are written locally and checked in CI from one config. Any setting tha
 
 ## Consequences
 
-- The type rejects `{ local, ci }` on every other key. Tolerance, viewport, mask colour, platform and image can't drift between environments.
+- The type rejects `{ local, ci }` on every other key. Tolerance, viewport, mask colour, timezone, locale, colour scheme, platform and image can't drift between environments.
 - The config is a module, so a project can still branch on `process.env` itself. visual-check can't stop it, and the docs never show it.
 - Letting another key take the pair later is additive. Bringing back blocks, or taking the pair away from a key, breaks every config that uses them.
