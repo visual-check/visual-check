@@ -7,6 +7,8 @@ pre-commit:
 
 pre-push:
   commands:
+    biome:
+      run: pnpm lint:biome
     fallow:
       run: pnpm lint:fallow
     test:

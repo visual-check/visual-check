@@ -29,6 +29,7 @@
         "noReExportAll": "error"
       },
       "style": {
+        "useBlockStatements": "error",
         "useFilenamingConvention": {
           "level": "error",
           "options": { "filenameCases": ["kebab-case"], "requireAscii": true, "strictCase": true }
@@ -36,12 +37,6 @@
       }
     }
   },
-  "overrides": [
-    {
-      "includes": ["packages/*/src/index.ts"],
-      "linter": { "rules": { "performance": { "noBarrelFile": "off" } } }
-    }
-  ],
   "javascript": {
     "formatter": {
       "quoteStyle": "single",

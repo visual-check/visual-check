@@ -31,7 +31,7 @@
         "packages/storybook-addon/src/manager.ts",
         "packages/storybook-addon/src/preset.ts",
         "packages/repo-checks/src/check-lockstep.ts",
-        "packages/*/test/**"
+        "packages/*/test/**/*.test.ts"
       ]
     }
   }
