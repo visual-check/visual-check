@@ -13,13 +13,13 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
 
 When it runs:
 
-| Run | The check |
-|---|---|
-| Local `test` | Reports what it finds, still captures and compares, then exits 1. A new story's missing baseline doesn't hide another story's visual diff |
-| CI `test`, not sharded | Runs first. If it finds anything, the run exits 1 without capturing, and the report holds only the check's findings |
-| CI, sharded | `test --consistency` runs in a job of its own, and the shard jobs wait for it. If it fails, no shard runs |
-| `test --shard k/n` | Skips it, and prints a note that missing baselines and orphans are left to `test --consistency` |
-| `update` | Uses it to know what to write and delete |
+| Run                    | The check                                                                                                                                 |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Local `test`           | Reports what it finds, still captures and compares, then exits 1. A new story's missing baseline doesn't hide another story's visual diff |
+| CI `test`, not sharded | Runs first. If it finds anything, the run exits 1 without capturing, and the report holds only the check's findings                       |
+| CI, sharded            | `test --consistency` runs in a job of its own, and the shard jobs wait for it. If it fails, no shard runs                                 |
+| `test --shard k/n`     | Skips it, and prints a note that missing baselines and orphans are left to `test --consistency`                                           |
+| `update`               | Uses it to know what to write and delete                                                                                                  |
 
 ### `test --consistency`
 

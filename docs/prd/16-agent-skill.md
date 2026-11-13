@@ -8,11 +8,11 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
 
 `.agents/skills/visual-check/`, committed:
 
-| File | Holds |
-|---|---|
-| `SKILL.md` | The skill, identical for every project. Its frontmatter uses only fields of the Agent Skills format: `name`, `description`, `compatibility` and `metadata.visual-check-version`. It passes `skills-ref validate` |
-| `scripts/run.mjs` | The runner script: plain Node with no dependencies |
-| `setup.json` | Written by `init` for this project |
+| File              | Holds                                                                                                                                                                                                            |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SKILL.md`        | The skill, identical for every project. Its frontmatter uses only fields of the Agent Skills format: `name`, `description`, `compatibility` and `metadata.visual-check-version`. It passes `skills-ref validate` |
+| `scripts/run.mjs` | The runner script: plain Node with no dependencies                                                                                                                                                               |
+| `setup.json`      | Written by `init` for this project                                                                                                                                                                               |
 
 - `setup.json` holds:
   - the CLI command for the project's package manager, in a form that never downloads, such as `pnpm exec visual-check`;

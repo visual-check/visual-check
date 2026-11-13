@@ -49,44 +49,44 @@ One minified document. Paths use `/` on every OS.
 
 Top level:
 
-| Field | Holds |
-|---|---|
-| `version` | A whole number, starting at 1 |
-| `visualCheck` | The CLI's version |
-| `command` | `"test"` or `"update"` |
-| `consistencyOnly` | `true` for `test --consistency` |
-| `exitCode` | |
-| `shard` | `{ index, total }`, or `null` |
-| `selection` | How stories were picked: `{ by, base, changedFiles, fallback }`, where `by` is `"affected"`, `"all"` or `"filter"` ([Affected stories](11-affected-stories.md)) |
-| `reportDir` | Relative to the config folder |
-| `storybooks` | `[{ name, url }]` |
-| `counts` | For `test`: `{ passed, flaky, differs, broken, missing, orphan }`. For `update`: `{ written, deleted, kept, broken, flaky }` |
-| `snapshots` | The entries |
-| `warnings` | From `update`: `{ kind: "real-requests" \| "remote-content", host, stories, message }` |
-| `error` | On exit 2: `{ message, storybooks: [{ name, url }] }`. Otherwise `null` |
+| Field             | Holds                                                                                                                                                           |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `version`         | A whole number, starting at 1                                                                                                                                   |
+| `visualCheck`     | The CLI's version                                                                                                                                               |
+| `command`         | `"test"` or `"update"`                                                                                                                                          |
+| `consistencyOnly` | `true` for `test --consistency`                                                                                                                                 |
+| `exitCode`        |                                                                                                                                                                 |
+| `shard`           | `{ index, total }`, or `null`                                                                                                                                   |
+| `selection`       | How stories were picked: `{ by, base, changedFiles, fallback }`, where `by` is `"affected"`, `"all"` or `"filter"` ([Affected stories](11-affected-stories.md)) |
+| `reportDir`       | Relative to the config folder                                                                                                                                   |
+| `storybooks`      | `[{ name, url }]`                                                                                                                                               |
+| `counts`          | For `test`: `{ passed, flaky, differs, broken, missing, orphan }`. For `update`: `{ written, deleted, kept, broken, flaky }`                                    |
+| `snapshots`       | The entries                                                                                                                                                     |
+| `warnings`        | From `update`: `{ kind: "real-requests" \| "remote-content", host, stories, message }`                                                                          |
+| `error`           | On exit 2: `{ message, storybooks: [{ name, url }] }`. Otherwise `null`                                                                                         |
 
 Each entry:
 
-| Field | Holds |
-|---|---|
-| `storybook` | The Storybook's name |
-| `id` | The snapshot's key, unique within a Storybook |
-| `kind` | `"story"`, the only value in v1 |
-| `story`, `importPath` | The story's ID and its stories file |
-| `mode` | `null` for the default capture |
-| `status` | For `test`: `passed`, `differs`, `broken`, `missing`, `orphan`. For `update`: `written`, `deleted`, `broken` |
-| `reason` | For `differs`: `pixels` or `size`. For `broken`: a code from [Readiness and stability](06-readiness-and-stability.md). For `written`: `missing` or `differs` |
-| `message` | One line for people |
-| `flaky` | `true` when it passed on a retry, or needed a third load in `update` |
-| `attempts` | How many captures it took |
-| `pixels` | `{ differ, allowed, budget, scale }`, with `budget` as written: `20` or `"0.1%"` |
-| `size` | `null`, or `{ baseline: [w, h], snapshot: [w, h] }` on a size difference |
-| `details` | `null`, or a broken story's details |
-| `hints` | `[{ kind: "remote-content", hosts, message }]` |
-| `console` | `[{ level, text }]` |
-| `baseline` | The baseline's path, relative to the config folder |
-| `images` | `{ baseline, snapshot, diff }`, relative to the report folder. A broken story's image is `images.snapshot` |
-| `realRequestHosts`, `remoteContentHosts` | In `update` only |
+| Field                                    | Holds                                                                                                                                                        |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `storybook`                              | The Storybook's name                                                                                                                                         |
+| `id`                                     | The snapshot's key, unique within a Storybook                                                                                                                |
+| `kind`                                   | `"story"`, the only value in v1                                                                                                                              |
+| `story`, `importPath`                    | The story's ID and its stories file                                                                                                                          |
+| `mode`                                   | `null` for the default capture                                                                                                                               |
+| `status`                                 | For `test`: `passed`, `differs`, `broken`, `missing`, `orphan`. For `update`: `written`, `deleted`, `broken`                                                 |
+| `reason`                                 | For `differs`: `pixels` or `size`. For `broken`: a code from [Readiness and stability](06-readiness-and-stability.md). For `written`: `missing` or `differs` |
+| `message`                                | One line for people                                                                                                                                          |
+| `flaky`                                  | `true` when it passed on a retry, or needed a third load in `update`                                                                                         |
+| `attempts`                               | How many captures it took                                                                                                                                    |
+| `pixels`                                 | `{ differ, allowed, budget, scale }`, with `budget` as written: `20` or `"0.1%"`                                                                             |
+| `size`                                   | `null`, or `{ baseline: [w, h], snapshot: [w, h] }` on a size difference                                                                                     |
+| `details`                                | `null`, or a broken story's details                                                                                                                          |
+| `hints`                                  | `[{ kind: "remote-content", hosts, message }]`                                                                                                               |
+| `console`                                | `[{ level, text }]`                                                                                                                                          |
+| `baseline`                               | The baseline's path, relative to the config folder                                                                                                           |
+| `images`                                 | `{ baseline, snapshot, diff }`, relative to the report folder. A broken story's image is `images.snapshot`                                                   |
+| `realRequestHosts`, `remoteContentHosts` | In `update` only                                                                                                                                             |
 
 Rules:
 
@@ -104,11 +104,11 @@ Rules:
 
 ## Reporters
 
-| Reporter | For | Output |
-|---|---|---|
-| `live` | A terminal. The default with a TTY | One progress line, and failures as they happen |
-| `log` | CI. Chosen with `CI` set or no TTY | One line per snapshot, append-only |
-| `json` | Tools and the agent skill | The JSON document on stdout at exit |
+| Reporter | For                                | Output                                         |
+| -------- | ---------------------------------- | ---------------------------------------------- |
+| `live`   | A terminal. The default with a TTY | One progress line, and failures as they happen |
+| `log`    | CI. Chosen with `CI` set or no TTY | One line per snapshot, append-only             |
+| `json`   | Tools and the agent skill          | The JSON document on stdout at exit            |
 
 ### Header
 

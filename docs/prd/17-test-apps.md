@@ -6,12 +6,12 @@ The public repo `visual-check/test-apps` proves that the packages about to be pu
 
 ## The apps
 
-| App | Storybook | Shape | Package manager | Stories |
-|---|---|---|---|---|
-| [storybookjs/react-inspector](https://github.com/storybookjs/react-inspector) | 9.1 | Single repo | Yarn 4 | About 76 |
-| [freeCodeCamp/ui](https://github.com/freeCodeCamp/ui) | 10.6 | Single repo | pnpm | 112 |
-| [TrigenSoftware/masonry-grid](https://github.com/TrigenSoftware/masonry-grid) | 9.1 | Monorepo with 5 Storybooks | pnpm | About 14 |
-| `sb11` | The newest 11 prerelease | A copy of the Storybook 10 app, upgraded | pnpm | 112 |
+| App                                                                           | Storybook                | Shape                                    | Package manager | Stories  |
+| ----------------------------------------------------------------------------- | ------------------------ | ---------------------------------------- | --------------- | -------- |
+| [storybookjs/react-inspector](https://github.com/storybookjs/react-inspector) | 9.1                      | Single repo                              | Yarn 4          | About 76 |
+| [freeCodeCamp/ui](https://github.com/freeCodeCamp/ui)                         | 10.6                     | Single repo                              | pnpm            | 112      |
+| [TrigenSoftware/masonry-grid](https://github.com/TrigenSoftware/masonry-grid) | 9.1                      | Monorepo with 5 Storybooks               | pnpm            | About 14 |
+| `sb11`                                                                        | The newest 11 prerelease | A copy of the Storybook 10 app, upgraded | pnpm            | 112      |
 
 - The first three are real open-source projects, each copied at a pinned commit, with every story and no filters. They're MIT or BSD-3, so their baselines can be committed.
 - `sb11` exists so visual-check is ready when Storybook 11 turns stable. Its prerelease is pinned and Renovate bumps it. When 11 is stable, it moves to the stable release.
@@ -33,9 +33,9 @@ The public repo `visual-check/test-apps` proves that the packages about to be pu
 
 ## Jobs
 
-| Runner | Runs |
-|---|---|
-| `ubuntu-24.04` | Every app. One app also runs from a `node` job container with the `docker` CLI added, which tests the browser joining that container's network |
+| Runner         | Runs                                                                                                                                                          |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ubuntu-24.04` | Every app. One app also runs from a `node` job container with the `docker` CLI added, which tests the browser joining that container's network                |
 | `windows-2025` | Every app, from the Windows host. The job installs Docker Desktop first. One app also runs from inside a WSL distro, through Docker Desktop's WSL integration |
 
 - There are no macOS jobs here.

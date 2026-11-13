@@ -95,22 +95,22 @@ Notes:
 
 A broken story counts toward exit 1, and the run goes on. Errors and timeouts aren't retried.
 
-| Reason code | When |
-|---|---|
-| `load-failed` | Its stories file failed to load, or didn't load within `readyTimeout`. Every story of that file is broken |
-| `error` | Storybook shows its error display, or `storyFinished` reports an error |
-| `play-threw` | `play` threw or left unhandled errors |
-| `timeout` | Not ready within `readyTimeout` |
-| `fonts-not-loaded` | `document.fonts.ready` hadn't resolved by the timeout. The details name the faces still pending |
-| `wait-threw` | The `wait` hook threw |
-| `navigated-away` | The story left its document, after 2 retries. The details carry the URL, and the message says to await the new page before clicking |
-| `element-missing` | The `element` selector matched nothing, or a box of zero size |
-| `too-tall` | The capture is over 32,767 device pixels on a side |
-| `grid-too-wide` | A grid is wider than the viewport ([Grid stories](08-grid-stories.md)) |
-| `crashed` | The page crashed. The message points to memory and the worker count |
-| `browser-exited` | The browser exited while the story was in flight |
-| `changed-after-capture` | `update` only: the page changed in the second after capture |
-| `unstable` | `update` only: no two loads agreed |
+| Reason code             | When                                                                                                                                |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `load-failed`           | Its stories file failed to load, or didn't load within `readyTimeout`. Every story of that file is broken                           |
+| `error`                 | Storybook shows its error display, or `storyFinished` reports an error                                                              |
+| `play-threw`            | `play` threw or left unhandled errors                                                                                               |
+| `timeout`               | Not ready within `readyTimeout`                                                                                                     |
+| `fonts-not-loaded`      | `document.fonts.ready` hadn't resolved by the timeout. The details name the faces still pending                                     |
+| `wait-threw`            | The `wait` hook threw                                                                                                               |
+| `navigated-away`        | The story left its document, after 2 retries. The details carry the URL, and the message says to await the new page before clicking |
+| `element-missing`       | The `element` selector matched nothing, or a box of zero size                                                                       |
+| `too-tall`              | The capture is over 32,767 device pixels on a side                                                                                  |
+| `grid-too-wide`         | A grid is wider than the viewport ([Grid stories](08-grid-stories.md))                                                              |
+| `crashed`               | The page crashed. The message points to memory and the worker count                                                                 |
+| `browser-exited`        | The browser exited while the story was in flight                                                                                    |
+| `changed-after-capture` | `update` only: the page changed in the second after capture                                                                         |
+| `unstable`              | `update` only: no two loads agreed                                                                                                  |
 
 - A stories file that fails to load also fails the consistency check. Its baselines are never orphans, and `update` never deletes them.
 - These aren't broken stories but exit 2: a preview that fails to load, an `index.json` that fails, and invalid options.

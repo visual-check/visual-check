@@ -6,11 +6,11 @@ The CLI has three commands with fixed names: `init`, `test` and `update`. It con
 
 ## Commands
 
-| Command | Does | Detail |
-|---|---|---|
-| `visual-check init` | Detects the project, asks its questions and writes the setup | [Config and init](03-config-and-init.md) |
-| `visual-check test` | Captures snapshots and compares them with baselines. Never writes a baseline | This file, [Sharding and the consistency check](12-sharding-and-consistency.md) |
-| `visual-check update` | Writes missing and failing baselines and deletes orphans. Local only | [Baselines and update](10-baselines-and-update.md) |
+| Command               | Does                                                                         | Detail                                                                          |
+| --------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `visual-check init`   | Detects the project, asks its questions and writes the setup                 | [Config and init](03-config-and-init.md)                                        |
+| `visual-check test`   | Captures snapshots and compares them with baselines. Never writes a baseline | This file, [Sharding and the consistency check](12-sharding-and-consistency.md) |
+| `visual-check update` | Writes missing and failing baselines and deletes orphans. Local only         | [Baselines and update](10-baselines-and-update.md)                              |
 
 - Setup is `pnpm dlx @visual-check/cli init`, or the package manager's equivalent. There's no postinstall step: pnpm blocks them, and they can't prompt or tell CI from a person.
 - Sharding and the consistency check are flags of `test`, not commands.
@@ -20,15 +20,15 @@ The CLI has three commands with fixed names: `init`, `test` and `update`. It con
 
 `test` and `update` take the same selection flags.
 
-| Flag | Covers |
-|---|---|
-| None, `CI` unset | Affected stories |
-| None, `CI` set | All stories |
-| `--affected` | Affected stories, even in CI |
-| `--all` | Every story |
-| `--filter <regex>` | Every story whose ID matches, whatever the changed files |
-| `--storybook <name>` | Narrows any of the above to one Storybook |
-| `--base <ref>` | Sets the ref the base is worked out from |
+| Flag                 | Covers                                                   |
+| -------------------- | -------------------------------------------------------- |
+| None, `CI` unset     | Affected stories                                         |
+| None, `CI` set       | All stories                                              |
+| `--affected`         | Affected stories, even in CI                             |
+| `--all`              | Every story                                              |
+| `--filter <regex>`   | Every story whose ID matches, whatever the changed files |
+| `--storybook <name>` | Narrows any of the above to one Storybook                |
+| `--base <ref>`       | Sets the ref the base is worked out from                 |
 
 - Only the `CI` env var counts as CI. A missing TTY doesn't.
 - `--all`, `--affected` and `--filter` are exclusive. Two of them together exit 2.
@@ -39,25 +39,25 @@ The CLI has three commands with fixed names: `init`, `test` and `update`. It con
 
 ## Other flags
 
-| Flag | On | Does |
-|---|---|---|
-| `--url <url>` | `test`, `update` | Overrides the Storybook's URL. With several Storybooks it needs `--storybook` |
-| `--config <path>` | `test`, `update` | Overrides the config search |
-| `--workers <n>` | `test`, `update` | Overrides `workers` for one run |
-| `--reporter live\|log\|json` | `test`, `update` | Picks the output ([Report and output](13-report-and-output.md)) |
-| `--shard <k>/<n>` | `test` | Runs one shard's share |
-| `--consistency` | `test` | Runs only the consistency check |
-| `--yes` | `init` | Takes every default |
+| Flag                         | On               | Does                                                                          |
+| ---------------------------- | ---------------- | ----------------------------------------------------------------------------- |
+| `--url <url>`                | `test`, `update` | Overrides the Storybook's URL. With several Storybooks it needs `--storybook` |
+| `--config <path>`            | `test`, `update` | Overrides the config search                                                   |
+| `--workers <n>`              | `test`, `update` | Overrides `workers` for one run                                               |
+| `--reporter live\|log\|json` | `test`, `update` | Picks the output ([Report and output](13-report-and-output.md))               |
+| `--shard <k>/<n>`            | `test`           | Runs one shard's share                                                        |
+| `--consistency`              | `test`           | Runs only the consistency check                                               |
+| `--yes`                      | `init`           | Takes every default                                                           |
 
 Not in v1: `--force`, `update --from <report>`, `--project`, and any flag for the platform, which is a config key only.
 
 ## Exit codes
 
-| Code | Meaning |
-|---|---|
-| `0` | Pass |
-| `1` | A problem in the project |
-| `2` | A tool, config or environment failure |
+| Code | Meaning                               |
+| ---- | ------------------------------------- |
+| `0`  | Pass                                  |
+| `1`  | A problem in the project              |
+| `2`  | A tool, config or environment failure |
 
 Exit 1 covers:
 
