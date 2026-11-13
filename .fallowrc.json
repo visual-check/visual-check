@@ -12,13 +12,15 @@
       { "name": "cli/commands", "patterns": ["packages/cli/src/commands/**"] },
       { "name": "repo-checks/workspace", "patterns": ["packages/repo-checks/src/workspace/**"] },
       { "name": "repo-checks/lockstep", "patterns": ["packages/repo-checks/src/lockstep/**"] },
-      { "name": "repo-checks/no-playwright", "patterns": ["packages/repo-checks/src/no-playwright/**"] }
+      { "name": "repo-checks/no-playwright", "patterns": ["packages/repo-checks/src/no-playwright/**"] },
+      { "name": "repo-checks/source-layout", "patterns": ["packages/repo-checks/src/source-layout/**"] }
     ],
     "rules": [
       { "from": "cli/commands", "allow": [] },
       { "from": "repo-checks/workspace", "allow": [] },
       { "from": "repo-checks/lockstep", "allow": ["repo-checks/workspace"] },
-      { "from": "repo-checks/no-playwright", "allow": ["repo-checks/workspace"] }
+      { "from": "repo-checks/no-playwright", "allow": ["repo-checks/workspace"] },
+      { "from": "repo-checks/source-layout", "allow": ["repo-checks/workspace"] }
     ],
     "coverage": {
       "requireAllFiles": true,

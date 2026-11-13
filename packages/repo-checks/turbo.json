@@ -3,7 +3,12 @@
   "extends": ["//"],
   "tasks": {
     "test:unit": {
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/packages/*/package.json"]
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/*/package.json",
+        "$TURBO_ROOT$/packages/*/src/**",
+        "$TURBO_ROOT$/.fallowrc.json"
+      ]
     }
   }
 }
