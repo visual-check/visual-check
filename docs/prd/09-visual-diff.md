@@ -30,11 +30,11 @@ Rules:
 
 One key, whose type sets its unit ([ADR 0006](../adr/0006-pixel-budget-is-one-key-in-css-pixels.md)):
 
-| Value | Meaning |
-|---|---|
-| A whole number, 0 or more | A count of differing CSS pixels |
-| A string from `'0%'` to `'100%'` | A share of the image's own pixels |
-| Anything else, such as `1.5`, `-1` or `'0.1'` | Exit 2 |
+| Value                                         | Meaning                           |
+| --------------------------------------------- | --------------------------------- |
+| A whole number, 0 or more                     | A count of differing CSS pixels   |
+| A string from `'0%'` to `'100%'`              | A share of the image's own pixels |
+| Anything else, such as `1.5`, `-1` or `'0.1'` | Exit 2                            |
 
 - **A count scales with the device scale factor.** At scale s, the snapshot may have ⌊`pixels` × s²⌋ differing image pixels. So `20` allows 20 at scale 1, 45 at scale 1.5 and 80 at scale 2.
 - **A share isn't scaled.** It's counted against the image's own pixels and rounded down to a whole pixel.

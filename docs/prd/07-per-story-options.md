@@ -14,13 +14,13 @@ Everything a project sets for a Storybook, a stories file or a story lives in `p
 
 How levels merge, through Storybook's own merging:
 
-| Key | Merge |
-|---|---|
-| `modes` | The most specific level's list wins |
-| `viewport` | Deep-merges, so a story can set `{ width: 375 }` alone |
-| `tolerance` | Deep-merges, so a level can set only `color` or only `pixels` |
-| `masks` | Merges by name |
-| `wait`, `element`, `disable` | The most specific level wins |
+| Key                          | Merge                                                         |
+| ---------------------------- | ------------------------------------------------------------- |
+| `modes`                      | The most specific level's list wins                           |
+| `viewport`                   | Deep-merges, so a story can set `{ width: 375 }` alone        |
+| `tolerance`                  | Deep-merges, so a level can set only `color` or only `pixels` |
+| `masks`                      | Merges by name                                                |
+| `wait`, `element`, `disable` | The most specific level wins                                  |
 
 ## The helper
 
@@ -121,11 +121,11 @@ Every story's merged options are checked before any capture. Each of these exits
 - Storybook's `extract()` is never called, and MDX docs files never load.
 - Options are read in the browser that captures. Nothing is cached between runs, because `index.json` doesn't change when a file's options do.
 
-| Run | Stories files it loads |
-|---|---|
-| `test` or `update`, any selection | All of them |
-| `test --consistency` | All of them |
-| `test --shard k/n` | Only its own |
+| Run                               | Stories files it loads |
+| --------------------------------- | ---------------------- |
+| `test` or `update`, any selection | All of them            |
+| `test --consistency`              | All of them            |
+| `test --shard k/n`                | Only its own           |
 
 - Because the consistency check covers every story, a local run of affected stories still loads every file. On a cold dev server, that compiles them all once.
 

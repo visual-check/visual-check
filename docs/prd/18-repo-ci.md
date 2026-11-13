@@ -6,20 +6,20 @@ This repo's CI checks the code, runs the built CLI against the repo's own small 
 
 ## On every PR
 
-| Job | Runner | Checks |
-|---|---|---|
-| Code | Linux, Node 24 | Biome, typecheck, Fallow, unit tests |
-| Node 22 | Linux, Node 22 | Unit tests and one end-to-end run, because 22 is the minimum |
-| Own Storybooks | Linux | The built CLI against this repo's test Storybooks (below) |
-| Setup | Linux | `init` under each package manager (below) |
-| Test apps | Linux and Windows | test-apps' reusable workflow, on the packed packages ([Test apps](17-test-apps.md)) |
+| Job                  | Runner               | Checks                                                                                                                 |
+| -------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Code                 | Linux, Node 24       | Biome, typecheck, Fallow, unit tests                                                                                   |
+| Node 22              | Linux, Node 22       | Unit tests and one end-to-end run, because 22 is the minimum                                                           |
+| Own Storybooks       | Linux                | The built CLI against this repo's test Storybooks (below)                                                              |
+| Setup                | Linux                | `init` under each package manager (below)                                                                              |
+| Test apps            | Linux and Windows    | test-apps' reusable workflow, on the packed packages ([Test apps](17-test-apps.md))                                    |
 | macOS without Docker | macOS, Apple Silicon | `init`, affected stories, baseline files, starting and stopping Storybook, the no-Docker error, and one `host` capture |
-| Ubuntu `host` | Linux | One `host` capture, where Chromium's sandbox can't start and visual-check relaunches without it |
-| Windows skill script | Windows | The agent skill's script starts and stops Storybook. Killing the CLI mid-run leaves no browser container |
-| Oldest browser | Linux | A smoke run with the oldest browser package in the CLI's range: it launches and captures, with no image comparison |
-| Devcontainer | Linux | A run from a devcontainer that uses the host's Docker |
-| arm64 image | Linux arm64 | A pixel run on the arm64 image |
-| Lockstep versions | Linux | The three lockstep packages have one version |
+| Ubuntu `host`        | Linux                | One `host` capture, where Chromium's sandbox can't start and visual-check relaunches without it                        |
+| Windows skill script | Windows              | The agent skill's script starts and stops Storybook. Killing the CLI mid-run leaves no browser container               |
+| Oldest browser       | Linux                | A smoke run with the oldest browser package in the CLI's range: it launches and captures, with no image comparison     |
+| Devcontainer         | Linux                | A run from a devcontainer that uses the host's Docker                                                                  |
+| arm64 image          | Linux arm64          | A pixel run on the arm64 image                                                                                         |
+| Lockstep versions    | Linux                | The three lockstep packages have one version                                                                           |
 
 - Every job runs Node 24, except the Node 22 job.
 - GitHub Actions sets `CI`. Steps that test local-only behaviour run with `CI` unset: the Setup job's `update`, the addon's Update, the affected-stories check and the skill refresh.

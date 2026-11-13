@@ -39,10 +39,10 @@ All names are known before anything is captured, so these are checked first:
 
 ## What `update` writes and deletes
 
-| What | Scope |
-|---|---|
-| A failing baseline | Stories the run selected |
-| A missing baseline | Every story of the Storybooks in the run, whatever the selection |
+| What                | Scope                                                             |
+| ------------------- | ----------------------------------------------------------------- |
+| A failing baseline  | Stories the run selected                                          |
+| A missing baseline  | Every story of the Storybooks in the run, whatever the selection  |
 | An orphan (deleted) | Every orphan of the Storybooks in the run, whatever the selection |
 
 - A baseline within tolerance stays untouched. There's no `--force`: to rewrite a baseline, delete the file and run `update`.

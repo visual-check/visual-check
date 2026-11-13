@@ -30,28 +30,28 @@ A project that uses Storybook wants to know whether a code change alters how its
 
 ## Areas
 
-| # | Area | Covers |
-|---|---|---|
-| 1 | [Packages](01-packages.md) | The four npm packages and what each holds |
-| 2 | [CLI and commands](02-cli.md) | `init`, `test`, `update`, flags and exit codes |
-| 3 | [Config and `init`](03-config-and-init.md) | The config file, its keys, and what `init` detects, asks and writes |
-| 4 | [Capture engine](04-capture-engine.md) | The raw CDP driver, pages, hazards, retries and speed |
-| 5 | [Browser and platform](05-browser-and-platform.md) | The platform key, Docker, the network path, `host`, the image and the sandbox |
-| 6 | [Readiness and stability](06-readiness-and-stability.md) | Supported Storybooks, readiness, the end state, flaky snapshots, broken stories and remote content |
-| 7 | [Per-story options](07-per-story-options.md) | `parameters.visualCheck`: modes, viewport, capture area, masks, and how options are read |
-| 8 | [Grid stories](08-grid-stories.md) | The grid component, its ports, layout and forced states |
-| 9 | [Visual diff](09-visual-diff.md) | `color`, `pixels`, size differences and the visual diff image |
-| 10 | [Baselines and update](10-baselines-and-update.md) | Storage, file names, what `update` writes and its stability checks |
-| 11 | [Affected stories](11-affected-stories.md) | The base, changed files, the graph and the rules by file |
-| 12 | [Sharding and the consistency check](12-sharding-and-consistency.md) | `--shard`, the split, and when the check runs |
-| 13 | [Report and output](13-report-and-output.md) | The report folder, the JSON, reporters and the step summary |
-| 14 | [GitHub Action](14-github-action.md) | The composite Action and the reusable workflow |
-| 15 | [Storybook addon](15-storybook-addon.md) | Check and Update for the current story in `storybook dev` |
-| 16 | [Agent skill](16-agent-skill.md) | The skill's files, its runner script and what it tells an agent |
-| 17 | [Test apps](17-test-apps.md) | The separate repo of real Storybooks |
-| 18 | [CI for this repo](18-repo-ci.md) | PR jobs and this repo's own test Storybooks |
-| 19 | [Release process](19-release.md) | Versions, the release steps and the browser package's releases |
-| 20 | [Docs site](20-docs-site.md) | The landing page and docs, built last |
+| #   | Area                                                                 | Covers                                                                                             |
+| --- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| 1   | [Packages](01-packages.md)                                           | The four npm packages and what each holds                                                          |
+| 2   | [CLI and commands](02-cli.md)                                        | `init`, `test`, `update`, flags and exit codes                                                     |
+| 3   | [Config and `init`](03-config-and-init.md)                           | The config file, its keys, and what `init` detects, asks and writes                                |
+| 4   | [Capture engine](04-capture-engine.md)                               | The raw CDP driver, pages, hazards, retries and speed                                              |
+| 5   | [Browser and platform](05-browser-and-platform.md)                   | The platform key, Docker, the network path, `host`, the image and the sandbox                      |
+| 6   | [Readiness and stability](06-readiness-and-stability.md)             | Supported Storybooks, readiness, the end state, flaky snapshots, broken stories and remote content |
+| 7   | [Per-story options](07-per-story-options.md)                         | `parameters.visualCheck`: modes, viewport, capture area, masks, and how options are read           |
+| 8   | [Grid stories](08-grid-stories.md)                                   | The grid component, its ports, layout and forced states                                            |
+| 9   | [Visual diff](09-visual-diff.md)                                     | `color`, `pixels`, size differences and the visual diff image                                      |
+| 10  | [Baselines and update](10-baselines-and-update.md)                   | Storage, file names, what `update` writes and its stability checks                                 |
+| 11  | [Affected stories](11-affected-stories.md)                           | The base, changed files, the graph and the rules by file                                           |
+| 12  | [Sharding and the consistency check](12-sharding-and-consistency.md) | `--shard`, the split, and when the check runs                                                      |
+| 13  | [Report and output](13-report-and-output.md)                         | The report folder, the JSON, reporters and the step summary                                        |
+| 14  | [GitHub Action](14-github-action.md)                                 | The composite Action and the reusable workflow                                                     |
+| 15  | [Storybook addon](15-storybook-addon.md)                             | Check and Update for the current story in `storybook dev`                                          |
+| 16  | [Agent skill](16-agent-skill.md)                                     | The skill's files, its runner script and what it tells an agent                                    |
+| 17  | [Test apps](17-test-apps.md)                                         | The separate repo of real Storybooks                                                               |
+| 18  | [CI for this repo](18-repo-ci.md)                                    | PR jobs and this repo's own test Storybooks                                                        |
+| 19  | [Release process](19-release.md)                                     | Versions, the release steps and the browser package's releases                                     |
+| 20  | [Docs site](20-docs-site.md)                                         | The landing page and docs, built last                                                              |
 
 ## Headline decisions
 
@@ -83,18 +83,18 @@ Smaller things left out of v1 are listed in each area's file.
 
 ## Risks
 
-| Risk | What happens then |
-|---|---|
-| Apple hasn't said whether Linux VMs keep Rosetta after macOS 27 | Projects on Apple Silicon move to `linux/arm64`, which the default tolerance absorbs |
-| Storybook's test path and `loadStory` are internals | The adapter absorbs changes. Without the test path, captures are about 100 ms slower and still correct |
-| Storybook 11 isn't stable yet | The adapter's reading of 11 is re-checked at stable. The test apps and this repo already run an 11 prerelease |
-| The addon relies on Storybook APIs marked experimental | v1 needs it on Storybook 10 only. Storybook 11 is decided later |
-| Google hasn't confirmed that its headless shell may ship inside the image | Fall back to a download at run time, or Debian's Chromium, as a new browser package version |
-| The launch arguments and font table were measured on one older browser build | The comparison against Playwright is repeated on the first build, and reviewed on every bump |
-| The migration target once saw pixel noise at 2 CI workers | Measured again with visual-check as an acceptance check. `workers` can be set to 1 |
-| Fallow needs a lot of memory on very large repos | The run falls back to all stories, with a warning |
-| The arm64 image can't pin its system packages to a dated snapshot | Each image records its package list, and users always pull by digest |
-| release-please's linked versions have old open bugs | A CI check keeps the three versions equal |
+| Risk                                                                         | What happens then                                                                                             |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Apple hasn't said whether Linux VMs keep Rosetta after macOS 27              | Projects on Apple Silicon move to `linux/arm64`, which the default tolerance absorbs                          |
+| Storybook's test path and `loadStory` are internals                          | The adapter absorbs changes. Without the test path, captures are about 100 ms slower and still correct        |
+| Storybook 11 isn't stable yet                                                | The adapter's reading of 11 is re-checked at stable. The test apps and this repo already run an 11 prerelease |
+| The addon relies on Storybook APIs marked experimental                       | v1 needs it on Storybook 10 only. Storybook 11 is decided later                                               |
+| Google hasn't confirmed that its headless shell may ship inside the image    | Fall back to a download at run time, or Debian's Chromium, as a new browser package version                   |
+| The launch arguments and font table were measured on one older browser build | The comparison against Playwright is repeated on the first build, and reviewed on every bump                  |
+| The migration target once saw pixel noise at 2 CI workers                    | Measured again with visual-check as an acceptance check. `workers` can be set to 1                            |
+| Fallow needs a lot of memory on very large repos                             | The run falls back to all stories, with a warning                                                             |
+| The arm64 image can't pin its system packages to a dated snapshot            | Each image records its package list, and users always pull by digest                                          |
+| release-please's linked versions have old open bugs                          | A CI check keeps the three versions equal                                                                     |
 
 ## Open questions
 

@@ -6,11 +6,11 @@ By default the browser runs in visual-check's own container image, forced to `li
 
 ## The `platform` key
 
-| Value | Browser runs | Parity between machines |
-|---|---|---|
-| `'linux/amd64'` (default) | In the container, as amd64. Under Rosetta on Apple Silicon | Exact |
-| `'linux/arm64'` | In the container, as arm64 | Within the default tolerance, which absorbs arm64's differences |
-| `'host'` | Directly on the machine, no Docker | None |
+| Value                     | Browser runs                                               | Parity between machines                                         |
+| ------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------- |
+| `'linux/amd64'` (default) | In the container, as amd64. Under Rosetta on Apple Silicon | Exact                                                           |
+| `'linux/arm64'`           | In the container, as arm64                                 | Within the default tolerance, which absorbs arm64's differences |
+| `'host'`                  | Directly on the machine, no Docker                         | None                                                            |
 
 - It's one committed value for the whole project. It can't take `{ local, ci }` and has no CLI flag, because a mismatch makes every story a visual diff.
 - `host` is a choice for the whole project, never a fallback.
@@ -51,13 +51,13 @@ By default the browser runs in visual-check's own container image, forced to `li
 
 The first rule that matches wins.
 
-| # | Where the CLI runs | The browser |
-|---|---|---|
-| 1 | Inside visual-check's image | Starts directly, with no Docker |
-| 2 | Inside a container the Docker daemon knows | Joins that container's network (`--network container:<id>`) |
-| 3 | With Docker Desktop, on any OS | Goes through a SOCKS proxy in the CLI |
-| 4 | With any other Linux engine | Uses host networking (`--network host`) |
-| 5 | Anywhere else, such as OrbStack or Colima on macOS | Goes through the SOCKS proxy |
+| #   | Where the CLI runs                                 | The browser                                                 |
+| --- | -------------------------------------------------- | ----------------------------------------------------------- |
+| 1   | Inside visual-check's image                        | Starts directly, with no Docker                             |
+| 2   | Inside a container the Docker daemon knows         | Joins that container's network (`--network container:<id>`) |
+| 3   | With Docker Desktop, on any OS                     | Goes through a SOCKS proxy in the CLI                       |
+| 4   | With any other Linux engine                        | Uses host networking (`--network host`)                     |
+| 5   | Anywhere else, such as OrbStack or Colima on macOS | Goes through the SOCKS proxy                                |
 
 - On every path the Storybook's `url` works exactly as written: loopback, hosts-file names, VPN and LAN names. Remote content is fetched the same way.
 - **Rule 2** reads the container's ID from `/proc/self/mountinfo`, and `docker inspect <id>` must succeed. A container the daemon doesn't know falls through to the later rules.
@@ -80,13 +80,13 @@ A CI job container or a devcontainer can be built on visual-check's image.
 
 ## Runtimes by OS
 
-| OS | Supported | Notes |
-|---|---|---|
-| Linux | Docker Engine | Docker Desktop for Linux, rootless Docker and Podman take the same paths but aren't tested |
-| macOS, Apple Silicon | OrbStack and Docker Desktop | Both run amd64 under Rosetta by default. Colima and Podman default to QEMU, which can't run amd64 Chromium |
-| macOS, Intel | Colima | No emulation needed |
-| Windows x64 | Docker Desktop | It renders like a Linux runner. CI tests it on Windows Server 2025. Windows 10 and 11 desktops aren't tested |
-| Node inside WSL | As Linux | With Docker Engine in the distro: host networking. With Docker Desktop: the proxy |
+| OS                   | Supported                   | Notes                                                                                                        |
+| -------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Linux                | Docker Engine               | Docker Desktop for Linux, rootless Docker and Podman take the same paths but aren't tested                   |
+| macOS, Apple Silicon | OrbStack and Docker Desktop | Both run amd64 under Rosetta by default. Colima and Podman default to QEMU, which can't run amd64 Chromium   |
+| macOS, Intel         | Colima                      | No emulation needed                                                                                          |
+| Windows x64          | Docker Desktop              | It renders like a Linux runner. CI tests it on Windows Server 2025. Windows 10 and 11 desktops aren't tested |
+| Node inside WSL      | As Linux                    | With Docker Engine in the distro: host networking. With Docker Desktop: the proxy                            |
 
 Not supported in v1:
 
@@ -130,11 +130,11 @@ Not supported in v1:
 
 ## The sandbox
 
-| Where the browser runs | Chromium's sandbox | The boundary |
-|---|---|---|
-| visual-check's container | Off | The container: a non-root user, no capabilities, no new privileges |
-| Inside the image, as a job container or devcontainer | Off, and never tried | That container alone |
-| `host` | On where the OS allows it | Chromium's sandbox |
+| Where the browser runs                               | Chromium's sandbox        | The boundary                                                       |
+| ---------------------------------------------------- | ------------------------- | ------------------------------------------------------------------ |
+| visual-check's container                             | Off                       | The container: a non-root user, no capabilities, no new privileges |
+| Inside the image, as a job container or devcontainer | Off, and never tried      | That container alone                                               |
+| `host`                                               | On where the OS allows it | Chromium's sandbox                                                 |
 
 - On `host` the browser launches with the sandbox. If Chromium exits at launch, visual-check relaunches without it, silently. The run then keeps that choice.
 - In the container and inside the image, the launch arguments include `--no-sandbox`. On `host` they're Playwright's arguments without it, and the relaunch adds it back.

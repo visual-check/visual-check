@@ -85,14 +85,14 @@ None of these fails a story:
 
 ## When a capture goes wrong
 
-| Event | What happens |
-|---|---|
-| The story navigates its document away | Retried 2 times, each on a fresh page in a new context, with no wait. Then a broken story, "navigated away". Its message names the URL it went to and says to await the new page before clicking |
-| A page-started navigation overtakes `goto` | The `goto` fails at once and doesn't hang |
-| The page crashes | A broken story, "crashed", never retried. The worker opens a new context for its next story |
-| The browser exits | Every story in flight becomes a broken story, "browser exited". The browser relaunches once. A second exit, or a failed relaunch, exits 2 |
-| An error or a timeout | A broken story. Never retried |
-| A snapshot beyond tolerance, or of a different size | Captured again with a fresh `goto`, up to `retries` more times ([Readiness and stability](06-readiness-and-stability.md)) |
+| Event                                               | What happens                                                                                                                                                                                     |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The story navigates its document away               | Retried 2 times, each on a fresh page in a new context, with no wait. Then a broken story, "navigated away". Its message names the URL it went to and says to await the new page before clicking |
+| A page-started navigation overtakes `goto`          | The `goto` fails at once and doesn't hang                                                                                                                                                        |
+| The page crashes                                    | A broken story, "crashed", never retried. The worker opens a new context for its next story                                                                                                      |
+| The browser exits                                   | Every story in flight becomes a broken story, "browser exited". The browser relaunches once. A second exit, or a failed relaunch, exits 2                                                        |
+| An error or a timeout                               | A broken story. Never retried                                                                                                                                                                    |
+| A snapshot beyond tolerance, or of a different size | Captured again with a fresh `goto`, up to `retries` more times ([Readiness and stability](06-readiness-and-stability.md))                                                                        |
 
 - Only new documents count as navigating away. Storybook's own `history.replaceState` doesn't.
 - Broken stories count toward exit 1, and the run goes on.
@@ -109,13 +109,13 @@ None of these fails a story:
 
 These numbers come from the research and are here for reference. Captures per second, the launch time and the message count were measured with 2 workers on 2-vCPU runners over 300 real stories. The fresh-runner time was measured on 4-vCPU runners, and memory per worker in local Docker VMs.
 
-| Measure | Value |
-|---|---|
-| Captures per second | 3.30, against 2.71 for Playwright's `run-server` |
-| Browser launched, `docker run` included | 0.39 s |
-| Fresh runner: pull, start and first CDP reply | About 8 s |
-| CDP messages per capture | 14 to 16 |
-| Memory per worker | About 1 GiB |
+| Measure                                       | Value                                            |
+| --------------------------------------------- | ------------------------------------------------ |
+| Captures per second                           | 3.30, against 2.71 for Playwright's `run-server` |
+| Browser launched, `docker run` included       | 0.39 s                                           |
+| Fresh runner: pull, start and first CDP reply | About 8 s                                        |
+| CDP messages per capture                      | 14 to 16                                         |
+| Memory per worker                             | About 1 GiB                                      |
 
 The migration target's CI capture takes 4:45 today on 2 vCPUs. v1 has to beat that from capture speed alone, because CI runs all stories.
 

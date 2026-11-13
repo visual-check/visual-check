@@ -28,26 +28,26 @@ export default defineConfig({
 
 ## Keys
 
-| Key | Default | Notes |
-|---|---|---|
-| `storybooks.<name>.dir` | The config file's folder | The folder Storybook runs in. `index.json`'s `importPath` is relative to it |
-| `storybooks.<name>.configDir` | `.storybook`, inside `dir` | |
-| `storybooks.<name>.url` | None, required | One value or `{ local, ci }` |
-| `storybooks.<name>.baselines` | `<dir>/.visual-check/baselines` | The only folder a project can move in v1 |
-| `platform` | `'linux/amd64'` | Or `'linux/arm64'` or `'host'` ([Browser and platform](05-browser-and-platform.md)) |
-| `image` | The browser package's image | A custom image must be built `FROM` it |
-| `tolerance` | `{ color: 0.01, pixels: 20 }` | [Visual diff](09-visual-diff.md) |
-| `viewport` | `{ width: 1280, height: 720, deviceScaleFactor: 1 }` | The default capture's viewport when `preview` sets none |
-| `maskColor` | `'#FF00FF'` | |
-| `timezone` | `'UTC'` | Emulated in the browser |
-| `locale` | `'en-US'` | Emulated in the browser |
-| `colorScheme` | `'light'` | Or `'dark'`. Emulated in the browser |
-| `workers` | `'auto'` | A number, or `{ local, ci }`. One pool for the whole run |
-| `readyTimeout` | `10_000` ms | A number, or `{ local, ci }` |
-| `retries` | `1` | How many more times a failing snapshot is captured before it fails. The same for every story |
-| `silenceHosts` | `[]` | Exact hosts or `*.example.com`. Silences `update`'s two warnings |
-| `affected.selectAll` | `[]` | Globs, relative to the config file. A changed file that matches selects every story |
-| `affected.ignore` | `[]` | Globs, relative to the config file. A changed file that matches selects nothing |
+| Key                           | Default                                              | Notes                                                                                        |
+| ----------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `storybooks.<name>.dir`       | The config file's folder                             | The folder Storybook runs in. `index.json`'s `importPath` is relative to it                  |
+| `storybooks.<name>.configDir` | `.storybook`, inside `dir`                           |                                                                                              |
+| `storybooks.<name>.url`       | None, required                                       | One value or `{ local, ci }`                                                                 |
+| `storybooks.<name>.baselines` | `<dir>/.visual-check/baselines`                      | The only folder a project can move in v1                                                     |
+| `platform`                    | `'linux/amd64'`                                      | Or `'linux/arm64'` or `'host'` ([Browser and platform](05-browser-and-platform.md))          |
+| `image`                       | The browser package's image                          | A custom image must be built `FROM` it                                                       |
+| `tolerance`                   | `{ color: 0.01, pixels: 20 }`                        | [Visual diff](09-visual-diff.md)                                                             |
+| `viewport`                    | `{ width: 1280, height: 720, deviceScaleFactor: 1 }` | The default capture's viewport when `preview` sets none                                      |
+| `maskColor`                   | `'#FF00FF'`                                          |                                                                                              |
+| `timezone`                    | `'UTC'`                                              | Emulated in the browser                                                                      |
+| `locale`                      | `'en-US'`                                            | Emulated in the browser                                                                      |
+| `colorScheme`                 | `'light'`                                            | Or `'dark'`. Emulated in the browser                                                         |
+| `workers`                     | `'auto'`                                             | A number, or `{ local, ci }`. One pool for the whole run                                     |
+| `readyTimeout`                | `10_000` ms                                          | A number, or `{ local, ci }`                                                                 |
+| `retries`                     | `1`                                                  | How many more times a failing snapshot is captured before it fails. The same for every story |
+| `silenceHosts`                | `[]`                                                 | Exact hosts or `*.example.com`. Silences `update`'s two warnings                             |
+| `affected.selectAll`          | `[]`                                                 | Globs, relative to the config file. A changed file that matches selects every story          |
+| `affected.ignore`             | `[]`                                                 | Globs, relative to the config file. A changed file that matches selects nothing              |
 
 Rules for the keys:
 
@@ -82,11 +82,11 @@ Rules for the keys:
 
 ## Folders
 
-| Folder | Holds | In git |
-|---|---|---|
-| `<dir>/.visual-check/baselines/` | Baselines | Committed |
-| `<dir>/.visual-check/snapshots/`, `diffs/` | The addon's images. The CLI never writes them | Ignored |
-| `<config folder>/.visual-check/report/` | The report. Its place is fixed in v1 | Ignored |
+| Folder                                     | Holds                                         | In git    |
+| ------------------------------------------ | --------------------------------------------- | --------- |
+| `<dir>/.visual-check/baselines/`           | Baselines                                     | Committed |
+| `<dir>/.visual-check/snapshots/`, `diffs/` | The addon's images. The CLI never writes them | Ignored   |
+| `<config folder>/.visual-check/report/`    | The report. Its place is fixed in v1          | Ignored   |
 
 - Each `<dir>/.visual-check/` and the root `.visual-check/` get a `.gitignore` holding `/*`, `!/baselines/` and `!/.gitignore`.
 - `init` never touches the root `.gitignore` and writes no `.gitattributes`. Git already treats PNG as binary, and a nested file would override a project's LFS attributes.

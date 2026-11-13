@@ -6,13 +6,13 @@ v1 publishes four npm packages and reserves one name. The Action, the test apps 
 
 ## Published packages
 
-| Package | Holds | Versioning |
-|---|---|---|
-| `@visual-check/cli` | The CLI, the engine and the public config API | Lockstep group |
-| `@visual-check/storybook` | Code that runs in Storybook's preview: the options helper and the grid component | Lockstep group |
-| `@visual-check/storybook-addon` | The Storybook panel | Lockstep group |
-| `@visual-check/chromium` | Data naming one exact Chromium build | Its own: the major is the Chromium major |
-| `visual-check` (unscoped) | A README-only placeholder | Published once |
+| Package                         | Holds                                                                            | Versioning                               |
+| ------------------------------- | -------------------------------------------------------------------------------- | ---------------------------------------- |
+| `@visual-check/cli`             | The CLI, the engine and the public config API                                    | Lockstep group                           |
+| `@visual-check/storybook`       | Code that runs in Storybook's preview: the options helper and the grid component | Lockstep group                           |
+| `@visual-check/storybook-addon` | The Storybook panel                                                              | Lockstep group                           |
+| `@visual-check/chromium`        | Data naming one exact Chromium build                                             | Its own: the major is the Chromium major |
+| `visual-check` (unscoped)       | A README-only placeholder                                                        | Published once                           |
 
 The three packages of the lockstep group always share one version and release together ([Release process](19-release.md)).
 
