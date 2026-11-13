@@ -7,6 +7,7 @@
   },
   "scripts": {
     "build": "turbo run build",
+    "check:chromium-checksums": "node packages/repo-checks/src/check-chromium-checksums.ts",
     "check:lockstep": "node packages/repo-checks/src/check-lockstep.ts",
     "dev": "turbo run dev",
     "format": "biome format --write .",

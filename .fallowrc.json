@@ -14,6 +14,7 @@
       { "name": "cli/config", "patterns": ["packages/cli/src/config/**"] },
       { "name": "repo-checks/workspace", "patterns": ["packages/repo-checks/src/workspace/**"] },
       { "name": "repo-checks/lockstep", "patterns": ["packages/repo-checks/src/lockstep/**"] },
+      { "name": "repo-checks/chromium-checksums", "patterns": ["packages/repo-checks/src/chromium-checksums/**"] },
       { "name": "repo-checks/no-playwright", "patterns": ["packages/repo-checks/src/no-playwright/**"] },
       { "name": "repo-checks/source-layout", "patterns": ["packages/repo-checks/src/source-layout/**"] }
     ],
@@ -23,6 +24,7 @@
       { "from": "cli/config", "allow": [] },
       { "from": "repo-checks/workspace", "allow": [] },
       { "from": "repo-checks/lockstep", "allow": ["repo-checks/workspace"] },
+      { "from": "repo-checks/chromium-checksums", "allow": ["repo-checks/workspace"] },
       { "from": "repo-checks/no-playwright", "allow": ["repo-checks/workspace"] },
       { "from": "repo-checks/source-layout", "allow": ["repo-checks/workspace"] }
     ],
@@ -34,6 +36,7 @@
         "packages/storybook/src/index.ts",
         "packages/storybook-addon/src/manager.ts",
         "packages/storybook-addon/src/preset.ts",
+        "packages/repo-checks/src/check-chromium-checksums.ts",
         "packages/repo-checks/src/check-lockstep.ts",
         "packages/*/test/**/*.test.ts"
       ]
