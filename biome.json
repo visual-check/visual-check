@@ -21,6 +21,13 @@
     },
     "rules": {
       "preset": "recommended",
+      "correctness": {
+        "noPrivateImports": { "level": "error", "options": { "defaultVisibility": "package" } }
+      },
+      "performance": {
+        "noBarrelFile": "error",
+        "noReExportAll": "error"
+      },
       "style": {
         "useFilenamingConvention": {
           "level": "error",
@@ -29,6 +36,12 @@
       }
     }
   },
+  "overrides": [
+    {
+      "includes": ["packages/*/src/index.ts"],
+      "linter": { "rules": { "performance": { "noBarrelFile": "off" } } }
+    }
+  ],
   "javascript": {
     "formatter": {
       "quoteStyle": "single",
