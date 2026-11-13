@@ -22,15 +22,15 @@ A composite Action and a reusable workflow live in the public repo `visual-check
 
 ## The Action's inputs
 
-| Input | Does |
-|---|---|
-| `storybook` | Runs one named Storybook |
-| `shard` | `k/n`, passed as `--shard`. The Action also reads the index from it for the artifact's name |
-| `affected` | Passes `--affected`, on pull requests only. On other events it's ignored with a note |
-| `consistency` | Runs only the consistency check |
-| `working-directory` | Where the config search starts |
-| `args` | Extra CLI arguments, such as `--workers` |
-| `retention-days` | Passed to the artifact upload. Defaults to the repo's setting |
+| Input               | Does                                                                                        |
+| ------------------- | ------------------------------------------------------------------------------------------- |
+| `storybook`         | Runs one named Storybook                                                                    |
+| `shard`             | `k/n`, passed as `--shard`. The Action also reads the index from it for the artifact's name |
+| `affected`          | Passes `--affected`, on pull requests only. On other events it's ignored with a note        |
+| `consistency`       | Runs only the consistency check                                                             |
+| `working-directory` | Where the config search starts                                                              |
+| `args`              | Extra CLI arguments, such as `--workers`                                                    |
+| `retention-days`    | Passed to the artifact upload. Defaults to the repo's setting                               |
 
 - **Outputs:** `exit-code`, `report-dir` and `artifact-url`.
 - With no selection input, CI covers all stories.
@@ -53,14 +53,14 @@ For exit 1 and exit 2 alike, the Action:
 
 `uses: visual-check/action/.github/workflows/test.yml@v1`
 
-| Input | Default | Does |
-|---|---|---|
-| `shards` | Required | The number of shards |
-| `setup` | Required | A shell script, run after checkout and Node setup, that installs, builds and serves Storybook and leaves it running |
-| `node-version-file` | `.nvmrc` | |
-| `runs-on` | `ubuntu-24.04` | |
-| `working-directory` | The repo root | |
-| `storybook` | Every Storybook | |
+| Input               | Default         | Does                                                                                                                |
+| ------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `shards`            | Required        | The number of shards                                                                                                |
+| `setup`             | Required        | A shell script, run after checkout and Node setup, that installs, builds and serves Storybook and leaves it running |
+| `node-version-file` | `.nvmrc`        |                                                                                                                     |
+| `runs-on`           | `ubuntu-24.04`  |                                                                                                                     |
+| `working-directory` | The repo root   |                                                                                                                     |
+| `storybook`         | Every Storybook |                                                                                                                     |
 
 - Secrets come through `secrets: inherit`, for private registries.
 - A plan job turns `shards` into the matrix, with `fail-fast: false`.

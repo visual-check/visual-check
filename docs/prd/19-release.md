@@ -43,10 +43,10 @@ Rules:
 
 Two checks can't run on hosted runners. Each runs before a release that changes its area, and both run once more before 1.0.0.
 
-| Check | Before a release that changes |
-|---|---|
-| The agent skill in Claude Code, Codex, Cursor, Copilot and Antigravity: it's listed once, and its script starts and stops Storybook | The skill |
-| The browser container on an Apple Silicon Mac, with OrbStack and with Docker Desktop, including the container's hardening options | The container, the driver or the browser package |
+| Check                                                                                                                               | Before a release that changes                    |
+| ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| The agent skill in Claude Code, Codex, Cursor, Copilot and Antigravity: it's listed once, and its script starts and stops Storybook | The skill                                        |
+| The browser container on an Apple Silicon Mac, with OrbStack and with Docker Desktop, including the container's hardening options   | The container, the driver or the browser package |
 
 ## Releasing the browser package
 

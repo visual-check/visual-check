@@ -6,12 +6,12 @@ visual-check ships a grid component in `@visual-check/storybook`. A project uses
 
 ## Ports
 
-| Entry | Export | For |
-|---|---|---|
-| `@visual-check/storybook/react` | `<Combinations>` | React 18 and 19 |
-| `@visual-check/storybook/vue` | `Combinations` | Vue 3 |
-| `@visual-check/storybook/angular` | `combinations()` | Angular 18 and later |
-| `@visual-check/storybook` | `combinations()` | Plain DOM: Storybook's html and web-components renderers |
+| Entry                             | Export           | For                                                      |
+| --------------------------------- | ---------------- | -------------------------------------------------------- |
+| `@visual-check/storybook/react`   | `<Combinations>` | React 18 and 19                                          |
+| `@visual-check/storybook/vue`     | `Combinations`   | Vue 3                                                    |
+| `@visual-check/storybook/angular` | `combinations()` | Angular 18 and later                                     |
+| `@visual-check/storybook`         | `combinations()` | Plain DOM: Storybook's html and web-components renderers |
 
 - One framework-free module works out the rows, each caption's text and every element's inline styles. Each port only turns that into elements.
 - Cells stay in the framework's own tree, so React context, Vue's `provide` and Angular's injector reach them.
@@ -24,14 +24,14 @@ visual-check ships a grid component in `@visual-check/storybook`. A project uses
 
 The same in every port:
 
-| Input | Meaning |
-|---|---|
+| Input       | Meaning                                                                                                        |
+| ----------- | -------------------------------------------------------------------------------------------------------------- |
 | `component` | The component in every cell. The plain-DOM port takes `render` instead: a function that returns a node or HTML |
-| `props` | The values to try for each prop. Every combination is a row |
-| `args` | Props that every cell shares |
-| `states` | The states to force, one column each: `hover`, `active`, `focus-visible`, `focus-within`, `focus` |
-| `cellWidth` | A fixed width in CSS pixels for every column |
-| `caption` | `(props) => string`, called with a row's varying props. It replaces the default caption |
+| `props`     | The values to try for each prop. Every combination is a row                                                    |
+| `args`      | Props that every cell shares                                                                                   |
+| `states`    | The states to force, one column each: `hover`, `active`, `focus-visible`, `focus-within`, `focus`              |
+| `cellWidth` | A fixed width in CSS pixels for every column                                                                   |
+| `caption`   | `(props) => string`, called with a row's varying props. It replaces the default caption                        |
 
 ## Layout
 

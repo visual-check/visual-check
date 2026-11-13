@@ -6,10 +6,10 @@ Locally, `test` and `update` cover only the stories that the changed files can a
 
 ## When it applies
 
-| Run | Default |
-|---|---|
-| `CI` unset | Affected stories |
-| `CI` set | All stories. The graph isn't read unless `--affected` is passed |
+| Run        | Default                                                         |
+| ---------- | --------------------------------------------------------------- |
+| `CI` unset | Affected stories                                                |
+| `CI` set   | All stories. The graph isn't read unless `--affected` is passed |
 
 - `--all`, `--affected` and `--filter` are exclusive. Two of them together exit 2.
 - `test --consistency` takes none of the three. Any of them exits 2.
@@ -37,29 +37,29 @@ Locally, `test` and `update` cover only the stories that the changed files can a
 
 ## Rules by changed file
 
-| Changed file | Selects |
-|---|---|
-| In the graph | The stories reached by walking back from it, the file itself included when it's a stories file |
-| `preview*`, `main*`, `preview-head.html` or `preview-body.html`, or a walk that reaches `preview*` or `main*` | All stories of that Storybook |
-| Other files in a Storybook's config folder, such as `visual-check.ts` | What the graph says |
-| visual-check's config file | All stories of every Storybook |
-| A lockfile, `pnpm-workspace.yaml` | All stories of every Storybook |
-| `package.json`, `tsconfig*`, a Vite, PostCSS, Tailwind or Next config, `.env*` | All stories of the Storybooks whose graph reaches that package. Every Storybook for a file at the repo root |
-| An image, a font or a JSON file that isn't config | The same scope as the row above |
-| A baseline | That baseline's story |
-| A match for `affected.selectAll` | All stories of every Storybook |
-| A match for `affected.ignore` | Nothing |
-| Anything else outside the graph, such as a README | Nothing |
-| A deleted source file | Nothing. Its importers changed too, or the build breaks |
+| Changed file                                                                                                  | Selects                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| In the graph                                                                                                  | The stories reached by walking back from it, the file itself included when it's a stories file              |
+| `preview*`, `main*`, `preview-head.html` or `preview-body.html`, or a walk that reaches `preview*` or `main*` | All stories of that Storybook                                                                               |
+| Other files in a Storybook's config folder, such as `visual-check.ts`                                         | What the graph says                                                                                         |
+| visual-check's config file                                                                                    | All stories of every Storybook                                                                              |
+| A lockfile, `pnpm-workspace.yaml`                                                                             | All stories of every Storybook                                                                              |
+| `package.json`, `tsconfig*`, a Vite, PostCSS, Tailwind or Next config, `.env*`                                | All stories of the Storybooks whose graph reaches that package. Every Storybook for a file at the repo root |
+| An image, a font or a JSON file that isn't config                                                             | The same scope as the row above                                                                             |
+| A baseline                                                                                                    | That baseline's story                                                                                       |
+| A match for `affected.selectAll`                                                                              | All stories of every Storybook                                                                              |
+| A match for `affected.ignore`                                                                                 | Nothing                                                                                                     |
+| Anything else outside the graph, such as a README                                                             | Nothing                                                                                                     |
+| A deleted source file                                                                                         | Nothing. Its importers changed too, or the build breaks                                                     |
 
 ## When it can't answer
 
-| Case | Result |
-|---|---|
-| No merge base, for example in a shallow clone | All stories, with a warning |
-| An invalid `--base` | Exit 2 |
-| Fallow fails, runs out of memory or has no binary for the machine | All stories, with a warning |
-| No changed files | `test`: nothing is captured, and a hint points to `--all`. The consistency check still runs, so the exit code is 0 or 1. `update`: no failing baseline is rewritten, but every missing baseline is still written and every orphan deleted |
+| Case                                                              | Result                                                                                                                                                                                                                                    |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No merge base, for example in a shallow clone                     | All stories, with a warning                                                                                                                                                                                                               |
+| An invalid `--base`                                               | Exit 2                                                                                                                                                                                                                                    |
+| Fallow fails, runs out of memory or has no binary for the machine | All stories, with a warning                                                                                                                                                                                                               |
+| No changed files                                                  | `test`: nothing is captured, and a hint points to `--all`. The consistency check still runs, so the exit code is 0 or 1. `update`: no failing baseline is rewritten, but every missing baseline is still written and every orphan deleted |
 
 ## What selection doesn't change
 
