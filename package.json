@@ -14,7 +14,7 @@
     "lint:biome": "biome check .",
     "lint:fallow": "fallow --fail-on-issues --format compact",
     "prepare": "lefthook install",
-    "test": "turbo run test:type test:unit"
+    "test": "turbo run test"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.7",
