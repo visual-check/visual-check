@@ -1,0 +1,9 @@
+{
+  "name": "visual-check",
+  "version": "0.0.0",
+  "description": "Placeholder: visual-check is published as @visual-check/cli",
+  "license": "MIT",
+  "files": [
+    "README.md"
+  ]
+}
