@@ -1,0 +1,43 @@
+{
+  "name": "@visual-check/storybook",
+  "version": "0.0.0",
+  "type": "module",
+  "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test:type": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@angular/core": ">=18.0.0",
+    "react": "^18.0.0 || ^19.0.0",
+    "storybook": "^9.1.0 || ^10.0.0 || ^11.0.0-0",
+    "vue": "^3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@angular/core": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "storybook": {
+      "optional": true
+    },
+    "vue": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@visual-check/typescript-config": "workspace:*",
+    "typescript": "7.0.2"
+  }
+}
