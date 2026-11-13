@@ -123,7 +123,7 @@ All under `/docs`.
 
 **Storybook addon**
 
-- Installing it, Check and Update, that Update's baselines come from the dev server, the panel in a static build, and that it needs Storybook 10 or later.
+- Installing it, Check and Update, that Update's baselines come from the dev server, the panel in a static build, and that it needs Storybook 10.
 
 **Agent skill**
 

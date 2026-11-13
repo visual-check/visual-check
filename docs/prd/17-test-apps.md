@@ -24,7 +24,7 @@ The public repo `visual-check/test-apps` proves that the packages about to be pu
 ## A run
 
 1. Pack `@visual-check/cli`, `@visual-check/storybook` and `@visual-check/storybook-addon` once, from one commit.
-2. In each app, install those files with the app's package manager. The addon goes into the apps on Storybook 10 and later.
+2. In each app, install those files with the app's package manager. The addon goes into the app on Storybook 10.
 3. Build and serve each Storybook.
 4. Run `test` against the committed baselines, through the Action and the reusable workflow. One run is sharded, with its consistency job. The run from inside a WSL distro is a plain step, because a composite Action can't run there.
 

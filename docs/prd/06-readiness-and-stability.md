@@ -9,7 +9,7 @@ A story runs under visual-check as it does in plain Storybook. visual-check wait
 - v1 supports Storybook 9.1, 10 and 11.
 - 9.1 is the floor for good. 7, 8 and 9.0 are never supported, not even behind an adapter.
 - A major stays supported while Storybook still ships fixes for it. It's dropped only in a visual-check major after that, so 9 stays until Storybook 12 is stable.
-- The addon supports 10 and later ([Storybook addon](15-storybook-addon.md)).
+- The addon supports 10 only in v1 ([Storybook addon](15-storybook-addon.md)).
 - Every run checks the version of the `storybook` package installed in each Storybook's folder:
   - below 9.1, it exits 2 and names the version and the minimum;
   - above 11, it warns once and carries on;

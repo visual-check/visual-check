@@ -44,7 +44,7 @@ What CI checks there:
 - Every grid port renders on 9.1, 10 and 11.
 - One grid through every port gives identical images.
 - A deliberate change is caught.
-- **The addon, end to end, on 10:** `storybook dev` with the addon, then Check and Update on one story. The same run on 11 doesn't block a PR until the Storybook 11 question is decided ([Storybook addon](15-storybook-addon.md)).
+- **The addon, end to end, on 10:** `storybook dev` with the addon, then Check and Update on one story. v1 doesn't need the addon on 11 ([Storybook addon](15-storybook-addon.md)).
 
 ## Setup under each package manager
 

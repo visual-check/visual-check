@@ -88,7 +88,7 @@ Smaller things left out of v1 are listed in each area's file.
 | Apple hasn't said whether Linux VMs keep Rosetta after macOS 27 | Projects on Apple Silicon move to `linux/arm64`, which the default tolerance absorbs |
 | Storybook's test path and `loadStory` are internals | The adapter absorbs changes. Without the test path, captures are about 100 ms slower and still correct |
 | Storybook 11 isn't stable yet | The adapter's reading of 11 is re-checked at stable. The test apps and this repo already run an 11 prerelease |
-| The addon relies on Storybook APIs marked experimental | Whether it must work on 11 for v1 is decided when 11 is stable |
+| The addon relies on Storybook APIs marked experimental | v1 needs it on Storybook 10 only. Storybook 11 is decided later |
 | Google hasn't confirmed that its headless shell may ship inside the image | Fall back to a download at run time, or Debian's Chromium, as a new browser package version |
 | The launch arguments and font table were measured on one older browser build | The comparison against Playwright is repeated on the first build, and reviewed on every bump |
 | The migration target once saw pixel noise at 2 CI workers | Measured again with visual-check as an acceptance check. `workers` can be set to 1 |
@@ -98,7 +98,7 @@ Smaller things left out of v1 are listed in each area's file.
 
 ## Open questions
 
-1. **The addon on Storybook 11.** Whether it must work there before v1 is done is decided when 11 is stable ([Storybook addon](15-storybook-addon.md)).
+None. What the addon does on Storybook 11 is left for after v1 ([Storybook addon](15-storybook-addon.md)).
 
 ## Decisions made while writing this PRD
 
@@ -146,7 +146,7 @@ Report, addon and skill
 - No `browser` field. A run-level `selection` field replaces a reason per story.
 - One header line for every run, with a shard's share inside it.
 - The remaining report names: a broken story's image in `images.snapshot`, `update`'s counts, `realRequestHosts` and `remoteContentHosts`, and `load-failed` entries in a consistency-only report.
-- The addon's panel shows one image with a slider, and counts browser exits per click.
+- The addon's panel shows one image with a slider, and counts browser exits per click. v1 needs the addon on Storybook 10 only.
 - The skill's `.claude` link is committed. The skill no longer suggests the reduced-motion preference.
 
 Tests, CI and release

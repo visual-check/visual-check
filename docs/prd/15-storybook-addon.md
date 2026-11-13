@@ -6,12 +6,13 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
 
 ## Scope
 
-- It works in `storybook dev`, on Storybook 10 and later.
+- It works in `storybook dev`, on Storybook 10.
 - It works on the current story only. There's no "run all", no affected stories, and no report read from an earlier CLI run. Storybook's own "Run all" button doesn't run visual-check.
 - Runs are manual: Check and Update, from the panel and from the story's menu in the sidebar.
 - A hot reload or a change to the story index marks earlier results stale. Nothing re-runs by itself.
 - It has a manager entry and a preset, and no preview entry.
-- Whether the addon must work on Storybook 11 before v1 is done is decided when 11 is stable. It's built on Storybook APIs marked experimental: the test provider, the status store, the server channel and the dev-server hook. It never uses `UniversalStore`, which Storybook 11 makes internal.
+- v1 needs the addon on Storybook 10 only. What to do about Storybook 11 is decided later, and adding it won't break anyone. Until then `init` skips the addon for a Storybook on 11, with a note.
+- It's built on Storybook APIs marked experimental: the test provider, the status store, the server channel and the dev-server hook. It never uses `UniversalStore`, which Storybook 11 makes internal.
 
 ## Check
 
@@ -79,7 +80,7 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
 ## Versions and install
 
 - The addon and the CLI release in lockstep. The addon peer-depends on exactly its own version of the CLI, and on a mismatch the panel says which package to upgrade.
-- `init` offers it for each Storybook on 10 or later, and installs it with `storybook add` ([Config and init](03-config-and-init.md)).
+- `init` offers it for each Storybook on 10, and installs it with `storybook add` ([Config and init](03-config-and-init.md)).
 - The addon has no postinstall.
 
 ## Tests
@@ -95,7 +96,7 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
 ## Sources
 
 - [Storybook addon][41], [Failure report format][39], [Baseline updates without a local capture][42], [Docker's role][13], [Test apps repo][34], [Storybook 9 floor and Storybook 11][48].
-- Decided while writing this PRD: the slider view, counting browser exits per click, and deferring the Storybook 11 question.
+- Decided while writing this PRD: the slider view, counting browser exits per click, and v1 needing the addon on Storybook 10 only.
 
 [13]: https://github.com/visual-check/visual-check/issues/13
 [34]: https://github.com/visual-check/visual-check/issues/34

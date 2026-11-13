@@ -124,7 +124,7 @@ Rules for the keys:
 2. **For each Storybook:** its name (the package name without its scope, or the folder name), its URL, and its start command when none was found.
 3. **Script names,** `visual:test` and `visual:update` by default.
 4. **"Install the agent skill?"**, yes by default.
-5. **"Add the Storybook addon?"** A checklist of the chosen Storybooks on 10 or later, all ticked, or one item when there's only one. It's shown only when at least one is on 10 or later. Storybook 9 entries are skipped with a note.
+5. **"Add the Storybook addon?"** A checklist of the chosen Storybooks on 10, all ticked, or one item when there's only one. It's shown only when at least one is on 10. Storybook 9 and 11 entries are skipped with a note.
 
 Rules:
 

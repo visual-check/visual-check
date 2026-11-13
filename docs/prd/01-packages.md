@@ -68,7 +68,7 @@ The three packages of the lockstep group always share one version and release to
 
 ## `@visual-check/storybook-addon`
 
-- It supports Storybook 10 and later.
+- In v1 it supports Storybook 10. Storybook 11 is decided later.
 - It has a manager entry and a preset, with no preview entry and no postinstall.
 - It peer-depends on exactly its own version of `@visual-check/cli`. On a mismatch, the panel says which package to upgrade.
 - Its behaviour is in [Storybook addon](15-storybook-addon.md).
@@ -84,7 +84,7 @@ The three packages of the lockstep group always share one version and release to
 
 - `@visual-check/cli` and `@visual-check/chromium` as devDependencies of the workspace root. The browser package is added at the newest version in the CLI's range, even where npm would install the peer by itself, so Renovate sees it.
 - `@visual-check/storybook`, at the CLI's version, as a devDependency of the package that holds each Storybook's `configDir`.
-- The addon through `storybook add`, for each Storybook 10 or later that the developer ticks.
+- The addon through `storybook add`, for each Storybook on 10 that the developer ticks.
 
 ## Not npm packages
 
