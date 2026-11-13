@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { parseArgs } from 'node:util'
+import { checkBrowserPackage } from '../browser/browser-package.js'
 
 const usage = 'Usage: visual-check --version'
 
@@ -24,11 +25,11 @@ export interface CliResult {
 }
 
 /**
- * Runs the CLI with the given arguments and returns its result without writing anything.
+ * Runs the CLI with the given arguments and environment and returns its result without writing anything.
  *
  * @public
  */
-export function runCli(commandLineArguments: string[]): CliResult {
+export function runCli(commandLineArguments: string[], environment: Record<string, string | undefined>): CliResult {
   let version: boolean | undefined
   try {
     version = parseArgs({ args: commandLineArguments, options: { version: { type: 'boolean' } }, strict: true }).values
@@ -36,13 +37,17 @@ export function runCli(commandLineArguments: string[]): CliResult {
   } catch (error) {
     return usageError(error instanceof Error ? error.message : String(error))
   }
-  if (!version) {
-    return usageError('No command given.')
+  if (version) {
+    const manifest = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
+      version: string
+    }
+    return { exitCode: 0, stdout: `${manifest.version}\n`, stderr: '' }
   }
-  const manifest = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
-    version: string
+  const browserProblem = checkBrowserPackage(environment)
+  if (browserProblem !== undefined) {
+    return { exitCode: 2, stdout: '', stderr: browserProblem }
   }
-  return { exitCode: 0, stdout: `${manifest.version}\n`, stderr: '' }
+  return usageError('No command given.')
 }
 
 /**

@@ -26,8 +26,12 @@
   "dependencies": {
     "jiti": "^2.7.0"
   },
+  "peerDependencies": {
+    "@visual-check/chromium": "^157.0.0"
+  },
   "devDependencies": {
     "@types/node": "22.20.5",
+    "@visual-check/chromium": "workspace:*",
     "@visual-check/typescript-config": "workspace:*",
     "typescript": "7.0.2",
     "vitest": "5.1.0"
