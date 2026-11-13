@@ -1,0 +1,15 @@
+{
+  "chromium": "157.0.8103.78",
+  "image": {
+    "tag": "ghcr.io/visual-check/chromium:157.0.0",
+    "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "headlessShell": "/opt/chrome-headless-shell/chrome-headless-shell",
+  "sha256": {
+    "linux64": "f90329720fb61e5a76da9b6b509b6ad12a484c9c5df0359403e935177c6d153a",
+    "linux-arm64": "912fbf877e53de34d7b3cca5104f3b95607d41bd35412ccc6cd2a599ff0c0dbf",
+    "mac-x64": "f1a6a9561eaf1f409849538de663695d36d72fbf1ebca4d42e47c7b5f2a157f3",
+    "mac-arm64": "17bf66d53c1b1104dcb641c5b331cd4ac5d200c778f5feed0934a0b92deaf8d6",
+    "win64": "2138c1583d25d6f3abec5269943b2f430207d87a539895aa9e90cc4697ec0e1f"
+  }
+}
