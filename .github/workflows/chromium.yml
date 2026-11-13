@@ -25,6 +25,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   checksums:
     name: Checksums
@@ -39,8 +43,78 @@ jobs:
           node-version: 24
       - run: node packages/repo-checks/src/check-chromium-checksums.ts
 
+  # Decides whether this run pushes the image. Only a run started by hand on main pushes, and only when the tag
+  # is missing: the image is rebuilt only on purpose, and a tag is never overwritten, so a rebuilt image ships
+  # as a new package minor. Other runs build and verify it. #95 moves publishing to merge time.
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      image: ${{ steps.plan.outputs.image }}
+      exists: ${{ steps.plan.outputs.exists }}
+      push: ${{ steps.plan.outputs.push }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Plan
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FROM_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+          BY_HAND_ON_MAIN: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+        # GHCR's registry answers 403 both for a package that doesn't exist yet and for one the caller can't read.
+        # The REST API answers 404 when there is no package, so the plan asks it instead.
+        # It may answer the same for a package this token can't read. Then the push fails, because writing
+        # needs read access, so no tag is overwritten.
+        run: |
+          tag=$(jq -er .image.tag packages/chromium/chromium.json)
+          image=${tag%:*}
+          version=${tag##*:}
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ $FROM_FORK == true ]]; then
+            echo "::notice::A pull request from a fork can't read the package, so this run only builds and verifies the image."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "push=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          package=${image#ghcr.io/}
+          exists=false
+          if tags=$(gh api --paginate "/orgs/${package%%/*}/packages/container/${package#*/}/versions?per_page=100" \
+            --jq '.[].metadata.container.tags[]?' 2> "$RUNNER_TEMP/gh-error"); then
+            if grep -qxF "$version" <<< "$tags"; then
+              exists=true
+            fi
+          elif ! grep -qF '(HTTP 404)' "$RUNNER_TEMP/gh-error"; then
+            cat "$RUNNER_TEMP/gh-error" >&2
+            exit 1
+          fi
+          push=false
+          if [[ $exists == true ]]; then
+            echo "::notice::$tag exists, so this run checks its digest."
+          elif [[ $BY_HAND_ON_MAIN == true ]]; then
+            push=true
+            echo "::notice::$tag is missing, so this run pushes it."
+          else
+            message="$tag isn't in GHCR yet. Run this workflow by hand on main to push it."
+            echo "::notice::$message"
+            echo "$message" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "exists=$exists" >> "$GITHUB_OUTPUT"
+          echo "push=$push" >> "$GITHUB_OUTPUT"
+
   image:
     name: Image (${{ matrix.arch }})
+    needs: plan
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -53,6 +127,7 @@ jobs:
     timeout-minutes: 30
     env:
       ARCH: ${{ matrix.arch }}
+      IMAGE: ${{ needs.plan.outputs.image }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -63,3 +138,101 @@ jobs:
         run: packages/chromium/image/build.sh "$ARCH" --output type=docker,name=visual-check-chromium:ci
       - name: Verify
         run: packages/chromium/image/verify-image.sh visual-check-chromium:ci "$ARCH"
+      - name: Log in to GHCR
+        if: needs.plan.outputs.push == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      # The builder's cache holds every step of the verified build, so this pushes that same image, with gzip layers.
+      # The check below proves it: the pushed image must have the verified image's layer diff IDs.
+      - name: Push by digest
+        if: needs.plan.outputs.push == 'true'
+        run: |
+          packages/chromium/image/build.sh "$ARCH" \
+            --output "type=image,name=$IMAGE,push-by-digest=true,name-canonical=true,push=true,compression=gzip,force-compression=true,oci-mediatypes=true" \
+            --metadata-file "$RUNNER_TEMP/metadata.json"
+          digest=$(jq -er '."containerimage.digest"' "$RUNNER_TEMP/metadata.json")
+          pushed=$(docker buildx imagetools inspect "$IMAGE@$digest" --format '{{json .Image.RootFS.DiffIDs}}' | jq -c .)
+          verified=$(docker image inspect --format '{{json .RootFS.Layers}}' visual-check-chromium:ci | jq -c .)
+          if [[ $pushed != "$verified" ]]; then
+            echo "::error::$IMAGE@$digest has other layers than the verified image."
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/digest"
+          echo "$digest" > "$RUNNER_TEMP/digest/$ARCH"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: needs.plan.outputs.push == 'true'
+        with:
+          name: image-digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digest/${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 1
+
+  # Tags the pushed images as one index, then checks that the tag's index digest is the one the package records.
+  # It runs when this run pushes or the tag exists already. Fork pull requests skip it: their token can't read
+  # a private package.
+  index:
+    name: Index
+    needs: [plan, image]
+    if: needs.plan.outputs.push == 'true' || needs.plan.outputs.exists == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: chromium-image-index
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ${{ needs.plan.outputs.image }}
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Log in to GHCR
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      # Another run, or an earlier attempt of this run, may have pushed the tag since the plan. The images pushed
+      # by digest made the package, so the registry now answers "not found" for a missing tag. Any other answer
+      # stops the run.
+      - name: Check the tag is still missing
+        if: needs.plan.outputs.push == 'true'
+        run: |
+          if output=$(docker buildx imagetools inspect "$IMAGE:$VERSION" 2>&1); then
+            echo "::error::$IMAGE:$VERSION: the tag exists already: another run, or an earlier attempt of this run, pushed it."
+            exit 1
+          fi
+          if [[ $output != *": not found" ]]; then
+            echo "::error::Can't tell whether $IMAGE:$VERSION exists: $output"
+            exit 1
+          fi
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.plan.outputs.push == 'true'
+        with:
+          pattern: image-digest-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/digests
+      # GHCR shows a multi-arch package's description from the index's annotations, so the index repeats the image's labels.
+      - name: Create the index
+        if: needs.plan.outputs.push == 'true'
+        run: |
+          sources=()
+          for arch in amd64 arm64; do
+            digest=$(cat "$RUNNER_TEMP/digests/$arch")
+            if [[ ! $digest =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::The $arch digest artifact holds '$digest', not a sha256 digest."
+              exit 1
+            fi
+            sources+=("$IMAGE@$digest")
+          done
+          labels=$(docker buildx imagetools inspect "${sources[0]}" --format '{{json .Image.Config.Labels}}')
+          annotations=()
+          for key in source description version; do
+            value=$(jq -er --arg key "org.opencontainers.image.$key" '.[$key]' <<< "$labels")
+            annotations+=(--annotation "index:org.opencontainers.image.$key=$value")
+          done
+          docker buildx imagetools create --tag "$IMAGE:$VERSION" "${annotations[@]}" "${sources[@]}"
+      - name: Check the index
+        run: packages/chromium/image/check-index.sh "$IMAGE:$VERSION" | tee -a "$GITHUB_STEP_SUMMARY"
