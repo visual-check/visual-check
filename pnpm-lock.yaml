@@ -21,6 +21,8 @@ importers:
         specifier: 2.11.11
         version: 2.11.11
 
+  packages/chromium: {}
+
   packages/cli:
     devDependencies:
       '@types/node':
@@ -75,6 +77,8 @@ importers:
         version: 7.0.2
 
   packages/typescript-config: {}
+
+  packages/visual-check: {}
 
 packages:
 

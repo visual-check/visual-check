@@ -1,0 +1,6 @@
+{
+  "name": "@visual-check/chromium",
+  "version": "0.0.0",
+  "description": "Names the exact Chromium build visual-check renders with",
+  "license": "MIT"
+}
