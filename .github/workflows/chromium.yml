@@ -38,3 +38,28 @@ jobs:
         with:
           node-version: 24
       - run: node packages/repo-checks/src/check-chromium-checksums.ts
+
+  image:
+    name: Image (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Create a docker-container builder
+        run: docker buildx create --driver docker-container --use
+      - name: Build
+        run: packages/chromium/image/build.sh "$ARCH" --output type=docker,name=visual-check-chromium:ci
+      - name: Verify
+        run: packages/chromium/image/verify-image.sh visual-check-chromium:ci "$ARCH"
