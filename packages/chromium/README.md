@@ -27,6 +27,8 @@ image/verify-image.sh visual-check-chromium:arm64 arm64
 
 The architecture is `amd64` or `arm64`. Options after it go to `docker buildx build`.
 
+Running the Browser package workflow (`.github/workflows/chromium.yml`) by hand on `main` pushes the image when its version's tag is missing. A tag is never overwritten. Pull requests and other runs only build and check the image, and once the tag exists they check that `image.digest` matches it. After the push, the run fails until `image.digest` holds the index digest it prints in the run summary.
+
 ## Versioning
 
 - The major is the Chromium major.
