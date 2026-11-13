@@ -9,6 +9,9 @@
       "cache": false,
       "persistent": true
     },
+    "test": {
+      "dependsOn": ["test:type", "test:unit"]
+    },
     "test:type": {
       "dependsOn": ["^build"]
     },
