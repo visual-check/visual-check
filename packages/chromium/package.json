@@ -1,6 +1,24 @@
 {
   "name": "@visual-check/chromium",
-  "version": "0.0.0",
+  "version": "157.0.0",
   "description": "Names the exact Chromium build visual-check renders with",
-  "license": "MIT"
+  "type": "module",
+  "license": "MIT",
+  "files": [
+    "chromium.json"
+  ],
+  "exports": {
+    ".": "./chromium.json",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test:type": "tsc --noEmit",
+    "test:unit": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@visual-check/typescript-config": "workspace:*",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
 }
