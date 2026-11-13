@@ -58,6 +58,22 @@ importers:
         specifier: 7.0.2
         version: 7.0.2
 
+  packages/storybook-addon:
+    dependencies:
+      '@visual-check/cli':
+        specifier: workspace:*
+        version: link:../cli
+      storybook:
+        specifier: ^10.0.0
+        version: 10.6.7(react@19.3.1)
+    devDependencies:
+      '@visual-check/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+
   packages/typescript-config: {}
 
 packages:
