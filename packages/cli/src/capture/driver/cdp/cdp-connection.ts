@@ -68,8 +68,22 @@ interface PendingCall {
 /**
  * Whether a value is a non-null object that isn't an array.
  */
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Calls a listener. An error it throws is rethrown on a microtask, so it surfaces as an uncaught exception without
+ * stopping the caller's other work.
+ */
+function callSafely(call: () => void): void {
+  try {
+    call()
+  } catch (error) {
+    queueMicrotask(() => {
+      throw error
+    })
+  }
 }
 
 /**
@@ -126,6 +140,11 @@ export class CdpConnection {
   private closedWith: Error | undefined
 
   /**
+   * The close listeners.
+   */
+  private readonly closeListeners = new Set<(error: Error) => void>()
+
+  /**
    * Starts reading the browser's messages from `fromBrowser`. Commands are written to `toBrowser`.
    */
   constructor(toBrowser: Writable, fromBrowser: Readable) {
@@ -175,8 +194,27 @@ export class CdpConnection {
   }
 
   /**
-   * Closes the connection: every pending call and every later `send` rejects with `error`. Closing again keeps the
-   * first error.
+   * Calls `listener` once, with the error the connection is closed with, when it closes, or at once when it already
+   * has. Returns the function that stops listening.
+   */
+  onClose(listener: (error: Error) => void): () => void {
+    if (this.closedWith !== undefined) {
+      listener(this.closedWith)
+
+      return () => undefined
+    }
+
+    this.closeListeners.add(listener)
+
+    return () => {
+      this.closeListeners.delete(listener)
+    }
+  }
+
+  /**
+   * Closes the connection: every pending call and every later `send` rejects with `error`, and every close listener is
+   * called with it. Closing again keeps the first error. An error a close listener throws is rethrown on a microtask,
+   * like an event listener's.
    */
   close(error: Error): void {
     if (this.closedWith !== undefined) {
@@ -190,6 +228,13 @@ export class CdpConnection {
     this.pending.clear()
     for (const call of calls) {
       call.reject(error)
+    }
+
+    const listeners = [...this.closeListeners]
+
+    this.closeListeners.clear()
+    for (const listener of listeners) {
+      callSafely(() => listener(error))
     }
   }
 
@@ -253,13 +298,7 @@ export class CdpConnection {
     }
 
     for (const listener of [...this.listeners]) {
-      try {
-        listener(event)
-      } catch (error) {
-        queueMicrotask(() => {
-          throw error
-        })
-      }
+      callSafely(() => listener(event))
     }
   }
 

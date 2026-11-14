@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream'
 import { finished } from 'node:stream/promises'
-import type { BrowserProcess, ProcessExit, StartBrowser } from '../driver.js'
+import type { BrowserProcess, PageSetup, ProcessExit, StartBrowser } from '../driver.js'
 
 /**
  * A CDP command the fake browser received.
@@ -78,11 +78,148 @@ function closeBrowser(command: ReceivedCommand, browser: FakeBrowser): void {
 }
 
 /**
+ * The setup the tests open pages with.
+ */
+export const pageSetup: PageSetup = {
+  userAgentSuffix: ' StorybookTestRunner',
+  timezone: 'Europe/Warsaw',
+  locale: 'pl-PL',
+  colorScheme: 'dark',
+  initScript: 'window.__visualCheck = true',
+}
+
+/**
+ * The content size the fake browser reports for a page by default, in CSS pixels.
+ */
+const defaultContentSize = { x: 0, y: 0, width: 800, height: 1200 }
+
+/**
+ * The bytes the fake browser captures a page as by default, base64-encoded as CDP sends them.
+ */
+export const defaultCaptureData = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64')
+
+/**
+ * The main frame of the page with this target id, committed at this URL by this loader, as `Page.frameNavigated`
+ * describes it. In Chromium the main frame's id is its target's id. The URL goes without its fragment, and the
+ * fragment on its own, as Chromium reports them.
+ */
+export function mainFrame(targetId: string, url: string, loaderId: string): Record<string, unknown> {
+  const hash = url.indexOf('#')
+
+  return hash === -1
+    ? { id: targetId, loaderId, url }
+    : { id: targetId, loaderId, url: url.slice(0, hash), urlFragment: url.slice(hash) }
+}
+
+/**
+ * A child frame of the main frame of the page with this target id, committed at this URL, as `Page.frameNavigated`
+ * describes it.
+ */
+export function childFrame(targetId: string, url: string): Record<string, unknown> {
+  return { id: 'child-frame', parentId: targetId, loaderId: 'child-loader', url }
+}
+
+/**
+ * Replies to a command with an empty result.
+ */
+function answerEmpty(command: ReceivedCommand, browser: FakeBrowser): void {
+  browser.reply(command, {})
+}
+
+/**
+ * Creates a browser context, named `context-1` for the first, `context-2` for the next, and so on.
+ */
+function createBrowserContext(command: ReceivedCommand, browser: FakeBrowser): void {
+  browser.reply(command, { browserContextId: `context-${browser.timesReceived(command.method)}` })
+}
+
+/**
+ * Creates a target, named `target-1` for the first, `target-2` for the next, and so on.
+ */
+function createTarget(command: ReceivedCommand, browser: FakeBrowser): void {
+  browser.reply(command, { targetId: `target-${browser.timesReceived(command.method)}` })
+}
+
+/**
+ * Attaches to a target in a session, named `session-1` for the first, `session-2` for the next, and so on.
+ */
+function attachToTarget(command: ReceivedCommand, browser: FakeBrowser): void {
+  const sessionId = `session-${browser.timesReceived(command.method)}`
+
+  browser.sessionTargets.set(sessionId, String(command.params.targetId))
+  browser.reply(command, { sessionId })
+}
+
+/**
+ * Answers the init script with its identifier.
+ */
+function addInitScript(command: ReceivedCommand, browser: FakeBrowser): void {
+  browser.reply(command, { identifier: '1' })
+}
+
+/**
+ * Navigates the main frame the way Chromium does when the page loads: `Page.frameNavigated`, the reply, then
+ * `Page.loadEventFired`, all in the command's session. Its loader is `loader-1` for the first navigation, `loader-2`
+ * for the next, and so on.
+ */
+function navigateAndLoad(command: ReceivedCommand, browser: FakeBrowser): void {
+  const targetId = browser.sessionTargets.get(String(command.sessionId)) ?? ''
+  const loaderId = `loader-${browser.timesReceived(command.method)}`
+
+  browser.emit(
+    'Page.frameNavigated',
+    { frame: mainFrame(targetId, String(command.params.url), loaderId) },
+    command.sessionId,
+  )
+  browser.reply(command, { frameId: targetId, loaderId })
+  browser.emit('Page.loadEventFired', { timestamp: 1 }, command.sessionId)
+}
+
+/**
+ * Answers an evaluation whose value is `undefined`.
+ */
+function evaluateToUndefined(command: ReceivedCommand, browser: FakeBrowser): void {
+  browser.reply(command, { result: { type: 'undefined' } })
+}
+
+/**
+ * Answers with the default content size.
+ */
+function answerLayoutMetrics(command: ReceivedCommand, browser: FakeBrowser): void {
+  browser.reply(command, { cssContentSize: defaultContentSize })
+}
+
+/**
+ * Answers a capture with the default bytes.
+ */
+function answerCapture(command: ReceivedCommand, browser: FakeBrowser): void {
+  browser.reply(command, { data: defaultCaptureData })
+}
+
+/**
  * The handlers the fake browser starts with.
  */
 const defaultHandlers: Record<string, CommandHandler> = {
   'Browser.getVersion': answerVersion,
   'Browser.close': closeBrowser,
+  'Target.createBrowserContext': createBrowserContext,
+  'Target.createTarget': createTarget,
+  'Target.attachToTarget': attachToTarget,
+  'Target.disposeBrowserContext': answerEmpty,
+  'Page.enable': answerEmpty,
+  'Inspector.enable': answerEmpty,
+  'Page.setFontFamilies': answerEmpty,
+  'Emulation.setUserAgentOverride': answerEmpty,
+  'Emulation.setTimezoneOverride': answerEmpty,
+  'Emulation.setLocaleOverride': answerEmpty,
+  'Emulation.setEmulatedMedia': answerEmpty,
+  'Emulation.setFocusEmulationEnabled': answerEmpty,
+  'Page.addScriptToEvaluateOnNewDocument': addInitScript,
+  'Emulation.setDeviceMetricsOverride': answerEmpty,
+  'Page.navigate': navigateAndLoad,
+  'Runtime.evaluate': evaluateToUndefined,
+  'Page.getLayoutMetrics': answerLayoutMetrics,
+  'Page.captureScreenshot': answerCapture,
 }
 
 /**
@@ -100,6 +237,11 @@ export class FakeBrowser {
    * Every command the browser received, in order.
    */
   readonly received: ReceivedCommand[] = []
+
+  /**
+   * The target each page session is attached to, by session id.
+   */
+  readonly sessionTargets = new Map<string, string>()
 
   /**
    * Whether the process was killed.
@@ -232,6 +374,13 @@ export class FakeBrowser {
    */
   emit(method: string, params: Record<string, unknown> = {}, sessionId?: string): void {
     this.send(sessionId === undefined ? { method, params } : { method, params, sessionId })
+  }
+
+  /**
+   * How many commands calling `method` the browser has received, the one being handled included.
+   */
+  timesReceived(method: string): number {
+    return this.received.filter((command) => command.method === method).length
   }
 
   /**

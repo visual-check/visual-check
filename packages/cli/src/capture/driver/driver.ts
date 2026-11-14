@@ -76,8 +76,118 @@ export interface Driver {
    */
   readonly exited: Promise<BrowserExitedError>
   /**
+   * Opens a page in a fresh browser context and sets it up once, as `setup` says. Rejects at once after `close()` has
+   * started, when the page isn't open in time, and with a `BrowserExitedError` when the browser exits first.
+   */
+  newPage: (setup: PageSetup) => Promise<Page>
+  /**
    * Closes the browser and resolves once it has gone, or 5 s after a kill that didn't work, leaving a browser that won't
    * die to the starter. Calling it again returns the same promise.
+   */
+  close: () => Promise<void>
+}
+
+/**
+ * How a page is set up once, when it opens.
+ *
+ * @public
+ */
+export interface PageSetup {
+  /**
+   * What the page's user agent adds to the browser's own, such as ` StorybookTestRunner`, which puts Storybook on its
+   * test path.
+   */
+  userAgentSuffix: string
+  /**
+   * The time zone the page runs in, such as `Europe/Warsaw`.
+   */
+  timezone: string
+  /**
+   * The locale the page runs in and asks for content in, such as `en-US`.
+   */
+  locale: string
+  /**
+   * The colour scheme the page's `prefers-color-scheme` media feature reports.
+   */
+  colorScheme: 'light' | 'dark'
+  /**
+   * A script that runs at the start of every document of the page, before the page's own scripts.
+   */
+  initScript: string
+}
+
+/**
+ * The size a page lays out and renders at.
+ *
+ * @public
+ */
+export interface PageViewport {
+  /**
+   * The width, in CSS pixels.
+   */
+  width: number
+  /**
+   * The height, in CSS pixels.
+   */
+  height: number
+  /**
+   * How many device pixels make one CSS pixel.
+   */
+  deviceScaleFactor: number
+}
+
+/**
+ * A page in a browser context of its own, set up once, that stories are loaded and captured in. It emulates
+ * `prefers-reduced-motion: no-preference` and keeps focus as if its window were focused.
+ *
+ * Handling the page's hazards is part of the contract every driver will meet, each inside itself and the same way in
+ * every driver, so none of them fails a capture: dialogs, popups, downloads and permission requests. It comes with
+ * #62; until then, no driver handles them.
+ *
+ * Once the page can no longer be used, every call in flight and every later call fails at once, with an error that
+ * says why:
+ *
+ * - the page crashed: a `PageCrashedError`;
+ * - the browser closed the page without a crash: a plain error, "The browser closed the page.";
+ * - the browser exited: a `BrowserExitedError`;
+ * - `close()` on the driver closed the browser: a plain error, "The browser was closed.";
+ * - `close()` on the page: a plain error, "The page was closed.".
+ *
+ * A story that navigates its document away is retried by the engine (#62). For now only `goto` reports it, with a
+ * `PageNavigatedAwayError`; #62 makes every page call report it.
+ *
+ * After any call on a page fails, the page may still be in the middle of a navigation, or stuck, and a later call on it
+ * can fail because of that. So the caller closes a page once a call on it fails, and opens a fresh page for its next
+ * capture.
+ *
+ * @public
+ */
+export interface Page {
+  /**
+   * Sets the size the page lays out and renders at.
+   */
+  setViewport: (viewport: PageViewport) => Promise<void>
+  /**
+   * Loads `url` into the page's main frame and resolves on that document's load event. A server redirect is followed.
+   * Fails at once with a `PageNavigatedAwayError` when another navigation of the main frame overtakes it, such as one
+   * the page starts itself, and with a plain error when the browser can't load the URL or `timeoutMs` passes first.
+   */
+  goto: (url: string, timeoutMs: number) => Promise<void>
+  /**
+   * Evaluates a JavaScript expression in the page's main frame, as if from a user gesture. Awaits the promise the
+   * expression gives, if it gives one, and resolves with the value passed through JSON. Fails with the exception the
+   * expression throws or rejects with, when the value is one JSON can't carry, such as `NaN`, `Infinity`, `-0` or a
+   * bigint, and when `timeoutMs` passes first.
+   */
+  evaluate: (expression: string, timeoutMs: number) => Promise<unknown>
+  /**
+   * Captures the whole page, beyond the viewport too, without resizing the viewport. Resolves with the PNG bytes exactly
+   * as the browser made them.
+   */
+  captureFullPage: () => Promise<Uint8Array>
+  /**
+   * Closes the page and its browser context. Every call in flight and every later call fails. Calling it again returns
+   * the same promise.
    */
   close: () => Promise<void>
 }
@@ -126,6 +236,52 @@ export class BrowserExitedError extends Error {
   constructor(exit: ProcessExit, output: readonly string[]) {
     super(describeExit(exit, 'while in use'))
     this.output = output
+  }
+}
+
+/**
+ * The page crashed, as it does when its renderer runs out of memory. Every call in flight on that page and every later
+ * one fails with this error. Other pages carry on.
+ *
+ * @public
+ */
+export class PageCrashedError extends Error {
+  /**
+   * The class's name, so a stack trace or a log line reads `PageCrashedError`.
+   */
+  override name = 'PageCrashedError'
+
+  /**
+   * Says that the page crashed.
+   */
+  constructor() {
+    super('The page crashed.')
+  }
+}
+
+/**
+ * The page's main frame went to another document than the one asked for, on the page's own initiative, such as a
+ * story's script following a link.
+ *
+ * @public
+ */
+export class PageNavigatedAwayError extends Error {
+  /**
+   * The class's name, so a stack trace or a log line reads `PageNavigatedAwayError`.
+   */
+  override name = 'PageNavigatedAwayError'
+
+  /**
+   * The URL the main frame went to.
+   */
+  readonly url: string
+
+  /**
+   * Keeps the URL the main frame went to, with the message saying what it overtook.
+   */
+  constructor(url: string, message: string) {
+    super(message)
+    this.url = url
   }
 }
 
