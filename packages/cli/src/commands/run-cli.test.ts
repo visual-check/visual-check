@@ -1157,6 +1157,18 @@ describe('runCli launching the browser', () => {
     })
   })
 
+  it("exits 2 with the message alone when the browser can't reach the proxy, even inside a container", async () => {
+    const { project } = await createRun(['a'])
+    const message = "The browser can't reach the proxy.\nThis runtime has no host.docker.internal."
+    const error = new ContainerError(message, 'tested-runtimes')
+
+    expect(await runCli(['update'], {}, project, { ...failingLaunch(error), insideContainer: true })).toEqual({
+      exitCode: 2,
+      stdout: printed(headerOf('update', 1)),
+      stderr: `${message}\n`,
+    })
+  })
+
   it('exits 2 when the browser exits mid-run, keeping the lines printed so far', async () => {
     const { project } = await createRun(
       ['a', 'b', 'c'],

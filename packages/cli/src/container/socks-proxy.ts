@@ -1,9 +1,11 @@
+import { randomBytes } from 'node:crypto'
 import { connect, createServer, type Socket } from 'node:net'
 
 /**
  * A SOCKS5 proxy in visual-check's own process. The browser in Docker connects through it to reach the Storybook, so
  * a name is resolved and a connection is made from the machine visual-check runs on, whatever the host file, VPN or
- * LAN there says. It speaks the CONNECT command with no authentication, which is all Chromium asks for.
+ * LAN there says. It speaks the CONNECT command with no authentication, which is all Chromium asks for. It answers
+ * one host itself, the one in `checkUrl`, which lets visual-check check that the browser reaches it.
  *
  * @public
  */
@@ -12,6 +14,11 @@ export interface SocksProxy {
    * The port it listens on, on 127.0.0.1.
    */
   readonly port: number
+  /**
+   * A URL only this proxy answers, with an empty page, so a browser that loads it has reached the proxy. Its host is
+   * random, under `visual-check.invalid`, which never resolves anywhere.
+   */
+  readonly checkUrl: string
   /**
    * Stops listening and ends every connection through it. Resolves once it has stopped. Calling it again returns the
    * same promise.
@@ -76,6 +83,20 @@ const commandNotSupported = 0x07
  * The reply code for an address type the proxy doesn't speak.
  */
 const addressTypeNotSupported = 0x08
+
+/**
+ * What the proxy answers on a connection to its check host once the client has sent its request: an empty page, after
+ * which the connection ends.
+ */
+const checkPage = Buffer.from(
+  'HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 0\r\nConnection: close\r\n\r\n',
+)
+
+/**
+ * How many bytes of a request to the check host the proxy holds while it waits for the end of the headers. Once that
+ * many have come, it answers anyway.
+ */
+const checkRequestLimit = 8 * 1024
 
 /**
  * The reply code for each error code of a failed connection. Any other error gets `generalFailure`.
@@ -199,11 +220,12 @@ function parseGreeting(bytes: Buffer): { length: number; offersNoAuthentication:
 
 /**
  * Serves one client: reads its greeting and request, connects to the target and relays both ways until either side
- * closes. Every socket it opens is added to `sockets` while it lives.
+ * closes. A request for `checkHost`, the proxy's own, connects nowhere: the client gets the check page once it has
+ * sent its HTTP request's headers. Every socket it opens is added to `sockets` while it lives.
  */
-function serveClient(client: Socket, sockets: Set<Socket>): void {
+function serveClient(client: Socket, sockets: Set<Socket>, checkHost: string): void {
   let pending: Buffer = Buffer.alloc(0)
-  let stage: 'greeting' | 'request' | 'connecting' | 'relaying' = 'greeting'
+  let stage: 'greeting' | 'request' | 'connecting' | 'checking' | 'checked' | 'relaying' = 'greeting'
   let upstream: Socket | undefined
 
   /**
@@ -293,19 +315,44 @@ function serveClient(client: Socket, sockets: Set<Socket>): void {
   }
 
   /**
-   * Reads the request, and connects to its target or refuses it. The client is paused while connecting, so what it
-   * sends next waits in its socket.
+   * Reads the request, and connects to its target, takes it as a check, or refuses it. The client is paused while
+   * connecting, so what it sends next waits in its socket. A check is answered with success at once, and the client
+   * then gets the check page once its HTTP request has come.
    */
   const readRequest = (): void => {
     const parsed = dropWrongVersion() ? undefined : parseRequest(pending)
 
-    if (parsed !== undefined && 'code' in parsed) {
+    if (parsed === undefined) {
+      return
+    }
+
+    if ('code' in parsed) {
       endWith(replyOf(parsed.code))
-    } else if (parsed !== undefined) {
-      pending = pending.subarray(parsed.length)
+
+      return
+    }
+
+    pending = pending.subarray(parsed.length)
+
+    if (parsed.host.toLowerCase() === checkHost) {
+      client.write(replyOf(succeeded))
+      stage = 'checking'
+    } else {
       stage = 'connecting'
       client.pause()
       open(parsed)
+    }
+  }
+
+  /**
+   * Ends the connection with the check page once the headers of the client's HTTP request have ended, or
+   * `checkRequestLimit` bytes of them have come.
+   */
+  const answerCheck = (): void => {
+    if (pending.includes('\r\n\r\n') || pending.length >= checkRequestLimit) {
+      // Past `checking`, a client that half-closes isn't destroyed before the page has been flushed to it.
+      stage = 'checked'
+      endWith(checkPage)
     }
   }
 
@@ -320,6 +367,10 @@ function serveClient(client: Socket, sockets: Set<Socket>): void {
     if (stage === 'request') {
       readRequest()
     }
+
+    if (stage === 'checking') {
+      answerCheck()
+    }
   }
 
   /**
@@ -328,7 +379,7 @@ function serveClient(client: Socket, sockets: Set<Socket>): void {
   function onData(chunk: Buffer): void {
     pending = Buffer.concat([pending, chunk])
 
-    if (stage === 'greeting' || stage === 'request') {
+    if (stage === 'greeting' || stage === 'request' || stage === 'checking') {
       advance()
     }
   }
@@ -337,7 +388,7 @@ function serveClient(client: Socket, sockets: Set<Socket>): void {
   client.setNoDelay(true)
   client.on('data', onData)
   client.on('end', () => {
-    if (stage === 'greeting' || stage === 'request') {
+    if (stage === 'greeting' || stage === 'request' || stage === 'checking') {
       client.destroy()
     }
   })
@@ -354,15 +405,16 @@ function serveClient(client: Socket, sockets: Set<Socket>): void {
 }
 
 /**
- * Starts the proxy on 127.0.0.1 on a random port. It serves every client until `close` is called, and never logs or
- * throws out of a connection.
+ * Starts the proxy on 127.0.0.1 on a random port, with a random check host of its own. It serves every client until
+ * `close` is called, and never logs or throws out of a connection.
  *
  * @public
  */
 export async function startSocksProxy(): Promise<SocksProxy> {
   const sockets = new Set<Socket>()
+  const checkHost = `${randomBytes(8).toString('hex')}.visual-check.invalid`
   const server = createServer({ allowHalfOpen: true }, (client) => {
-    serveClient(client, sockets)
+    serveClient(client, sockets, checkHost)
   })
 
   await new Promise<void>((resolve, reject) => {
@@ -379,6 +431,7 @@ export async function startSocksProxy(): Promise<SocksProxy> {
 
   return {
     port: typeof address === 'object' && address !== null ? address.port : 0,
+    checkUrl: `http://${checkHost}/`,
     close() {
       closing ??= new Promise<void>((resolve) => {
         server.once('close', resolve)

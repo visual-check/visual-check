@@ -165,6 +165,27 @@ async function negotiate(
 }
 
 /**
+ * The empty page the proxy answers a request to its check host with.
+ */
+const checkPage = Buffer.from(
+  'HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 0\r\nConnection: close\r\n\r\n',
+)
+
+/**
+ * Builds the request a browser sends for the root of this host.
+ */
+function httpRequestOf(host: string): Buffer {
+  return Buffer.from(`GET / HTTP/1.1\r\nHost: ${host}\r\n\r\n`)
+}
+
+/**
+ * Gives the host of the proxy's check URL.
+ */
+function checkHostOf(proxy: SocksProxy): string {
+  return new URL(proxy.checkUrl).hostname
+}
+
+/**
  * Waits until the socket is closed.
  */
 async function closed(socket: Socket): Promise<void> {
@@ -468,6 +489,104 @@ describe('startSocksProxy', () => {
     await new Promise<void>((resolve) => socket.once('end', resolve))
 
     expect(total).toBe(2 + 10 + size)
+  })
+
+  it('gives each proxy a check URL of its own, on a random host under visual-check.invalid', async () => {
+    const first = await startProxy()
+    const second = await startProxy()
+
+    expect(first.checkUrl).toMatch(/^http:\/\/[0-9a-f]{16}\.visual-check\.invalid\/$/)
+    expect(second.checkUrl).toMatch(/^http:\/\/[0-9a-f]{16}\.visual-check\.invalid\/$/)
+    expect(second.checkUrl).not.toBe(first.checkUrl)
+  })
+
+  it('answers its check host itself with an empty page, though the name resolves nowhere, then ends', async () => {
+    const proxy = await startProxy()
+    const host = checkHostOf(proxy)
+    const { socket, reader, reply } = await negotiate(proxy, requestOf(1, 3, domainOf(host), 80))
+
+    expect(reply).toEqual(replyOf(0))
+    socket.write(httpRequestOf(host))
+    expect(await reader.take(checkPage.length + 1)).toEqual(checkPage)
+    await closed(socket)
+  })
+
+  it('answers its check host on any port and in upper case', async () => {
+    const proxy = await startProxy()
+    const host = checkHostOf(proxy).toUpperCase()
+    const { socket, reader, reply } = await negotiate(proxy, requestOf(1, 3, domainOf(host), 8080))
+
+    expect(reply).toEqual(replyOf(0))
+    socket.write(httpRequestOf(host))
+    expect(await reader.take(checkPage.length + 1)).toEqual(checkPage)
+  })
+
+  it('answers its check host when the request comes with the greeting', async () => {
+    const proxy = await startProxy()
+    const host = checkHostOf(proxy)
+    const socket = await connectToProxy(proxy)
+    const reader = readerOf(socket)
+
+    socket.write(Buffer.concat([greeting, requestOf(1, 3, domainOf(host), 80), httpRequestOf(host)]))
+
+    expect(await reader.take(2 + 10 + checkPage.length + 1)).toEqual(
+      Buffer.concat([Buffer.from([5, 0]), replyOf(0), checkPage]),
+    )
+    await closed(socket)
+  })
+
+  it('answers its check host only once the request has ended, and ends the connection without a reset', async () => {
+    const proxy = await startProxy()
+    const host = checkHostOf(proxy)
+    const { socket, reader } = await negotiate(proxy, requestOf(1, 3, domainOf(host), 80))
+    const request = httpRequestOf(host)
+    const errors: Error[] = []
+    let received = 0
+    let ended = false
+
+    socket.on('error', (error: Error) => errors.push(error))
+    socket.on('end', () => {
+      ended = true
+    })
+    socket.on('data', (chunk: Buffer) => {
+      received += chunk.length
+    })
+    socket.write(request.subarray(0, request.length - 2))
+    await new Promise<void>((resolve) => setTimeout(resolve, 50))
+
+    expect(received).toBe(0)
+    expect(socket.destroyed).toBe(false)
+
+    socket.write(request.subarray(request.length - 2))
+
+    expect(await reader.take(checkPage.length + 1)).toEqual(checkPage)
+    expect(ended).toBe(true)
+    expect(errors).toEqual([])
+  })
+
+  it('answers its check host once 8 KiB of a request with no end of headers have come', async () => {
+    const proxy = await startProxy()
+    const { socket, reader } = await negotiate(proxy, requestOf(1, 3, domainOf(checkHostOf(proxy)), 80))
+
+    socket.write(Buffer.alloc(8 * 1024, 'a'))
+
+    expect(await reader.take(checkPage.length + 1)).toEqual(checkPage)
+  })
+
+  it('ends a client waiting on its check host when closed', async () => {
+    const proxy = await startProxy()
+    const { socket } = await negotiate(proxy, requestOf(1, 3, domainOf(checkHostOf(proxy)), 80))
+
+    await proxy.close()
+    await closed(socket)
+  })
+
+  it('drops a client that half-closes before it asks its check host for anything', async () => {
+    const proxy = await startProxy()
+    const { socket } = await negotiate(proxy, requestOf(1, 3, domainOf(checkHostOf(proxy)), 80))
+
+    socket.end()
+    await closed(socket)
   })
 
   it('resets the client when the target resets the connection', async () => {

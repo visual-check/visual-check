@@ -5,6 +5,7 @@ import {
   browserThatFailedToStart,
   describeExit,
   PageCrashedError,
+  PageLoadError,
   PageNavigatedAwayError,
   PageTimeoutError,
 } from './driver.js'
@@ -65,6 +66,16 @@ describe('PageTimeoutError', () => {
       name: 'PageTimeoutError',
       message: "The page didn't load http://storybook/a within 10 s.",
       timeoutMs: 10_000,
+    })
+  })
+})
+
+describe('PageLoadError', () => {
+  it("names the URL and keeps the browser's network error", () => {
+    expect(new PageLoadError('http://storybook/a', 'net::ERR_CONNECTION_REFUSED')).toMatchObject({
+      name: 'PageLoadError',
+      message: "The page couldn't load http://storybook/a: net::ERR_CONNECTION_REFUSED",
+      reason: 'net::ERR_CONNECTION_REFUSED',
     })
   })
 })

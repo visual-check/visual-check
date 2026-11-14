@@ -1,6 +1,7 @@
 import { connect } from 'node:net'
 import { describe, expect, it } from 'vitest'
-import type { BrowserExitedError, Driver, Page, PageSetup } from '../capture/driver/driver.js'
+import { BrowserExitedError, type Driver, type Page, PageLoadError, type PageSetup } from '../capture/driver/driver.js'
+import { ContainerError } from '../container/container-error.js'
 import { launchThroughProxy } from './launch-browser.js'
 
 /**
@@ -15,15 +16,17 @@ const pageSetup: PageSetup = {
 }
 
 /**
- * A page that does nothing, which the fake driver opens.
+ * How the fake driver behaves.
  */
-const fakePage: Page = {
-  setViewport: async () => undefined,
-  goto: async () => undefined,
-  evaluate: async () => undefined,
-  captureFullPage: async () => new Uint8Array(),
-  clearStorage: async () => undefined,
-  close: async () => undefined,
+interface FakeBehaviour {
+  /**
+   * The error closing the driver rejects with, or `undefined` to close it.
+   */
+  closeError?: Error
+  /**
+   * The error loading a URL in a page rejects with, or `undefined` to load it.
+   */
+  gotoError?: Error
 }
 
 /**
@@ -35,9 +38,17 @@ interface FakeDriver {
    */
   driver: Driver
   /**
+   * The page every `newPage` opens, which does nothing but load.
+   */
+  page: Page
+  /**
    * The setup of every page opened.
    */
   setups: PageSetup[]
+  /**
+   * The URL of every load, in order.
+   */
+  urls: string[]
   /**
    * What connecting to the proxy gave at each close of the driver, in order.
    */
@@ -46,29 +57,44 @@ interface FakeDriver {
 
 /**
  * Builds a fake driver that, when it is closed, connects to the proxy on this port and records what that gave, then
- * rejects with `closeError` when one is given.
+ * rejects with the behaviour's `closeError` when it has one. Its page loads every URL, or rejects with `gotoError`.
  */
-function fakeDriverOf(proxyPort: () => number, closeError?: Error): FakeDriver {
+function fakeDriverOf(proxyPort: () => number, behaviour: FakeBehaviour = {}): FakeDriver {
   const setups: PageSetup[] = []
+  const urls: string[] = []
   const proxyAtCloses: string[] = []
+  const page: Page = {
+    setViewport: async () => undefined,
+    goto: async (url) => {
+      urls.push(url)
+
+      if (behaviour.gotoError !== undefined) {
+        throw behaviour.gotoError
+      }
+    },
+    evaluate: async () => undefined,
+    captureFullPage: async () => new Uint8Array(),
+    clearStorage: async () => undefined,
+    close: async () => undefined,
+  }
   const driver: Driver = {
     version: '157.0.8103.78',
     exited: new Promise<BrowserExitedError>(() => undefined),
     newPage: async (setup) => {
       setups.push(setup)
 
-      return fakePage
+      return page
     },
     close: async () => {
       proxyAtCloses.push(await connectionTo(proxyPort()))
 
-      if (closeError !== undefined) {
-        throw closeError
+      if (behaviour.closeError !== undefined) {
+        throw behaviour.closeError
       }
     },
   }
 
-  return { driver, setups, proxyAtCloses }
+  return { driver, page, setups, urls, proxyAtCloses }
 }
 
 /**
@@ -109,8 +135,8 @@ describe('launchThroughProxy', () => {
     expect(await connectionTo(portOf(proxyServer))).toBe('accepted')
     expect(driver.version).toBe('157.0.8103.78')
     expect(driver.exited).toBe(fake.driver.exited)
-    expect(await driver.newPage(pageSetup)).toBe(fakePage)
-    expect(fake.setups).toEqual([pageSetup])
+    expect(await driver.newPage(pageSetup)).toBe(fake.page)
+    expect(fake.setups.at(-1)).toEqual(pageSetup)
 
     await driver.close()
   })
@@ -136,7 +162,7 @@ describe('launchThroughProxy', () => {
   it("closes the proxy and rejects with the driver's error when the driver fails to close", async () => {
     const error = new Error('The browser could not be closed.')
     let proxyServer = ''
-    const fake = fakeDriverOf(() => portOf(proxyServer), error)
+    const fake = fakeDriverOf(() => portOf(proxyServer), { closeError: error })
     const driver = await launchThroughProxy(async (server) => {
       proxyServer = server
 
@@ -159,6 +185,55 @@ describe('launchThroughProxy', () => {
         throw error
       }),
     ).rejects.toBe(error)
+    expect(await connectionTo(portOf(proxyServer))).toBe('ECONNREFUSED')
+  })
+
+  it("checks that the browser reaches the proxy by loading the proxy's check URL once it has launched", async () => {
+    let proxyServer = ''
+    const fake = fakeDriverOf(() => portOf(proxyServer))
+    const driver = await launchThroughProxy(async (server) => {
+      proxyServer = server
+
+      return fake.driver
+    })
+
+    expect(fake.urls).toEqual([expect.stringMatching(/^http:\/\/[0-9a-f]{16}\.visual-check\.invalid\/$/)])
+    expect(fake.proxyAtCloses).toEqual([])
+
+    await driver.close()
+  })
+
+  it("closes the browser, then the proxy, and rejects with a ContainerError when the browser can't reach the proxy", async () => {
+    let proxyServer = ''
+    const fake = fakeDriverOf(() => portOf(proxyServer), {
+      gotoError: new PageLoadError('http://check.visual-check.invalid/', 'net::ERR_PROXY_CONNECTION_FAILED'),
+      closeError: new Error('The browser could not be closed.'),
+    })
+    const launching = launchThroughProxy(async (server) => {
+      proxyServer = server
+
+      return fake.driver
+    })
+
+    await expect(launching).rejects.toBeInstanceOf(ContainerError)
+    await expect(launching).rejects.toHaveProperty('fix', 'tested-runtimes')
+    expect(fake.proxyAtCloses).toEqual(['accepted'])
+    expect(await connectionTo(portOf(proxyServer))).toBe('ECONNREFUSED')
+  })
+
+  it('rethrows a browser that exits during the check, after closing the browser and the proxy', async () => {
+    const exited = new BrowserExitedError({ code: 133, signal: null, error: undefined }, [])
+    let proxyServer = ''
+    const fake = fakeDriverOf(() => portOf(proxyServer), { gotoError: exited })
+
+    await expect(
+      launchThroughProxy(async (server) => {
+        proxyServer = server
+
+        return fake.driver
+      }),
+    ).rejects.toBe(exited)
+    expect(fake.proxyAtCloses).toEqual(['accepted'])
     expect(await connectionTo(portOf(proxyServer))).toBe('ECONNREFUSED')
   })
 })

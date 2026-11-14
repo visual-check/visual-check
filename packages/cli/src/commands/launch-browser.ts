@@ -13,6 +13,7 @@ import {
   startBrowserInContainer,
 } from '../container/browser-container.js'
 import { pullMissingImage } from '../container/image-pull.js'
+import { checkProxyReach } from '../container/proxy-reach.js'
 import { type SocksProxy, startSocksProxy } from '../container/socks-proxy.js'
 import type { BrowserPlace, ContainerRoute } from './browser-route.js'
 
@@ -66,10 +67,13 @@ export type BrowserLaunch =
 /**
  * Launches the browser a run captures in, and resolves with its driver once it has connected. In visual-check's
  * container, the launch's route says how the browser reaches a Storybook: with host networking, on the network of the
- * container the CLI runs in, or through a SOCKS proxy in the CLI that lives as long as the driver.
+ * container the CLI runs in, or through a SOCKS proxy in the CLI that lives as long as the driver, which the browser is
+ * checked to reach before the driver resolves.
  *
- * @throws {ContainerError} When Docker can't be run or the image can't be pulled.
- * @throws {BrowserLaunchError} When the browser doesn't connect.
+ * @throws {ContainerError} When Docker can't be run, the image can't be pulled, or the browser can't reach the proxy.
+ * @throws {BrowserLaunchError} When the browser doesn't connect, or fails any other way while it is checked to reach
+ * the proxy.
+ * @throws {BrowserExitedError} When the browser exits while it is checked to reach the proxy.
  */
 export type LaunchBrowser = (launch: BrowserLaunch) => Promise<Driver>
 
@@ -132,22 +136,36 @@ function closingProxyWith(driver: Driver, proxy: SocksProxy): Driver {
 /**
  * Starts the SOCKS proxy, then launches the browser with `launchWith`, which gets the proxy's address as a browser on
  * Docker's default bridge network reaches it: `socks5://host.docker.internal:<port>`, the runtime's own name for the
- * machine. Closing the driver it resolves with closes the browser, then the proxy. When the launch fails, the proxy
- * closes at once and the error is rethrown.
+ * machine. Then checks that the browser reaches the proxy. Closing the driver it resolves with closes the browser,
+ * then the proxy. When the launch fails, the proxy closes at once and the error is rethrown. When the check fails, the
+ * browser and the proxy close, and the check's error is rethrown.
+ *
+ * @throws {ContainerError} When the browser can't reach the proxy.
+ * @throws {BrowserExitedError} When the browser exits during the check.
+ * @throws {BrowserLaunchError} When the browser fails the check any other way.
+ * @throws {Error} Any error `launchWith` rejects with.
  */
 export async function launchThroughProxy(launchWith: (proxyServer: string) => Promise<Driver>): Promise<Driver> {
   const proxy = await startSocksProxy()
   let driver: Driver
 
   try {
-    driver = await launchWith(`socks5://host.docker.internal:${proxy.port}`)
+    driver = closingProxyWith(await launchWith(`socks5://host.docker.internal:${proxy.port}`), proxy)
   } catch (error) {
     await proxy.close()
 
     throw error
   }
 
-  return closingProxyWith(driver, proxy)
+  try {
+    await checkProxyReach(driver, proxy)
+  } catch (error) {
+    await driver.close().catch(() => undefined)
+
+    throw error
+  }
+
+  return driver
 }
 
 /**
@@ -209,8 +227,10 @@ export interface RunBrowser {
    * The capture session of a worker. The first call launches the browser and checks that it is the browser package's
    * build, and every call shares that one browser. A worker's first call opens its session, which keeps its own page.
    *
-   * @throws {ContainerError} When Docker can't be run or the image can't be pulled.
-   * @throws {BrowserLaunchError} When the browser doesn't connect.
+   * @throws {ContainerError} When Docker can't be run, the image can't be pulled, or the browser can't reach the proxy.
+   * @throws {BrowserLaunchError} When the browser doesn't connect, or fails any other way while it is checked to reach
+   * the proxy.
+   * @throws {BrowserExitedError} When the browser exits while it is checked to reach the proxy.
    * @throws {BrowserMismatchError} When the browser isn't the browser package's build.
    */
   session: (worker: number) => Promise<CaptureSession>

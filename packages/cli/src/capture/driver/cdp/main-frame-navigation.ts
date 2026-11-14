@@ -1,4 +1,4 @@
-import { PageNavigatedAwayError } from '../driver.js'
+import { PageLoadError, PageNavigatedAwayError } from '../driver.js'
 import { type CdpEvent, isRecord } from './cdp-connection.js'
 
 /**
@@ -92,14 +92,14 @@ export class MainFrameNavigation {
   }
 
   /**
-   * Takes in the answer to `Page.navigate`. Fails on its error text, such as `net::ERR_CONNECTION_REFUSED`. Otherwise
-   * keeps the loader it names and judges the events held until now.
+   * Takes in the answer to `Page.navigate`. Fails with a `PageLoadError` on its error text, such as
+   * `net::ERR_CONNECTION_REFUSED`. Otherwise keeps the loader it names and judges the events held until now.
    */
   answer(result: Record<string, unknown>): void {
     const { errorText, loaderId } = result
 
     if (typeof errorText === 'string' && errorText !== '') {
-      this.reject(new Error(`The page couldn't load ${this.url}: ${errorText}`))
+      this.reject(new PageLoadError(this.url, errorText))
     } else if (typeof loaderId !== 'string') {
       this.reject(new Error("The browser's answer to Page.navigate has no loaderId."))
     } else {
