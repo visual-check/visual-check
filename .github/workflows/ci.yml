@@ -38,8 +38,8 @@ jobs:
 
   node-22:
     name: Node 22
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -52,6 +52,53 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Unit tests
         run: pnpm turbo run test:unit
+      - name: Create a docker-container builder
+        run: docker buildx create --driver docker-container --use
+      - name: Build the browser image
+        run: packages/chromium/image/build.sh amd64 --output type=docker,name=visual-check-chromium:ci
+      - name: End-to-end check
+        env:
+          TEST_STORYBOOK_IMAGE: visual-check-chromium:ci
+        run: pnpm turbo run e2e --filter @visual-check/test-storybook-react-10
+      - name: Upload the end-to-end output
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-output-${{ github.job }}
+          path: packages/test-storybook-react-10/e2e-output/
+          if-no-files-found: ignore
+          retention-days: 3
+
+  own-storybooks:
+    name: Own Storybooks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Create a docker-container builder
+        run: docker buildx create --driver docker-container --use
+      - name: Build the browser image
+        run: packages/chromium/image/build.sh amd64 --output type=docker,name=visual-check-chromium:ci
+      - name: End-to-end check
+        env:
+          TEST_STORYBOOK_IMAGE: visual-check-chromium:ci
+        run: pnpm turbo run e2e --filter @visual-check/test-storybook-react-10
+      - name: Upload the end-to-end output
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-output-${{ github.job }}
+          path: packages/test-storybook-react-10/e2e-output/
+          if-no-files-found: ignore
+          retention-days: 3
 
   lockstep:
     name: Lockstep versions
