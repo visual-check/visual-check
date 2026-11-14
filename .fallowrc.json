@@ -9,6 +9,8 @@
   },
   "boundaries": {
     "zones": [
+      { "name": "cli/capture/driver/cdp", "patterns": ["packages/cli/src/capture/driver/cdp/**"] },
+      { "name": "cli/capture", "patterns": ["packages/cli/src/capture/**"] },
       { "name": "cli/browser", "patterns": ["packages/cli/src/browser/**"] },
       { "name": "cli/commands", "patterns": ["packages/cli/src/commands/**"] },
       { "name": "cli/config", "patterns": ["packages/cli/src/config/**"] },
@@ -20,6 +22,8 @@
       { "name": "repo-checks/source-layout", "patterns": ["packages/repo-checks/src/source-layout/**"] }
     ],
     "rules": [
+      { "from": "cli/capture/driver/cdp", "allow": [] },
+      { "from": "cli/capture", "allow": [] },
       { "from": "cli/browser", "allow": [] },
       { "from": "cli/commands", "allow": ["cli/browser", "cli/config", "cli/storybook"] },
       { "from": "cli/config", "allow": [] },
