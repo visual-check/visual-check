@@ -498,9 +498,11 @@ async function isStale(lock: string): Promise<boolean> {
 
 /**
  * Removes the lock when it was left behind: its run exited on this machine, whose temporary files go too, or it is
- * stale. Gives whether it removed it. Another run can take over the same lock first, making a new lock between this
- * removal's emptying of the folder and its removal of the folder. The folder then isn't empty, so it stays, and this
- * gives `false`.
+ * stale. Gives whether it removed it. Two waiting runs can both judge the same lock left behind. When one removes it
+ * and makes its own before the other removes it, the other's removal deletes that new lock, and both runs download.
+ * That is harmless, since `moveIntoPlace` is safe with two runs holding the lock. When the new lock gets its owner
+ * file while the other's removal empties the folder, the folder isn't empty at the end, so it stays, and this gives
+ * `false`. On Windows, though, `rm` tries again and deletes the new lock, as in the first case.
  */
 async function removeIfLeftBehind(paths: ShellPaths): Promise<boolean> {
   const owner = await ownerOf(paths.lock)
