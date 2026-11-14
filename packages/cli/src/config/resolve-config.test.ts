@@ -14,16 +14,21 @@ const url = 'http://127.0.0.1:6006'
 const path = '/repo/visual-check.config.ts'
 
 /**
+ * The options the tests of `resolveConfig` vary.
+ */
+type ResolveTestOptions = Partial<Omit<Parameters<typeof resolveConfig>[1], 'path'>>
+
+/**
  * Resolves a config in a local run from the repo's root folder, unless the options say otherwise.
  */
-function resolve(config: Config, options: { ci?: boolean; cwd?: string } = {}) {
+function resolve(config: Config, options: ResolveTestOptions = {}) {
   return resolveConfig(config, { path, cwd: '/repo', ci: false, ...options })
 }
 
 /**
  * Resolves a config that must be unusable and returns its `ConfigError`'s message.
  */
-function messageOf(config: Config, options: { ci?: boolean; cwd?: string } = {}): string {
+function messageOf(config: Config, options: ResolveTestOptions = {}): string {
   try {
     resolve(config, options)
   } catch (error) {
@@ -350,6 +355,90 @@ describe('resolveConfig with several problems', () => {
         'Storybook web has no URL for local runs. Set storybooks.web.url.local.',
         'Storybooks web, ui and docs all keep baselines in .visual-check/baselines. Give each its own dir or baselines.',
       ),
+    )
+  })
+})
+
+describe('resolveConfig with --storybook', () => {
+  const two: Config = { storybooks: { web: { url, dir: 'web' }, ui: { url: { local: url }, dir: 'ui' } } }
+
+  it('returns only the Storybook it names', () => {
+    expect(resolve(two, { storybook: 'ui' }).storybooks.map(({ name }) => name)).toStrictEqual(['ui'])
+  })
+
+  it('needs no URL for a Storybook outside the run', () => {
+    expect(resolve(two, { ci: true, storybook: 'web' }).storybooks.map(({ name }) => name)).toStrictEqual(['web'])
+  })
+
+  it('still needs a URL for the Storybook in the run', () => {
+    expect(messageOf(two, { ci: true, storybook: 'ui' })).toBe(
+      issuesMessage('Storybook ui has no URL for CI. Set storybooks.ui.url.ci.'),
+    )
+  })
+
+  it('names the choices when the Storybook is not in the config', () => {
+    expect(messageOf(two, { storybook: 'docs' })).toBe(
+      "--storybook docs isn't a Storybook in visual-check.config.ts. Pick one of web and ui.",
+    )
+  })
+
+  it('still reports shared baselines of every Storybook in the config', () => {
+    expect(messageOf({ storybooks: { web: { url }, ui: { url } } }, { storybook: 'web' })).toBe(
+      issuesMessage(
+        'Storybooks web and ui both keep baselines in .visual-check/baselines. Give each its own dir or baselines.',
+      ),
+    )
+  })
+})
+
+describe('resolveConfig with --url', () => {
+  const other = 'http://127.0.0.1:7007'
+
+  it('fills in a URL missing for CI', () => {
+    expect(resolve({ storybooks: { web: { url: { local: url } } } }, { ci: true, url: other }).storybooks[0]?.url).toBe(
+      other,
+    )
+  })
+
+  it('replaces a URL the config sets', () => {
+    expect(resolve({ storybooks: { web: { url } } }, { url: other }).storybooks[0]?.url).toBe(other)
+  })
+
+  it('applies to the only Storybook when --storybook is not given', () => {
+    expect(resolve({ storybooks: { docs: { url: { ci: url } } } }, { ci: true, url: other }).storybooks).toStrictEqual([
+      expect.objectContaining({ name: 'docs', url: other }),
+    ])
+  })
+
+  it('replaces only the URL of the Storybook --storybook names', () => {
+    const config: Config = { storybooks: { web: { url, dir: 'web' }, ui: { url, dir: 'ui' } } }
+
+    expect(resolve(config, { storybook: 'ui', url: other }).storybooks).toStrictEqual([
+      expect.objectContaining({ name: 'ui', url: other }),
+    ])
+  })
+
+  it.each(['localhost:6006', 'ftp://example.com'])('rejects %j', (value) => {
+    expect(messageOf({ storybooks: { web: { url } } }, { url: value })).toBe(
+      `--url takes an http: or https: URL, such as 'http://127.0.0.1:6006'. Got '${value}'.`,
+    )
+  })
+
+  it('rejects a URL with several Storybooks and no --storybook', () => {
+    expect(messageOf({ storybooks: { web: { url, dir: 'web' }, ui: { url, dir: 'ui' } } }, { url: other })).toBe(
+      "--url sets one Storybook's URL, and visual-check.config.ts has several: web and ui. Name the one with --storybook.",
+    )
+  })
+
+  it('checks the Storybook name before the URL', () => {
+    expect(messageOf({ storybooks: { web: { url } } }, { storybook: 'ui', url: 'nope' })).toBe(
+      "--storybook ui isn't a Storybook in visual-check.config.ts. The config has one: web.",
+    )
+  })
+
+  it('checks the URL before counting the Storybooks', () => {
+    expect(messageOf({ storybooks: { web: { url, dir: 'web' }, ui: { url, dir: 'ui' } } }, { url: 'nope' })).toBe(
+      "--url takes an http: or https: URL, such as 'http://127.0.0.1:6006'. Got 'nope'.",
     )
   })
 })

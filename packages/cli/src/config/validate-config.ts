@@ -8,6 +8,7 @@ import type {
   Tolerance,
   Viewport,
 } from './define-config.js'
+import { isHttpUrl } from './is-http-url.js'
 
 /**
  * Checks the value at a key path and returns one issue per problem, each starting with its key path. A key that is
@@ -287,8 +288,7 @@ const checkStorybook = objectOf(
       `Set the URL the Storybook answers at, such as '${exampleUrl}'.`,
       pairOf({
         text: 'an http: or https: URL string',
-        accepts: (value) =>
-          typeof value === 'string' && URL.canParse(value) && ['http:', 'https:'].includes(new URL(value).protocol),
+        accepts: isHttpUrl,
       }),
     ),
     dir: oneValue(nonEmptyString),
