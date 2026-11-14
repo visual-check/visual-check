@@ -2,12 +2,26 @@
 // what the CLI reports. Run it with `pnpm turbo run e2e --filter @visual-check/test-storybook-10-react`, which builds the
 // CLI and the Storybook first, with TEST_STORYBOOK_IMAGE naming the browser image. It prints one line per case, then
 // each of its problems, and exits 1 when any case fails.
+//
+// With `--inside-image` it runs inside visual-check's amd64 browser image, where the CLI starts the browser itself: it
+// needs no TEST_STORYBOOK_IMAGE and no docker, and checks `platform: 'host'` and a platform mismatch in place of the
+// kill case.
 import { type ChildProcessByStdio, spawn, spawnSync } from 'node:child_process'
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import {
+  accessSync,
+  constants,
+  cpSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { createServer, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
-import { extname, join, sep } from 'node:path'
+import { delimiter, extname, join, sep } from 'node:path'
 import type { Readable } from 'node:stream'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
@@ -51,6 +65,16 @@ const committedBaselines = join(packageDir, '.visual-check', 'baselines')
  * Where the update case copies the baselines it wrote when they differ from the committed ones, for CI to keep.
  */
 const diagnosticsDir = join(packageDir, 'e2e-output')
+
+/**
+ * Whether the check runs inside visual-check's browser image, as the `--inside-image` argument says.
+ */
+const insideImage = process.argv.includes('--inside-image')
+
+/**
+ * Where visual-check's browser image records the browser it holds.
+ */
+const markerPath = '/etc/visual-check/chromium.json'
 
 /**
  * The browser image every run uses, until the browser package names a published one.
@@ -197,6 +221,16 @@ interface FollowedCli {
 }
 
 /**
+ * The part of the image's marker that the platform cases use.
+ */
+interface ImageMarker {
+  /**
+   * The architecture the image's browser is for, `amd64` or `arm64`.
+   */
+  arch: 'amd64' | 'arm64'
+}
+
+/**
  * One end-to-end case: what it checks, and the check, which gives every problem it finds.
  */
 interface Case {
@@ -211,16 +245,74 @@ interface Case {
 }
 
 /**
- * Lists what the check needs and doesn't have: the static build, the built CLI and the browser image.
+ * Lists what the check needs and doesn't have: the static build and the built CLI, then the browser image, or inside
+ * visual-check's image its marker and no docker.
  */
 function findSetupProblems(): string[] {
   return [
     ...(existsSync(join(staticDir, 'index.json')) ? [] : [`storybook-static/ is missing: ${turboHint}`]),
     ...(existsSync(cliBin) ? [] : [`The CLI is not built: ${turboHint}`]),
-    ...(image
-      ? []
-      : ['TEST_STORYBOOK_IMAGE is not set: set it to the browser image, such as visual-check-chromium:amd64.']),
+    ...(insideImage ? findInsideImageProblems() : findBrowserImageProblems()),
   ]
+}
+
+/**
+ * Lists what the check needs outside the image: the name of the browser image.
+ */
+function findBrowserImageProblems(): string[] {
+  return image
+    ? []
+    : ['TEST_STORYBOOK_IMAGE is not set: set it to the browser image, such as visual-check-chromium:amd64.']
+}
+
+/**
+ * Lists what the check needs inside the image: the image's marker, for the amd64 image because the committed baselines
+ * are linux/amd64, and no docker, which the mode proves the CLI needs none of.
+ */
+function findInsideImageProblems(): string[] {
+  return [
+    ...markerProblems(),
+    ...(isDockerOnPath()
+      ? ['docker is on the PATH: this mode proves the CLI needs none, so run it where there is none.']
+      : []),
+  ]
+}
+
+/**
+ * Lists what is wrong with the image's marker: it is missing, or it isn't the amd64 image's.
+ */
+function markerProblems(): string[] {
+  if (!existsSync(markerPath)) {
+    return [`${markerPath} is missing: run this mode inside visual-check's image.`]
+  }
+
+  return readMarker().arch === 'amd64'
+    ? []
+    : ['The committed baselines are linux/amd64, so run this mode in the amd64 image.']
+}
+
+/**
+ * Whether an executable file named `docker` is in one of the `PATH` folders.
+ */
+function isDockerOnPath(): boolean {
+  return (process.env.PATH ?? '').split(delimiter).some((folder) => {
+    const path = join(folder, 'docker')
+
+    try {
+      accessSync(path, constants.X_OK)
+
+      return isFile(path)
+    } catch {
+      return false
+    }
+  })
+}
+
+/**
+ * Reads the image's marker.
+ */
+function readMarker(): ImageMarker {
+  return JSON.parse(readFileSync(markerPath, 'utf8')) as ImageMarker
 }
 
 /**
@@ -525,11 +617,16 @@ function localEnvironment(): NodeJS.ProcessEnv {
 }
 
 /**
- * Writes a config for this Storybook, served at the URL, with its baselines in the given folder. Gives its path.
+ * Writes a config for this Storybook, served at the URL, with its baselines in the given folder and, when given, its
+ * platform. Gives its path.
  */
-function writeConfig(folder: string, url: string, baselines: string): string {
+function writeConfig(folder: string, url: string, baselines: string, platform?: string): string {
   const path = join(folder, 'visual-check.config.mjs')
-  const config = { storybooks: { react: { url, dir: packageDir, baselines } }, image }
+  const config = {
+    storybooks: { react: { url, dir: packageDir, baselines } },
+    image,
+    ...(platform === undefined ? {} : { platform }),
+  }
 
   writeFileSync(path, `export default ${JSON.stringify(config, null, 2)}\n`)
 
@@ -583,7 +680,7 @@ async function checkCommittedBaselines(expected: Outcomes): Promise<string[]> {
   return await withStorybookServer({}, async (server) => {
     const run = await runCli(['test', '--all', '--url', server.url])
 
-    return [...exitCodeProblems('test', run, exitCodeOf(expected)), ...outcomeProblems('test', run.outcomes, expected)]
+    return expectedRunProblems('test', run, expected)
   })
 }
 
@@ -616,12 +713,19 @@ async function checkUpdateThenTest(expected: Outcomes): Promise<string[]> {
 }
 
 /**
+ * Lists how a run's exit code and outcomes differ from the ones the expected outcomes give.
+ */
+function expectedRunProblems(command: string, run: CliRun, expected: Outcomes): string[] {
+  return [...exitCodeProblems(command, run, exitCodeOf(expected)), ...outcomeProblems(command, run.outcomes, expected)]
+}
+
+/**
  * Runs a command locally, without `CI`, and lists how its exit code and outcomes differ from the expected ones.
  */
 async function runAndCheck(command: 'test' | 'update', args: string[], expected: Outcomes): Promise<string[]> {
   const run = await runCli([command, ...args], localEnvironment())
 
-  return [...exitCodeProblems(command, run, exitCodeOf(expected)), ...outcomeProblems(command, run.outcomes, expected)]
+  return expectedRunProblems(command, run, expected)
 }
 
 /**
@@ -636,6 +740,48 @@ async function checkDeliberateChange(expected: Outcomes): Promise<string[]> {
       ...outcomeProblems('test', run.outcomes, { ...expected, [deliberateChange.storyId]: 'differs' }),
     ]
   })
+}
+
+/**
+ * Runs `test --all` against the committed baselines with a config that sets this platform, and hands the run and the
+ * server to `check`.
+ */
+async function testWithPlatform(
+  platform: string,
+  check: (run: CliRun, server: StorybookServer) => string[],
+): Promise<string[]> {
+  return await withStorybookServer({}, (server) =>
+    withTemporaryFolder(async (folder) => {
+      const config = writeConfig(folder, server.url, committedBaselines, platform)
+
+      return check(await runCli(['test', '--all', '--config', config]), server)
+    }),
+  )
+}
+
+/**
+ * Inside the image, `platform: 'host'` captures with the image's browser and gives exactly the expected outcomes.
+ */
+async function checkHostPlatform(expected: Outcomes): Promise<string[]> {
+  return await testWithPlatform('host', (run) => expectedRunProblems('test', run, expected))
+}
+
+/**
+ * Inside the amd64 image, the platform `linux/arm64` exits 2 before any capture, and the message names the image's
+ * architecture and the configured platform.
+ */
+async function checkPlatformMismatch(): Promise<string[]> {
+  const { arch } = readMarker()
+  const platform = 'linux/arm64'
+
+  return await testWithPlatform(platform, (run, server) => [
+    ...exitCodeProblems('test', run, 2),
+    ...outcomeProblems('test', run.outcomes, {}),
+    ...[`image for ${arch}`, `platform is ${platform}`]
+      .filter((text) => !run.stderr.includes(text))
+      .map((text) => `the message doesn't say "${text}"${outputOf(run.stderr)}`),
+    ...(server.storyPageRequested() ? ['the browser asked for a story, so the run captured'] : []),
+  ])
 }
 
 /**
@@ -703,6 +849,22 @@ async function waitForRemoval(before: ReadonlySet<string>): Promise<string[]> {
 }
 
 /**
+ * The cases only the image can run: the host platform and a platform of the other architecture.
+ */
+function insideImageCases(expected: Outcomes): Case[] {
+  return [
+    {
+      name: "platform host: test uses the image's browser and gives the expected outcomes",
+      run: () => checkHostPlatform(expected),
+    },
+    {
+      name: 'platform mismatch: test exits 2 naming both architectures before any capture',
+      run: checkPlatformMismatch,
+    },
+  ]
+}
+
+/**
  * Runs every case, prints its result, and resolves with whether all of them passed.
  */
 async function runCases(cases: Case[]): Promise<boolean> {
@@ -755,7 +917,9 @@ if (setupProblems.length > 0) {
       name: `deliberate change: test exits 1 and ${deliberateChange.storyId} differs`,
       run: () => checkDeliberateChange(expected),
     },
-    { name: 'killing the CLI: no container is left behind', run: checkKill },
+    ...(insideImage
+      ? insideImageCases(expected)
+      : [{ name: 'killing the CLI: no container is left behind', run: checkKill }]),
   ])
 
   process.exitCode = passed ? 0 : 1
