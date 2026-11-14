@@ -20,9 +20,15 @@ async function readAll(stream: NodeJS.ReadableStream): Promise<string> {
 }
 
 describe('containerRunArguments', () => {
-  it.each(['linux/amd64', 'linux/arm64'] as const)('builds the exact docker run arguments for %s', (platform) => {
+  it.each([
+    ['linux/amd64', 'host'],
+    ['linux/arm64', `container:${'a'.repeat(64)}`],
+  ] as const)('builds the exact docker run arguments for %s on the %s network', (platform, network) => {
     expect(
-      containerRunArguments({ name: 'visual-check-0123456789ab', image, platform, executable }, ['--a', '--b=1']),
+      containerRunArguments({ name: 'visual-check-0123456789ab', image, platform, executable, network }, [
+        '--a',
+        '--b=1',
+      ]),
     ).toEqual([
       'run',
       '-i',
@@ -37,7 +43,7 @@ describe('containerRunArguments', () => {
       '--cap-drop=ALL',
       '--security-opt=no-new-privileges',
       '--network',
-      'host',
+      network,
       image,
       'sh',
       '-c',
@@ -63,7 +69,7 @@ describe('startBrowserInContainer', () => {
   it('runs the browser with a fresh visual-check name each start', () => {
     fake = installFakeDocker()
 
-    const start = startBrowserInContainer({ image, platform: 'linux/amd64', executable })
+    const start = startBrowserInContainer({ image, platform: 'linux/amd64', executable, network: 'host' })
     const first = start(['--x'])
     const second = start(['--x'])
 
@@ -84,7 +90,7 @@ describe('startBrowserInContainer', () => {
   it('carries bytes both ways, passes stderr as output, and settles exited with the code when stdin ends', async () => {
     fake = installFakeDocker()
 
-    const browser = startBrowserInContainer({ image, platform: 'linux/arm64', executable })(['--x'])
+    const browser = startBrowserInContainer({ image, platform: 'linux/arm64', executable, network: 'host' })(['--x'])
     const received = readAll(browser.fromBrowser)
     const output = readAll(browser.output)
 
@@ -99,7 +105,7 @@ describe('startBrowserInContainer', () => {
   it('settles exited with the error when docker is missing, without throwing', async () => {
     restorePath = removeDockerFromPath()
 
-    const browser = startBrowserInContainer({ image, platform: 'linux/amd64', executable })([])
+    const browser = startBrowserInContainer({ image, platform: 'linux/amd64', executable, network: 'host' })([])
     const exit = await browser.exited
 
     expect(exit.code).toBeNull()
@@ -111,7 +117,12 @@ describe('startBrowserInContainer', () => {
   it('settles exited with the error when spawn throws, such as for a NUL byte in the image', async () => {
     fake = installFakeDocker()
 
-    const browser = startBrowserInContainer({ image: 'bad\0image', platform: 'linux/amd64', executable })([])
+    const browser = startBrowserInContainer({
+      image: 'bad\0image',
+      platform: 'linux/amd64',
+      executable,
+      network: 'host',
+    })([])
 
     expect((await browser.exited).error).toBeInstanceOf(Error)
     expect(() => browser.kill()).not.toThrow()
@@ -120,7 +131,7 @@ describe('startBrowserInContainer', () => {
   it('kills the container by its name with docker kill, which ends the run', async () => {
     fake = installFakeDocker({ kill: 'stop' })
 
-    const browser = startBrowserInContainer({ image, platform: 'linux/amd64', executable })([])
+    const browser = startBrowserInContainer({ image, platform: 'linux/amd64', executable, network: 'host' })([])
 
     await readFirstOutput(browser.output)
     browser.kill()
@@ -138,9 +149,13 @@ describe('startBrowserInContainer', () => {
   it.each(['fail', 'ignore'] as const)('SIGKILLs the docker client when docker kill %ss', async (kill) => {
     fake = installFakeDocker({ kill })
 
-    const browser = startBrowserInContainer({ image, platform: 'linux/amd64', executable, killGraceMilliseconds: 300 })(
-      [],
-    )
+    const browser = startBrowserInContainer({
+      image,
+      platform: 'linux/amd64',
+      executable,
+      network: 'host',
+      killGraceMilliseconds: 300,
+    })([])
 
     await readFirstOutput(browser.output)
     browser.kill()

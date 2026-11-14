@@ -12,6 +12,7 @@ const fakeKeys = [
   'FAKE_DOCKER_ENGINE',
   'FAKE_DOCKER_PULL_EXIT',
   'FAKE_DOCKER_KILL',
+  'FAKE_DOCKER_CONTAINERS',
 ]
 
 /**
@@ -41,6 +42,11 @@ export interface FakeDockerBehaviour {
    * real Docker, `fail` exits 1 and leaves it running, and `ignore` exits 0 and leaves it running. `stop` by default.
    */
   kill?: 'stop' | 'fail' | 'ignore'
+  /**
+   * The IDs of the containers `docker inspect --type container` finds. Any other ID exits 1 with `No such container`.
+   * None by default.
+   */
+  containers?: string[]
 }
 
 /**
@@ -94,6 +100,15 @@ if (args[0] === 'image' && args[1] === 'inspect') {
     process.stderr.write('warning: multi-platform image\\n')
   }
   process.stdout.write(answer === '' ? '' : answer + '\\n', () => process.exit(exitCode))
+} else if (args[0] === 'inspect') {
+  const id = args[args.length - 1]
+  const known = (process.env.FAKE_DOCKER_CONTAINERS || '').split(',').includes(id)
+
+  if (known) {
+    process.stdout.write(id + '\\n', () => process.exit(0))
+  } else {
+    process.stderr.write('Error: No such container: ' + id + '\\n', () => process.exit(1))
+  }
 } else if (args[0] === 'pull') {
   process.stdout.write('pull progress 1\\npull progress 2\\n')
   process.stderr.write('pull progress 3\\n', () => process.exit(Number(process.env.FAKE_DOCKER_PULL_EXIT)))
@@ -134,6 +149,7 @@ export function installFakeDocker(behaviour: FakeDockerBehaviour = {}): FakeDock
   process.env.FAKE_DOCKER_ENGINE = behaviour.engine ?? 'classic'
   process.env.FAKE_DOCKER_PULL_EXIT = String(behaviour.pullExitCode ?? 0)
   process.env.FAKE_DOCKER_KILL = behaviour.kill ?? 'stop'
+  process.env.FAKE_DOCKER_CONTAINERS = (behaviour.containers ?? []).join(',')
   process.env.PATH = `${dir}${delimiter}${oldPath ?? ''}`
 
   return {

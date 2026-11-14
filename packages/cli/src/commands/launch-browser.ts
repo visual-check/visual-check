@@ -5,6 +5,7 @@ import { launchCdpDriver } from '../capture/driver/cdp/cdp-driver.js'
 import type { Driver } from '../capture/driver/driver.js'
 import { type ContainerPlatform, startBrowserInContainer } from '../container/browser-container.js'
 import { pullMissingImage } from '../container/image-pull.js'
+import { containerNetwork } from '../container/own-container.js'
 
 /**
  * The folder Chromium keeps its profile in, inside the container. The container is removed when the browser exits, and
@@ -44,13 +45,21 @@ export type LaunchBrowser = (launch: BrowserLaunch) => Promise<Driver>
 
 /**
  * Pulls the image when Docker doesn't have it for the platform, then starts the browser in visual-check's container,
- * with its sandbox off because the container is the boundary, and connects to it over CDP.
+ * with its sandbox off because the container is the boundary, and connects to it over CDP. The container joins the
+ * network of the container the CLI runs in when Docker knows it, else it uses the host's.
  */
 export const launchBrowserInContainer: LaunchBrowser = async (launch) => {
   await pullMissingImage(launch.image, launch.platform, launch.progress)
 
+  const network = await containerNetwork()
+
   return await launchCdpDriver({
-    start: startBrowserInContainer({ image: launch.image, platform: launch.platform, executable: launch.executable }),
+    start: startBrowserInContainer({
+      image: launch.image,
+      platform: launch.platform,
+      executable: launch.executable,
+      network,
+    }),
     sandbox: false,
     profileDir: containerProfileDir,
   })
