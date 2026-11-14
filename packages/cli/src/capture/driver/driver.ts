@@ -62,6 +62,13 @@ export interface BrowserProcess {
 export type StartBrowser = (browserArguments: readonly string[]) => BrowserProcess
 
 /**
+ * The OS a browser runs on, which picks the font table its pages use.
+ *
+ * @public
+ */
+export type BrowserSystem = 'linux' | 'macos' | 'windows'
+
+/**
  * A running browser that snapshots are captured in.
  *
  * @public
@@ -343,8 +350,8 @@ export class PageNavigatedAwayError extends Error {
 }
 
 /**
- * The browser didn't connect: it exited before answering, didn't answer in time, or answered its first call with an
- * error.
+ * The browser didn't connect: it exited, or couldn't start, before answering its version call, didn't answer in time,
+ * answered with an error, or answered without a version.
  *
  * @public
  */
@@ -360,10 +367,18 @@ export class BrowserLaunchError extends Error {
   readonly output: readonly string[]
 
   /**
-   * Takes the message saying what went wrong and the browser's last output lines.
+   * True only when the browser exited, or couldn't start, before it answered its version call. False when it didn't
+   * answer in time, answered with an error, or answered without a version.
    */
-  constructor(message: string, output: readonly string[]) {
+  readonly exited: boolean
+
+  /**
+   * Takes the message saying what went wrong, the browser's last output lines, and whether the browser exited before it
+   * answered.
+   */
+  constructor(message: string, output: readonly string[], options: { exited: boolean }) {
     super(message)
     this.output = output
+    this.exited = options.exited
   }
 }

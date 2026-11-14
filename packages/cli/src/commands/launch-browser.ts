@@ -79,6 +79,7 @@ async function launchBrowserInImage(executable: string): Promise<Driver> {
     start: startBrowserProcess({ executable, profileDir }),
     sandbox: false,
     profileDir,
+    system: 'linux',
   })
 }
 
@@ -101,6 +102,7 @@ async function launchBrowserInContainer(launch: Extract<BrowserLaunch, { in: 'co
     }),
     sandbox: false,
     profileDir: containerProfileDir,
+    system: 'linux',
   })
 }
 

@@ -999,10 +999,11 @@ describe('runCli launching the browser', () => {
       b: defaultSnapshot,
       c: defaultSnapshot,
     })
-    const error = new BrowserLaunchError('The browser exited with code 127 before it answered.', [
-      'exec: not found',
-      'bye',
-    ])
+    const error = new BrowserLaunchError(
+      'The browser exited with code 127 before it answered.',
+      ['exec: not found', 'bye'],
+      { exited: true },
+    )
     let launches = 0
     const options: RunCliOptions = {
       ...hostOptions,
@@ -1030,7 +1031,7 @@ describe('runCli launching the browser', () => {
 
   it("names the config's platform in the next step when the browser fails to launch without output", async () => {
     const { project } = await createRun(['a'], { a: defaultSnapshot }, "platform: 'linux/arm64'")
-    const error = new BrowserLaunchError("The browser didn't answer within 30 s.", [])
+    const error = new BrowserLaunchError("The browser didn't answer within 30 s.", [], { exited: false })
 
     expect((await runCli(['test'], {}, project, failingLaunch(error))).stderr).toBe(
       printed(
@@ -1269,7 +1270,7 @@ describe('runCli launching the browser', () => {
 
   it("names the headless shell in the next step when the browser fails to launch inside visual-check's image", async () => {
     const { project } = await createRun(['a'], { a: defaultSnapshot })
-    const error = new BrowserLaunchError("The browser didn't answer within 30 s.", [])
+    const error = new BrowserLaunchError("The browser didn't answer within 30 s.", [], { exited: false })
     const result = await runCli(['test'], {}, project, {
       ...failingLaunch(error),
       imageMarkerPath: writeMarker(markerOf('amd64')),

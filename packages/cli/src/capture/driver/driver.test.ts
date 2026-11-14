@@ -82,11 +82,14 @@ describe('PageNavigatedAwayError', () => {
 })
 
 describe('BrowserLaunchError', () => {
-  it('keeps the message and the output lines', () => {
-    expect(new BrowserLaunchError('The browser exited with code 1 before it answered.', ['bad flag'])).toMatchObject({
+  it('keeps the message, the output lines and whether the browser exited', () => {
+    expect(
+      new BrowserLaunchError('The browser exited with code 1 before it answered.', ['bad flag'], { exited: true }),
+    ).toMatchObject({
       name: 'BrowserLaunchError',
       message: 'The browser exited with code 1 before it answered.',
       output: ['bad flag'],
+      exited: true,
     })
   })
 })
