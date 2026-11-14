@@ -344,4 +344,43 @@ describe('visual-check binary reaching Storybooks', () => {
     expect(result.status).toBe(0)
     expect(result.stdout).toBe('Storybook web: 1 story\n')
   })
+
+  it('exits 2 for a storybook older than 9.1, naming the version, and leaves its index unread', async () => {
+    const { url, requests } = await startRecordingServer()
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
+      'node_modules/storybook/package.json': JSON.stringify({ version: '9.0.0' }),
+    })
+    const result = await runAsynchronously({ cwd: project }, 'test')
+    expect(result.status).toBe(2)
+    expect(result.stderr).toContain('Storybook web runs storybook 9.0.0, and visual-check needs 9.1 or later.')
+    expect(result.stderr).toContain('Upgrade storybook in the current folder.')
+    expect(requests).toEqual([])
+  })
+
+  it('warns once on standard error for a storybook newer than 11 and carries on', async () => {
+    const url = await startStorybookServer({ a: entryOf('button--primary') })
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
+      'button.stories.tsx': '',
+      'node_modules/storybook/package.json': JSON.stringify({ version: '12.0.0' }),
+    })
+    const result = await runAsynchronously({ cwd: project }, 'test')
+    expect(result.status).toBe(0)
+    expect(result.stderr).toBe(
+      'Warning: Storybook web runs storybook 12.0.0, and visual-check supports 9.1 to 11. The run carries on.\n',
+    )
+    expect(result.stdout).toBe('Storybook web: 1 story\n')
+  })
+
+  it('skips the version check when no storybook is installed', async () => {
+    const url = await startStorybookServer({ a: entryOf('button--primary') })
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
+      'button.stories.tsx': '',
+    })
+    const result = await runAsynchronously({ cwd: project }, 'test')
+    expect(result.status).toBe(0)
+    expect(result.stderr).toBe('')
+  })
 })

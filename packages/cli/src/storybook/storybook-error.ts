@@ -1,6 +1,6 @@
 /**
- * A Storybook that can't be used for the run: it doesn't answer, its index fails, or its stories files are missing.
- * Commands exit with code 2 on it.
+ * A Storybook that can't be used for the run: it doesn't answer, its index fails, its stories files are missing, or its
+ * installed `storybook` is older than 9.1. Commands exit with code 2 on it.
  *
  * @public
  */

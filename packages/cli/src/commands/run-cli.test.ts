@@ -74,6 +74,21 @@ async function startStorybook(storyIds: string[]): Promise<string> {
 }
 
 /**
+ * Starts a server on a free port that records the URL of every request it gets. Returns its URL and the record.
+ */
+async function startRecordingServer(): Promise<{ url: string; requests: string[] }> {
+  const requests: string[] = []
+  const url = await listen(
+    createServer((request, response) => {
+      requests.push(request.url ?? '')
+      response.end('{}')
+    }),
+  )
+
+  return { url, requests }
+}
+
+/**
  * Takes a port nothing listens on: listens on a free port, reads it and closes that server. Returns the URL it had.
  */
 async function takeUnusedUrl(): Promise<string> {
@@ -235,6 +250,50 @@ Other options:
     expect(result.stderr).toContain(`Storybook docs doesn't answer at ${down}/index.json`)
     expect(result.stderr).not.toContain('Storybook web')
     expect(result.stderr.endsWith('To check one Storybook on its own, pass --storybook <name>.\n')).toBe(true)
+  })
+
+  it('prints the warnings of Storybooks newer than 11 in config order, and carries on', async () => {
+    const web = await startStorybook(['a'])
+    const docs = await startStorybook(['b'])
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${web}' }, docs: { dir: 'docs', url: '${docs}' } } }\n`,
+      'web/button.stories.tsx': '',
+      'docs/button.stories.tsx': '',
+      'web/node_modules/storybook/package.json': JSON.stringify({ version: '12.1.0' }),
+      'docs/node_modules/storybook/package.json': JSON.stringify({ version: '13.0.0' }),
+    })
+    const result = await runCli(['test'], {}, project)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe(
+      'Warning: Storybook web runs storybook 12.1.0, and visual-check supports 9.1 to 11. The run carries on.\n' +
+        'Warning: Storybook docs runs storybook 13.0.0, and visual-check supports 9.1 to 11. The run carries on.\n',
+    )
+  })
+
+  it('prints a warning before the problems of the same run', async () => {
+    const down = await takeUnusedUrl()
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${down}' } } }\n`,
+      'node_modules/storybook/package.json': JSON.stringify({ version: '12.0.0' }),
+    })
+    const result = await runCli(['test'], {}, project)
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stderr).toMatch(/^Warning: Storybook web runs storybook 12\.0\.0.*\nStorybook web doesn't answer at /)
+  })
+
+  it('fails a Storybook older than 9.1 without reaching its index', async () => {
+    const { url, requests } = await startRecordingServer()
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
+      'node_modules/storybook/package.json': JSON.stringify({ version: '9.0.0' }),
+    })
+    const result = await runCli(['test'], {}, project)
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stderr).toContain('Storybook web runs storybook 9.0.0, and visual-check needs 9.1 or later.')
+    expect(requests).toEqual([])
   })
 
   it('reports every Storybook that is down, in config order', async () => {

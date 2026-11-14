@@ -89,7 +89,8 @@ export async function runCli(
 
 /**
  * Runs `test` or `update` after the checks that come first: `update` runs only locally, the browser package is
- * installed, the config is found, valid and usable, and every Storybook in the run answers with an index. Then it
+ * installed, the config is found, valid and usable, every Storybook in the run has a supported `storybook` version
+ * installed, and every Storybook in the run answers with an index. Then it
  * reports how many stories each Storybook's selection covers.
  *
  * @throws {ConfigError} When the config can't be found, loaded or used.
