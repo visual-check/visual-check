@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
 import { createServer, type IncomingMessage, type RequestListener, type Server } from 'node:http'
 import { type AddressInfo, connect, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -411,6 +411,48 @@ describe('downloadFile', () => {
     )
     expect(existsSync(destination)).toBe(false)
   })
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    "fails with the file system's own error when the destination cannot be written",
+    async () => {
+      const base = await serve((_request, response) => {
+        response.end('zip')
+      })
+      const readOnly = join(folder, 'read-only')
+
+      mkdirSync(readOnly, { mode: 0o555 })
+      destination = join(readOnly, 'chrome-headless-shell.zip')
+
+      try {
+        const result = download(`${base}/zip`)
+
+        await expect(result).rejects.not.toThrow(BrowserDownloadError)
+        await expect(result).rejects.toMatchObject({ code: 'EACCES', syscall: 'open' })
+      } finally {
+        chmodSync(readOnly, 0o755)
+      }
+    },
+  )
+
+  it.skipIf(process.platform !== 'linux')(
+    "fails with the file system's own error when a write fails partway, and removes the file",
+    async () => {
+      const base = await serve((_request, response) => {
+        response.end(bytesOf(100_000))
+      })
+
+      // /dev/full opens, then fails every write with ENOSPC, as a disk that fills up mid-download does.
+      symlinkSync('/dev/full', destination)
+
+      const result = download(`${base}/zip`)
+
+      await expect(result).rejects.not.toThrow(BrowserDownloadError)
+      await expect(result).rejects.toMatchObject({ code: 'ENOSPC', syscall: 'write' })
+      // The symlink went, not /dev/full.
+      expect(readdirSync(folder)).toEqual([])
+      expect(existsSync('/dev/full')).toBe(true)
+    },
+  )
 
   it('fails when the server stops before the headers', async () => {
     const base = await serve(() => undefined)

@@ -319,16 +319,15 @@ export function checksumMismatchOf(options: InstallHeadlessShellOptions, url: UR
 
 /**
  * The message for a download with the right SHA-256 that couldn't be unzipped into the version folder, from unzip's
- * error. The zip is a temporary file, so the message names the version folder and the cause unzip gives. A cause the
- * file system gave, such as a full disk, which carries the call that failed, says to move the cache. Any other, such
- * as a zip that is damaged though its SHA-256 matches, is one to report.
+ * error. The zip is a temporary file, so the message names the version folder. An error the file system gave, such as
+ * a full disk, which carries the call that failed, says to move the cache. Any other, such as a zip that is damaged
+ * though its SHA-256 matches, is one to report.
  */
 export function unzipFailureOf(label: string, versionFolder: string, error: unknown): string {
-  const cause = error instanceof Error ? (error.cause ?? error) : error
-  const fromFileSystem = typeof (cause as NodeJS.ErrnoException | undefined)?.syscall === 'string'
+  const fromFileSystem = typeof (error as NodeJS.ErrnoException | undefined)?.syscall === 'string'
   const fix = fromFileSystem ? moveCacheFix : `Report it at ${issuesUrl}.`
 
-  return `Couldn't unzip ${label} into ${versionFolder}: ${reasonOf(cause)}. ${fix}`
+  return `Couldn't unzip ${label} into ${versionFolder}: ${reasonOf(error)}. ${fix}`
 }
 
 /**

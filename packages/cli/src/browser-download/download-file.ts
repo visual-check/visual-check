@@ -1,10 +1,8 @@
 import { createHash } from 'node:crypto'
-import { createWriteStream } from 'node:fs'
-import { rm } from 'node:fs/promises'
+import { open, rm } from 'node:fs/promises'
 import * as http from 'node:http'
 import * as https from 'node:https'
 import { isIP, type Socket } from 'node:net'
-import { pipeline } from 'node:stream/promises'
 import * as tls from 'node:tls'
 import { BrowserDownloadError } from './browser-download-error.js'
 import { portOf, unbracketed } from './proxy.js'
@@ -170,6 +168,12 @@ class Transfer {
   #connectingTo: URL | undefined
 
   /**
+   * The file system's error when writing the destination failed, such as on a full disk, which `run` gives as it is:
+   * the network isn't to blame.
+   */
+  #writeError: unknown
+
+  /**
    * Prepares the download. Nothing is sent until `run`.
    */
   constructor(options: DownloadFileOptions) {
@@ -182,6 +186,7 @@ class Transfer {
    * Downloads the file and gives its SHA-256 as lowercase hex. On a failure, removes the partial file.
    *
    * @throws {BrowserDownloadError} The first problem the download hit.
+   * @throws {Error} The file system's error, when writing the destination failed.
    */
   async run(): Promise<string> {
     const { url, destination, label, progress } = this.#options
@@ -191,7 +196,7 @@ class Transfer {
     try {
       return await this.#save(await this.#fileResponse())
     } catch (error) {
-      const problem = this.#fail(error)
+      const problem = this.#writeError ?? this.#fail(error)
 
       await rm(destination, { force: true }).catch(() => undefined)
 
@@ -383,27 +388,41 @@ class Transfer {
   }
 
   /**
-   * Streams the response's body into the destination while hashing it and reporting progress. Gives the SHA-256 as
-   * lowercase hex.
+   * Waits for the file system to write the destination, keeping its failure as the write error unless one came first,
+   * so a close that fails after a write did doesn't hide the write's error.
+   */
+  async #written<T>(operation: Promise<T>): Promise<T> {
+    try {
+      return await operation
+    } catch (error) {
+      this.#writeError ??= error
+
+      throw error
+    }
+  }
+
+  /**
+   * Writes the response's body into the destination as it arrives, while hashing it and reporting progress. Gives the
+   * SHA-256 as lowercase hex.
    */
   async #save(response: http.IncomingMessage): Promise<string> {
     const { destination, label, progress } = this.#options
     const hash = createHash('sha256')
     const report = progressReporter(label, sizeOf(response), progress)
+    const file = await this.#written(open(destination, 'w'))
     let received = 0
 
-    await pipeline(
-      response,
-      async function* (chunks: AsyncIterable<Buffer>) {
-        for await (const chunk of chunks) {
-          hash.update(chunk)
-          received += chunk.length
-          report(received)
-          yield chunk
-        }
-      },
-      createWriteStream(destination),
-    )
+    try {
+      for await (const chunk of response as AsyncIterable<Buffer>) {
+        hash.update(chunk)
+        received += chunk.length
+        report(received)
+        // Unlike `write`, `appendFile` writes the whole chunk, or fails.
+        await this.#written(file.appendFile(chunk))
+      }
+    } finally {
+      await this.#written(file.close())
+    }
 
     return hash.digest('hex')
   }
@@ -416,6 +435,8 @@ class Transfer {
  *
  * @throws {BrowserDownloadError} When the proxy refuses the tunnel, the server answers anything but 2xx after its
  * redirects, the network fails, or no data comes for the idle timeout.
+ * @throws {Error} The file system's own error, which carries the `syscall` that failed, when the destination can't be
+ * written, as on a full disk.
  */
 export async function downloadFile(options: DownloadFileOptions): Promise<string> {
   return new Transfer(options).run()

@@ -4,7 +4,6 @@ import { dirname, join, resolve } from 'node:path'
 import { text } from 'node:stream/consumers'
 import { pipeline } from 'node:stream/promises'
 import * as yauzl from 'yauzl'
-import { BrowserDownloadError, reasonOf } from './browser-download-error.js'
 
 /**
  * The system an entry's `versionMadeBy` names, in its high byte, when the zip was made on Unix.
@@ -94,21 +93,19 @@ async function extractEntries(zip: yauzl.ZipFile, destination: string): Promise<
  * zip made on Unix holds, and symlinks whose target is a relative path with no `..`. yauzl refuses entries with an
  * absolute name or a `..` in it, so nothing lands outside the destination.
  *
- * @throws {BrowserDownloadError} Naming the zip and the reason, with the original error as its `cause`, when it isn't
- * a zip, is damaged, has a symlink that could point outside the destination, or can't be written.
+ * @throws {Error} yauzl's, zlib's or the file system's own error, when the zip isn't one, is damaged, or can't be read
+ * or written; the file system's carries the `syscall` that failed. An error naming the symlink and its target, when a
+ * symlink could point outside the destination.
  */
 export async function unzip(zipPath: string, destination: string): Promise<void> {
   const destinationFolder = resolve(destination)
-  let zip: yauzl.ZipFile | undefined
+  // `openPromise` reads entries one at a time, as `eachEntry` needs. The `finally` closes the zip.
+  const zip = await yauzl.openPromise(zipPath, { autoClose: false })
 
   try {
-    // `openPromise` reads entries one at a time, as `eachEntry` needs. The `finally` closes the zip.
-    zip = await yauzl.openPromise(zipPath, { autoClose: false })
     await mkdir(destinationFolder, { recursive: true })
     await extractEntries(zip, destinationFolder)
-  } catch (error) {
-    throw new BrowserDownloadError(`Couldn't unzip ${zipPath}: ${reasonOf(error)}.`, { cause: error })
   } finally {
-    zip?.close()
+    zip.close()
   }
 }

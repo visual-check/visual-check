@@ -18,7 +18,7 @@ import type { AddressInfo } from 'node:net'
 import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, assert, beforeEach, describe, expect, it } from 'vitest'
 import { BrowserDownloadError } from './browser-download-error.js'
 import {
   checksumMismatchOf,
@@ -412,6 +412,23 @@ describe('installHeadlessShell', () => {
     expect(readdirSync(versionFolder())).toEqual([])
   })
 
+  it('gives no cache fix when the network fails, though its error names the call that failed', async () => {
+    const mirror = await startLinuxMirror()
+    const server = servers.pop()
+
+    assert.isDefined(server)
+    await new Promise<void>((resolve) => {
+      server.close(() => {
+        resolve()
+      })
+    })
+
+    expect(await failureOf(optionsFor(mirror))).toBe(
+      `The download of Chromium ${version} (linux64) from ${mirror.origin}${zipPathOf('linux64')} ` +
+        `failed: connect ECONNREFUSED ${mirror.origin.replace('http://', '')}.`,
+    )
+  })
+
   it.each([
     ['last changed a minute ago', 60],
     ['changed a minute ahead, by another clock', -60],
@@ -600,6 +617,30 @@ describe('installHeadlessShell', () => {
     },
   )
 
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'says how to move the cache when the download cannot be written to it',
+    async () => {
+      // The version folder turns read-only once this run holds the lock, before the zip is written.
+      const mirror = await startLinuxMirror(() => {
+        chmodSync(versionFolder(), 0o555)
+      })
+
+      try {
+        const message = await failureOf(optionsFor(mirror))
+
+        expect(
+          message.startsWith(
+            `Couldn't install Chromium ${version} in ${versionFolder()}: ` +
+              `EACCES: permission denied, open '${join(versionFolder(), '.download-')}`,
+          ),
+        ).toBe(true)
+        expect(message.endsWith(` ${moveCacheFix}`)).toBe(true)
+      } finally {
+        chmodSync(versionFolder(), 0o755)
+      }
+    },
+  )
+
   it('fails on a mirror that is not an http or https URL, before touching the cache', async () => {
     const mirror = await startLinuxMirror()
     const options = optionsFor(mirror, {
@@ -648,21 +689,19 @@ describe('unzipFailureOf', () => {
    */
   const folderName = `/cache/chromium/${version}`
 
-  it('says to move the cache when the file system refused, as unzip gives it in its cause', () => {
-    const cause = Object.assign(new Error('ENOSPC: no space left on device, write'), {
+  it('says to move the cache when the file system refused, naming the call that failed', () => {
+    const error = Object.assign(new Error('ENOSPC: no space left on device, write'), {
       code: 'ENOSPC',
       syscall: 'write',
     })
-    const error = new BrowserDownloadError("Couldn't unzip /cache/.download-0123.zip: ENOSPC.", { cause })
 
     expect(unzipFailureOf(label, folderName, error)).toBe(
       `Couldn't unzip ${label} into ${folderName}: ENOSPC: no space left on device, write. ${moveCacheFix}`,
     )
   })
 
-  it('says to report any other cause, such as a damaged zip', () => {
-    const cause = Object.assign(new Error('invalid block type'), { code: 'Z_DATA_ERROR', errno: -3 })
-    const error = new BrowserDownloadError("Couldn't unzip /cache/.download-0123.zip: invalid block type.", { cause })
+  it('says to report any other error, such as a damaged zip', () => {
+    const error = Object.assign(new Error('invalid block type'), { code: 'Z_DATA_ERROR', errno: -3 })
 
     expect(unzipFailureOf(label, folderName, error)).toBe(
       `Couldn't unzip ${label} into ${folderName}: invalid block type. ` +

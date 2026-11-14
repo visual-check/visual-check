@@ -12,7 +12,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { BrowserDownloadError } from './browser-download-error.js'
 import { unzip } from './unzip.js'
 
 // The fixtures were built once, from a folder holding the files they list:
@@ -55,7 +54,7 @@ afterEach(() => {
 })
 
 /**
- * The message the unzip fails with, or `''` when it succeeds. Checks the error is a `BrowserDownloadError`.
+ * The message the unzip fails with, or `''` when it succeeds. Checks the error is an `Error`.
  */
 async function failureOf(zipPath: string): Promise<string> {
   try {
@@ -63,7 +62,7 @@ async function failureOf(zipPath: string): Promise<string> {
 
     return ''
   } catch (error) {
-    expect(error).toBeInstanceOf(BrowserDownloadError)
+    expect(error).toBeInstanceOf(Error)
 
     return (error as Error).message
   }
@@ -106,11 +105,8 @@ describe('unzip', () => {
     ['symlink-absolute.zip', '/tmp/outside.txt'],
     ['symlink-backslash.zip', '..\\outside.txt'],
   ])('refuses a symlink that could point outside the folder, from %s', async (name, target) => {
-    const zipPath = fixture(name)
-
-    expect(await failureOf(zipPath)).toBe(
-      `Couldn't unzip ${zipPath}: the symlink link points to ${target}, ` +
-        'but its target must be a relative path without a .. in it.',
+    expect(await failureOf(fixture(name))).toBe(
+      `the symlink link points to ${target}, but its target must be a relative path without a .. in it`,
     )
     expect(existsSync(join(destination, 'link'))).toBe(false)
   })
@@ -132,18 +128,19 @@ describe('unzip', () => {
   })
 
   it('refuses a name with .. in it', async () => {
-    const zipPath = fixture('dot-dot-name.zip')
-
-    expect(await failureOf(zipPath)).toBe(`Couldn't unzip ${zipPath}: invalid relative path: ../escape.txt.`)
+    expect(await failureOf(fixture('dot-dot-name.zip'))).toBe('invalid relative path: ../escape.txt')
     expect(existsSync(join(folder, 'escape.txt'))).toBe(false)
   })
 
-  it('fails on a file that is not a zip', async () => {
+  it('fails on a file that is not a zip, with no call of the file system that failed', async () => {
     const zipPath = join(folder, 'not-a-zip.zip')
 
     writeFileSync(zipPath, 'This is not a zip.\n')
 
-    expect(await failureOf(zipPath)).toMatch(/^Couldn't unzip .+not-a-zip\.zip: .+[^.]\.$/)
+    const result = unzip(zipPath, destination)
+
+    await expect(result).rejects.toThrow(/central directory/)
+    await expect(result).rejects.not.toHaveProperty('syscall')
   })
 
   it('fails on a zip whose compressed data is damaged', async () => {
@@ -155,12 +152,13 @@ describe('unzip', () => {
     bytes.fill(0xff, dataStart, dataStart + 16)
     writeFileSync(zipPath, bytes)
 
-    expect(await failureOf(zipPath)).toBe(`Couldn't unzip ${zipPath}: invalid block type.`)
+    expect(await failureOf(zipPath)).toBe('invalid block type')
   })
 
-  it('fails on a zip that is missing', async () => {
-    const zipPath = join(folder, 'missing.zip')
-
-    expect(await failureOf(zipPath)).toMatch(/^Couldn't unzip .+: ENOENT/)
+  it("fails on a zip that is missing with the file system's error, which names the call that failed", async () => {
+    await expect(unzip(join(folder, 'missing.zip'), destination)).rejects.toMatchObject({
+      code: 'ENOENT',
+      syscall: 'open',
+    })
   })
 })
