@@ -108,6 +108,7 @@ const fallowSuppressionPattern = new RegExp(
 export function readSourceFiles(root: URL): SourceFile[] {
   const packagesDirectory = new URL('packages/', root)
   const files: SourceFile[] = []
+
   for (const packageEntry of readdirSync(packagesDirectory, { withFileTypes: true })) {
     const sourceDirectory = new URL(`${packageEntry.name}/src/`, packagesDirectory)
 
@@ -116,9 +117,11 @@ export function readSourceFiles(root: URL): SourceFile[] {
     }
 
     const sourcePath = fileURLToPath(sourceDirectory)
+
     for (const entry of readdirSync(sourceDirectory, { recursive: true, withFileTypes: true })) {
       if (entry.isFile()) {
         const pathInSource = relative(sourcePath, `${entry.parentPath}${sep}${entry.name}`).split(sep).join('/')
+
         files.push({
           path: `packages/${packageEntry.name}/src/${pathInSource}`,
           content: readFileSync(new URL(`${packageEntry.name}/src/${pathInSource}`, packagesDirectory), 'utf8'),
@@ -163,6 +166,7 @@ export function findSourceLayoutProblems(files: readonly SourceFile[], boundarie
 function findModulesWithoutZone(files: readonly SourceFile[], boundaries: FallowBoundaries): string[] {
   const zoneNames = new Set(boundaries.zones.map((zone) => zone.name))
   const modules = new Set<string>()
+
   for (const file of files) {
     const match = /^packages\/([^/]+)\/src\/([^/]+)\//.exec(file.path)
 
@@ -186,6 +190,7 @@ function findModulesWithoutZone(files: readonly SourceFile[], boundaries: Fallow
  */
 function findMalformedZones(files: readonly SourceFile[], boundaries: FallowBoundaries): string[] {
   const problems: string[] = []
+
   for (const zone of boundaries.zones) {
     const separatorIndex = zone.name.indexOf('/')
 
@@ -250,8 +255,10 @@ function findSuppressions(files: readonly SourceFile[]): string[] {
  */
 function findCatchAllFolders(files: readonly SourceFile[]): string[] {
   const folders = new Set<string>()
+
   for (const file of files) {
     const segments = file.path.split('/')
+
     for (let depth = 4; depth < segments.length; depth += 1) {
       if (catchAllFolderNames.has(segments[depth - 1] as string)) {
         folders.add(`${segments.slice(0, depth).join('/')}/`)

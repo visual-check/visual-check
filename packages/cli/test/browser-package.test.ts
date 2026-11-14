@@ -17,6 +17,7 @@ const temporaryFolders: string[] = []
  */
 function setUp(browserVersion?: string, manifest: Record<string, unknown> = {}): string {
   const folder = mkdtempSync(join(tmpdir(), 'visual-check-'))
+
   temporaryFolders.push(folder)
   // The config search stops at the `.git` folder, so it can't find a config above the temporary folder.
   mkdirSync(join(folder, '.git'))
@@ -32,6 +33,7 @@ function setUp(browserVersion?: string, manifest: Record<string, unknown> = {}):
 
   if (browserVersion !== undefined) {
     const browserFolder = join(folder, 'node_modules', '@visual-check', 'chromium')
+
     mkdirSync(browserFolder, { recursive: true })
     writeFileSync(
       join(browserFolder, 'package.json'),
@@ -54,6 +56,7 @@ function setUp(browserVersion?: string, manifest: Record<string, unknown> = {}):
  */
 function run(folder: string, options: { arguments?: string[]; userAgent?: string; ci?: boolean } = {}) {
   const environment = { ...process.env }
+
   delete environment.npm_config_user_agent
   delete environment.NODE_PATH
 
@@ -81,12 +84,14 @@ afterEach(() => {
 describe('browser package check', () => {
   it('does not run for init', () => {
     const result = run(setUp(), { arguments: ['init'] })
+
     expect(result.status).toBe(2)
     expect(result.stderr).toBe("visual-check init isn't available yet. Write visual-check.config.ts by hand for now.\n")
   })
 
   it('exits 2 and names the npm install command when the package is missing', () => {
     const result = run(setUp())
+
     expect(result.status).toBe(2)
     expect(result.stderr).toContain("isn't installed")
     expect(result.stderr).toContain('npm install --save-dev @visual-check/chromium@157')
@@ -94,6 +99,7 @@ describe('browser package check', () => {
 
   it('exits 2 and names the version and the command when the package is out of range', () => {
     const result = run(setUp('156.0.0'))
+
     expect(result.status).toBe(2)
     expect(result.stderr).toContain('156.0.0')
     expect(result.stderr).toContain('npm install --save-dev @visual-check/chromium@157')
@@ -101,18 +107,21 @@ describe('browser package check', () => {
 
   it('passes the check for a version in range', () => {
     const result = run(setUp('157.2.1'))
+
     expect(result.status).toBe(2)
     expect(result.stderr).toContain('No visual-check.config.ts')
   })
 
   it('writes the pnpm command for a pnpm user agent', () => {
     const result = run(setUp(), { userAgent: 'pnpm/9.12.3 npm/? node/v22.23.1 darwin arm64' })
+
     expect(result.status).toBe(2)
     expect(result.stderr).toContain('pnpm add --save-dev @visual-check/chromium@157')
   })
 
   it('exits 2 when the package has no version', () => {
     const result = run(setUp('1.0.0', { version: undefined }))
+
     expect(result.status).toBe(2)
     expect(result.stderr).toContain("can't be read")
     expect(result.stderr).toContain('its package.json has no version')
@@ -120,12 +129,14 @@ describe('browser package check', () => {
 
   it('exits 2 when the package does not export its package.json', () => {
     const result = run(setUp('157.0.0', { exports: {} }))
+
     expect(result.status).toBe(2)
     expect(result.stderr).toContain("can't be read")
   })
 
   it('exits 2 with the CI message for update in CI, before the browser package check', () => {
     const result = run(setUp(), { arguments: ['update'], ci: true })
+
     expect(result.status).toBe(2)
     expect(result.stderr).toContain('visual-check update only runs locally')
     expect(result.stderr).not.toContain("isn't installed")
@@ -133,6 +144,7 @@ describe('browser package check', () => {
 
   it('prints the version for --version without the package', () => {
     const result = run(setUp(), { arguments: ['--version'] })
+
     expect(result.status).toBe(0)
     expect(result.stdout).toBe(`${version}\n`)
   })

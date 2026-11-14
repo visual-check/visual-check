@@ -26,6 +26,7 @@ const gitHead = 'ref: refs/heads/main\n'
  */
 function createFolder(files: Record<string, string>): string {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'visual-check-config-')))
+
   temporaryFolders.push(root)
   for (const [path, fileContent] of Object.entries(files)) {
     mkdirSync(dirname(join(root, path)), { recursive: true })
@@ -44,11 +45,13 @@ afterEach(() => {
 describe('findConfig', () => {
   it('finds the config in the start folder', () => {
     const root = createFolder({ '.git/HEAD': gitHead, 'visual-check.config.ts': content })
+
     expect(findConfig(root)).toBe(join(root, 'visual-check.config.ts'))
   })
 
   it('finds the config in a parent folder', () => {
     const root = createFolder({ '.git/HEAD': gitHead, 'visual-check.config.ts': content, 'apps/web/src/.keep': '' })
+
     expect(findConfig(join(root, 'apps/web/src'))).toBe(join(root, 'visual-check.config.ts'))
   })
 
@@ -59,6 +62,7 @@ describe('findConfig', () => {
       'apps/web/visual-check.config.mjs': content,
       'apps/web/src/.keep': '',
     })
+
     expect(findConfig(join(root, 'apps/web/src'))).toBe(join(root, 'apps/web/visual-check.config.mjs'))
   })
 
@@ -68,6 +72,7 @@ describe('findConfig', () => {
       'visual-check.config.mjs': content,
       'visual-check.config.ts': content,
     })
+
     expect(findConfig(root)).toBe(join(root, 'visual-check.config.ts'))
   })
 
@@ -77,6 +82,7 @@ describe('findConfig', () => {
       'repo/.git/HEAD': gitHead,
       'repo/app/.keep': '',
     })
+
     expect(findConfig(join(root, 'repo/app'))).toBeUndefined()
   })
 
@@ -86,6 +92,7 @@ describe('findConfig', () => {
       'repo/.git': 'gitdir: ../.git/worktrees/repo\n',
       'repo/app/.keep': '',
     })
+
     expect(findConfig(join(root, 'repo/app'))).toBeUndefined()
   })
 
@@ -96,16 +103,19 @@ describe('findConfig', () => {
       'repo/visual-check.config.js': content,
       'repo/app/.keep': '',
     })
+
     expect(findConfig(join(root, 'repo/app'))).toBe(join(root, 'repo/visual-check.config.js'))
   })
 
   it('returns undefined when there is no config', () => {
     const root = createFolder({ '.git/HEAD': gitHead, 'apps/web/.keep': '' })
+
     expect(findConfig(join(root, 'apps/web'))).toBeUndefined()
   })
 
   it('skips a link that loops', () => {
     const root = createFolder({ '.git/HEAD': gitHead, 'visual-check.config.js': content })
+
     symlinkSync('visual-check.config.ts', join(root, 'visual-check.config.ts'))
     expect(findConfig(root)).toBe(join(root, 'visual-check.config.js'))
   })
@@ -116,6 +126,7 @@ describe('findConfig', () => {
       'visual-check.config.ts/.keep': '',
       'visual-check.config.js': content,
     })
+
     expect(findConfig(root)).toBe(join(root, 'visual-check.config.js'))
   })
 })

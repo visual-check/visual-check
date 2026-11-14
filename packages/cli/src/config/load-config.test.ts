@@ -53,6 +53,7 @@ const cliPackage = fileURLToPath(new URL('../../', import.meta.url))
  */
 function createProject(files: Record<string, string>): string {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'visual-check-config-')))
+
   projects.push(root)
   for (const [path, content] of Object.entries({ '.git/HEAD': 'ref: refs/heads/main\n', ...files })) {
     mkdirSync(dirname(join(root, path)), { recursive: true })
@@ -77,6 +78,7 @@ async function configErrorOf(cwd: string, options: Partial<LoadConfigOptions> = 
     () => undefined,
     (rejection: unknown) => rejection,
   )
+
   expect(error).toBeInstanceOf(ConfigError)
 
   return error as ConfigError
@@ -95,6 +97,7 @@ describe('loadConfig loading', () => {
     async (name) => {
       const root = createProject({ [name]: minimalConfig })
       const resolved = await load(root)
+
       expect(resolved.path).toBe(join(root, name))
       expect(resolved.storybooks).toMatchObject([{ name: 'web', dir: root, url }])
     },
@@ -106,6 +109,7 @@ describe('loadConfig loading', () => {
         'enum Port {\n  Storybook = 6006,\n}\n\n' +
         "export default { storybooks: { web: { url: 'http://127.0.0.1:' + Port.Storybook } } }\n",
     })
+
     expect((await load(root)).storybooks[0]?.url).toBe(url)
   })
 
@@ -116,6 +120,7 @@ describe('loadConfig loading', () => {
         "import { storybookUrl } from './storybook-url.ts'\n\n" +
         'export default { storybooks: { web: { url: storybookUrl } } }\n',
     })
+
     expect((await load(root)).storybooks[0]?.url).toBe(url)
     writeFileSync(join(root, 'storybook-url.ts'), "export const storybookUrl: string = 'http://127.0.0.1:6007'\n")
     expect((await load(root)).storybooks[0]?.url).toBe('http://127.0.0.1:6007')
@@ -125,6 +130,7 @@ describe('loadConfig loading', () => {
     const root = createProject({
       'visual-check.config.mjs': `export default { storybooks: { [${loaderProbe}]: { url: '${url}' } } }\n`,
     })
+
     expect((await load(root)).storybooks).toMatchObject([{ name: 'jiti', url }])
   })
 
@@ -135,6 +141,7 @@ describe('loadConfig loading', () => {
         "import { port } from './port.ts'\n\n" +
         "export default { storybooks: { web: { url: 'http://127.0.0.1:' + port } } }\n",
     })
+
     expect((await load(root)).storybooks[0]?.url).toBe(url)
   })
 
@@ -143,6 +150,7 @@ describe('loadConfig loading', () => {
       'package.json': '{ "type": "module" }\n',
       'visual-check.config.js': `export default { storybooks: { [${loaderProbe}]: { url: '${url}' } } }\n`,
     })
+
     expect((await load(root)).storybooks).toMatchObject([{ name: 'jiti', url }])
   })
 
@@ -152,6 +160,7 @@ describe('loadConfig loading', () => {
         "import { defineConfig } from '@visual-check/cli'\n\n" +
         `export default defineConfig({ storybooks: { web: { url: '${url}' } } })\n`,
     })
+
     mkdirSync(join(root, 'node_modules/@visual-check'), { recursive: true })
     symlinkSync(cliPackage, join(root, 'node_modules/@visual-check/cli'), 'dir')
     expect((await load(root)).storybooks[0]?.url).toBe(url)
@@ -160,12 +169,14 @@ describe('loadConfig loading', () => {
   it('doesn’t resolve tsconfig paths', async () => {
     const root = createProject(tsconfigPathsProject)
     const { message } = await configErrorOf(root)
+
     expect(message).toMatch(/^Couldn't load visual-check\.config\.ts: /)
     expect(message).toContain("Cannot find module '@app/value'")
   })
 
   it.each(['visual-check.config.ts', 'visual-check.config.mjs'])('reads %s afresh on every load', async (name) => {
     const root = createProject({ [name]: minimalConfig })
+
     expect((await load(root)).storybooks[0]?.url).toBe(url)
     writeFileSync(join(root, name), "export default { storybooks: { web: { url: 'http://127.0.0.1:6007' } } }\n")
     expect((await load(root)).storybooks[0]?.url).toBe('http://127.0.0.1:6007')
@@ -175,6 +186,7 @@ describe('loadConfig loading', () => {
     const root = createProject({
       'visual-check.config.ts': `export default { storybooks: { web: { url: { local: '${url}', ci: 'http://storybook:6006' } } } }\n`,
     })
+
     expect((await load(root, { ci: true })).storybooks[0]?.url).toBe('http://storybook:6006')
   })
 
@@ -186,6 +198,7 @@ describe('loadConfig loading', () => {
 } }\n`,
     })
     const storybooks = (await load(root, { ci: true, storybook: 'ui', url: 'http://storybook:6006' })).storybooks
+
     expect(storybooks.map(({ name, url: storybookUrl }) => [name, storybookUrl])).toStrictEqual([
       ['ui', 'http://storybook:6006'],
     ])
@@ -195,18 +208,22 @@ describe('loadConfig loading', () => {
 describe('loadConfig with JITI_* environment variables', () => {
   it('doesn’t resolve tsconfig paths when JITI_TSCONFIG_PATHS is true', async () => {
     vi.stubEnv('JITI_TSCONFIG_PATHS', 'true')
+
     const root = createProject(tsconfigPathsProject)
     const { message } = await configErrorOf(root)
+
     expect(message).toMatch(/^Couldn't load visual-check\.config\.ts: /)
     expect(message).toContain("Cannot find module '@app/value'")
   })
 
   it('runs the TypeScript a config imports through jiti when JITI_TRY_NATIVE is true', async () => {
     vi.stubEnv('JITI_TRY_NATIVE', 'true')
+
     const root = createProject({
       'loader.ts': `export const loader: string = ${loaderProbe}\n`,
       'visual-check.config.ts': `import { loader } from './loader.ts'\n\nexport default { storybooks: { [loader]: { url: '${url}' } } }\n`,
     })
+
     expect((await load(root)).storybooks).toMatchObject([{ name: 'jiti', url }])
   })
 })
@@ -218,6 +235,7 @@ describe('loadConfig with --config', () => {
       'configs/custom.ts': "export default { storybooks: { web: { url: 'http://127.0.0.1:6007' } } }\n",
     })
     const resolved = await load(join(root, 'apps/web'), { path: join(root, 'configs/custom.ts') })
+
     expect(resolved.path).toBe(join(root, 'configs/custom.ts'))
     expect(resolved.storybooks[0]?.url).toBe('http://127.0.0.1:6007')
   })
@@ -225,12 +243,14 @@ describe('loadConfig with --config', () => {
   it('resolves a relative path against cwd', async () => {
     const root = createProject({ 'apps/web/.keep': '', 'configs/custom.mts': minimalConfig })
     const resolved = await load(join(root, 'apps/web'), { path: '../../configs/custom.mts' })
+
     expect(resolved.path).toBe(join(root, 'configs/custom.mts'))
     expect(resolved.storybooks[0]?.dir).toBe(join(root, 'configs'))
   })
 
   it('fails on a path with no file', async () => {
     const root = createProject({})
+
     expect((await configErrorOf(root, { path: 'configs/missing.ts' })).message).toBe(
       'No config at configs/missing.ts. Check the path given to --config.',
     )
@@ -238,6 +258,7 @@ describe('loadConfig with --config', () => {
 
   it('fails on a folder', async () => {
     const root = createProject({ 'visual-check.config.ts/.keep': '' })
+
     expect((await configErrorOf(root, { path: 'visual-check.config.ts' })).message).toBe(
       'No config at visual-check.config.ts. Check the path given to --config.',
     )
@@ -245,6 +266,7 @@ describe('loadConfig with --config', () => {
 
   it.each(['visual-check.config.json', 'visual-check.config.yaml'])('fails on %s', async (name) => {
     const root = createProject({ [name]: '{}\n' })
+
     expect((await configErrorOf(root, { path: name })).message).toBe(
       `Can't use ${name} as a config: a config is a .ts, .mts, .js or .mjs file, and JSON and YAML aren't supported. ` +
         'Write visual-check.config.ts and pass its path to --config.',
@@ -253,6 +275,7 @@ describe('loadConfig with --config', () => {
 
   it('names cwd as the current folder', async () => {
     const root = createProject({})
+
     expect((await configErrorOf(root, { path: '.' })).message).toBe(
       "Can't use the current folder as a config: a config is a .ts, .mts, .js or .mjs file, and JSON and YAML aren't " +
         'supported. Write visual-check.config.ts and pass its path to --config.',
@@ -263,6 +286,7 @@ describe('loadConfig with --config', () => {
 describe('loadConfig failures', () => {
   it('points to visual-check init when no config is found', async () => {
     const root = createProject({ 'apps/web/.keep': '' })
+
     expect((await configErrorOf(join(root, 'apps/web'))).message).toBe(
       'No visual-check.config.ts (or .mts, .js, .mjs) found in the current folder or its parents. ' +
         'Run visual-check init to create one.',
@@ -271,6 +295,7 @@ describe('loadConfig failures', () => {
 
   it('fails on a config with no default export', async () => {
     const root = createProject({ 'visual-check.config.ts': 'export const config = { storybooks: {} }\n' })
+
     expect((await configErrorOf(root)).message).toBe(
       'visual-check.config.ts must export a config object: export default defineConfig({ ... }).',
     )
@@ -279,6 +304,7 @@ describe('loadConfig failures', () => {
   it('fails on a config that throws, keeping the error as the cause', async () => {
     const root = createProject({ 'visual-check.config.ts': "throw new Error('No Storybook here')\n" })
     const error = await configErrorOf(root)
+
     expect(error.message).toBe("Couldn't load visual-check.config.ts: No Storybook here")
     expect(error.cause).toBeInstanceOf(Error)
     expect((error.cause as Error).message).toBe('No Storybook here')
@@ -287,6 +313,7 @@ describe('loadConfig failures', () => {
   it('fails on a config with a syntax error, naming the config relative to cwd', async () => {
     const root = createProject({ 'visual-check.config.ts': 'export default {\n' })
     const error = await configErrorOf(root)
+
     expect(error.message).toMatch(/^Couldn't load visual-check\.config\.ts: /)
     expect(error.message).toContain(' visual-check.config.ts:2')
     expect(error.message).not.toContain(root)
@@ -299,6 +326,7 @@ describe('loadConfig failures', () => {
         "import { url } from './missing.ts'\n\nexport default { storybooks: { web: { url } } }\n",
     })
     const { message } = await configErrorOf(root)
+
     expect(message).toMatch(/^Couldn't load visual-check\.config\.ts: /)
     expect(message).toContain("Cannot find module './missing.ts'")
   })
@@ -306,6 +334,7 @@ describe('loadConfig failures', () => {
   it('fails on a default export that rejects, keeping the error as the cause', async () => {
     const root = createProject({ 'visual-check.config.ts': "export default Promise.reject(new Error('boom'))\n" })
     const error = await configErrorOf(root)
+
     expect(error.message).toBe("Couldn't load visual-check.config.ts: boom")
     expect((error.cause as Error).message).toBe('boom')
   })
@@ -314,6 +343,7 @@ describe('loadConfig failures', () => {
     const root = createProject({
       'visual-check.config.ts': `export default Promise.resolve({ storybooks: { web: { url: '${url}' } } })\n`,
     })
+
     expect((await load(root)).storybooks[0]?.url).toBe(url)
   })
 
@@ -323,6 +353,7 @@ describe('loadConfig failures', () => {
       'apps/.keep': '',
     })
     const { message } = await configErrorOf(join(root, 'apps'))
+
     expect(message).toMatch(/^\.\.\/visual-check\.config\.ts is invalid:\n/)
     expect(message).toContain('colour: unknown key.')
   })

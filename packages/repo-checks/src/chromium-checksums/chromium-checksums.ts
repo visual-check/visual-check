@@ -52,6 +52,7 @@ async function sha256OfUrl(url: string, fetcher: (url: string) => Promise<Respon
   }
 
   const hash = createHash('sha256')
+
   for await (const chunk of response.body) {
     hash.update(chunk)
   }

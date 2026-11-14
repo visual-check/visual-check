@@ -26,6 +26,7 @@ const projects: string[] = []
  */
 function createProject(files: Record<string, string>): string {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'visual-check-run-')))
+
   projects.push(root)
   mkdirSync(join(root, '.git'))
   writeFileSync(join(root, '.git', 'HEAD'), 'ref: refs/heads/main\n')
@@ -93,10 +94,13 @@ async function startRecordingServer(): Promise<{ url: string; requests: string[]
  */
 async function takeUnusedUrl(): Promise<string> {
   const server = createServer()
+
   await new Promise<void>((resolve) => {
     server.listen(0, '127.0.0.1', resolve)
   })
+
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+
   await new Promise<void>((resolve) => {
     server.close(() => {
       resolve()

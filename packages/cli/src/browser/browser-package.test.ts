@@ -102,6 +102,7 @@ describe('the workspace', () => {
     const browser = JSON.parse(
       readFileSync(createRequire(import.meta.url).resolve('@visual-check/chromium/package.json'), 'utf8'),
     ) as { version: string }
+
     expect(isInRange(browser.version, parseMajors(range))).toBe(true)
   })
 })

@@ -47,6 +47,7 @@ export interface Manifest {
 export function readWorkspaceManifests(root: URL): Manifest[] {
   const packagesDirectory = new URL('packages/', root)
   const manifests: Manifest[] = []
+
   for (const entry of readdirSync(packagesDirectory, { withFileTypes: true })) {
     const manifestUrl = new URL(`${entry.name}/package.json`, packagesDirectory)
 

@@ -20,6 +20,7 @@ export function findLockstepProblems(manifests: readonly Manifest[]): string[] {
 
   if (new Set(found.map((manifest) => manifest.version)).size > 1) {
     const versions = found.map((manifest) => `${manifest.name} ${manifest.version}`).join(', ')
+
     problems.push(`Lockstep packages must share one version: ${versions}`)
   }
 

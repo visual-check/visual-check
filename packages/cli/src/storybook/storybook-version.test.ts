@@ -15,6 +15,7 @@ const folders: string[] = []
  */
 function createFolder(): string {
   const folder = realpathSync(mkdtempSync(join(tmpdir(), 'visual-check-version-')))
+
   folders.push(folder)
 
   return folder
@@ -25,6 +26,7 @@ function createFolder(): string {
  */
 function install(folder: string, content: string): void {
   const directory = join(folder, 'node_modules', 'storybook')
+
   mkdirSync(directory, { recursive: true })
   writeFileSync(join(directory, 'package.json'), content)
 }
@@ -59,6 +61,7 @@ describe('classifyStorybookVersion', () => {
 describe('readInstalledStorybookVersion', () => {
   it('reads the version of the install in the folder', () => {
     const folder = createFolder()
+
     install(folder, JSON.stringify({ name: 'storybook', version: '9.1.2' }))
 
     expect(readInstalledStorybookVersion(folder)).toBe('9.1.2')
@@ -66,6 +69,7 @@ describe('readInstalledStorybookVersion', () => {
 
   it('reads an install whose package.json is not in its exports', () => {
     const folder = createFolder()
+
     install(folder, JSON.stringify({ version: '10.0.0', exports: { '.': './index.js' } }))
 
     expect(readInstalledStorybookVersion(folder)).toBe('10.0.0')
@@ -73,8 +77,11 @@ describe('readInstalledStorybookVersion', () => {
 
   it('reads an install hoisted to a parent folder', () => {
     const folder = createFolder()
+
     install(folder, JSON.stringify({ version: '9.5.0' }))
+
     const nested = join(folder, 'apps', 'web')
+
     mkdirSync(nested, { recursive: true })
 
     expect(readInstalledStorybookVersion(nested)).toBe('9.5.0')
@@ -82,8 +89,11 @@ describe('readInstalledStorybookVersion', () => {
 
   it('prefers the nearest install', () => {
     const folder = createFolder()
+
     install(folder, JSON.stringify({ version: '9.5.0' }))
+
     const nested = join(folder, 'web')
+
     install(nested, JSON.stringify({ version: '10.1.0' }))
 
     expect(readInstalledStorybookVersion(nested)).toBe('10.1.0')
@@ -94,8 +104,11 @@ describe('readInstalledStorybookVersion', () => {
     ['versionless', JSON.stringify({ name: 'storybook' })],
   ])('stops at a %s nearest install instead of reading a parent', (_kind, content) => {
     const folder = createFolder()
+
     install(folder, JSON.stringify({ version: '8.6.0' }))
+
     const nested = join(folder, 'apps', 'web')
+
     install(nested, content)
 
     expect(readInstalledStorybookVersion(nested)).toBeUndefined()
@@ -107,6 +120,7 @@ describe('readInstalledStorybookVersion', () => {
 
   it('returns undefined when package.json has no version', () => {
     const folder = createFolder()
+
     install(folder, JSON.stringify({ name: 'storybook' }))
 
     expect(readInstalledStorybookVersion(folder)).toBeUndefined()
@@ -114,6 +128,7 @@ describe('readInstalledStorybookVersion', () => {
 
   it('returns undefined when the version is not a string', () => {
     const folder = createFolder()
+
     install(folder, JSON.stringify({ version: 9 }))
 
     expect(readInstalledStorybookVersion(folder)).toBeUndefined()
@@ -121,6 +136,7 @@ describe('readInstalledStorybookVersion', () => {
 
   it('returns undefined when package.json is not JSON', () => {
     const folder = createFolder()
+
     install(folder, '{ broken')
 
     expect(readInstalledStorybookVersion(folder)).toBeUndefined()
@@ -130,6 +146,7 @@ describe('readInstalledStorybookVersion', () => {
 describe('checkStorybookVersion', () => {
   it('returns nothing for a supported version', () => {
     const dir = createFolder()
+
     install(dir, JSON.stringify({ version: '9.1.0' }))
 
     expect(checkStorybookVersion({ name: 'web', dir }, dir)).toBeUndefined()
@@ -143,6 +160,7 @@ describe('checkStorybookVersion', () => {
 
   it('returns nothing for a version it cannot read', () => {
     const dir = createFolder()
+
     install(dir, JSON.stringify({ version: 'latest' }))
 
     expect(checkStorybookVersion({ name: 'web', dir }, dir)).toBeUndefined()
@@ -151,6 +169,7 @@ describe('checkStorybookVersion', () => {
   it('throws for a version below 9.1, naming the folder relative to the current folder', () => {
     const cwd = createFolder()
     const dir = join(cwd, 'web')
+
     install(dir, JSON.stringify({ version: '9.0.18' }))
 
     const check = () => checkStorybookVersion({ name: 'web', dir }, cwd)
@@ -163,6 +182,7 @@ describe('checkStorybookVersion', () => {
 
   it('names the current folder when the Storybook runs there', () => {
     const dir = createFolder()
+
     install(dir, JSON.stringify({ version: '8.6.14' }))
 
     expect(() => checkStorybookVersion({ name: 'web', dir }, dir)).toThrow('Upgrade storybook in the current folder.')
@@ -170,6 +190,7 @@ describe('checkStorybookVersion', () => {
 
   it('returns a warning for a version above 11', () => {
     const dir = createFolder()
+
     install(dir, JSON.stringify({ version: '12.0.0' }))
 
     expect(checkStorybookVersion({ name: 'web', dir }, dir)).toBe(

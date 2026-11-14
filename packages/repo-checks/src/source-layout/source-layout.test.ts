@@ -49,12 +49,14 @@ describe('findSourceLayoutProblems', () => {
       ],
       rules: [...cleanBoundaries.rules, { from: 'cli/capture', allow: [] }, { from: 'cli/capture/driver', allow: [] }],
     }
+
     expect(findSourceLayoutProblems(files, boundaries)).toEqual([])
   })
 
   describe('module without a zone', () => {
     it('names the folder and the zone to add', () => {
       const files = [...cleanFiles, file('packages/cli/src/config/load.ts')]
+
       expect(findSourceLayoutProblems(files, cleanBoundaries)).toEqual([
         'packages/cli/src/config/ is a module with no zone: add zone "cli/config" with pattern "packages/cli/src/config/**" to .fallowrc.json boundaries',
       ])
@@ -67,6 +69,7 @@ describe('findSourceLayoutProblems', () => {
         zones: [{ name: 'cli/commands', patterns: ['packages/cli/src/**'] }],
         rules: cleanBoundaries.rules,
       }
+
       expect(findSourceLayoutProblems(cleanFiles, boundaries)).toEqual([
         'Zone "cli/commands" must have exactly the pattern ["packages/cli/src/commands/**"], found ["packages/cli/src/**"]',
       ])
@@ -77,6 +80,7 @@ describe('findSourceLayoutProblems', () => {
         zones: [{ name: 'cli/commands', patterns: ['packages/cli/src/commands/**', 'packages/cli/src/bin.ts'] }],
         rules: cleanBoundaries.rules,
       }
+
       expect(findSourceLayoutProblems(cleanFiles, boundaries)).toHaveLength(1)
     })
 
@@ -85,6 +89,7 @@ describe('findSourceLayoutProblems', () => {
         zones: [...cleanBoundaries.zones, { name: 'commands', patterns: ['packages/cli/src/commands/**'] }],
         rules: [...cleanBoundaries.rules, { from: 'commands', allow: [] }],
       }
+
       expect(findSourceLayoutProblems(cleanFiles, boundaries)).toEqual([
         'Zone "commands" must be named "<package>/<path>", for example "cli/commands"',
       ])
@@ -95,6 +100,7 @@ describe('findSourceLayoutProblems', () => {
         zones: [...cleanBoundaries.zones, { name: 'cli/gone', patterns: ['packages/cli/src/gone/**'] }],
         rules: [...cleanBoundaries.rules, { from: 'cli/gone', allow: [] }],
       }
+
       expect(findSourceLayoutProblems(cleanFiles, boundaries)).toEqual([
         'Zone "cli/gone" is stale: packages/cli/src/gone/ has no files, remove the zone and its rule',
       ])
@@ -104,6 +110,7 @@ describe('findSourceLayoutProblems', () => {
   describe('zone without a rule', () => {
     it('names the zone and the rule to add', () => {
       const boundaries: FallowBoundaries = { zones: cleanBoundaries.zones, rules: [] }
+
       expect(findSourceLayoutProblems(cleanFiles, boundaries)).toEqual([
         'Zone "cli/commands" has no rule: add { "from": "cli/commands", "allow": [...] } to .fallowrc.json boundaries.rules, an unruled zone may import anything',
       ])
@@ -124,6 +131,7 @@ describe('findSourceLayoutProblems', () => {
 
     it.each(forms)('flags %s', (_description, content) => {
       const files = [...cleanFiles, file('packages/cli/src/commands/barrel.ts', content)]
+
       expect(findSourceLayoutProblems(files, cleanBoundaries)).toEqual([
         'packages/cli/src/commands/barrel.ts re-exports from another file: import what you publish, then export it, and import symbols from the file that defines them',
       ])
@@ -131,12 +139,14 @@ describe('findSourceLayoutProblems', () => {
 
     it('flags a re-export in a package entry too', () => {
       const files = [...cleanFiles, file('packages/cli/src/index.ts', glue('export { a } ', "from './commands/a.ts'"))]
+
       expect(findSourceLayoutProblems(files, cleanBoundaries)).toHaveLength(1)
     })
 
     it('allows importing then exporting', () => {
       const content = "import { a } from './a.ts'\nexport { a }\nexport const b = 1\nexport type { A }\n"
       const files = [...cleanFiles, file('packages/cli/src/index.ts', content)]
+
       expect(findSourceLayoutProblems(files, cleanBoundaries)).toEqual([])
     })
   })
@@ -160,6 +170,7 @@ describe('findSourceLayoutProblems', () => {
 
     it.each(suppressions)('flags %s', (_description, content) => {
       const files = [...cleanFiles, file('packages/cli/src/commands/sneaky.ts', `${content}\nexport const a = 1\n`)]
+
       expect(findSourceLayoutProblems(files, cleanBoundaries)).toEqual([
         'packages/cli/src/commands/sneaky.ts suppresses a layout rule with a comment: remove it and fix the import or the layout instead',
       ])
@@ -168,12 +179,14 @@ describe('findSourceLayoutProblems', () => {
     it('allows a suppression of an unrelated rule', () => {
       const content = `${glue('// biome', '-ignore lint/suspicious/noExplicitAny: x')}\nexport const a = 1\n`
       const files = [...cleanFiles, file('packages/cli/src/commands/other.ts', content)]
+
       expect(findSourceLayoutProblems(files, cleanBoundaries)).toEqual([])
     })
 
     it('allows a Fallow ignore of an unrelated issue', () => {
       const content = `${glue('// fallow', '-ignore-next-line unused-export')}\nexport const a = 1\n`
       const files = [...cleanFiles, file('packages/cli/src/commands/other.ts', content)]
+
       expect(findSourceLayoutProblems(files, cleanBoundaries)).toEqual([])
     })
   })
@@ -195,6 +208,7 @@ describe('findSourceLayoutProblems', () => {
 
     it.each(names)('flags a folder named %s inside a module', (name) => {
       const files = [...cleanFiles, file(`packages/cli/src/commands/${name}/x.ts`)]
+
       expect(findSourceLayoutProblems(files, cleanBoundaries)).toEqual([
         `packages/cli/src/commands/${name}/ is a catch-all folder: name it for what it does in the domain, or move its files into the module that owns them`,
       ])
@@ -206,6 +220,7 @@ describe('findSourceLayoutProblems', () => {
         rules: [...cleanBoundaries.rules, { from: 'cli/utils', allow: [] }],
       }
       const files = [...cleanFiles, file('packages/cli/src/utils/a.ts'), file('packages/cli/src/utils/b.ts')]
+
       expect(findSourceLayoutProblems(files, boundaries)).toEqual([
         'packages/cli/src/utils/ is a catch-all folder: name it for what it does in the domain, or move its files into the module that owns them',
       ])
@@ -213,6 +228,7 @@ describe('findSourceLayoutProblems', () => {
 
     it('allows a file named like a catch-all folder', () => {
       const files = [...cleanFiles, file('packages/cli/src/commands/utils.ts')]
+
       expect(findSourceLayoutProblems(files, cleanBoundaries)).toEqual([])
     })
   })
@@ -221,6 +237,7 @@ describe('findSourceLayoutProblems', () => {
 describe('real workspace', () => {
   it('reads source files from every package', () => {
     const paths = readSourceFiles(repoRoot).map((sourceFile) => sourceFile.path)
+
     expect(paths).toContain('packages/repo-checks/src/source-layout/source-layout.ts')
     expect(paths).toContain('packages/cli/src/commands/run-cli.ts')
     expect(paths.every((path) => !path.includes('\\'))).toBe(true)
@@ -228,6 +245,7 @@ describe('real workspace', () => {
 
   it('reads the Fallow boundaries', () => {
     const boundaries = readFallowBoundaries(repoRoot)
+
     expect(boundaries.zones.map((zone) => zone.name)).toContain('repo-checks/source-layout')
     expect(boundaries.rules.map((rule) => rule.from)).toContain('repo-checks/source-layout')
   })
