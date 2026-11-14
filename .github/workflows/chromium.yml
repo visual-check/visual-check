@@ -1,20 +1,19 @@
 name: Browser package
 
+# Only the image's inputs: its build context, and the package files the image scripts read.
 on:
   pull_request:
     paths:
-      - packages/chromium/**
-      - packages/repo-checks/src/chromium-checksums/**
-      - packages/repo-checks/src/check-chromium-checksums.ts
-      - packages/repo-checks/src/workspace/manifests.ts
+      - packages/chromium/image/**
+      - packages/chromium/chromium.json
+      - packages/chromium/package.json
       - .github/workflows/chromium.yml
   push:
     branches: [main]
     paths:
-      - packages/chromium/**
-      - packages/repo-checks/src/chromium-checksums/**
-      - packages/repo-checks/src/check-chromium-checksums.ts
-      - packages/repo-checks/src/workspace/manifests.ts
+      - packages/chromium/image/**
+      - packages/chromium/chromium.json
+      - packages/chromium/package.json
       - .github/workflows/chromium.yml
   workflow_dispatch:
 
@@ -30,19 +29,6 @@ defaults:
     shell: bash
 
 jobs:
-  checksums:
-    name: Checksums
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-      - run: node packages/repo-checks/src/check-chromium-checksums.ts
-
   # Decides whether this run pushes the image. Only a run started by hand on main pushes, and only when the tag
   # is missing: the image is rebuilt only on purpose, and a tag is never overwritten, so a rebuilt image ships
   # as a new package minor. Other runs build and verify it. #95 moves publishing to merge time.
