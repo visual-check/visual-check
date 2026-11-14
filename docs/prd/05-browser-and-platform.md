@@ -38,6 +38,8 @@ By default the browser runs in visual-check's own container image, forced to `li
 
 - The driver starts the browser with `docker run -i --rm`, and CDP travels over the container's stdin and stdout.
 - The command also carries:
+  - `--name visual-check-<12 hex>`, so the driver can `docker kill` the container when the browser won't quit;
+  - `--pull=never`, since the image was pulled first and a run never pulls on its own;
   - `--platform <platform>`;
   - the image as `tag@digest` from the browser package, or the config's `image`;
   - `--user ubuntu --cap-drop=ALL --security-opt=no-new-privileges`;
