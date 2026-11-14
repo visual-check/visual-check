@@ -29,6 +29,12 @@
         "noReExportAll": "error"
       },
       "style": {
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": { "yauzl": "Only packages/cli/src/browser-download/ unzips, through yauzl." }
+          }
+        },
         "useBlockStatements": "error",
         "useFilenamingConvention": {
           "level": "error",
@@ -43,6 +49,14 @@
       "linter": {
         "rules": {
           "correctness": { "noPrivateImports": "off" }
+        }
+      }
+    },
+    {
+      "includes": ["packages/cli/src/browser-download/**"],
+      "linter": {
+        "rules": {
+          "style": { "noRestrictedImports": "off" }
         }
       }
     }

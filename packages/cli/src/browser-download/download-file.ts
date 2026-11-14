@@ -57,7 +57,7 @@ export interface DownloadFileOptions {
 /**
  * The URL as messages print it, without credentials.
  */
-function printable(url: URL): string {
+export function printable(url: URL): string {
   const copy = new URL(url)
 
   copy.username = ''
