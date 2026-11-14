@@ -14,7 +14,7 @@ import { createRequire } from 'node:module'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import {
   BrowserExitedError,
   BrowserLaunchError,
@@ -48,10 +48,30 @@ const browserPackage = (() => {
 })()
 
 /**
+ * The folder holding the marker path no test writes, so that no test reads the machine's own marker.
+ */
+const absentMarkerFolder = mkdtempSync(join(tmpdir(), 'visual-check-no-marker-'))
+
+/**
+ * A marker path where nothing exists, which makes a run happen outside visual-check's image.
+ */
+const absentMarkerPath = join(absentMarkerFolder, 'chromium.json')
+
+afterAll(() => {
+  rmSync(absentMarkerFolder, { recursive: true, force: true })
+})
+
+/**
+ * Options that only keep the run outside visual-check's image, for runs that stop before the launch.
+ */
+const noMarker: RunCliOptions = { imageMarkerPath: absentMarkerPath }
+
+/**
  * Options that fail the run if it launches a browser, for runs that must stop before the launch.
  */
 const noLaunch: RunCliOptions = {
   launchBrowser: () => Promise.reject(new Error('The run launched a browser.')),
+  imageMarkerPath: absentMarkerPath,
 }
 
 /**
@@ -172,14 +192,18 @@ function fakeBrowser(
     return fakeDriverOf(stories, record, driverVersion)
   }
 
-  return { options: { launchBrowser, progress: (text) => progress.push(text) }, record, progress }
+  return {
+    options: { launchBrowser, progress: (text) => progress.push(text), imageMarkerPath: absentMarkerPath },
+    record,
+    progress,
+  }
 }
 
 /**
  * Builds options whose launch fails with `error`.
  */
 function failingLaunch(error: Error): RunCliOptions {
-  return { launchBrowser: () => Promise.reject(error) }
+  return { launchBrowser: () => Promise.reject(error), imageMarkerPath: absentMarkerPath }
 }
 
 /**
@@ -237,6 +261,22 @@ function createProject(files: Record<string, string>): string {
   }
 
   return root
+}
+
+/**
+ * Writes a marker file with the given text in a temporary folder. Returns its path.
+ */
+function writeMarker(text: string): string {
+  const folder = createProject({ 'chromium.json': text })
+
+  return join(folder, 'chromium.json')
+}
+
+/**
+ * The marker of visual-check's image for the browser package's version and the given architecture.
+ */
+function markerOf(arch: 'amd64' | 'arm64', markerVersion: string = browserPackage.packageVersion): string {
+  return `{"version":"${markerVersion}","arch":"${arch}"}\n`
 }
 
 /**
@@ -393,7 +433,7 @@ Other options:
   it('exits 2 for update in CI before looking at the config', async () => {
     const project = createProject({})
 
-    expect(await runCli(['update'], { CI: 'true' }, project)).toEqual({
+    expect(await runCli(['update'], { CI: 'true' }, project, noMarker)).toEqual({
       exitCode: 2,
       stdout: '',
       stderr:
@@ -446,7 +486,7 @@ Other options:
       'web/button.stories.tsx': '',
       'docs/button.stories.tsx': '',
     })
-    const result = await runCli(['test'], {}, project)
+    const result = await runCli(['test'], {}, project, noMarker)
 
     expect(result.exitCode).toBe(2)
     expect(result.stdout).toBe('')
@@ -481,7 +521,7 @@ Other options:
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${down}' } } }\n`,
       'node_modules/storybook/package.json': JSON.stringify({ version: '12.0.0' }),
     })
-    const result = await runCli(['test'], {}, project)
+    const result = await runCli(['test'], {}, project, noMarker)
 
     expect(result.exitCode).toBe(2)
     expect(result.stderr).toMatch(/^Warning: Storybook web runs storybook 12\.0\.0.*\nStorybook web doesn't answer at /)
@@ -493,7 +533,7 @@ Other options:
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
       'node_modules/storybook/package.json': JSON.stringify({ version: '9.0.0' }),
     })
-    const result = await runCli(['test'], {}, project)
+    const result = await runCli(['test'], {}, project, noMarker)
 
     expect(result.exitCode).toBe(2)
     expect(result.stderr).toContain('Storybook web runs storybook 9.0.0, and visual-check needs 9.1 or later.')
@@ -506,7 +546,7 @@ Other options:
     const project = createProject({
       'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${first}' }, docs: { dir: 'docs', url: '${second}' } } }\n`,
     })
-    const result = await runCli(['test'], {}, project)
+    const result = await runCli(['test'], {}, project, noMarker)
 
     expect(result.stderr.indexOf('Storybook web doesn')).toBeGreaterThanOrEqual(0)
     expect(result.stderr.indexOf('Storybook web doesn')).toBeLessThan(result.stderr.indexOf('Storybook docs doesn'))
@@ -524,7 +564,7 @@ Other options:
       'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${web}' }, docs: { dir: 'docs', url: '${failing}' } } }\n`,
       'docs/button.stories.tsx': '',
     })
-    const result = await runCli(['test'], {}, project)
+    const result = await runCli(['test'], {}, project, noMarker)
 
     expect(result.exitCode).toBe(2)
     expect(result.stderr).toContain("Storybook docs's index.json failed")
@@ -538,7 +578,7 @@ Other options:
     const project = createProject({
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${down}' } } }\n`,
     })
-    const result = await runCli(['test'], {}, project)
+    const result = await runCli(['test'], {}, project, noMarker)
 
     expect(result.exitCode).toBe(2)
     expect(result.stderr).toContain("Storybook web doesn't answer")
@@ -549,7 +589,7 @@ Other options:
     const project = createProject({
       'visual-check.config.mjs': "export default { storybooks: { web: { url: 'http://127.0.0.1:6006' } }, nope: 1 }\n",
     })
-    const result = await runCli(['test'], {}, project)
+    const result = await runCli(['test'], {}, project, noMarker)
 
     expect(result.exitCode).toBe(2)
     expect(result.stdout).toBe('')
@@ -908,6 +948,81 @@ describe('runCli launching the browser', () => {
     expect(requests).toEqual([])
   })
 
+  it("starts the headless shell directly, with no progress, when the marker of visual-check's image fits", async () => {
+    const { project } = await createRun(['a'])
+    const { options, record, progress } = fakeBrowser()
+    const result = await runCli(['update'], {}, project, {
+      ...options,
+      imageMarkerPath: writeMarker(markerOf('amd64')),
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(record.launches).toEqual([{ in: 'image', executable: browserPackage.headlessShell }])
+    expect(progress).toEqual([])
+  })
+
+  it("starts the headless shell directly for platform 'host' inside visual-check's image", async () => {
+    const { project } = await createRun(['a'], {}, "platform: 'host'")
+    const { options, record } = fakeBrowser()
+
+    const result = await runCli(['update'], {}, project, {
+      ...options,
+      imageMarkerPath: writeMarker(markerOf('arm64')),
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(record.launches).toEqual([{ in: 'image', executable: browserPackage.headlessShell }])
+  })
+
+  it("exits 2 with the marker's problem before any Storybook request when the image doesn't fit", async () => {
+    const { url, requests } = await startRecordingServer()
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
+    })
+    const result = await runCli(['test'], {}, project, { ...noLaunch, imageMarkerPath: writeMarker(markerOf('arm64')) })
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stdout).toBe('')
+    expect(firstLineOf(result.stderr)).toBe(
+      "This container runs visual-check's image for arm64, but the config's platform is linux/amd64.",
+    )
+    expect(requests).toEqual([])
+  })
+
+  it("names the headless shell in the next step when the browser fails to launch inside visual-check's image", async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot })
+    const error = new BrowserLaunchError("The browser didn't answer within 30 s.", [])
+    const result = await runCli(['test'], {}, project, {
+      ...failingLaunch(error),
+      imageMarkerPath: writeMarker(markerOf('amd64')),
+    })
+
+    expect(result.stderr).toBe(
+      printed(
+        "The browser didn't answer within 30 s.",
+        `Check that ${browserPackage.headlessShell} starts in this container, then run visual-check again.`,
+      ),
+    )
+  })
+
+  it("names this container when the browser inside visual-check's image is another build", async () => {
+    const { project } = await createRun(['a'])
+    const { options } = fakeBrowser({}, '156.0.7000.1')
+    const result = await runCli(['update'], {}, project, {
+      ...options,
+      imageMarkerPath: writeMarker(markerOf('amd64')),
+    })
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stderr).toBe(
+      printed(
+        'The browser in this container is Chromium 156.0.7000.1, but the browser package ' +
+          `@visual-check/chromium ${browserPackage.packageVersion} names Chromium ${browserPackage.chromium}.`,
+        `Run in ${browserPackage.imageReference}, or rebuild your image FROM it.`,
+      ),
+    )
+  })
+
   it("exits 2 when a baseline can't be read, keeping the lines printed so far and closing the browser", async () => {
     const { project, folder } = await createRun(['a', 'b', 'c'], { a: defaultSnapshot, c: defaultSnapshot })
     const { options, record } = fakeBrowser()
@@ -939,9 +1054,9 @@ describe('runCli launching the browser', () => {
       },
     })
 
-    await expect(runCli(['update'], {}, project, { launchBrowser: async () => driver })).rejects.toThrow(
-      'A bug in the driver.',
-    )
+    await expect(
+      runCli(['update'], {}, project, { launchBrowser: async () => driver, imageMarkerPath: absentMarkerPath }),
+    ).rejects.toThrow('A bug in the driver.')
     expect(record.closed).toBe(true)
   })
 })

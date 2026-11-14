@@ -255,7 +255,11 @@ function browserOutputOf(output: readonly string[]): string {
  * Gives the next step after the browser failed to launch or exited while in use, pointing to its output first when it
  * printed any.
  */
-function browserFixOf(error: BrowserLaunchError | BrowserExitedError, place: BrowserPlace): string {
+function browserFixOf(
+  error: BrowserLaunchError | BrowserExitedError,
+  place: BrowserPlace,
+  headlessShell: string,
+): string {
   const why = error.output.length === 0 ? '' : "The browser's output below may say why. "
 
   if (!(error instanceof BrowserLaunchError)) {
@@ -263,7 +267,7 @@ function browserFixOf(error: BrowserLaunchError | BrowserExitedError, place: Bro
   }
 
   return place.in === 'image'
-    ? `${why}Check that this container runs visual-check's image, or an image built FROM it, then run visual-check again.`
+    ? `${why}Check that ${headlessShell} starts in this container, then run visual-check again.`
     : `${why}Check that Docker can run images for ${place.platform}, then run visual-check again.`
 }
 
@@ -281,7 +285,9 @@ function stopMessageOf(error: unknown, run: SnapshotRun): string | undefined {
   }
 
   if (error instanceof BrowserLaunchError || error instanceof BrowserExitedError) {
-    return `${error.message}\n${browserFixOf(error, run.place)}\n${browserOutputOf(error.output)}`
+    const fix = browserFixOf(error, run.place, run.browserPackage.headlessShell)
+
+    return `${error.message}\n${fix}\n${browserOutputOf(error.output)}`
   }
 
   if (error instanceof ContainerError || error instanceof BrowserMismatchError) {

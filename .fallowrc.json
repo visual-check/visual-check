@@ -33,7 +33,7 @@
       { "from": "cli/container", "allow": ["cli/capture/driver"] },
       { "from": "cli/browser-process", "allow": ["cli/capture/driver"] },
       { "from": "cli/baselines", "allow": [] },
-      { "from": "cli/browser", "allow": [] },
+      { "from": "cli/browser", "allow": ["cli/config"] },
       {
         "from": "cli/commands",
         "allow": [

@@ -177,7 +177,11 @@ export function runBrowserOf(launcher: LaunchBrowser, options: RunBrowserOptions
             progress: options.progress,
           },
     )
-    checkBrowserVersion(driver.version, options.browserPackage, options.configImage)
+    checkBrowserVersion(
+      driver.version,
+      options.browserPackage,
+      options.place.in === 'image' ? { in: 'image' } : { in: 'container', configImage: options.configImage },
+    )
 
     return openCaptureSession(driver, options.settings)
   }
