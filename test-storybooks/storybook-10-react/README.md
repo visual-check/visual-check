@@ -2,7 +2,7 @@
 
 One of this repo's own test Storybooks ([PRD 18](../../docs/prd/18-repo-ci.md#this-repos-own-test-storybooks)): a private React Storybook on Storybook 10 with a few plain stories, their committed baselines in `.visual-check/baselines/` and the expected outcome of every story in `expected-outcomes.json`.
 
-`e2e.ts` is its end-to-end check. It serves the static build on `127.0.0.1`, runs the built CLI against it and checks five cases. Inside visual-check's image the last is replaced; see below.
+`e2e.ts` is its end-to-end check. It serves the static build on `127.0.0.1`, runs the built CLI against it and checks five cases. Inside visual-check's image the last is replaced, and on the host other cases run; see below.
 
 - `test` against the committed baselines, with 2 workers, gives exactly the expected outcomes.
 - `update` into an empty folder writes every story that isn't broken, `test` then passes them, and the baselines of the stories expected to pass are byte-identical to the committed ones. When they aren't, the written baselines are copied to `e2e-output/`. Both commands take 2 workers from the config.
@@ -41,6 +41,21 @@ docker run --rm --network none -e CI=true -v "$PWD:$PWD" -v "$NODE_DIR:/opt/node
 ```
 
 CI's "Inside the image" job does this on every PR.
+
+## Running it on the host
+
+`--host` checks `platform: 'host'` on your machine, in place of all the cases above. It needs no `TEST_STORYBOOK_IMAGE` and no Docker. Two cases capture `card--default` against baselines the run writes, since the committed ones need the image's fonts:
+
+- With an empty cache, `update` (with `CI` unset) downloads the headless shell, says so, writes the baseline, and leaves the cache's marker for this machine's build.
+- `test` then downloads nothing and passes.
+
+The cache is `VISUAL_CHECK_CACHE_DIR` when set, which must name an empty or missing folder, else a temporary folder removed at the end. `--no-docker` adds a case for a machine with no `docker` on the `PATH`: with the default platform, `test` exits 2 with the no-Docker error before any capture.
+
+```sh
+pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --host --no-docker
+```
+
+CI's "Ubuntu host" job runs `--host` where Chromium's sandbox can't start, so the CLI relaunches without it. "macOS without Docker" runs `--host --no-docker`.
 
 ## Rewriting the baselines
 
