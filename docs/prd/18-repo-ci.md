@@ -32,6 +32,8 @@ Nightly, and not blocking:
 
 Small private workspace packages on Storybook 9.1, 10 and 11. Each version has one React Storybook, which holds the hazard stories and runs the addon, and one small Storybook for each other port: Vue, Angular and plain DOM. Until 11 is stable, it's the same pinned prerelease the test apps use.
 
+Each one lives in `test-storybooks/storybook-<major>-<framework>/`, apart from the packages in `packages/`, as the package `@visual-check/test-storybook-<major>-<framework>`. For example, `storybook-10-react` and `storybook-9-vue`.
+
 They hold:
 
 - **Hazard stories:** animations of every kind the end state handles, late images, fonts that never load, a story that navigates away, stories that break in each way, dialogs, popups, downloads and iframes.
