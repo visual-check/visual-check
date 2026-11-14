@@ -96,6 +96,10 @@ _Avoid_: Diff stories, relevant stories
 What a snapshot is rendered in: one exact Chromium build, which the project chooses.
 _Avoid_: Browser engine, Safari
 
+**Container**:
+The Docker container the browser runs in, so every machine renders a snapshot with the same fonts and libraries.
+_Avoid_: Sandbox, VM
+
 **Platform**:
 The OS and CPU architecture a snapshot is rendered on. A baseline and a snapshot from different platforms can differ even when nothing changed.
 _Avoid_: Environment, arch, machine
