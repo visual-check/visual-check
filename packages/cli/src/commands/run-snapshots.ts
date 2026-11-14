@@ -9,8 +9,9 @@ import { runWorkerPool } from '../capture/worker-pool.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
 import { ContainerError } from '../container/container-error.js'
 import { type Story, storyUrlOf } from '../storybook/read-stories.js'
+import type { BrowserPlace } from './browser-route.js'
 import { dockerProblemOf } from './docker-problem.js'
-import { type BrowserPlace, type LaunchBrowser, runBrowserOf } from './launch-browser.js'
+import { type LaunchBrowser, runBrowserOf } from './launch-browser.js'
 
 /**
  * The stories a run covers in one Storybook, in the order they are taken and printed.

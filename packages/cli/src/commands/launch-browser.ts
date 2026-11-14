@@ -7,20 +7,20 @@ import { startBrowserProcess } from '../browser-process/start-browser-process.js
 import { type CaptureSession, type CaptureSettings, openCaptureSession } from '../capture/capture-session.js'
 import { launchCdpDriver } from '../capture/driver/cdp/cdp-driver.js'
 import type { Driver } from '../capture/driver/driver.js'
-import { type ContainerPlatform, startBrowserInContainer } from '../container/browser-container.js'
+import {
+  type ContainerNetwork,
+  type ContainerPlatform,
+  startBrowserInContainer,
+} from '../container/browser-container.js'
 import { pullMissingImage } from '../container/image-pull.js'
-import { containerNetwork } from '../container/own-container.js'
+import { type SocksProxy, startSocksProxy } from '../container/socks-proxy.js'
+import type { BrowserPlace, ContainerRoute } from './browser-route.js'
 
 /**
  * The folder Chromium keeps its profile in, inside the container. The container is removed when the browser exits, and
  * the profile with it.
  */
 const containerProfileDir = '/tmp/visual-check-profile'
-
-/**
- * Where a run's browser runs: directly inside visual-check's image, or in visual-check's container.
- */
-export type BrowserPlace = { in: 'image' } | { in: 'container'; platform: ContainerPlatform }
 
 /**
  * What launching the browser for a run needs.
@@ -50,6 +50,10 @@ export type BrowserLaunch =
        */
       platform: ContainerPlatform
       /**
+       * How the browser reaches a Storybook.
+       */
+      route: ContainerRoute
+      /**
        * The path of the headless shell's executable inside the image.
        */
       executable: string
@@ -60,7 +64,9 @@ export type BrowserLaunch =
     }
 
 /**
- * Launches the browser a run captures in, and resolves with its driver once it has connected.
+ * Launches the browser a run captures in, and resolves with its driver once it has connected. In visual-check's
+ * container, the launch's route says how the browser reaches a Storybook: with host networking, on the network of the
+ * container the CLI runs in, or through a SOCKS proxy in the CLI that lives as long as the driver.
  *
  * @throws {ContainerError} When Docker can't be run or the image can't be pulled.
  * @throws {BrowserLaunchError} When the browser doesn't connect.
@@ -83,15 +89,14 @@ async function launchBrowserInImage(executable: string): Promise<Driver> {
 }
 
 /**
- * Pulls the image when Docker doesn't have it for the platform, then starts the browser in visual-check's container,
- * with its sandbox off because the container is the boundary, and connects to it over CDP. The container joins the
- * network of the container the CLI runs in when Docker knows it, else it uses the host's.
+ * Starts the browser in visual-check's container on this network, with its sandbox off because the container is the
+ * boundary, and connects to it over CDP. Every request goes through the proxy when one is given.
  */
-async function launchBrowserInContainer(launch: Extract<BrowserLaunch, { in: 'container' }>): Promise<Driver> {
-  await pullMissingImage(launch.image, launch.platform, launch.progress)
-
-  const network = await containerNetwork()
-
+async function launchCdpInContainer(
+  launch: Extract<BrowserLaunch, { in: 'container' }>,
+  network: ContainerNetwork,
+  proxyServer?: string,
+): Promise<Driver> {
   return await launchCdpDriver({
     start: startBrowserInContainer({
       image: launch.image,
@@ -101,7 +106,66 @@ async function launchBrowserInContainer(launch: Extract<BrowserLaunch, { in: 'co
     }),
     sandbox: false,
     profileDir: containerProfileDir,
+    ...(proxyServer === undefined ? {} : { proxyServer }),
   })
+}
+
+/**
+ * Wraps the driver of a browser that goes through the proxy, so closing it closes the browser, then the proxy. Calling
+ * `close()` again returns the same promise.
+ */
+function closingProxyWith(driver: Driver, proxy: SocksProxy): Driver {
+  let closing: Promise<void> | undefined
+
+  return {
+    version: driver.version,
+    exited: driver.exited,
+    newPage: (setup) => driver.newPage(setup),
+    close: () => {
+      closing ??= driver.close().finally(() => proxy.close())
+
+      return closing
+    },
+  }
+}
+
+/**
+ * Starts the SOCKS proxy, then launches the browser with `launchWith`, which gets the proxy's address as a browser on
+ * Docker's default bridge network reaches it: `socks5://host.docker.internal:<port>`, the runtime's own name for the
+ * machine. Closing the driver it resolves with closes the browser, then the proxy. When the launch fails, the proxy
+ * closes at once and the error is rethrown.
+ */
+export async function launchThroughProxy(launchWith: (proxyServer: string) => Promise<Driver>): Promise<Driver> {
+  const proxy = await startSocksProxy()
+  let driver: Driver
+
+  try {
+    driver = await launchWith(`socks5://host.docker.internal:${proxy.port}`)
+  } catch (error) {
+    await proxy.close()
+
+    throw error
+  }
+
+  return closingProxyWith(driver, proxy)
+}
+
+/**
+ * Pulls the image when Docker doesn't have it for the platform, then starts the browser in visual-check's container
+ * and connects to it over CDP. The route decides how it reaches a Storybook: `host` uses the machine's network,
+ * `container:<id>` joins the network of the container the CLI runs in, and `proxy` goes through a SOCKS proxy in the
+ * CLI.
+ */
+async function launchBrowserInContainer(launch: Extract<BrowserLaunch, { in: 'container' }>): Promise<Driver> {
+  await pullMissingImage(launch.image, launch.platform, launch.progress)
+
+  if (launch.route === 'proxy') {
+    // On the bridge network every request, loopback included, goes through the proxy, so the Storybook is reached from
+    // the CLI's machine.
+    return await launchThroughProxy((proxyServer) => launchCdpInContainer(launch, 'bridge', proxyServer))
+  }
+
+  return await launchCdpInContainer(launch, launch.route)
 }
 
 /**
@@ -173,6 +237,7 @@ export function runBrowserOf(launcher: LaunchBrowser, options: RunBrowserOptions
             in: 'container',
             image: runImageOf(options.browserPackage, options.configImage),
             platform: options.place.platform,
+            route: options.place.route,
             executable,
             progress: options.progress,
           },

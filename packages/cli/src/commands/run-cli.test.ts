@@ -23,6 +23,7 @@ import {
   type PageViewport,
 } from '../capture/driver/driver.js'
 import { ContainerError } from '../container/container-error.js'
+import type { ContainerRoute } from './browser-route.js'
 import type { BrowserLaunch, LaunchBrowser } from './launch-browser.js'
 import { type RunCliOptions, runCli } from './run-cli.js'
 
@@ -67,14 +68,27 @@ afterAll(() => {
 const noMarker: RunCliOptions = { imageMarkerPath: absentMarkerPath }
 
 /**
- * The options every run gets: a Docker probe and a machine that both have 4 CPUs and 16 GiB, and no container around
- * the run, so no test runs the real `docker` or reads the machine it runs on.
+ * The options every run gets: a Docker probe and a machine that both have 4 CPUs and 16 GiB, an engine that isn't
+ * Docker Desktop's, Linux, and no container around the run, so no test runs the real `docker` or reads the machine it
+ * runs on.
  */
 const hostOptions = {
-  probeDocker: async () => ({ cpus: 4, memoryBytes: 16 * 2 ** 30 }),
+  probeDocker: async () => ({ cpus: 4, memoryBytes: 16 * 2 ** 30, desktop: false }),
   machine: { cpus: 4, memoryBytes: 16 * 2 ** 30 },
   insideContainer: false,
+  os: 'linux',
+  findKnownContainer: async () => undefined,
 } satisfies RunCliOptions
+
+/**
+ * A Docker probe that finds Docker Desktop's engine, with 4 CPUs and 16 GiB.
+ */
+const desktopProbe = async () => ({ cpus: 4, memoryBytes: 16 * 2 ** 30, desktop: true })
+
+/**
+ * The ID of the container the CLI runs in, in the runs where the Docker daemon knows it.
+ */
+const containerId = 'c'.repeat(64)
 
 /**
  * Options that fail the run if it launches a browser, for runs that must stop before the launch.
@@ -254,6 +268,7 @@ function fakeBrowser(
   const progress: string[] = []
   const launchBrowser: LaunchBrowser = async (launch) => {
     record.launches.push(launch)
+
     if (launch.in === 'container') {
       launch.progress(`Pulling ${launch.image}\n`)
     }
@@ -809,7 +824,7 @@ describe('runCli test', () => {
 
   it("sizes 'auto' workers from the Docker host the probe finds", async () => {
     const { project } = await createRun(['a'], {}, "workers: 'auto'")
-    const smallHost = { ...noLaunch, probeDocker: async () => ({ cpus: 2, memoryBytes: 7e9 }) }
+    const smallHost = { ...noLaunch, probeDocker: async () => ({ cpus: 2, memoryBytes: 7e9, desktop: false }) }
 
     expect(firstLineOf((await runCli(['test'], {}, project, noLaunch)).stdout)).toBe(headerOf('test', 1, 4))
     expect(firstLineOf((await runCli(['test'], {}, project, smallHost)).stdout)).toBe(headerOf('test', 1, 2))
@@ -930,12 +945,34 @@ describe('runCli launching the browser', () => {
         in: 'container',
         image: browserPackage.imageReference,
         platform: 'linux/amd64',
+        route: 'host',
         executable: browserPackage.headlessShell,
         progress: expect.any(Function),
       },
     ])
     expect(progress).toEqual([`Pulling ${browserPackage.imageReference}\n`])
   })
+
+  it.each([
+    ['Docker Desktop on Linux', { probeDocker: desktopProbe }, 'proxy'],
+    ['macOS without Docker Desktop', { os: 'darwin' }, 'proxy'],
+    ['Linux without Docker Desktop', {}, 'host'],
+    [
+      'a container Docker knows, which beats Docker Desktop',
+      { probeDocker: desktopProbe, findKnownContainer: async () => containerId },
+      `container:${containerId}`,
+    ],
+  ] satisfies [string, RunCliOptions, ContainerRoute][])(
+    'routes the browser for %s',
+    async (_case, overrides, route) => {
+      const { project } = await createRun(['a'])
+      const { options, record } = fakeBrowser()
+
+      await runCli(['update'], {}, project, { ...options, ...overrides })
+
+      expect(record.launches).toMatchObject([{ in: 'container', route }])
+    },
+  )
 
   it("launches the config's image on the config's platform", async () => {
     const { project } = await createRun(['a'], {}, "image: 'example.com/chromium:custom', platform: 'linux/arm64'")
@@ -1234,23 +1271,34 @@ describe('runCli launching the browser', () => {
   it.each([
     ['linux/amd64', ''],
     ['host', "platform: 'host'"],
-  ])("never probes Docker inside visual-check's image, for platform %s", async (_platform, config) => {
-    const { project } = await createRun(['a'], {}, config)
-    const { options } = fakeBrowser()
-    let probes = 0
-    const result = await runCli(['update'], {}, project, {
-      ...options,
-      probeDocker: async () => {
-        probes += 1
+  ])(
+    "never probes Docker or looks for a container inside visual-check's image, for platform %s",
+    async (_platform, config) => {
+      const { project } = await createRun(['a'], {}, config)
+      const { options, record } = fakeBrowser()
+      let probes = 0
+      let lookups = 0
+      const result = await runCli(['update'], {}, project, {
+        ...options,
+        probeDocker: async () => {
+          probes += 1
 
-        return { cpus: 4, memoryBytes: 16 * 2 ** 30 }
-      },
-      imageMarkerPath: writeMarker(markerOf('amd64')),
-    })
+          return { cpus: 4, memoryBytes: 16 * 2 ** 30, desktop: true }
+        },
+        findKnownContainer: async () => {
+          lookups += 1
 
-    expect(result.exitCode).toBe(0)
-    expect(probes).toBe(0)
-  })
+          return containerId
+        },
+        imageMarkerPath: writeMarker(markerOf('amd64')),
+      })
+
+      expect(result.exitCode).toBe(0)
+      expect(record.launches).toEqual([{ in: 'image', executable: browserPackage.headlessShell }])
+      expect(probes).toBe(0)
+      expect(lookups).toBe(0)
+    },
+  )
 
   it("exits 2 with the marker's problem before any Storybook request when the image doesn't fit", async () => {
     const { url, requests } = await startRecordingServer()

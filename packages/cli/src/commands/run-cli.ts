@@ -9,14 +9,17 @@ import { ConfigError } from '../config/config-error.js'
 import { isCi } from '../config/is-ci.js'
 import { type LoadConfigOptions, loadConfig } from '../config/load-config.js'
 import type { ResolvedConfig } from '../config/resolve-config.js'
+import type { ContainerPlatform } from '../container/browser-container.js'
 import { ContainerError } from '../container/container-error.js'
-import { type ProbeDocker, probeDocker } from '../container/docker-probe.js'
+import { type DockerHost, type ProbeDocker, probeDocker } from '../container/docker-probe.js'
 import { isInsideContainer } from '../container/inside-container.js'
+import { knownContainerIdOf } from '../container/own-container.js'
+import { type BrowserPlace, browserPlaceOf } from './browser-route.js'
 import { checkStorybooks } from './check-storybooks.js'
 import { dockerProblemOf } from './docker-problem.js'
-import { type BrowserPlace, type LaunchBrowser, launchBrowser } from './launch-browser.js'
+import { type LaunchBrowser, launchBrowser } from './launch-browser.js'
 import { parseCommandLine, type RunOptions, UsageError } from './parse-command-line.js'
-import { placeBrowser } from './place-browser.js'
+import { readImageFit } from './read-image-fit.js'
 import { runSnapshots } from './run-snapshots.js'
 import { selectStories } from './select-stories.js'
 
@@ -80,14 +83,15 @@ export interface RunCliOptions {
   progress?: (text: string) => void
   /**
    * Launches the browser that `test` and `update` capture in. By default, in visual-check's container the image is
-   * pulled when Docker lacks it and the browser starts in the container, and inside visual-check's image the browser
-   * starts directly as a child process. Either way it connects over CDP. A test gives a fake.
+   * pulled when Docker lacks it and the browser starts in the container, reaching a Storybook by the launch's route, and
+   * inside visual-check's image the browser starts directly as a child process. Either way it connects over CDP. A test
+   * gives a fake.
    */
   launchBrowser?: LaunchBrowser
   /**
    * Asks Docker what its engine has, before a run whose browser runs in visual-check's container reaches a Storybook.
-   * Inside visual-check's image no Docker is used, so it isn't asked. By default it runs `docker info`. A test gives a
-   * fake.
+   * It also tells whether the engine is Docker Desktop's, which decides the browser's route to a Storybook. Inside
+   * visual-check's image no Docker is used, so it isn't asked. By default it runs `docker info`. A test gives a fake.
    */
   probeDocker?: ProbeDocker
   /**
@@ -100,6 +104,16 @@ export interface RunCliOptions {
    * container's root, and for `KUBERNETES_SERVICE_HOST`, which Kubernetes sets in every pod. A test gives its answer.
    */
   insideContainer?: boolean
+  /**
+   * The OS the CLI runs on, which decides between host networking and the proxy. `process.platform` by default. A test
+   * gives its own.
+   */
+  os?: NodeJS.Platform
+  /**
+   * Finds the ID of the container the CLI runs in, when the Docker daemon knows it. By default it reads
+   * `/proc/self/mountinfo` and asks `docker inspect`. A test gives a fake.
+   */
+  findKnownContainer?: () => Promise<string | undefined>
 }
 
 /**
@@ -148,7 +162,8 @@ export async function runCli(
  * image when its marker fits the browser package and the platform, else in a container, never on the host), Docker
  * answers `docker info` with a running engine of Linux containers when the browser runs in a container, every
  * Storybook in the run has a supported `storybook` version installed, and every Storybook in the run answers with an
- * index. Then it captures the selected stories.
+ * index. In a container, the browser reaches a Storybook by the route the five rules give, from the container the CLI
+ * runs in, Docker's engine and the OS. Then it captures the selected stories.
  *
  * @throws {ConfigError} When the config can't be found, loaded or used.
  */
@@ -233,8 +248,10 @@ function insideContainerOf(cliOptions: RunCliOptions, environment: Record<string
 
 /**
  * Decides where the run's browser runs and reads the CPUs and memory there: inside visual-check's image the machine's
- * own, with no Docker used, and in visual-check's container Docker's engine's, which the Docker probe reads. Gives the
- * place with them, or what to print when the browser has no place to run or Docker can't run it.
+ * own, with no Docker used, and in visual-check's container Docker's engine's, which the Docker probe reads. In a
+ * container, the route to a Storybook comes from the container the CLI runs in, whether the engine is Docker
+ * Desktop's, and the OS. Gives the place with them, or what to print when the browser has no place to run or Docker
+ * can't run it.
  *
  * @throws {Error} Any error the probe throws besides a `ContainerError`.
  */
@@ -244,18 +261,20 @@ async function placeAndProbe(
   insideContainer: boolean,
   cliOptions: RunCliOptions,
 ): Promise<{ place: BrowserPlace; host: BrowserHost } | { problem: string }> {
-  const placement = placeBrowser(config.platform, browserPackage, cliOptions.imageMarkerPath ?? imageMarkerPath)
+  const imageFit = readImageFit(config.platform, browserPackage, cliOptions.imageMarkerPath ?? imageMarkerPath)
 
-  if ('problem' in placement) {
-    return { problem: `${placement.problem}\n` }
+  if ('problem' in imageFit) {
+    return { problem: `${imageFit.problem}\n` }
   }
 
-  if (placement.place.in === 'image') {
-    return { place: placement.place, host: cliOptions.machine ?? machineOf() }
+  if (imageFit.insideImage) {
+    return { place: browserPlaceOf({ insideImage: true }), host: cliOptions.machine ?? machineOf() }
   }
+
+  let docker: DockerHost
 
   try {
-    return { place: placement.place, host: await (cliOptions.probeDocker ?? probeDocker)() }
+    docker = await (cliOptions.probeDocker ?? probeDocker)()
   } catch (error) {
     if (error instanceof ContainerError) {
       return { problem: dockerProblemOf(error, { insideContainer, image: runImageOf(browserPackage, config.image) }) }
@@ -263,6 +282,26 @@ async function placeAndProbe(
 
     throw error
   }
+
+  return { place: await containerPlaceOf(imageFit.platform, docker, cliOptions), host: docker }
+}
+
+/**
+ * Gives the place of a browser in visual-check's container on this platform, with the route the five rules give it
+ * from the container the CLI runs in, whether Docker's engine is Docker Desktop's, and the OS.
+ */
+async function containerPlaceOf(
+  platform: ContainerPlatform,
+  docker: DockerHost,
+  cliOptions: RunCliOptions,
+): Promise<BrowserPlace> {
+  return browserPlaceOf({
+    insideImage: false,
+    platform,
+    containerId: await (cliOptions.findKnownContainer ?? knownContainerIdOf)(),
+    dockerDesktop: docker.desktop,
+    os: cliOptions.os ?? process.platform,
+  })
 }
 
 /**

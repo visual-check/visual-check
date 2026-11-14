@@ -61,6 +61,11 @@ export interface CdpDriverOptions {
    */
   launchTimeoutMs?: number
   /**
+   * The proxy every request goes through, loopback included, such as `socks5://host.docker.internal:40123`. None when
+   * not given.
+   */
+  proxyServer?: string
+  /**
    * Starts the browser executable with the launch arguments.
    */
   start: StartBrowser
