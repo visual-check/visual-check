@@ -1,6 +1,8 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer, type Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { runCli } from './run-cli.js'
 
@@ -29,16 +31,89 @@ function createProject(files: Record<string, string>): string {
   writeFileSync(join(root, '.git', 'HEAD'), 'ref: refs/heads/main\n')
 
   for (const [path, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, path)), { recursive: true })
     writeFileSync(join(root, path), content)
   }
 
   return root
 }
 
-afterEach(() => {
+/**
+ * The servers the tests started, closed after each test.
+ */
+const servers: Server[] = []
+
+/**
+ * Starts the server on a free port, to be closed after the test. Returns its URL.
+ */
+async function listen(server: Server): Promise<string> {
+  servers.push(server)
+  await new Promise<void>((resolve) => {
+    server.listen(0, '127.0.0.1', resolve)
+  })
+
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+}
+
+/**
+ * Starts a server on a free port that answers every request with an index of the given stories. Returns its URL.
+ */
+async function startStorybook(storyIds: string[]): Promise<string> {
+  const entries = Object.fromEntries(
+    storyIds.map((id) => [
+      id,
+      { id, title: 'Button', name: id, importPath: './button.stories.tsx', type: 'story', subtype: 'story' },
+    ]),
+  )
+
+  return await listen(
+    createServer((_request, response) => {
+      response.end(JSON.stringify({ v: 5, entries }))
+    }),
+  )
+}
+
+/**
+ * Takes a port nothing listens on: listens on a free port, reads it and closes that server. Returns the URL it had.
+ */
+async function takeUnusedUrl(): Promise<string> {
+  const server = createServer()
+  await new Promise<void>((resolve) => {
+    server.listen(0, '127.0.0.1', resolve)
+  })
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  await new Promise<void>((resolve) => {
+    server.close(() => {
+      resolve()
+    })
+  })
+
+  return url
+}
+
+/**
+ * Closes every server the tests started.
+ */
+async function closeServers(): Promise<void> {
+  await Promise.all(
+    servers.splice(0).map(
+      (server) =>
+        new Promise<void>((resolve) => {
+          server.closeAllConnections()
+          server.close(() => {
+            resolve()
+          })
+        }),
+    ),
+  )
+}
+
+afterEach(async () => {
   for (const project of projects.splice(0)) {
     rmSync(project, { recursive: true, force: true })
   }
+
+  await closeServers()
 })
 
 describe('runCli', () => {
@@ -108,12 +183,103 @@ Other options:
     })
   })
 
-  it('exits 0 for test with a valid config', async () => {
+  it('prints the story count of the Storybook for test', async () => {
+    const url = await startStorybook(['button--primary', 'button--secondary'])
     const project = createProject({
-      'visual-check.config.mjs': "export default { storybooks: { web: { url: 'http://127.0.0.1:6006' } } }\n",
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
+      'button.stories.tsx': '',
     })
 
-    expect(await runCli(['test'], {}, project)).toEqual({ exitCode: 0, stdout: '', stderr: '' })
+    expect(await runCli(['test'], {}, project)).toEqual({
+      exitCode: 0,
+      stdout: 'Storybook web: 2 stories\n',
+      stderr: '',
+    })
+  })
+
+  it('says 1 story for a single story, and counts only the stories --filter matches', async () => {
+    const url = await startStorybook(['button--primary', 'button--secondary'])
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
+      'button.stories.tsx': '',
+    })
+
+    expect((await runCli(['update', '--filter', 'secondary$'], {}, project)).stdout).toBe('Storybook web: 1 story\n')
+    expect((await runCli(['test', '--all'], {}, project)).stdout).toBe('Storybook web: 2 stories\n')
+  })
+
+  it('prints one count line per Storybook in the run', async () => {
+    const web = await startStorybook(['a', 'b', 'c'])
+    const docs = await startStorybook(['d'])
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${web}' }, docs: { dir: 'docs', url: '${docs}' } } }\n`,
+      'web/button.stories.tsx': '',
+      'docs/button.stories.tsx': '',
+    })
+
+    expect((await runCli(['test'], {}, project)).stdout).toBe('Storybook web: 3 stories\nStorybook docs: 1 story\n')
+  })
+
+  it('suggests --storybook when one of several Storybooks is down', async () => {
+    const web = await startStorybook(['a'])
+    const down = await takeUnusedUrl()
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${web}' }, docs: { dir: 'docs', url: '${down}' } } }\n`,
+      'web/button.stories.tsx': '',
+      'docs/button.stories.tsx': '',
+    })
+    const result = await runCli(['test'], {}, project)
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stdout).toBe('')
+    expect(result.stderr).toContain(`Storybook docs doesn't answer at ${down}/index.json`)
+    expect(result.stderr).not.toContain('Storybook web')
+    expect(result.stderr.endsWith('To check one Storybook on its own, pass --storybook <name>.\n')).toBe(true)
+  })
+
+  it('reports every Storybook that is down, in config order', async () => {
+    const first = await takeUnusedUrl()
+    const second = await takeUnusedUrl()
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${first}' }, docs: { dir: 'docs', url: '${second}' } } }\n`,
+    })
+    const result = await runCli(['test'], {}, project)
+
+    expect(result.stderr.indexOf('Storybook web doesn')).toBeGreaterThanOrEqual(0)
+    expect(result.stderr.indexOf('Storybook web doesn')).toBeLessThan(result.stderr.indexOf('Storybook docs doesn'))
+  })
+
+  it('does not suggest --storybook for problems that are not an unreachable Storybook', async () => {
+    const failing = await listen(
+      createServer((_request, response) => {
+        response.statusCode = 500
+        response.end('boom')
+      }),
+    )
+    const web = await startStorybook(['a'])
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${web}' }, docs: { dir: 'docs', url: '${failing}' } } }\n`,
+      'docs/button.stories.tsx': '',
+    })
+    const result = await runCli(['test'], {}, project)
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stderr).toContain("Storybook docs's index.json failed")
+    expect(result.stderr).toContain("Storybook web's index.json lists stories files that aren't on disk")
+    expect(result.stderr).not.toContain('--storybook')
+    expect(result.stderr.indexOf("Storybook web's")).toBeLessThan(result.stderr.indexOf("Storybook docs's"))
+  })
+
+  it('does not suggest --storybook when the only Storybook is down', async () => {
+    const down = await takeUnusedUrl()
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${down}' } } }\n`,
+    })
+    const result = await runCli(['test'], {}, project)
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stderr).toContain("Storybook web doesn't answer")
+    expect(result.stderr).not.toContain('--storybook')
   })
 
   it('exits 2 with the config error for a broken config', async () => {
@@ -129,17 +295,19 @@ Other options:
   })
 
   it('hands --storybook, --url and --config to the config', async () => {
+    const url = await startStorybook(['a'])
     const project = createProject({
       'other.config.mjs':
-        "export default { storybooks: { web: { dir: 'web', url: { local: 'http://127.0.0.1:1' } }, docs: { dir: 'docs', url: { local: 'http://127.0.0.1:6007' } } } }\n",
+        "export default { storybooks: { web: { dir: 'web', url: { local: 'http://127.0.0.1:6008' } }, docs: { dir: 'docs', url: { local: 'http://127.0.0.1:6007' } } } }\n",
+      'web/button.stories.tsx': '',
     })
 
     expect(
       await runCli(
-        ['test', '--config', 'other.config.mjs', '--storybook', 'web', '--url', 'http://127.0.0.1:6006'],
+        ['test', '--config', 'other.config.mjs', '--storybook', 'web', '--url', url],
         { CI: 'true' },
         project,
       ),
-    ).toEqual({ exitCode: 0, stdout: '', stderr: '' })
+    ).toEqual({ exitCode: 0, stdout: 'Storybook web: 1 story\n', stderr: '' })
   })
 })

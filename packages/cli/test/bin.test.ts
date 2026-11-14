@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -74,6 +74,7 @@ function createProject(files: Record<string, string>): string {
   writeFileSync(join(root, '.git', 'HEAD'), 'ref: refs/heads/main\n')
 
   for (const [path, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, path)), { recursive: true })
     writeFileSync(join(root, path), content)
   }
 
@@ -103,20 +104,74 @@ function runAsynchronously(options: CaseOptions, ...commandLineArguments: string
 }
 
 /**
- * Starts a server on a free port that records the URL of every request it gets. Returns its address and the record.
+ * Starts the server on a free port, to be closed after the test. Returns its URL.
  */
-async function startRecordingServer(): Promise<{ url: string; requests: string[] }> {
-  const requests: string[] = []
-  const server = createServer((request, response) => {
-    requests.push(request.url ?? '')
-    response.end('{}')
-  })
+async function listen(server: Server): Promise<string> {
   servers.push(server)
   await new Promise<void>((resolve) => {
     server.listen(0, '127.0.0.1', resolve)
   })
 
-  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, requests }
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+}
+
+/**
+ * Takes a port nothing listens on: listens on a free port, reads it and closes that server. Returns the URL it had.
+ */
+async function takeUnusedUrl(): Promise<string> {
+  const server = createServer()
+  await new Promise<void>((resolve) => {
+    server.listen(0, '127.0.0.1', resolve)
+  })
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  await new Promise<void>((resolve) => {
+    server.close(() => {
+      resolve()
+    })
+  })
+
+  return url
+}
+
+/**
+ * Starts a server on a free port that records the URL of every request it gets. Returns its address and the record.
+ */
+async function startRecordingServer(): Promise<{ url: string; requests: string[] }> {
+  const requests: string[] = []
+  const url = await listen(
+    createServer((request, response) => {
+      requests.push(request.url ?? '')
+      response.end('{}')
+    }),
+  )
+
+  return { url, requests }
+}
+
+/**
+ * Starts a server on a free port that serves a Storybook index with the given entries. Returns its address.
+ */
+async function startStorybookServer(entries: Record<string, Record<string, unknown>>): Promise<string> {
+  return await listen(
+    createServer((_request, response) => {
+      response.end(JSON.stringify({ v: 5, entries }))
+    }),
+  )
+}
+
+/**
+ * Builds an index entry for `button.stories.tsx` with the given ID and the given fields over the story defaults.
+ */
+function entryOf(id: string, fields: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id,
+    title: 'Button',
+    name: id,
+    importPath: './button.stories.tsx',
+    type: 'story',
+    subtype: 'story',
+    ...fields,
+  }
 }
 
 afterEach(async () => {
@@ -212,11 +267,81 @@ describe('visual-check binary', () => {
     expect(result.status).toBe(2)
     expect(result.stderr).toContain('Storybook web has no URL for CI')
   })
+})
 
-  it('exits 0 for test with a valid config', () => {
+describe('visual-check binary reaching Storybooks', () => {
+  it('exits 2 at once for a Storybook that is down, naming it and its URL', async () => {
+    const down = await takeUnusedUrl()
     const project = createProject({
-      'visual-check.config.mjs': "export default { storybooks: { web: { url: 'http://127.0.0.1:6006' } } }\n",
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${down}' } } }\n`,
     })
-    expect(run({ cwd: project }, 'test').status).toBe(0)
+    const started = Date.now()
+    const result = await runAsynchronously({ cwd: project }, 'test')
+    expect(result.status).toBe(2)
+    expect(Date.now() - started).toBeLessThan(2_000)
+    expect(result.stderr).toContain(`Storybook web doesn't answer at ${down}/index.json (ECONNREFUSED)`)
+    expect(result.stderr).not.toContain('--storybook')
+  })
+
+  it('suggests --storybook when one of several Storybooks is down', async () => {
+    const url = await startStorybookServer({ a: entryOf('button--primary') })
+    const down = await takeUnusedUrl()
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${url}' }, docs: { dir: 'docs', url: '${down}' } } }\n`,
+      'web/button.stories.tsx': '',
+    })
+    const result = await runAsynchronously({ cwd: project }, 'test')
+    expect(result.status).toBe(2)
+    expect(result.stderr).toContain(`Storybook docs doesn't answer at ${down}/index.json`)
+    expect(result.stderr).toContain('To check one Storybook on its own, pass --storybook <name>.')
+  })
+
+  it('exits 2 for a stories file the index lists and the disk lacks', async () => {
+    const url = await startStorybookServer({ a: entryOf('button--primary') })
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
+    })
+    const result = await runAsynchronously({ cwd: project }, 'test')
+    expect(result.status).toBe(2)
+    expect(result.stderr).toContain("lists stories files that aren't on disk: button.stories.tsx")
+  })
+
+  it('counts stories only, not docs or test entries', async () => {
+    const url = await startStorybookServer({
+      a: entryOf('button--primary'),
+      b: entryOf('button--secondary'),
+      c: entryOf('button--primary:test', { subtype: 'test' }),
+      d: entryOf('button--docs', { type: 'docs', subtype: undefined }),
+    })
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
+      'button.stories.tsx': '',
+    })
+    const result = await runAsynchronously({ cwd: project }, 'test')
+    expect(result.status).toBe(0)
+    expect(result.stdout).toBe('Storybook web: 2 stories\n')
+  })
+
+  it('narrows the count with --filter', async () => {
+    const url = await startStorybookServer({ a: entryOf('button--primary'), b: entryOf('button--secondary') })
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
+      'button.stories.tsx': '',
+    })
+    const result = await runAsynchronously({ cwd: project }, 'test', '--filter', 'primary$')
+    expect(result.status).toBe(0)
+    expect(result.stdout).toBe('Storybook web: 1 story\n')
+  })
+
+  it('narrows the run to one Storybook with --storybook, which --url points at a server', async () => {
+    const url = await startStorybookServer({ a: entryOf('button--primary') })
+    const down = await takeUnusedUrl()
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${down}' }, docs: { dir: 'docs', url: '${down}' } } }\n`,
+      'web/button.stories.tsx': '',
+    })
+    const result = await runAsynchronously({ cwd: project }, 'test', '--storybook', 'web', '--url', url)
+    expect(result.status).toBe(0)
+    expect(result.stdout).toBe('Storybook web: 1 story\n')
   })
 })

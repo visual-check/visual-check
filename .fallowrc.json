@@ -12,6 +12,7 @@
       { "name": "cli/browser", "patterns": ["packages/cli/src/browser/**"] },
       { "name": "cli/commands", "patterns": ["packages/cli/src/commands/**"] },
       { "name": "cli/config", "patterns": ["packages/cli/src/config/**"] },
+      { "name": "cli/storybook", "patterns": ["packages/cli/src/storybook/**"] },
       { "name": "repo-checks/workspace", "patterns": ["packages/repo-checks/src/workspace/**"] },
       { "name": "repo-checks/lockstep", "patterns": ["packages/repo-checks/src/lockstep/**"] },
       { "name": "repo-checks/chromium-checksums", "patterns": ["packages/repo-checks/src/chromium-checksums/**"] },
@@ -20,8 +21,9 @@
     ],
     "rules": [
       { "from": "cli/browser", "allow": [] },
-      { "from": "cli/commands", "allow": ["cli/browser", "cli/config"] },
+      { "from": "cli/commands", "allow": ["cli/browser", "cli/config", "cli/storybook"] },
       { "from": "cli/config", "allow": [] },
+      { "from": "cli/storybook", "allow": [] },
       { "from": "repo-checks/workspace", "allow": [] },
       { "from": "repo-checks/lockstep", "allow": ["repo-checks/workspace"] },
       { "from": "repo-checks/chromium-checksums", "allow": ["repo-checks/workspace"] },

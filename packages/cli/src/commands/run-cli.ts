@@ -3,7 +3,9 @@ import { checkBrowserPackage } from '../browser/browser-package.js'
 import { ConfigError } from '../config/config-error.js'
 import { isCi } from '../config/is-ci.js'
 import { type LoadConfigOptions, loadConfig } from '../config/load-config.js'
+import { checkStorybooks } from './check-storybooks.js'
 import { parseCommandLine, type RunOptions, UsageError } from './parse-command-line.js'
+import { selectStories } from './select-stories.js'
 
 /**
  * The help text `--help` prints.
@@ -87,7 +89,8 @@ export async function runCli(
 
 /**
  * Runs `test` or `update` after the checks that come first: `update` runs only locally, the browser package is
- * installed, and the config is found, valid and usable.
+ * installed, the config is found, valid and usable, and every Storybook in the run answers with an index. Then it
+ * reports how many stories each Storybook's selection covers.
  *
  * @throws {ConfigError} When the config can't be found, loaded or used.
  */
@@ -112,9 +115,32 @@ async function runTestOrUpdate(
     return { exitCode: 2, stdout: '', stderr: browserProblem }
   }
 
-  await loadConfig(loadConfigOptionsOf(options, ci, cwd))
+  const config = await loadConfig(loadConfigOptionsOf(options, ci, cwd))
+  const checks = await checkStorybooks(config.storybooks, cwd)
+  const warnings = checks.warnings.map((warning) => `${warning}\n`).join('')
 
-  return { exitCode: 0, stdout: '', stderr: '' }
+  if ('problems' in checks) {
+    return {
+      exitCode: 2,
+      stdout: '',
+      stderr: `${warnings}${checks.problems.map((problem) => `${problem}\n`).join('')}`,
+    }
+  }
+
+  const stdout = checks.storybooks
+    .map(
+      ({ name, stories }) => `Storybook ${name}: ${storyCountOf(selectStories(stories, options.selection).length)}\n`,
+    )
+    .join('')
+
+  return { exitCode: 0, stdout, stderr: warnings }
+}
+
+/**
+ * Writes a number of stories as a count, with the noun in the right number.
+ */
+function storyCountOf(count: number): string {
+  return `${count} ${count === 1 ? 'story' : 'stories'}`
 }
 
 /**
