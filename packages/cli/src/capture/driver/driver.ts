@@ -140,9 +140,10 @@ export interface PageViewport {
  * A page in a browser context of its own, set up once, that stories are loaded and captured in. It emulates
  * `prefers-reduced-motion: no-preference` and keeps focus as if its window were focused.
  *
- * Handling the page's hazards is part of the contract every driver will meet, each inside itself and the same way in
- * every driver, so none of them fails a capture: dialogs, popups, downloads and permission requests. It comes with
- * #62; until then, no driver handles them.
+ * Handling the page's hazards is part of the contract every driver meets, each inside itself and the same way in every
+ * driver, so none of them fails or hangs a capture: `alert()` and `beforeunload` dialogs are accepted, `confirm()` and
+ * `prompt()` dialogs are dismissed, popups are closed as soon as they open, downloads and permission requests are
+ * denied, and iframes, `srcdoc` ones included, are captured as part of the page.
  *
  * Once the page can no longer be used, every call in flight and every later call fails at once, with an error that
  * says why:

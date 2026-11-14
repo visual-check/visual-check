@@ -129,6 +129,33 @@ function tupleOriginOf(securityOrigin: unknown): string | undefined {
 }
 
 /**
+ * Says whether a `Page.javascriptDialogOpening` event's dialog is accepted: an `alert` and a `beforeunload` are, a
+ * `confirm` and a `prompt` are dismissed.
+ */
+function acceptsDialog(type: unknown): boolean {
+  return type === 'alert' || type === 'beforeunload'
+}
+
+/**
+ * Gives the id of the popup a `Target.targetCreated` event reports, or undefined when the target isn't one: a `page`
+ * target of the page's own browser context other than the page itself. The browser reports it at the browser level.
+ */
+function popupIdOf(event: CdpEvent, ids: PageIds): string | undefined {
+  const { targetInfo } = event.params
+
+  if (event.sessionId !== undefined || event.method !== 'Target.targetCreated' || !isRecord(targetInfo)) {
+    return undefined
+  }
+
+  const isPopup =
+    targetInfo.type === 'page' &&
+    targetInfo.browserContextId === ids.browserContextId &&
+    targetInfo.targetId !== ids.targetId
+
+  return isPopup && typeof targetInfo.targetId === 'string' ? targetInfo.targetId : undefined
+}
+
+/**
  * Asks the browser to dispose a browser context, closing its pages. Resolves once the browser has answered, either way,
  * or after 5 s.
  */
@@ -157,7 +184,9 @@ interface PageIds {
 /**
  * A page over CDP: a target in a browser context of its own, attached in a flat session. Every command it sends goes
  * in its session, but for those about its whole browser context, which go at the browser level. It listens only to its
- * session's events and to the browser's word that its session detached.
+ * session's events and to the browser's word that its session detached or that a target of its context opened. It
+ * handles the page's hazards itself: it accepts `alert()` and `beforeunload` dialogs and dismisses `confirm()` and
+ * `prompt()`, closes every popup, and denies downloads and permission requests.
  */
 class CdpPage implements Page {
   /**
@@ -178,7 +207,8 @@ class CdpPage implements Page {
   private readonly usable = new AbortController()
 
   /**
-   * Stops watching the page's session for a crash, a detach and its main frame's commits.
+   * Stops watching the page's session for a crash, a detach, its main frame's commits and its dialogs, and the browser
+   * for its popups.
    */
   private readonly stopWatching: () => void
 
@@ -213,7 +243,8 @@ class CdpPage implements Page {
   private readonly loaderIds = new Set<string>()
 
   /**
-   * Watches the page's session for a crash, a detach and its main frame's commits, and the connection for its close.
+   * Watches the page's session for a crash, a detach, its main frame's commits and its dialogs, the browser for its
+   * popups, and the connection for its close.
    */
   constructor(connection: CdpConnection, ids: PageIds) {
     this.connection = connection
@@ -224,7 +255,8 @@ class CdpPage implements Page {
 
   /**
    * Sets the page up once: the font table, the user agent, the emulated time zone, locale, colour scheme, motion and
-   * focus, and the init script. The commands go in parallel.
+   * focus, and the init script, and denies downloads and every permission in the page's browser context. The commands
+   * go in parallel.
    */
   async setUp(browserUserAgent: string, setup: PageSetup): Promise<void> {
     await this.unlessFailed(
@@ -246,6 +278,16 @@ class CdpPage implements Page {
         }),
         this.send('Emulation.setFocusEmulationEnabled', { enabled: true }),
         this.send('Page.addScriptToEvaluateOnNewDocument', { source: setup.initScript }),
+        this.connection.send('Browser.setDownloadBehavior', {
+          behavior: 'deny',
+          browserContextId: this.ids.browserContextId,
+        }),
+        // Deprecated in the protocol in favour of `Browser.setPermission`, but only this denies every permission at once,
+        // by granting an empty set. Check it again on a Chromium bump.
+        this.connection.send('Browser.grantPermissions', {
+          permissions: [],
+          browserContextId: this.ids.browserContextId,
+        }),
       ]),
     )
   }
@@ -383,7 +425,8 @@ class CdpPage implements Page {
   }
 
   /**
-   * Fails the page when an event says it can no longer be used, and counts every document its main frame commits.
+   * Fails the page when an event says it can no longer be used, counts every document its main frame commits, and
+   * handles its dialogs and popups.
    */
   private watch(event: CdpEvent): void {
     const failure = pageFailureOf(event, this.ids.sessionId)
@@ -396,6 +439,25 @@ class CdpPage implements Page {
 
     if (frame !== undefined) {
       this.countCommit(frame)
+    }
+
+    this.handleHazards(event)
+  }
+
+  /**
+   * Answers a dialog the page's session reports, accepting an `alert` and a `beforeunload` and dismissing a `confirm`
+   * and a `prompt`, and closes a popup the browser reports in the page's browser context. The replies are not awaited,
+   * and a failed one changes nothing: the dialog or popup may have gone already.
+   */
+  private handleHazards(event: CdpEvent): void {
+    if (event.sessionId === this.ids.sessionId && event.method === 'Page.javascriptDialogOpening') {
+      this.send('Page.handleJavaScriptDialog', { accept: acceptsDialog(event.params.type) }).catch(() => undefined)
+    }
+
+    const popupId = popupIdOf(event, this.ids)
+
+    if (popupId !== undefined) {
+      this.connection.send('Target.closeTarget', { targetId: popupId }).catch(() => undefined)
     }
   }
 
@@ -575,8 +637,8 @@ async function createContext(connection: CdpConnection, limit: TimeLimit): Promi
 
 /**
  * Opens a page over CDP: creates a target in a fresh browser context, attaches to it in a flat session, and sets it up
- * once. Its user agent is the browser's own with the setup's suffix. When a step fails, or the page isn't open within
- * 30 s, it disposes the context and rethrows.
+ * once. From then on the page handles its hazards itself. Its user agent is the browser's own with the setup's suffix.
+ * When a step fails, or the page isn't open within 30 s, it disposes the context and rethrows.
  */
 export async function openCdpPage(
   connection: CdpConnection,

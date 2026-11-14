@@ -1030,11 +1030,11 @@ describe('runCli launching the browser', () => {
 
   it("names the config's platform in the next step when the browser fails to launch without output", async () => {
     const { project } = await createRun(['a'], { a: defaultSnapshot }, "platform: 'linux/arm64'")
-    const error = new BrowserLaunchError("The browser didn't answer within 30 s.", [])
+    const error = new BrowserLaunchError("The browser didn't answer its version call within 30 s.", [])
 
     expect((await runCli(['test'], {}, project, failingLaunch(error))).stderr).toBe(
       printed(
-        "The browser didn't answer within 30 s.",
+        "The browser didn't answer its version call within 30 s.",
         'Check that Docker can run images for linux/arm64, then run visual-check again.',
       ),
     )
@@ -1269,7 +1269,7 @@ describe('runCli launching the browser', () => {
 
   it("names the headless shell in the next step when the browser fails to launch inside visual-check's image", async () => {
     const { project } = await createRun(['a'], { a: defaultSnapshot })
-    const error = new BrowserLaunchError("The browser didn't answer within 30 s.", [])
+    const error = new BrowserLaunchError("The browser didn't answer its version call within 30 s.", [])
     const result = await runCli(['test'], {}, project, {
       ...failingLaunch(error),
       imageMarkerPath: writeMarker(markerOf('amd64')),
@@ -1277,7 +1277,7 @@ describe('runCli launching the browser', () => {
 
     expect(result.stderr).toBe(
       printed(
-        "The browser didn't answer within 30 s.",
+        "The browser didn't answer its version call within 30 s.",
         `Check that ${browserPackage.headlessShell} starts in this container, then run visual-check again.`,
       ),
     )

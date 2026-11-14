@@ -132,6 +132,13 @@ function navigateAndLoadOnce(command: ReceivedCommand, fake: FakeBrowser): void 
 }
 
 /**
+ * A `Target.targetCreated` event's parameters for a target of this type, in this browser context.
+ */
+function createdTarget(type: string, browserContextId: string, newTargetId: string): Record<string, unknown> {
+  return { targetInfo: { targetId: newTargetId, type, browserContextId } }
+}
+
+/**
  * Waits until every pending stream event and promise callback has run.
  */
 async function flush(): Promise<void> {
@@ -174,7 +181,7 @@ describe('Driver.newPage', () => {
   it('opens a target in a fresh browser context and attaches to it in a flat session', async () => {
     const { browser } = await openPage()
 
-    expect(sent(browser).slice(1, 4)).toEqual([
+    expect(sent(browser).slice(2, 5)).toEqual([
       { method: 'Target.createBrowserContext', params: { disposeOnDetach: true }, sessionId: undefined },
       {
         method: 'Target.createTarget',
@@ -188,7 +195,7 @@ describe('Driver.newPage', () => {
   it('sets the page up once, in its session', async () => {
     const { browser } = await openPage()
 
-    expect(sent(browser).slice(4)).toEqual([
+    expect(sent(browser).slice(5)).toEqual([
       { method: 'Page.enable', params: {}, sessionId },
       { method: 'Inspector.enable', params: {}, sessionId },
       {
@@ -227,6 +234,16 @@ describe('Driver.newPage', () => {
         method: 'Page.addScriptToEvaluateOnNewDocument',
         params: { source: 'window.__visualCheck = true' },
         sessionId,
+      },
+      {
+        method: 'Browser.setDownloadBehavior',
+        params: { behavior: 'deny', browserContextId: 'context-1' },
+        sessionId: undefined,
+      },
+      {
+        method: 'Browser.grantPermissions',
+        params: { permissions: [], browserContextId: 'context-1' },
+        sessionId: undefined,
       },
     ])
   })
@@ -337,6 +354,9 @@ describe('Page', () => {
     expect(new Set(browser.received.map((command) => command.method))).toEqual(
       new Set([
         'Browser.getVersion',
+        'Target.setDiscoverTargets',
+        'Browser.setDownloadBehavior',
+        'Browser.grantPermissions',
         'Target.createBrowserContext',
         'Target.createTarget',
         'Target.attachToTarget',
@@ -902,6 +922,100 @@ describe('Page.clearStorage', () => {
 
     await page.goto(storyUrl, 1000)
     await expect(page.clearStorage()).rejects.toThrow('Frame not found for the given storage id')
+  })
+})
+
+describe('dialogs', () => {
+  it.each([
+    ['alert', true],
+    ['beforeunload', true],
+    ['confirm', false],
+    ['prompt', false],
+  ])('answers a %s dialog in the page session with accept: %s', async (type, accept) => {
+    const { browser, page } = await openPage()
+
+    browser.emit('Page.javascriptDialogOpening', { type, message: 'Hi', url: storyUrl }, sessionId)
+    await flushUntil(() => browser.timesReceived('Page.handleJavaScriptDialog') === 1)
+    expect(sentOf(browser, 'Page.handleJavaScriptDialog')).toEqual([
+      { method: 'Page.handleJavaScriptDialog', params: { accept }, sessionId },
+    ])
+    await page.close()
+  })
+
+  it('ignores a dialog in another session', async () => {
+    const { browser } = await openPage()
+
+    browser.emit('Page.javascriptDialogOpening', { type: 'alert' }, 'session-other')
+    await flush()
+    expect(sentOf(browser, 'Page.handleJavaScriptDialog')).toEqual([])
+  })
+
+  it('survives a failing dialog answer', async () => {
+    const { browser, page } = await openPage({
+      handlers: {
+        'Page.handleJavaScriptDialog': (command: ReceivedCommand, fake: FakeBrowser) =>
+          fake.fail(command, -32000, 'No dialog is showing'),
+      },
+    })
+
+    browser.emit('Page.javascriptDialogOpening', { type: 'alert' }, sessionId)
+    await flushUntil(() => browser.timesReceived('Page.handleJavaScriptDialog') === 1)
+    await expect(page.evaluate('1', 1000)).resolves.toBeUndefined()
+  })
+
+  it('answers no dialog once the page is closed', async () => {
+    const { browser, page } = await openPage()
+
+    await page.close()
+    browser.emit('Page.javascriptDialogOpening', { type: 'alert' }, sessionId)
+    await flush()
+    expect(sentOf(browser, 'Page.handleJavaScriptDialog')).toEqual([])
+  })
+})
+
+describe('popups', () => {
+  it('closes a page target created in the same browser context, at the browser level', async () => {
+    const { browser } = await openPage()
+
+    browser.emit('Target.targetCreated', createdTarget('page', 'context-1', 'target-popup'))
+    await flushUntil(() => browser.timesReceived('Target.closeTarget') === 1)
+    expect(sentOf(browser, 'Target.closeTarget')).toEqual([
+      { method: 'Target.closeTarget', params: { targetId: 'target-popup' }, sessionId: undefined },
+    ])
+  })
+
+  it.each([
+    ['a page target of another context', createdTarget('page', 'context-2', 'target-other')],
+    ['a service worker of the same context', createdTarget('service_worker', 'context-1', 'target-worker')],
+    ['the page itself', createdTarget('page', 'context-1', targetId)],
+  ])('leaves %s alone', async (_what, params) => {
+    const { browser } = await openPage()
+
+    browser.emit('Target.targetCreated', params)
+    await flush()
+    expect(sentOf(browser, 'Target.closeTarget')).toEqual([])
+  })
+
+  it('survives a failing close', async () => {
+    const { browser, page } = await openPage({
+      handlers: {
+        'Target.closeTarget': (command: ReceivedCommand, fake: FakeBrowser) =>
+          fake.fail(command, -32000, 'No target with given id'),
+      },
+    })
+
+    browser.emit('Target.targetCreated', createdTarget('page', 'context-1', 'target-popup'))
+    await flushUntil(() => browser.timesReceived('Target.closeTarget') === 1)
+    await expect(page.evaluate('1', 1000)).resolves.toBeUndefined()
+  })
+
+  it('closes no popup once the page is closed', async () => {
+    const { browser, page } = await openPage()
+
+    await page.close()
+    browser.emit('Target.targetCreated', createdTarget('page', 'context-1', 'target-popup'))
+    await flush()
+    expect(sentOf(browser, 'Target.closeTarget')).toEqual([])
   })
 })
 
