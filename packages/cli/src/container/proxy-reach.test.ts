@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   BrowserExitedError,
   type Driver,
@@ -45,6 +45,14 @@ interface FakeBehaviour {
    * The error closing the page rejects with, or `undefined` to close it.
    */
   closeError?: Error
+  /**
+   * The error the driver's `exited` settles with after `exitsAfterMs`, or `undefined` for a browser that stays up.
+   */
+  exits?: BrowserExitedError
+  /**
+   * How long after the fake is made `exits` settles, in milliseconds. 5 when not given.
+   */
+  exitsAfterMs?: number
 }
 
 /**
@@ -67,16 +75,25 @@ interface FakeDriver {
    * How many times a page was closed.
    */
   pageCloses: number
+  /**
+   * Cancels the settling of `exited`, so no timer outlives the test.
+   */
+  cancelExit: () => void
 }
 
 /**
  * Builds a fake driver whose pages behave as `behaviour` says, and records what it was asked.
  */
 function fakeDriverOf(behaviour: FakeBehaviour = {}): FakeDriver {
+  let exitTimer: NodeJS.Timeout | undefined
   const fake: FakeDriver = {
     driver: {
       version: '157.0.8103.78',
-      exited: new Promise<BrowserExitedError>(() => undefined),
+      exited: new Promise<BrowserExitedError>((resolve) => {
+        if (behaviour.exits !== undefined) {
+          exitTimer = setTimeout(() => resolve(behaviour.exits as BrowserExitedError), behaviour.exitsAfterMs ?? 5)
+        }
+      }),
       newPage: async (setup) => {
         fake.setups.push(setup)
 
@@ -91,6 +108,7 @@ function fakeDriverOf(behaviour: FakeBehaviour = {}): FakeDriver {
     setups: [],
     gotos: [],
     pageCloses: 0,
+    cancelExit: () => clearTimeout(exitTimer),
   }
 
   return fake
@@ -129,6 +147,10 @@ function browserExited(): BrowserExitedError {
   return new BrowserExitedError({ code: 133, signal: null, error: undefined }, ['qemu: uncaught target signal'])
 }
 
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe('checkProxyReach', () => {
   it("loads the proxy's check URL in one page with a neutral setup within 30 s, then closes the page", async () => {
     const fake = fakeDriverOf()
@@ -153,7 +175,7 @@ describe('checkProxyReach', () => {
   it("names the proxy, the network error and the tested runtimes when the page can't load, and closes it", async () => {
     const fake = fakeDriverOf({ gotoError: new PageLoadError(proxy.checkUrl, 'net::ERR_PROXY_CONNECTION_FAILED') })
 
-    await expect(checkProxyReach(fake.driver, proxy)).rejects.toMatchObject({
+    await expect(checkProxyReach(fake.driver, proxy, 500, 20)).rejects.toMatchObject({
       name: 'ContainerError',
       fix: 'tested-runtimes',
       message:
@@ -168,7 +190,7 @@ describe('checkProxyReach', () => {
       gotoError: new PageTimeoutError(`The page didn't load ${proxy.checkUrl} within 1.5 s.`, 1500),
     })
 
-    await expect(checkProxyReach(fake.driver, proxy)).rejects.toMatchObject({
+    await expect(checkProxyReach(fake.driver, proxy, 1500, 20)).rejects.toMatchObject({
       name: 'ContainerError',
       fix: 'tested-runtimes',
       message:
@@ -198,7 +220,7 @@ describe('checkProxyReach', () => {
   it('fails the launch when the page crashes while it loads, and closes the page', async () => {
     const fake = fakeDriverOf({ gotoError: new PageCrashedError() })
 
-    await expect(checkProxyReach(fake.driver, proxy)).rejects.toMatchObject({
+    await expect(checkProxyReach(fake.driver, proxy, 500, 20)).rejects.toMatchObject({
       name: 'BrowserLaunchError',
       message: 'The browser failed while visual-check checked that it can reach the proxy: The page crashed.',
       output: [],
@@ -209,7 +231,7 @@ describe('checkProxyReach', () => {
   it("fails the launch when the page doesn't open", async () => {
     const fake = fakeDriverOf({ newPageError: new Error("The browser didn't open a page within 30 s") })
 
-    await expect(checkProxyReach(fake.driver, proxy)).rejects.toMatchObject({
+    await expect(checkProxyReach(fake.driver, proxy, 500, 20)).rejects.toMatchObject({
       name: 'BrowserLaunchError',
       message:
         "The browser failed while visual-check checked that it can reach the proxy: The browser didn't open a page " +
@@ -217,6 +239,52 @@ describe('checkProxyReach', () => {
       output: [],
     })
     expect(fake.pageCloses).toBe(0)
+  })
+
+  it.each([
+    ['fails to load', new PageLoadError(proxy.checkUrl, 'net::ERR_PROXY_CONNECTION_FAILED')],
+    ['times out', new PageTimeoutError(`The page didn't load ${proxy.checkUrl} within 0.5 s.`, 500)],
+  ])(
+    'gives the exit of a browser that exits shortly after the page %s, rather than blaming the runtime',
+    async (_name, gotoError) => {
+      const exited = browserExited()
+      const fake = fakeDriverOf({ gotoError, exits: exited })
+
+      await expect(checkProxyReach(fake.driver, proxy, 500, 1000)).rejects.toBe(exited)
+      expect(fake.pageCloses).toBe(1)
+    },
+  )
+
+  it('waits 2 s by default for the browser to exit before it blames the runtime', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+
+    const fake = fakeDriverOf({ gotoError: new PageLoadError(proxy.checkUrl, 'net::ERR_PROXY_CONNECTION_FAILED') })
+    let failed = false
+    const checking = checkProxyReach(fake.driver, proxy).catch((error: unknown) => {
+      failed = true
+
+      return error
+    })
+
+    await vi.advanceTimersByTimeAsync(1999)
+    expect(failed).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await checking).toMatchObject({ name: 'ContainerError' })
+  })
+
+  it('gives the exit of a browser that exits shortly after the page crashes, which carries its output', async () => {
+    const exited = browserExited()
+    const fake = fakeDriverOf({ gotoError: new PageCrashedError(), exits: exited })
+
+    await expect(checkProxyReach(fake.driver, proxy, 500, 1000)).rejects.toBe(exited)
+    expect(fake.pageCloses).toBe(1)
+  })
+
+  it("fails the launch when the browser exits only after the wait, which it doesn't outlast", async () => {
+    const fake = fakeDriverOf({ gotoError: new PageCrashedError(), exits: browserExited(), exitsAfterMs: 500 })
+
+    await expect(checkProxyReach(fake.driver, proxy, 500, 20)).rejects.toMatchObject({ name: 'BrowserLaunchError' })
+    fake.cancelExit()
   })
 
   it("ignores the page's close failing, whether the page loaded or not", async () => {
@@ -228,7 +296,7 @@ describe('checkProxyReach', () => {
 
     const failed = fakeDriverOf({ gotoError: new PageLoadError(proxy.checkUrl, 'net::ERR_FAILED'), closeError })
 
-    await expect(checkProxyReach(failed.driver, proxy)).rejects.toMatchObject({ name: 'ContainerError' })
+    await expect(checkProxyReach(failed.driver, proxy, 500, 20)).rejects.toMatchObject({ name: 'ContainerError' })
     expect(failed.pageCloses).toBe(1)
   })
 })

@@ -1,5 +1,5 @@
 import { connect } from 'node:net'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BrowserExitedError, type Driver, type Page, PageLoadError, type PageSetup } from '../capture/driver/driver.js'
 import { ContainerError } from '../container/container-error.js'
 import { launchThroughProxy } from './launch-browser.js'
@@ -121,6 +121,10 @@ function connectionTo(port: number): Promise<string> {
   })
 }
 
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe('launchThroughProxy', () => {
   it("gives the launch the proxy's address on host.docker.internal, and passes the driver's version, exit and pages through", async () => {
     let proxyServer = ''
@@ -204,6 +208,8 @@ describe('launchThroughProxy', () => {
   })
 
   it("closes the browser, then the proxy, and rejects with a ContainerError when the browser can't reach the proxy", async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+
     let proxyServer = ''
     const fake = fakeDriverOf(() => portOf(proxyServer), {
       gotoError: new PageLoadError('http://check.visual-check.invalid/', 'net::ERR_PROXY_CONNECTION_FAILED'),
@@ -214,8 +220,14 @@ describe('launchThroughProxy', () => {
 
       return fake.driver
     })
+    const rejected = expect(launching).rejects.toBeInstanceOf(ContainerError)
 
-    await expect(launching).rejects.toBeInstanceOf(ContainerError)
+    // The check waits 2 s for the browser to exit before it blames the runtime.
+    await vi.waitFor(() => {
+      expect(vi.getTimerCount()).toBe(1)
+    })
+    await vi.advanceTimersByTimeAsync(2000)
+    await rejected
     await expect(launching).rejects.toHaveProperty('fix', 'tested-runtimes')
     expect(fake.proxyAtCloses).toEqual(['accepted'])
     expect(await connectionTo(portOf(proxyServer))).toBe('ECONNREFUSED')

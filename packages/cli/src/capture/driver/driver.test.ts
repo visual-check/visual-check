@@ -43,14 +43,19 @@ describe('describeExit', () => {
 })
 
 describe('BrowserExitedError', () => {
-  it('names the exit and keeps the output lines', () => {
+  it('names the exit and keeps the output lines, with no graphics failure unless given', () => {
     const error = new BrowserExitedError({ code: 139, signal: null, error: undefined }, ['Segmentation fault'])
 
     expect(error).toMatchObject({
       name: 'BrowserExitedError',
       message: 'The browser exited with code 139 while in use.',
       output: ['Segmentation fault'],
+      graphicsFailed: false,
     })
+  })
+
+  it('keeps whether its graphics process failed', () => {
+    expect(new BrowserExitedError({ code: 133, signal: null, error: undefined }, [], true).graphicsFailed).toBe(true)
   })
 })
 
@@ -93,12 +98,19 @@ describe('PageNavigatedAwayError', () => {
 })
 
 describe('BrowserLaunchError', () => {
-  it('keeps the message and the output lines', () => {
+  it('keeps the message and the output lines, with no graphics failure unless given', () => {
     expect(new BrowserLaunchError('The browser exited with code 1 before it answered.', ['bad flag'])).toMatchObject({
       name: 'BrowserLaunchError',
       message: 'The browser exited with code 1 before it answered.',
       output: ['bad flag'],
+      graphicsFailed: false,
     })
+  })
+
+  it('keeps whether its graphics process failed', () => {
+    expect(
+      new BrowserLaunchError('The browser exited with code 133 before it answered.', [], true).graphicsFailed,
+    ).toBe(true)
   })
 })
 

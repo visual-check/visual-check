@@ -257,16 +257,25 @@ export class BrowserExitedError extends Error {
   override name = 'BrowserExitedError'
 
   /**
-   * The browser's last output lines, oldest first, which may say why it exited.
+   * The browser's last output lines, oldest first, with its last fatal log line kept first when it scrolled out. They
+   * may say why it exited.
    */
   readonly output: readonly string[]
 
   /**
-   * Names the exit code or signal and keeps the browser's last output lines.
+   * Whether the browser's output says its graphics process couldn't start, which is how a browser fails under an
+   * emulator that can't run it.
    */
-  constructor(exit: ProcessExit, output: readonly string[]) {
+  readonly graphicsFailed: boolean
+
+  /**
+   * Names the exit code or signal, and keeps the browser's last output lines and whether they say its graphics process
+   * couldn't start, `false` unless given.
+   */
+  constructor(exit: ProcessExit, output: readonly string[], graphicsFailed = false) {
     super(describeExit(exit, 'while in use'))
     this.output = output
+    this.graphicsFailed = graphicsFailed
   }
 }
 
@@ -381,15 +390,24 @@ export class BrowserLaunchError extends Error {
   override name = 'BrowserLaunchError'
 
   /**
-   * The browser's last output lines, oldest first, which may say why it didn't connect. Empty when a check failed.
+   * The browser's last output lines, oldest first, with its last fatal log line kept first when it scrolled out. They
+   * may say why it didn't connect. Empty when a check failed.
    */
   readonly output: readonly string[]
 
   /**
-   * Takes the message saying what went wrong and the browser's last output lines.
+   * Whether the browser's output says its graphics process couldn't start, which is how a browser fails under an
+   * emulator that can't run it.
    */
-  constructor(message: string, output: readonly string[]) {
+  readonly graphicsFailed: boolean
+
+  /**
+   * Takes the message saying what went wrong, the browser's last output lines and whether they say its graphics
+   * process couldn't start, `false` unless given.
+   */
+  constructor(message: string, output: readonly string[], graphicsFailed = false) {
     super(message)
     this.output = output
+    this.graphicsFailed = graphicsFailed
   }
 }

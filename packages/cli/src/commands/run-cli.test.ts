@@ -116,6 +116,14 @@ interface FakeStory {
    */
   browserExits?: boolean
   /**
+   * The browser's last output lines when it exits while capturing. `Out of memory` and `bye` when not given.
+   */
+  exitOutput?: readonly string[]
+  /**
+   * Whether the browser's exit says its graphics process couldn't start. It doesn't when not given.
+   */
+  graphicsFailed?: boolean
+  /**
    * The ID of a story this one's capture waits for until that story's capture has settled, then one more macrotask, so
    * its result reaches the pool first. That story must reach its capture on another worker, or the gate never opens
    * and the test times out. It doesn't wait when not given.
@@ -232,10 +240,11 @@ function fakeDriverOf(stories: Record<string, FakeStory>, record: FakeBrowserRec
 
           try {
             if (story.browserExits === true) {
-              throw new BrowserExitedError({ code: null, signal: 'SIGKILL', error: undefined }, [
-                'Out of memory',
-                'bye',
-              ])
+              throw new BrowserExitedError(
+                { code: null, signal: 'SIGKILL', error: undefined },
+                story.exitOutput ?? ['Out of memory', 'bye'],
+                story.graphicsFailed === true,
+              )
             }
 
             return story.snapshot ?? defaultSnapshot
@@ -1191,6 +1200,138 @@ describe('runCli launching the browser', () => {
     )
     expect(record.urls).toHaveLength(2)
     expect(record.closed).toBe(true)
+  })
+
+  describe("when the browser exits because the machine can't run the platform", () => {
+    /**
+     * What a run prints for the amd64 platform problem, ahead of the browser's output.
+     */
+    const amd64Problem =
+      "The browser exited before its first capture because its graphics process can't start: this machine can't run " +
+      'linux/amd64, as happens when Docker emulates it with QEMU.\n' +
+      "Turn on Rosetta in your Docker runtime, or set platform to 'linux/arm64' in the config, which changes it for " +
+      'the whole project.\n'
+
+    /**
+     * The browser's last output lines in these runs.
+     */
+    const emulatedOutput = ['qemu: uncaught target signal 5 (Trace/breakpoint trap) - core dumped', 'bye']
+
+    /**
+     * What a run prints for the browser's output, after the platform problem.
+     */
+    const outputBlock = `The browser's last output:\n${emulatedOutput.map((line) => `  ${line}\n`).join('')}`
+
+    /**
+     * A launch that fails with a browser whose graphics process couldn't start.
+     */
+    const launchError = new BrowserLaunchError(
+      'The browser exited with code 133 before it answered.',
+      emulatedOutput,
+      true,
+    )
+
+    /**
+     * A story whose capture the browser exits on, saying its graphics process couldn't start.
+     */
+    const emulatedExit: FakeStory = { browserExits: true, exitOutput: emulatedOutput, graphicsFailed: true }
+
+    it('exits 2 with the platform problem when the launch fails', async () => {
+      const { project } = await createRun(['a'], { a: defaultSnapshot })
+      const result = await runCli(['test'], {}, project, failingLaunch(launchError))
+
+      expect(result.exitCode).toBe(2)
+      expect(result.stderr).toBe(`${amd64Problem}${outputBlock}`)
+    })
+
+    it('exits 2 with the platform problem when the browser exits on the first capture', async () => {
+      const { project } = await createRun(['a'], { a: defaultSnapshot }, 'workers: 1')
+      const { options } = fakeBrowser({ a: emulatedExit })
+      const result = await runCli(['test'], {}, project, options)
+
+      expect(result.exitCode).toBe(2)
+      expect(result.stderr).toBe(`${amd64Problem}${outputBlock}`)
+    })
+
+    it('gives the usual message when the browser exits after another capture finished', async () => {
+      const { project } = await createRun(['a', 'b'], { a: defaultSnapshot, b: defaultSnapshot }, 'workers: 1')
+      const { options } = fakeBrowser({ b: emulatedExit })
+      const result = await runCli(['test'], {}, project, options)
+
+      expect(result.exitCode).toBe(2)
+      expect(result.stderr).toContain('The browser was killed by signal SIGKILL while in use.')
+      expect(result.stderr).not.toContain("this machine can't run")
+    })
+
+    it("gives the platform problem for the config's platform inside visual-check's image", async () => {
+      const { project } = await createRun(['a'], { a: defaultSnapshot })
+      const result = await runCli(['test'], {}, project, {
+        ...failingLaunch(launchError),
+        imageMarkerPath: writeMarker(markerOf('amd64')),
+      })
+
+      expect(result.exitCode).toBe(2)
+      expect(result.stderr).toBe(`${amd64Problem}${outputBlock}`)
+    })
+
+    it("gives the usual message inside visual-check's image for platform 'host'", async () => {
+      const { project } = await createRun(['a'], { a: defaultSnapshot }, "platform: 'host'")
+      const result = await runCli(['test'], {}, project, {
+        ...failingLaunch(launchError),
+        imageMarkerPath: writeMarker(markerOf('amd64')),
+      })
+
+      expect(result.exitCode).toBe(2)
+      expect(result.stderr).toContain('Check that')
+      expect(result.stderr).not.toContain("this machine can't run")
+    })
+
+    it('gives the platform problem when a launch rejects with the exit of the browser, as the proxy check does', async () => {
+      const { project } = await createRun(['a'], { a: defaultSnapshot })
+      const exited = new BrowserExitedError({ code: 133, signal: null, error: undefined }, emulatedOutput, true)
+      const result = await runCli(['test'], {}, project, failingLaunch(exited))
+
+      expect(result.exitCode).toBe(2)
+      expect(result.stderr).toBe(`${amd64Problem}${outputBlock}`)
+    })
+
+    it('gives the platform problem for `update` when the browser exits before any capture', async () => {
+      const { project } = await createRun(['a'], {}, 'workers: 1')
+      const { options } = fakeBrowser({ a: emulatedExit })
+      const result = await runCli(['update'], {}, project, options)
+
+      expect(result.exitCode).toBe(2)
+      expect(result.stderr).toBe(`${amd64Problem}${outputBlock}`)
+    })
+
+    it('gives the platform problem when a story before the exit was broken, as it has no capture', async () => {
+      const { project } = await createRun(['a', 'b'], { a: defaultSnapshot, b: defaultSnapshot }, 'workers: 1')
+      const { options } = fakeBrowser({ a: { broken: true }, b: emulatedExit })
+      const result = await runCli(['test'], {}, project, options)
+
+      expect(result.exitCode).toBe(2)
+      expect(result.stderr).toBe(`${amd64Problem}${outputBlock}`)
+    })
+
+    it('gives the platform problem when a story before the exit has no baseline, as it has no capture', async () => {
+      const { project } = await createRun(['a', 'b'], { b: defaultSnapshot }, 'workers: 1')
+      const { options } = fakeBrowser({ b: emulatedExit })
+      const result = await runCli(['test'], {}, project, options)
+
+      expect(result.exitCode).toBe(2)
+      expect(result.stderr).toBe(`${amd64Problem}${outputBlock}`)
+    })
+
+    it('names linux/amd64 as the fix when the config sets linux/arm64', async () => {
+      const { project } = await createRun(['a'], { a: defaultSnapshot }, "platform: 'linux/arm64'")
+      const result = await runCli(['test'], {}, project, failingLaunch(launchError))
+
+      expect(result.stderr).toBe(
+        "The browser exited before its first capture because its graphics process can't start: this machine can't " +
+          'run linux/arm64, as happens when Docker emulates it with QEMU.\n' +
+          `Set platform to 'linux/amd64' in the config, which changes it for the whole project.\n${outputBlock}`,
+      )
+    })
   })
 
   it('captures with one browser and a page for each worker, printing the lines in selection order', async () => {
