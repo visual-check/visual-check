@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises'
-import type { ContainerNetwork } from './browser-container.js'
 import { ContainerError } from './container-error.js'
 import { runDocker } from './run-docker.js'
 
@@ -56,21 +55,21 @@ async function isKnownToDocker(id: string): Promise<boolean> {
 }
 
 /**
- * The network the browser's container runs on: `container:<id>` when the CLI runs in a container the Docker daemon
- * knows, so the browser shares its loopback, else `host`.
+ * Gives the ID of the container the CLI runs in, read from the mountinfo file, when the Docker daemon knows it, else
+ * `undefined`. A missing file and a mountinfo that names no container give `undefined` without running `docker`.
  *
  * @public
  */
-export async function containerNetwork(mountinfoPath = '/proc/self/mountinfo'): Promise<ContainerNetwork> {
+export async function knownContainerIdOf(mountinfoPath = '/proc/self/mountinfo'): Promise<string | undefined> {
   let mountinfo: string
 
   try {
     mountinfo = await readFile(mountinfoPath, 'utf8')
   } catch {
-    return 'host'
+    return undefined
   }
 
   const id = containerIdOf(mountinfo)
 
-  return id !== undefined && (await isKnownToDocker(id)) ? `container:${id}` : 'host'
+  return id !== undefined && (await isKnownToDocker(id)) ? id : undefined
 }

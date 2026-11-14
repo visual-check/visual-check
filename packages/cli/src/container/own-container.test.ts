@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { type FakeDocker, installFakeDocker, removeDockerFromPath } from './fake-docker.fixture.js'
-import { containerIdOf, containerNetwork } from './own-container.js'
+import { containerIdOf, knownContainerIdOf } from './own-container.js'
 
 /**
  * The ID of the container in the mountinfo lines.
@@ -78,7 +78,7 @@ describe('containerIdOf', () => {
   })
 })
 
-describe('containerNetwork', () => {
+describe('knownContainerIdOf', () => {
   let fake: FakeDocker | undefined
   let restorePath: (() => void) | undefined
   let dir: string | undefined
@@ -114,37 +114,37 @@ describe('containerNetwork', () => {
    */
   const containerLines = `${hostLines}\n${hostnameLine(`/var/lib/docker/containers/${id}/hostname`)}`
 
-  it('is host without running docker when the mountinfo file is missing', async () => {
+  it('gives no ID without running docker when the mountinfo file is missing', async () => {
     fake = installFakeDocker({ containers: [id] })
 
-    expect(await containerNetwork('/nonexistent/mountinfo')).toBe('host')
+    expect(await knownContainerIdOf('/nonexistent/mountinfo')).toBeUndefined()
     expect(fake.calls()).toEqual([])
   })
 
-  it('is host without running docker when the mountinfo names no container', async () => {
+  it('gives no ID without running docker when the mountinfo names no container', async () => {
     fake = installFakeDocker({ containers: [id] })
 
-    expect(await containerNetwork(mountinfoWith(hostLines))).toBe('host')
+    expect(await knownContainerIdOf(mountinfoWith(hostLines))).toBeUndefined()
     expect(fake.calls()).toEqual([])
   })
 
-  it('joins the container when Docker knows it, after one inspect', async () => {
+  it('gives the ID when Docker knows the container, after one inspect', async () => {
     fake = installFakeDocker({ containers: [id] })
 
-    expect(await containerNetwork(mountinfoWith(containerLines))).toBe(`container:${id}`)
+    expect(await knownContainerIdOf(mountinfoWith(containerLines))).toBe(id)
     expect(fake.calls()).toEqual([['inspect', '--type', 'container', '--format', '{{.Id}}', id]])
   })
 
-  it('is host when Docker does not know the container', async () => {
+  it('gives no ID when Docker does not know the container', async () => {
     fake = installFakeDocker({ containers: [] })
 
-    expect(await containerNetwork(mountinfoWith(containerLines))).toBe('host')
+    expect(await knownContainerIdOf(mountinfoWith(containerLines))).toBeUndefined()
     expect(fake.calls()).toHaveLength(1)
   })
 
-  it('is host when there is no docker on PATH', async () => {
+  it('gives no ID when there is no docker on PATH', async () => {
     restorePath = removeDockerFromPath()
 
-    expect(await containerNetwork(mountinfoWith(containerLines))).toBe('host')
+    expect(await knownContainerIdOf(mountinfoWith(containerLines))).toBeUndefined()
   })
 })

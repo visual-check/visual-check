@@ -21,6 +21,22 @@ import { settlesWithin } from './time-limit.js'
 const outputLineLimit = 50
 
 /**
+ * Tells whether a line of the browser's output is a Chromium fatal log line, one that starts with its `[...:FATAL:`
+ * prefix, which names why it exits and scrolls out of the last lines under the stack trace that follows it.
+ */
+function isFatalLogLine(line: string): boolean {
+  return /^\[[^\]]*:FATAL:/.test(line)
+}
+
+/**
+ * Tells whether the browser's output says its graphics process couldn't start: Chromium's "GPU process isn't usable"
+ * line, which it logs as it exits under an emulator that can't run it, such as QEMU.
+ */
+function graphicsFailedIn(output: readonly string[]): boolean {
+  return output.some((line) => line.includes("GPU process isn't usable"))
+}
+
+/**
  * How long the browser has to answer its version call when the options don't say, in ms.
  */
 const defaultLaunchTimeoutMs = 30_000
@@ -60,6 +76,11 @@ export interface CdpDriverOptions {
    * How long the browser has to answer its first call, in ms. 30 000 by default.
    */
   launchTimeoutMs?: number
+  /**
+   * The proxy every request goes through, loopback included, such as `socks5://host.docker.internal:40123`. None when
+   * not given.
+   */
+  proxyServer?: string
   /**
    * Starts the browser executable with the launch arguments.
    */
@@ -132,7 +153,7 @@ class BrowserSession {
    */
   constructor(browser: BrowserProcess) {
     this.browser = browser
-    this.lastLines = keepLastLines(browser.output, outputLineLimit)
+    this.lastLines = keepLastLines(browser.output, outputLineLimit, isFatalLogLine)
     this.connection = new CdpConnection(browser.toBrowser, browser.fromBrowser)
     this.exited = browser.exited.then((exit) => this.onExit(exit))
   }
@@ -154,7 +175,7 @@ class BrowserSession {
     if (!(await settlesWithin(call, timeoutMs))) {
       await this.kill()
 
-      throw new BrowserLaunchError(`The browser didn't answer within ${timeoutMs / 1000} s.`, this.lastLines())
+      throw this.launchErrorWith(`The browser didn't answer within ${timeoutMs / 1000} s.`)
     }
 
     let reply: Record<string, unknown>
@@ -170,10 +191,7 @@ class BrowserSession {
     if (browserVersion === undefined) {
       await this.kill()
 
-      throw new BrowserLaunchError(
-        "The browser's answer to its version call has no version or user agent.",
-        this.lastLines(),
-      )
+      throw this.launchErrorWith("The browser's answer to its version call has no version or user agent.")
     }
 
     return browserVersion
@@ -201,7 +219,8 @@ class BrowserSession {
       return new Promise(() => undefined)
     }
 
-    const error = new BrowserExitedError(exit, this.lastLines())
+    const output = this.lastLines()
+    const error = new BrowserExitedError(exit, output, graphicsFailedIn(output))
 
     this.connection.close(error)
 
@@ -215,16 +234,23 @@ class BrowserSession {
     if (error instanceof CdpError) {
       await this.kill()
 
-      return new BrowserLaunchError(
-        `The browser answered its version call with an error: ${error.browserMessage}`,
-        this.lastLines(),
-      )
+      return this.launchErrorWith(`The browser answered its version call with an error: ${error.browserMessage}`)
     }
 
     // The connection fails a call with anything else only once the process has exited, so `exited` has settled.
     const exit = await this.browser.exited
 
-    return new BrowserLaunchError(describeExit(exit, 'before it answered'), this.lastLines())
+    return this.launchErrorWith(describeExit(exit, 'before it answered'))
+  }
+
+  /**
+   * Builds a launch error with this message and the browser's last output lines, noting whether they say its graphics
+   * process couldn't start.
+   */
+  private launchErrorWith(message: string): BrowserLaunchError {
+    const output = this.lastLines()
+
+    return new BrowserLaunchError(message, output, graphicsFailedIn(output))
   }
 
   /**

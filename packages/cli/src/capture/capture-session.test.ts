@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type CaptureSettings, openCaptureSession } from './capture-session.js'
-import { BrowserExitedError, PageCrashedError, PageNavigatedAwayError, PageTimeoutError } from './driver/driver.js'
+import {
+  BrowserExitedError,
+  PageCrashedError,
+  PageLoadError,
+  PageNavigatedAwayError,
+  PageTimeoutError,
+} from './driver/driver.js'
 import { defaultSnapshot, FakeDriver } from './fake-driver.fixture.js'
 import { pageInitScript, storyReadinessExpression } from './page-script.js'
 
@@ -287,7 +293,7 @@ describe('a broken story', () => {
           goto: async (url, timeoutMs) => {
             pass(timeoutMs)
 
-            throw new Error(`The page couldn't load ${url}: net::ERR_CONNECTION_RESET`)
+            throw new PageLoadError(url, 'net::ERR_CONNECTION_RESET')
           },
         },
       ],
@@ -319,7 +325,7 @@ describe('a broken story', () => {
       pages: [
         {
           goto: async (url) => {
-            throw new Error(`The page couldn't load ${url}: net::ERR_CONNECTION_REFUSED`)
+            throw new PageLoadError(url, 'net::ERR_CONNECTION_REFUSED')
           },
         },
       ],

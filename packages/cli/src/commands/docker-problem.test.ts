@@ -23,4 +23,12 @@ describe('dockerProblemOf', () => {
 
     expect(dockerProblemOf(error, { insideContainer: true, image })).toBe('Switch to Linux containers.\n')
   })
+
+  it('gives the message alone for a runtime with no name for the machine, which lists the tested runtimes', () => {
+    const error = new ContainerError("The browser can't reach the proxy.\nTested with OrbStack.", 'tested-runtimes')
+
+    expect(dockerProblemOf(error, { insideContainer: true, image })).toBe(
+      "The browser can't reach the proxy.\nTested with OrbStack.\n",
+    )
+  })
 })

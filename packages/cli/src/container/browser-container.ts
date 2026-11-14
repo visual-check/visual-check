@@ -24,12 +24,12 @@ const defaultKillGraceMilliseconds = 3000
 export type ContainerPlatform = 'linux/amd64' | 'linux/arm64'
 
 /**
- * The network the browser's container runs on: `host`, or `container:<id>` to join the network of the container the CLI
- * runs in.
+ * The network the browser's container runs on: `host`, Docker's default `bridge`, or `container:<id>` to join the
+ * network of the container the CLI runs in.
  *
  * @public
  */
-export type ContainerNetwork = 'host' | `container:${string}`
+export type ContainerNetwork = 'host' | 'bridge' | `container:${string}`
 
 /**
  * What the container needs to run the browser.
@@ -50,8 +50,8 @@ export interface ContainerBrowser {
    */
   executable: string
   /**
-   * The value of `docker run --network`: `host`, or `container:<id>` to join the network of the container the CLI runs
-   * in.
+   * The value of `docker run --network`: `host`, Docker's default `bridge`, or `container:<id>` to join the network of
+   * the container the CLI runs in.
    */
   network: ContainerNetwork
   /**

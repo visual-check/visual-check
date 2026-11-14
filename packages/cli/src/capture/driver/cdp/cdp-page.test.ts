@@ -1,7 +1,7 @@
 import { setFlagsFromString } from 'node:v8'
 import { runInNewContext } from 'node:vm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { type Driver, type Page, PageTimeoutError } from '../driver.js'
+import { type Driver, type Page, PageLoadError, PageTimeoutError } from '../driver.js'
 import { launchCdpDriver } from './cdp-driver.js'
 import {
   type CommandHandler,
@@ -473,9 +473,13 @@ describe('Page.goto', () => {
       },
     })
 
-    await expect(page.goto(storyUrl, 1000)).rejects.toThrow(
-      `The page couldn't load ${storyUrl}: net::ERR_CONNECTION_REFUSED`,
-    )
+    const loading = page.goto(storyUrl, 1000)
+
+    await expect(loading).rejects.toBeInstanceOf(PageLoadError)
+    await expect(loading).rejects.toMatchObject({
+      message: `The page couldn't load ${storyUrl}: net::ERR_CONNECTION_REFUSED`,
+      reason: 'net::ERR_CONNECTION_REFUSED',
+    })
   })
 
   it('fails at once, naming the URL, when the page starts a navigation of its main frame and Page.navigate never replies', async () => {

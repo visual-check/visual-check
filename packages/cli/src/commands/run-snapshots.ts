@@ -9,8 +9,10 @@ import { runWorkerPool } from '../capture/worker-pool.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
 import { ContainerError } from '../container/container-error.js'
 import { type Story, storyUrlOf } from '../storybook/read-stories.js'
+import type { BrowserPlace } from './browser-route.js'
 import { dockerProblemOf } from './docker-problem.js'
-import { type BrowserPlace, type LaunchBrowser, runBrowserOf } from './launch-browser.js'
+import { type LaunchBrowser, runBrowserOf } from './launch-browser.js'
+import { platformProblemOf } from './platform-problem.js'
 
 /**
  * The stories a run covers in one Storybook, in the order they are taken and printed.
@@ -262,6 +264,11 @@ function exitCodeOf(command: SnapshotRun['command'], statuses: SnapshotStatus[])
 }
 
 /**
+ * The statuses of a snapshot that holds a capture, as a broken or missing one doesn't.
+ */
+const capturedStatuses: readonly SnapshotStatus[] = ['passed', 'differs', 'written', 'kept']
+
+/**
  * Writes the browser's last output lines under a heading, or nothing when there are none.
  */
 function browserOutputOf(output: readonly string[]): string {
@@ -289,11 +296,37 @@ function browserFixOf(
 }
 
 /**
+ * Gives what to print for a browser that failed to launch or exited while in use: the platform problem when it stopped
+ * before any capture with output saying its graphics process can't start, for its container's platform, or the
+ * config's inside visual-check's image unless that is `host`. Otherwise the error's message, the next step and the
+ * browser's last output.
+ */
+function browserStopMessageOf(
+  error: BrowserLaunchError | BrowserExitedError,
+  run: SnapshotRun,
+  capturedAny: boolean,
+): string {
+  const platform = run.place.in === 'container' ? run.place.platform : run.config.platform
+
+  if (platform !== 'host' && !capturedAny && error.graphicsFailed) {
+    return `${platformProblemOf(platform)}${browserOutputOf(error.output)}`
+  }
+
+  const fix = browserFixOf(error, run.place, run.browserPackage.headlessShell)
+
+  return `${error.message}\n${fix}\n${browserOutputOf(error.output)}`
+}
+
+/**
  * Gives what to print for an error that stops the run with exit 2: a baseline that can't be read or written, Docker's
  * error, a failed launch's or a browser exit's with the next step and the browser's last output, or a version
- * mismatch. Any other error gives `undefined`.
+ * mismatch. A browser that fails or exits before any capture, with output saying its graphics process can't start,
+ * gives the platform problem for its container's platform, or the config's inside visual-check's image unless that is
+ * `host`, instead of the next step. Any other error gives `undefined`.
+ *
+ * `capturedAny` is whether a snapshot has been captured, which a broken or missing one hasn't.
  */
-function stopMessageOf(error: unknown, run: SnapshotRun): string | undefined {
+function stopMessageOf(error: unknown, run: SnapshotRun, capturedAny: boolean): string | undefined {
   if (error instanceof BaselineError) {
     return (
       `visual-check couldn't ${error.action} the baseline ${displayPathOf(run.cwd, error.path)}: ${error.reason}. ` +
@@ -302,9 +335,7 @@ function stopMessageOf(error: unknown, run: SnapshotRun): string | undefined {
   }
 
   if (error instanceof BrowserLaunchError || error instanceof BrowserExitedError) {
-    const fix = browserFixOf(error, run.place, run.browserPackage.headlessShell)
-
-    return `${error.message}\n${fix}\n${browserOutputOf(error.output)}`
+    return browserStopMessageOf(error, run, capturedAny)
   }
 
   if (error instanceof ContainerError) {
@@ -328,7 +359,8 @@ function stopMessageOf(error: unknown, run: SnapshotRun): string | undefined {
  * `update` writes each snapshot whose baseline is missing or differs. The browser is launched at the first story that
  * needs a capture, so a run with nothing to capture launches nothing. A baseline that can't be read or written, a
  * failed launch, a version mismatch or a browser exit stops the run with exit 2, keeping the lines of the snapshots
- * that finished. The workers' sessions and the browser are always closed.
+ * that finished; a browser that can't start its graphics process before the first capture says the machine can't run
+ * the platform. The workers' sessions and the browser are always closed.
  *
  * @throws {Error} Any other error, after closing the sessions and the browser.
  */
@@ -359,7 +391,8 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
           : await updateSnapshot(storybook, story, () => browser.session(worker), run.cwd)
     })
   } catch (error) {
-    const message = stopMessageOf(error, run)
+    const capturedAny = results.some((result) => result !== undefined && capturedStatuses.includes(result.status))
+    const message = stopMessageOf(error, run, capturedAny)
 
     if (message === undefined) {
       throw error
