@@ -17,6 +17,8 @@ This repo's CI checks the code, runs the built CLI against the repo's own small 
 | Ubuntu `host`        | Linux                | One `host` capture, where Chromium's sandbox can't start and visual-check relaunches without it                        |
 | Windows skill script | Windows              | The agent skill's script starts and stops Storybook. Killing the CLI mid-run leaves no browser container               |
 | Oldest browser       | Linux                | A smoke run with the oldest browser package in the CLI's range: it launches and captures, with no image comparison     |
+| Inside the image     | Linux                | Captures inside visual-check's image with Node added, with no Docker or network: `host` and a platform mismatch too    |
+| Job container        | Linux                | A run from a job container on another image with the `docker` CLI, which the browser's container joins                 |
 | Devcontainer         | Linux                | A run from a devcontainer that uses the host's Docker                                                                  |
 | arm64 image          | Linux arm64          | A pixel run on the arm64 image                                                                                         |
 | Lockstep versions    | Linux                | The three lockstep packages have one version                                                                           |
@@ -59,7 +61,7 @@ What CI checks there:
 - **Browser range:** images are compared on the newest browser package only. The oldest in the CLI's range gets the smoke run in the table.
 - **Platform support:** setups nobody has run are sorted once:
   - covered by a planned check: OrbStack and Docker Desktop on macOS (by hand, [Release process](19-release.md)), the container network join and the proxy from WSL (test apps);
-  - new checks here: the devcontainer run and the arm64 pixel run in the table;
+  - new checks here: the runs inside the image, from a job container and from a devcontainer, and the arm64 pixel run in the table;
   - listed in the docs as untested: Docker Desktop for Linux, rootless Docker, Podman, and Windows 10 and 11 desktops.
 
 ## Checks to repeat as each part is built
