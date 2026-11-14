@@ -1,11 +1,18 @@
 import { readFileSync } from 'node:fs'
 import { checkBrowserPackage } from '../browser/browser-package.js'
+import { runImageOf } from '../browser/browser-version.js'
 import { imageMarkerPath } from '../browser/image-marker.js'
+import type { BrowserPackage } from '../browser/read-browser-package.js'
 import { ConfigError } from '../config/config-error.js'
 import { isCi } from '../config/is-ci.js'
 import { type LoadConfigOptions, loadConfig } from '../config/load-config.js'
+import type { ResolvedConfig } from '../config/resolve-config.js'
+import { ContainerError } from '../container/container-error.js'
+import { type ProbeDocker, probeDocker } from '../container/docker-probe.js'
+import { isInsideContainer } from '../container/inside-container.js'
 import { checkStorybooks } from './check-storybooks.js'
-import { type LaunchBrowser, launchBrowser } from './launch-browser.js'
+import { dockerProblemOf } from './docker-problem.js'
+import { type BrowserPlace, type LaunchBrowser, launchBrowser } from './launch-browser.js'
 import { parseCommandLine, type RunOptions, UsageError } from './parse-command-line.js'
 import { placeBrowser } from './place-browser.js'
 import { runSnapshots } from './run-snapshots.js'
@@ -74,6 +81,17 @@ export interface RunCliOptions {
    * starts directly as a child process. Either way it connects over CDP. A test gives a fake.
    */
   launchBrowser?: LaunchBrowser
+  /**
+   * Asks Docker what its engine has, before a run whose browser runs in visual-check's container reaches a Storybook.
+   * Inside visual-check's image no Docker is used, so it isn't asked. By default it runs `docker info`. A test gives a
+   * fake.
+   */
+  probeDocker?: ProbeDocker
+  /**
+   * Whether visual-check runs inside a container. By default it looks for the file Docker and Podman leave in a
+   * container's root, and for `KUBERNETES_SERVICE_HOST`, which Kubernetes sets in every pod. A test gives its answer.
+   */
+  insideContainer?: boolean
 }
 
 /**
@@ -119,7 +137,8 @@ export async function runCli(
 /**
  * Runs `test` or `update` after the checks that come first: `update` runs only locally, the browser package is
  * installed and readable, the config is found, valid and usable, the browser has a place to run (inside visual-check's
- * image when its marker fits the browser package and the platform, else in a container, never on the host), every
+ * image when its marker fits the browser package and the platform, else in a container, never on the host), Docker
+ * answers `docker info` with a running engine of Linux containers when the browser runs in a container, every
  * Storybook in the run has a supported `storybook` version installed, and every Storybook in the run answers with an
  * index. Then it captures the selected stories.
  *
@@ -148,14 +167,11 @@ async function runTestOrUpdate(
   }
 
   const config = await loadConfig(loadConfigOptionsOf(options, ci, cwd))
-  const placement = placeBrowser(
-    config.platform,
-    browserCheck.browserPackage,
-    cliOptions.imageMarkerPath ?? imageMarkerPath,
-  )
+  const insideContainer = insideContainerOf(cliOptions, environment)
+  const placement = await placeAndProbe(config, browserCheck.browserPackage, insideContainer, cliOptions)
 
   if ('problem' in placement) {
-    return failure(placement.problem)
+    return { exitCode: 2, stdout: '', stderr: placement.problem }
   }
 
   const checks = await checkStorybooks(config.storybooks, cwd)
@@ -180,11 +196,56 @@ async function runTestOrUpdate(
       stories: selectStories(stories, options.selection),
     })),
     cwd,
+    insideContainer,
     launchBrowser: cliOptions.launchBrowser ?? launchBrowser,
     progress: cliOptions.progress ?? (() => undefined),
   })
 
   return { ...result, stderr: `${warnings}${result.stderr}` }
+}
+
+/**
+ * Whether the run is inside a container: the option when a test gives it, else what the environment and the root's
+ * marker files say.
+ */
+function insideContainerOf(cliOptions: RunCliOptions, environment: Record<string, string | undefined>): boolean {
+  return cliOptions.insideContainer ?? isInsideContainer(environment)
+}
+
+/**
+ * Decides where the run's browser runs and, when that is visual-check's container, runs the Docker probe. Inside
+ * visual-check's image no Docker is used, so the probe doesn't run. Gives the place, or what to print when the browser
+ * has no place to run or Docker can't run it.
+ *
+ * @throws {Error} Any error the probe throws besides a `ContainerError`.
+ */
+async function placeAndProbe(
+  config: ResolvedConfig,
+  browserPackage: BrowserPackage,
+  insideContainer: boolean,
+  cliOptions: RunCliOptions,
+): Promise<{ place: BrowserPlace } | { problem: string }> {
+  const placement = placeBrowser(config.platform, browserPackage, cliOptions.imageMarkerPath ?? imageMarkerPath)
+
+  if ('problem' in placement) {
+    return { problem: `${placement.problem}\n` }
+  }
+
+  if (placement.place.in === 'image') {
+    return placement
+  }
+
+  try {
+    await (cliOptions.probeDocker ?? probeDocker)()
+
+    return placement
+  } catch (error) {
+    if (error instanceof ContainerError) {
+      return { problem: dockerProblemOf(error, { insideContainer, image: runImageOf(browserPackage, config.image) }) }
+    }
+
+    throw error
+  }
 }
 
 /**

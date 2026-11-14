@@ -48,7 +48,7 @@ export async function pullMissingImage(
   if (pullExitCode !== 0) {
     throw new ContainerError(
       `docker pull of ${image} for ${platform} failed with exit code ${pullExitCode}. ` +
-        'Check that Docker is running, the image reference, and your access to its registry.',
+        'Check the image reference and your access to its registry.',
     )
   }
 }

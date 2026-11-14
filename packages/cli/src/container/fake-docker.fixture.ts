@@ -13,6 +13,11 @@ const fakeKeys = [
   'FAKE_DOCKER_PULL_EXIT',
   'FAKE_DOCKER_KILL',
   'FAKE_DOCKER_CONTAINERS',
+  'FAKE_DOCKER_INFO',
+  'FAKE_DOCKER_INFO_EXIT',
+  'FAKE_DOCKER_INFO_STDERR',
+  'FAKE_DOCKER_INFO_STDOUT',
+  'FAKE_DOCKER_INFO_DELAY',
 ]
 
 /**
@@ -47,6 +52,45 @@ export interface FakeDockerBehaviour {
    * None by default.
    */
   containers?: string[]
+  /**
+   * What `docker info` answers. A field left out keeps its default.
+   */
+  info?: {
+    /**
+     * The engine's CPUs. 4 by default.
+     */
+    cpus?: number
+    /**
+     * The engine's memory in bytes. 16 GiB by default.
+     */
+    memoryBytes?: number
+    /**
+     * The engine's container OS, `linux` or `windows`. `linux` by default.
+     */
+    osType?: string
+    /**
+     * The exit code. 0 by default. A non-zero exit prints the zeroed answer, as real Docker does with its daemon
+     * unreachable.
+     */
+    exitCode?: number
+    /**
+     * What it writes to stderr. Nothing by default.
+     */
+    stderr?: string
+    /**
+     * What it writes to stdout instead of its JSON answer, such as text that isn't JSON. An empty string writes
+     * nothing.
+     */
+    stdout?: string
+    /**
+     * The `ServerErrors` its JSON answer holds, as older Docker CLIs report an unreachable daemon.
+     */
+    serverErrors?: string[]
+    /**
+     * How long it waits before it answers, in milliseconds. 0 by default.
+     */
+    delayMs?: number
+  }
 }
 
 /**
@@ -109,6 +153,15 @@ if (args[0] === 'image' && args[1] === 'inspect') {
   } else {
     process.stderr.write('Error: No such container: ' + id + '\\n', () => process.exit(1))
   }
+} else if (args[0] === 'info') {
+  const exitCode = Number(process.env.FAKE_DOCKER_INFO_EXIT)
+  const info = JSON.parse(process.env.FAKE_DOCKER_INFO)
+  const answer = exitCode === 0 ? info : { NCPU: 0, MemTotal: 0, OSType: '', ServerErrors: info.ServerErrors }
+  const stdout = process.env.FAKE_DOCKER_INFO_STDOUT
+  setTimeout(() => {
+    process.stderr.write(process.env.FAKE_DOCKER_INFO_STDERR)
+    process.stdout.write(stdout === undefined ? JSON.stringify(answer) + '\\n' : stdout, () => process.exit(exitCode))
+  }, Number(process.env.FAKE_DOCKER_INFO_DELAY))
 } else if (args[0] === 'pull') {
   process.stdout.write('pull progress 1\\npull progress 2\\n')
   process.stderr.write('pull progress 3\\n', () => process.exit(Number(process.env.FAKE_DOCKER_PULL_EXIT)))
@@ -132,6 +185,24 @@ if (args[0] === 'image' && args[1] === 'inspect') {
 `
 
 /**
+ * Builds the environment variables that steer the fake `docker info`, leaving out the stdout override when none is given.
+ */
+function infoEnvironmentOf(info: FakeDockerBehaviour['info'] = {}): Record<string, string> {
+  return {
+    FAKE_DOCKER_INFO: JSON.stringify({
+      NCPU: info.cpus ?? 4,
+      MemTotal: info.memoryBytes ?? 16 * 2 ** 30,
+      OSType: info.osType ?? 'linux',
+      ServerErrors: info.serverErrors,
+    }),
+    FAKE_DOCKER_INFO_EXIT: String(info.exitCode ?? 0),
+    FAKE_DOCKER_INFO_STDERR: info.stderr ?? '',
+    FAKE_DOCKER_INFO_DELAY: String(info.delayMs ?? 0),
+    ...(info.stdout === undefined ? {} : { FAKE_DOCKER_INFO_STDOUT: info.stdout }),
+  }
+}
+
+/**
  * Puts a fake `docker` first on PATH, acting as `behaviour` says. The test calls `remove` afterwards.
  */
 export function installFakeDocker(behaviour: FakeDockerBehaviour = {}): FakeDocker {
@@ -150,6 +221,7 @@ export function installFakeDocker(behaviour: FakeDockerBehaviour = {}): FakeDock
   process.env.FAKE_DOCKER_PULL_EXIT = String(behaviour.pullExitCode ?? 0)
   process.env.FAKE_DOCKER_KILL = behaviour.kill ?? 'stop'
   process.env.FAKE_DOCKER_CONTAINERS = (behaviour.containers ?? []).join(',')
+  Object.assign(process.env, infoEnvironmentOf(behaviour.info))
   process.env.PATH = `${dir}${delimiter}${oldPath ?? ''}`
 
   return {

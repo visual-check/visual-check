@@ -1,13 +1,14 @@
 import { relative, sep } from 'node:path'
 import { BaselineError } from '../baselines/baseline-error.js'
 import { baselinePathOf, isByteIdentical, readBaseline, writeBaseline } from '../baselines/baseline-files.js'
-import { BrowserMismatchError } from '../browser/browser-version.js'
+import { BrowserMismatchError, runImageOf } from '../browser/browser-version.js'
 import type { BrowserPackage } from '../browser/read-browser-package.js'
 import type { CaptureSettings, StoryToCapture } from '../capture/capture-session.js'
 import { BrowserExitedError, BrowserLaunchError } from '../capture/driver/driver.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
 import { ContainerError } from '../container/container-error.js'
 import { type Story, storyUrlOf } from '../storybook/read-stories.js'
+import { dockerProblemOf } from './docker-problem.js'
 import { type BrowserPlace, type LaunchBrowser, type RunBrowser, runBrowserOf } from './launch-browser.js'
 
 /**
@@ -56,6 +57,10 @@ interface SnapshotRun {
    * The folder the CLI runs in. Printed paths are relative to it.
    */
   cwd: string
+  /**
+   * Whether visual-check runs inside a container, which decides what a Docker problem suggests.
+   */
+  insideContainer: boolean
   /**
    * Launches the browser, at the first story that needs a capture.
    */
@@ -290,7 +295,14 @@ function stopMessageOf(error: unknown, run: SnapshotRun): string | undefined {
     return `${error.message}\n${fix}\n${browserOutputOf(error.output)}`
   }
 
-  if (error instanceof ContainerError || error instanceof BrowserMismatchError) {
+  if (error instanceof ContainerError) {
+    return dockerProblemOf(error, {
+      insideContainer: run.insideContainer,
+      image: runImageOf(run.browserPackage, run.config.image),
+    })
+  }
+
+  if (error instanceof BrowserMismatchError) {
     return `${error.message}\n`
   }
 

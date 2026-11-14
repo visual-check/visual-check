@@ -1,7 +1,7 @@
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { checkBrowserVersion, packageImageOf } from '../browser/browser-version.js'
+import { checkBrowserVersion, runImageOf } from '../browser/browser-version.js'
 import type { BrowserPackage } from '../browser/read-browser-package.js'
 import { startBrowserProcess } from '../browser-process/start-browser-process.js'
 import { type CaptureSession, type CaptureSettings, openCaptureSession } from '../capture/capture-session.js'
@@ -171,7 +171,7 @@ export function runBrowserOf(launcher: LaunchBrowser, options: RunBrowserOptions
         ? { in: 'image', executable }
         : {
             in: 'container',
-            image: options.configImage ?? packageImageOf(options.browserPackage),
+            image: runImageOf(options.browserPackage, options.configImage),
             platform: options.place.platform,
             executable,
             progress: options.progress,

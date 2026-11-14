@@ -67,9 +67,19 @@ afterAll(() => {
 const noMarker: RunCliOptions = { imageMarkerPath: absentMarkerPath }
 
 /**
+ * The options every run gets: a probe that finds a Docker with 4 CPUs and 16 GiB, and no container around the run, so
+ * no test runs the real `docker`.
+ */
+const dockerOptions = {
+  probeDocker: async () => ({ cpus: 4, memoryBytes: 16 * 2 ** 30 }),
+  insideContainer: false,
+} satisfies RunCliOptions
+
+/**
  * Options that fail the run if it launches a browser, for runs that must stop before the launch.
  */
 const noLaunch: RunCliOptions = {
+  ...dockerOptions,
   launchBrowser: () => Promise.reject(new Error('The run launched a browser.')),
   imageMarkerPath: absentMarkerPath,
 }
@@ -193,7 +203,12 @@ function fakeBrowser(
   }
 
   return {
-    options: { launchBrowser, progress: (text) => progress.push(text), imageMarkerPath: absentMarkerPath },
+    options: {
+      ...dockerOptions,
+      launchBrowser,
+      progress: (text) => progress.push(text),
+      imageMarkerPath: absentMarkerPath,
+    },
     record,
     progress,
   }
@@ -203,7 +218,7 @@ function fakeBrowser(
  * Builds options whose launch fails with `error`.
  */
 function failingLaunch(error: Error): RunCliOptions {
-  return { launchBrowser: () => Promise.reject(error), imageMarkerPath: absentMarkerPath }
+  return { ...dockerOptions, launchBrowser: () => Promise.reject(error), imageMarkerPath: absentMarkerPath }
 }
 
 /**
@@ -486,7 +501,7 @@ Other options:
       'web/button.stories.tsx': '',
       'docs/button.stories.tsx': '',
     })
-    const result = await runCli(['test'], {}, project, noMarker)
+    const result = await runCli(['test'], {}, project, noLaunch)
 
     expect(result.exitCode).toBe(2)
     expect(result.stdout).toBe('')
@@ -521,7 +536,7 @@ Other options:
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${down}' } } }\n`,
       'node_modules/storybook/package.json': JSON.stringify({ version: '12.0.0' }),
     })
-    const result = await runCli(['test'], {}, project, noMarker)
+    const result = await runCli(['test'], {}, project, noLaunch)
 
     expect(result.exitCode).toBe(2)
     expect(result.stderr).toMatch(/^Warning: Storybook web runs storybook 12\.0\.0.*\nStorybook web doesn't answer at /)
@@ -533,7 +548,7 @@ Other options:
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
       'node_modules/storybook/package.json': JSON.stringify({ version: '9.0.0' }),
     })
-    const result = await runCli(['test'], {}, project, noMarker)
+    const result = await runCli(['test'], {}, project, noLaunch)
 
     expect(result.exitCode).toBe(2)
     expect(result.stderr).toContain('Storybook web runs storybook 9.0.0, and visual-check needs 9.1 or later.')
@@ -546,7 +561,7 @@ Other options:
     const project = createProject({
       'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${first}' }, docs: { dir: 'docs', url: '${second}' } } }\n`,
     })
-    const result = await runCli(['test'], {}, project, noMarker)
+    const result = await runCli(['test'], {}, project, noLaunch)
 
     expect(result.stderr.indexOf('Storybook web doesn')).toBeGreaterThanOrEqual(0)
     expect(result.stderr.indexOf('Storybook web doesn')).toBeLessThan(result.stderr.indexOf('Storybook docs doesn'))
@@ -564,7 +579,7 @@ Other options:
       'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${web}' }, docs: { dir: 'docs', url: '${failing}' } } }\n`,
       'docs/button.stories.tsx': '',
     })
-    const result = await runCli(['test'], {}, project, noMarker)
+    const result = await runCli(['test'], {}, project, noLaunch)
 
     expect(result.exitCode).toBe(2)
     expect(result.stderr).toContain("Storybook docs's index.json failed")
@@ -578,7 +593,7 @@ Other options:
     const project = createProject({
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${down}' } } }\n`,
     })
-    const result = await runCli(['test'], {}, project, noMarker)
+    const result = await runCli(['test'], {}, project, noLaunch)
 
     expect(result.exitCode).toBe(2)
     expect(result.stderr).toContain("Storybook web doesn't answer")
@@ -589,7 +604,7 @@ Other options:
     const project = createProject({
       'visual-check.config.mjs': "export default { storybooks: { web: { url: 'http://127.0.0.1:6006' } }, nope: 1 }\n",
     })
-    const result = await runCli(['test'], {}, project, noMarker)
+    const result = await runCli(['test'], {}, project, noLaunch)
 
     expect(result.exitCode).toBe(2)
     expect(result.stdout).toBe('')
@@ -901,6 +916,72 @@ describe('runCli launching the browser', () => {
     )
   })
 
+  it('exits 2 at once when the Docker probe fails, before it reads a Storybook or launches a browser', async () => {
+    const down = await takeUnusedUrl()
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${down}' } } }\n`,
+    })
+    const probeDocker = () => Promise.reject(new ContainerError("Docker's daemon isn't running."))
+
+    expect(await runCli(['test'], {}, project, { ...noLaunch, probeDocker })).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr: printed(
+        "Docker's daemon isn't running.",
+        "Start or install Docker, or set platform: 'host' in the config.",
+      ),
+    })
+  })
+
+  it('asks for Linux containers without the both-fixes line when the probe finds Windows containers', async () => {
+    const { project } = await createRun(['a'])
+    const probeDocker = () =>
+      Promise.reject(new ContainerError('Switch Docker to Linux containers.', 'linux-containers'))
+
+    expect(await runCli(['test'], {}, project, { ...noLaunch, probeDocker, insideContainer: true })).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr: printed('Switch Docker to Linux containers.'),
+    })
+  })
+
+  it("names the browser package's image as the job container when the probe fails inside a container", async () => {
+    const { project } = await createRun(['a'])
+    const probeDocker = () => Promise.reject(new ContainerError('No docker command.'))
+    const result = await runCli(['test'], {}, project, { ...noLaunch, probeDocker, insideContainer: true })
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stderr).toBe(
+      printed(
+        'No docker command.',
+        "Start or install Docker, or set platform: 'host' in the config.",
+        `Inside a container, run visual-check in a job container on visual-check's image, ${browserPackage.imageReference}, which needs no Docker.`,
+      ),
+    )
+  })
+
+  it("names the config's image as the job container when it sets one", async () => {
+    const { project } = await createRun(['a'], {}, "image: 'example.com/my-chromium:1'")
+    const probeDocker = () => Promise.reject(new ContainerError('No docker command.'))
+    const result = await runCli(['test'], {}, project, { ...noLaunch, probeDocker, insideContainer: true })
+
+    expect(result.stderr).toContain("visual-check's image, example.com/my-chromium:1, which needs no Docker.\n")
+  })
+
+  it('ends a failed pull with both fixes, and with the job container inside a container', async () => {
+    const { project } = await createRun(['a'])
+    const error = new ContainerError('docker pull of example.com/chromium for linux/amd64 failed with exit code 1.')
+    const result = await runCli(['update'], {}, project, { ...failingLaunch(error), insideContainer: true })
+
+    expect(result.stderr).toBe(
+      printed(
+        'docker pull of example.com/chromium for linux/amd64 failed with exit code 1.',
+        "Start or install Docker, or set platform: 'host' in the config.",
+        `Inside a container, run visual-check in a job container on visual-check's image, ${browserPackage.imageReference}, which needs no Docker.`,
+      ),
+    )
+  })
+
   it("exits 2 with Docker's message when the image can't be pulled", async () => {
     const { project } = await createRun(['a'])
     const error = new ContainerError('docker pull of example.com/chromium for linux/amd64 failed with exit code 1.')
@@ -908,7 +989,10 @@ describe('runCli launching the browser', () => {
     expect(await runCli(['update'], {}, project, failingLaunch(error))).toEqual({
       exitCode: 2,
       stdout: printed(headerOf('update', 1)),
-      stderr: printed('docker pull of example.com/chromium for linux/amd64 failed with exit code 1.'),
+      stderr: printed(
+        'docker pull of example.com/chromium for linux/amd64 failed with exit code 1.',
+        "Start or install Docker, or set platform: 'host' in the config.",
+      ),
     })
   })
 
@@ -972,6 +1056,27 @@ describe('runCli launching the browser', () => {
 
     expect(result.exitCode).toBe(0)
     expect(record.launches).toEqual([{ in: 'image', executable: browserPackage.headlessShell }])
+  })
+
+  it.each([
+    ['linux/amd64', ''],
+    ['host', "platform: 'host'"],
+  ])("never probes Docker inside visual-check's image, for platform %s", async (_platform, config) => {
+    const { project } = await createRun(['a'], {}, config)
+    const { options } = fakeBrowser()
+    let probes = 0
+    const result = await runCli(['update'], {}, project, {
+      ...options,
+      probeDocker: async () => {
+        probes += 1
+
+        return { cpus: 4, memoryBytes: 16 * 2 ** 30 }
+      },
+      imageMarkerPath: writeMarker(markerOf('amd64')),
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(probes).toBe(0)
   })
 
   it("exits 2 with the marker's problem before any Storybook request when the image doesn't fit", async () => {
@@ -1055,7 +1160,11 @@ describe('runCli launching the browser', () => {
     })
 
     await expect(
-      runCli(['update'], {}, project, { launchBrowser: async () => driver, imageMarkerPath: absentMarkerPath }),
+      runCli(['update'], {}, project, {
+        ...dockerOptions,
+        launchBrowser: async () => driver,
+        imageMarkerPath: absentMarkerPath,
+      }),
     ).rejects.toThrow('A bug in the driver.')
     expect(record.closed).toBe(true)
   })
