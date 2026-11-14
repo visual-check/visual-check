@@ -3,14 +3,15 @@ import { BaselineError } from '../baselines/baseline-error.js'
 import { baselinePathOf, isByteIdentical, readBaseline, writeBaseline } from '../baselines/baseline-files.js'
 import { BrowserMismatchError, runImageOf } from '../browser/browser-version.js'
 import type { BrowserPackage } from '../browser/read-browser-package.js'
-import type { CaptureSession, CaptureSettings, StoryToCapture } from '../capture/capture-session.js'
+import type { CaptureSettings, StoryCapture, StoryToCapture } from '../capture/capture-session.js'
 import { BrowserExitedError, BrowserLaunchError } from '../capture/driver/driver.js'
 import { runWorkerPool } from '../capture/worker-pool.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
 import { ContainerError } from '../container/container-error.js'
 import { type Story, storyUrlOf } from '../storybook/read-stories.js'
 import { dockerProblemOf } from './docker-problem.js'
-import { type BrowserPlace, type LaunchBrowser, runBrowserOf } from './launch-browser.js'
+import type { BrowserPlace, LaunchBrowser } from './launch-browser.js'
+import { type FirstBrowserExit, runBrowserOf } from './run-browser.js'
 
 /**
  * The stories a run covers in one Storybook, in the order they are taken and printed.
@@ -67,7 +68,7 @@ interface SnapshotRun {
    */
   insideContainer: boolean
   /**
-   * Launches the browser, at the first story that needs a capture.
+   * Launches the browser, at the first story that needs a capture, and again at the first after the browser exits.
    */
   launchBrowser: LaunchBrowser
   /**
@@ -90,7 +91,8 @@ interface SnapshotRunResult {
    */
   stdout: string
   /**
-   * What stopped the run, or nothing.
+   * When the first browser exited mid-run, that it exited, whether visual-check relaunches it once, and its last output.
+   * Then, for a run that stopped with exit 2, what stopped it. Nothing for a run that went on with no exit.
    */
   stderr: string
 }
@@ -184,13 +186,20 @@ function displayPathOf(cwd: string, path: string): string {
 }
 
 /**
+ * Captures a story in the run's browser, on the worker's own session. `started`, when given, is called once the
+ * browser is up, just before the capture.
+ */
+type CaptureStory = (story: StoryToCapture, started?: () => void) => Promise<StoryCapture>
+
+/**
  * Tests one story: a missing baseline is reported without a capture, and a snapshot passes only when it holds the
- * baseline's bytes. It asks for the session only when it captures.
+ * baseline's bytes. It asks for a capture only once it has read the baseline. A pass's time leaves out the browser's
+ * launch.
  */
 async function testSnapshot(
   storybook: ResolvedStorybook,
   story: Story,
-  session: () => Promise<CaptureSession>,
+  captureStory: CaptureStory,
 ): Promise<SnapshotResult> {
   const baseline = await readBaseline(baselinePathOf(storybook.baselines, story.id))
 
@@ -198,9 +207,10 @@ async function testSnapshot(
     return { status: 'missing', detail: 'missing: no baseline yet; run visual-check update to write it' }
   }
 
-  const open = await session()
-  const started = performance.now()
-  const capture = await open.capture(storyToCaptureOf(storybook, story))
+  let started = performance.now()
+  const capture = await captureStory(storyToCaptureOf(storybook, story), () => {
+    started = performance.now()
+  })
 
   if ('broken' in capture) {
     return { status: 'broken', detail: `broken: ${capture.broken.message}` }
@@ -220,10 +230,10 @@ async function testSnapshot(
 async function updateSnapshot(
   storybook: ResolvedStorybook,
   story: Story,
-  session: () => Promise<CaptureSession>,
+  captureStory: CaptureStory,
   cwd: string,
 ): Promise<SnapshotResult> {
-  const capture = await (await session()).capture(storyToCaptureOf(storybook, story))
+  const capture = await captureStory(storyToCaptureOf(storybook, story))
 
   if ('broken' in capture) {
     return { status: 'broken', detail: `broken: ${capture.broken.message}` }
@@ -266,6 +276,22 @@ function exitCodeOf(command: SnapshotRun['command'], statuses: SnapshotStatus[])
  */
 function browserOutputOf(output: readonly string[]): string {
   return output.length === 0 ? '' : `The browser's last output:\n${output.map((line) => `  ${line}\n`).join('')}`
+}
+
+/**
+ * Says that the first browser exited mid-run: the exit, whether visual-check relaunches the browser for the stories
+ * left, and the browser's last output. Gives nothing when the browser didn't exit.
+ */
+function exitNoticeOf(exit: FirstBrowserExit | undefined): string {
+  if (exit === undefined) {
+    return ''
+  }
+
+  const relaunch = exit.relaunched
+    ? 'visual-check relaunches it once for the stories left.'
+    : "No story left needed a capture, so visual-check didn't relaunch the browser."
+
+  return `${exit.error.message}\n${relaunch}\n${browserOutputOf(exit.error.output)}`
 }
 
 /**
@@ -326,11 +352,15 @@ function stopMessageOf(error: unknown, run: SnapshotRun): string | undefined {
  * the header, then the counts. The lines follow config order and then selection order, whatever order the captures
  * finish in. `test` compares each snapshot with its baseline byte for byte and never captures a missing baseline;
  * `update` writes each snapshot whose baseline is missing or differs. The browser is launched at the first story that
- * needs a capture, so a run with nothing to capture launches nothing. A baseline that can't be read or written, a
- * failed launch, a version mismatch or a browser exit stops the run with exit 2, keeping the lines of the snapshots
- * that finished. The workers' sessions and the browser are always closed.
+ * needs a capture, so a run with nothing to capture launches nothing.
  *
- * @throws {Error} Any other error, after closing the sessions and the browser.
+ * When the browser exits, every story in flight is broken, `browser-exited`, the browser is relaunched once at the
+ * next story that needs a capture, and the run goes on; stderr then says so, with the browser's last output, whatever
+ * the run exits with. A baseline that can't be read or written, a failed launch or relaunch, a version mismatch or the
+ * relaunched browser's exit stops the run with exit 2, keeping the lines of the snapshots that finished. The workers'
+ * sessions and the browsers are always closed.
+ *
+ * @throws {Error} Any other error, after closing the sessions and the browsers.
  */
 export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult> {
   const header = headerOf(run)
@@ -353,10 +383,12 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
 
   try {
     await runWorkerPool(run.workers, items, async ({ storybook, story }, index, worker) => {
+      const captureStory: CaptureStory = (toCapture, started) => browser.capture(worker, toCapture, started)
+
       results[index] =
         run.command === 'test'
-          ? await testSnapshot(storybook, story, () => browser.session(worker))
-          : await updateSnapshot(storybook, story, () => browser.session(worker), run.cwd)
+          ? await testSnapshot(storybook, story, captureStory)
+          : await updateSnapshot(storybook, story, captureStory, run.cwd)
     })
   } catch (error) {
     const message = stopMessageOf(error, run)
@@ -365,7 +397,7 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
       throw error
     }
 
-    return { exitCode: 2, stdout: printed(linesOf()), stderr: message }
+    return { exitCode: 2, stdout: printed(linesOf()), stderr: `${exitNoticeOf(browser.firstExit())}${message}` }
   } finally {
     await browser.close()
   }
@@ -375,6 +407,6 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
   return {
     exitCode: exitCodeOf(run.command, statuses),
     stdout: printed([...linesOf(), countsLineOf(run.command, statuses)]),
-    stderr: '',
+    stderr: exitNoticeOf(browser.firstExit()),
   }
 }

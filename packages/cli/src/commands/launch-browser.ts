@@ -1,10 +1,7 @@
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { checkBrowserVersion, runImageOf } from '../browser/browser-version.js'
-import type { BrowserPackage } from '../browser/read-browser-package.js'
 import { startBrowserProcess } from '../browser-process/start-browser-process.js'
-import { type CaptureSession, type CaptureSettings, openCaptureSession } from '../capture/capture-session.js'
 import { launchCdpDriver } from '../capture/driver/cdp/cdp-driver.js'
 import type { Driver } from '../capture/driver/driver.js'
 import { type ContainerPlatform, startBrowserInContainer } from '../container/browser-container.js'
@@ -109,110 +106,4 @@ async function launchBrowserInContainer(launch: Extract<BrowserLaunch, { in: 'co
  */
 export const launchBrowser: LaunchBrowser = async (launch) => {
   return launch.in === 'image' ? await launchBrowserInImage(launch.executable) : await launchBrowserInContainer(launch)
-}
-
-/**
- * What a run's browser is launched and set up with.
- */
-interface RunBrowserOptions {
-  /**
-   * The browser package, which names the image, the headless shell and the build the browser must be.
-   */
-  browserPackage: BrowserPackage
-  /**
-   * The config's `image`, which replaces the browser package's, or `undefined`.
-   */
-  configImage: string | undefined
-  /**
-   * Where the browser runs.
-   */
-  place: BrowserPlace
-  /**
-   * How each session captures every story.
-   */
-  settings: CaptureSettings
-  /**
-   * Writes the progress of a pull as it happens.
-   */
-  progress: (text: string) => void
-}
-
-/**
- * The browser a run captures in, launched at the first story that needs it, with one capture session for each worker.
- */
-export interface RunBrowser {
-  /**
-   * The capture session of a worker. The first call launches the browser and checks that it is the browser package's
-   * build, and every call shares that one browser. A worker's first call opens its session, which keeps its own page.
-   *
-   * @throws {ContainerError} When Docker can't be run or the image can't be pulled.
-   * @throws {BrowserLaunchError} When the browser doesn't connect.
-   * @throws {BrowserMismatchError} When the browser isn't the browser package's build.
-   */
-  session: (worker: number) => Promise<CaptureSession>
-  /**
-   * Closes every session's page and the browser, if they were opened. Waits for a launch still in flight, so no
-   * browser is left running, and doesn't throw when the launch failed.
-   */
-  close: () => Promise<void>
-}
-
-/**
- * Prepares a run's browser, which `launcher` launches. Nothing is launched until the first `session()`.
- */
-export function runBrowserOf(launcher: LaunchBrowser, options: RunBrowserOptions): RunBrowser {
-  let launched: Promise<Driver> | undefined
-  const sessions = new Map<number, CaptureSession>()
-
-  const launch = async (): Promise<Driver> => {
-    const executable = options.browserPackage.headlessShell
-    const driver = await launcher(
-      options.place.in === 'image'
-        ? { in: 'image', executable }
-        : {
-            in: 'container',
-            image: runImageOf(options.browserPackage, options.configImage),
-            platform: options.place.platform,
-            executable,
-            progress: options.progress,
-          },
-    )
-
-    try {
-      checkBrowserVersion(
-        driver.version,
-        options.browserPackage,
-        options.place.in === 'image' ? { in: 'image' } : { in: 'container', configImage: options.configImage },
-      )
-    } catch (error) {
-      await driver.close()
-
-      throw error
-    }
-
-    return driver
-  }
-
-  return {
-    session: async (worker) => {
-      launched ??= launch()
-
-      const driver = await launched
-      let session = sessions.get(worker)
-
-      if (session === undefined) {
-        session = openCaptureSession(driver, options.settings)
-        sessions.set(worker, session)
-      }
-
-      return session
-    },
-    close: async () => {
-      await Promise.all([...sessions.values()].map((session) => session.close()))
-
-      const driver = await launched?.catch(() => undefined)
-
-      await driver?.close()
-    },
-  }
 }
