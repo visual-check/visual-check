@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { type Driver, type Page, PageTimeoutError } from '../driver.js'
 import { launchCdpDriver } from './cdp-driver.js'
 import {
+  type CommandHandler,
+  childFrame,
   defaultCaptureData,
   defaultVersionReply,
   FakeBrowser,
@@ -24,6 +26,16 @@ const collectGarbage = runInNewContext('gc') as () => void
  * The URL the tests load.
  */
 const storyUrl = 'http://storybook:6006/iframe.html?id=button--primary&viewMode=story'
+
+/**
+ * The origin of the URL the tests load.
+ */
+const storyOrigin = 'http://storybook:6006'
+
+/**
+ * The command that clears every cookie of the first page's browser context, at the browser level.
+ */
+const clearCookies = { method: 'Storage.clearCookies', params: { browserContextId: 'context-1' }, sessionId: undefined }
 
 /**
  * The session the fake browser attaches the first page in.
@@ -79,6 +91,35 @@ function sent(browser: FakeBrowser): SentCommand[] {
  */
 function sentOf(browser: FakeBrowser, method: string): SentCommand[] {
   return sent(browser).filter((command) => command.method === method)
+}
+
+/**
+ * The storage commands the browser received, without their ids.
+ */
+function storageCommands(browser: FakeBrowser): SentCommand[] {
+  return sent(browser).filter((command) => /^(DOM)?Storage\./.test(command.method))
+}
+
+/**
+ * The commands that clear `localStorage`, IndexedDB and `sessionStorage` of the origin, in the first page's session.
+ */
+function clearOriginCommands(origin: string): SentCommand[] {
+  return [
+    { method: 'Storage.clearDataForOrigin', params: { origin, storageTypes: 'local_storage,indexeddb' }, sessionId },
+    { method: 'DOMStorage.clear', params: { storageId: { securityOrigin: origin, isLocalStorage: false } }, sessionId },
+  ]
+}
+
+/**
+ * Answers `Page.navigate` as Chromium does when the first page loads, committing its main frame as `frame`, which
+ * carries loader `loader-1`: where a server redirect landed, or a document whose security origin the test chooses.
+ */
+function navigateCommitting(frame: Record<string, unknown>): CommandHandler {
+  return (command: ReceivedCommand, fake: FakeBrowser) => {
+    fake.emit('Page.frameNavigated', { frame }, sessionId)
+    fake.reply(command, { frameId: targetId, loaderId: 'loader-1' })
+    fake.emit('Page.loadEventFired', { timestamp: 1 }, sessionId)
+  }
 }
 
 /**
@@ -291,6 +332,7 @@ describe('Page', () => {
     await page.goto(storyUrl, 1000)
     await page.evaluate('document.title', 1000)
     await page.captureFullPage()
+    await page.clearStorage()
     await page.close()
     expect(new Set(browser.received.map((command) => command.method))).toEqual(
       new Set([
@@ -312,6 +354,9 @@ describe('Page', () => {
         'Runtime.evaluate',
         'Page.getLayoutMetrics',
         'Page.captureScreenshot',
+        'Storage.clearCookies',
+        'Storage.clearDataForOrigin',
+        'DOMStorage.clear',
         'Target.disposeBrowserContext',
       ]),
     )
@@ -331,6 +376,7 @@ describe('Page', () => {
     await page.goto(storyUrl, 1000)
     await expect(page.evaluate('fail()', 1000)).rejects.toThrow()
     await page.captureFullPage()
+    await page.clearStorage()
     await page.close()
     expect(vi.getTimerCount()).toBe(0)
   })
@@ -364,6 +410,12 @@ describe('the 30 s limit on a page call', () => {
       'Page.captureScreenshot',
       (page: Page) => page.captureFullPage(),
       "The page wasn't captured within 30 s.",
+    ],
+    [
+      'clearStorage',
+      'Storage.clearCookies',
+      (page: Page) => page.clearStorage(),
+      "The page didn't clear its storage within 30 s.",
     ],
   ])(
     'fails %s with a PageTimeoutError when the browser stays silent for 30 s',
@@ -732,6 +784,127 @@ describe('Page.captureFullPage', () => {
   })
 })
 
+describe('Page.clearStorage', () => {
+  it("clears the context's cookies at the browser level, and the main frame's origin in the session", async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    await page.clearStorage()
+    expect(storageCommands(browser)).toEqual([clearCookies, ...clearOriginCommands(storyOrigin)])
+  })
+
+  it('clears only the cookies before any goto', async () => {
+    const { browser, page } = await openPage()
+
+    await page.clearStorage()
+    expect(storageCommands(browser)).toEqual([clearCookies])
+  })
+
+  it("doesn't count a commit from before the goto", async () => {
+    const { browser, page } = await openPage()
+
+    browser.emit('Page.frameNavigated', { frame: mainFrame(targetId, 'about:blank', 'loader-0') }, sessionId)
+    await flush()
+    await page.goto(storyUrl, 1000)
+    await page.clearStorage()
+    expect(storageCommands(browser)).toEqual([clearCookies, ...clearOriginCommands(storyOrigin)])
+  })
+
+  it.each([
+    ['about:blank', '://'],
+    ['data:text/html,story', '://'],
+    ['chrome-error://chromewebdata/', '://'],
+    ['chrome-error://chromewebdata/', 'chrome-error://chromewebdata'],
+  ])(
+    'clears only the cookies when the goto loaded %s, whose security origin %s is opaque',
+    async (url, securityOrigin) => {
+      const frame = { ...mainFrame(targetId, url, 'loader-1'), securityOrigin }
+      const { browser, page } = await openPage({ handlers: { 'Page.navigate': navigateCommitting(frame) } })
+
+      await page.goto(url, 1000)
+      await page.clearStorage()
+      expect(storageCommands(browser)).toEqual([clearCookies])
+    },
+  )
+
+  it('clears the origin a server redirect took the main frame to', async () => {
+    const landed = mainFrame(targetId, 'https://www.storybook.test/iframe.html?id=button--primary', 'loader-1')
+    const { browser, page } = await openPage({ handlers: { 'Page.navigate': navigateCommitting(landed) } })
+
+    await page.goto(storyUrl, 1000)
+    await page.clearStorage()
+    expect(storageCommands(browser)).toEqual([clearCookies, ...clearOriginCommands('https://www.storybook.test')])
+  })
+
+  it.each([['http://elsewhere:7000/'], ['about:blank'], ['data:text/html,away']])(
+    'fails at once, sending nothing, when the page left the document its goto loaded for %s',
+    async (url) => {
+      const { browser, page } = await openPage()
+
+      await page.goto(storyUrl, 1000)
+      browser.emit('Page.frameNavigated', { frame: mainFrame(targetId, url, 'loader-9') }, sessionId)
+      await flush()
+      await expect(page.clearStorage()).rejects.toThrow('The page left the document its last goto loaded.')
+      expect(storageCommands(browser)).toEqual([])
+    },
+  )
+
+  it('clears the origin again once a goto has loaded another document after the page left one', async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    browser.emit('Page.frameNavigated', { frame: mainFrame(targetId, 'http://elsewhere:7000/', 'loader-9') }, sessionId)
+    await flush()
+    await page.goto(storyUrl, 1000)
+    await page.clearStorage()
+    expect(storageCommands(browser)).toEqual([clearCookies, ...clearOriginCommands(storyOrigin)])
+  })
+
+  it("ignores a subframe's commits and another session's", async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    browser.emit('Page.frameNavigated', { frame: childFrame(targetId, 'http://ads:9000/frame') }, sessionId)
+    browser.emit(
+      'Page.frameNavigated',
+      { frame: mainFrame(targetId, 'http://other:8000/', 'loader-9') },
+      'session-other',
+    )
+    await flush()
+    await page.clearStorage()
+    expect(storageCommands(browser)).toEqual([clearCookies, ...clearOriginCommands(storyOrigin)])
+  })
+
+  it('sends its commands in parallel and resolves once the browser has answered every one', async () => {
+    const { browser, page } = await openPage({ handlers: { 'Storage.clearCookies': () => undefined } })
+
+    await page.goto(storyUrl, 1000)
+
+    const clearing = page.clearStorage()
+
+    await flushUntil(() => browser.timesReceived('DOMStorage.clear') === 1)
+    expect(browser.timesReceived('Storage.clearDataForOrigin')).toBe(1)
+    expect(await hasSettled(clearing)).toBe(false)
+
+    const [cookies] = browser.received.filter((command) => command.method === 'Storage.clearCookies')
+
+    browser.reply(cookies as ReceivedCommand, {})
+    await expect(clearing).resolves.toBeUndefined()
+  })
+
+  it("fails with the browser's error when a command fails", async () => {
+    const { page } = await openPage({
+      handlers: {
+        'DOMStorage.clear': (command: ReceivedCommand, fake: FakeBrowser) =>
+          fake.fail(command, -32000, 'Frame not found for the given storage id'),
+      },
+    })
+
+    await page.goto(storyUrl, 1000)
+    await expect(page.clearStorage()).rejects.toThrow('Frame not found for the given storage id')
+  })
+})
+
 describe('when the page crashes', () => {
   it('fails a capture and sends no capture command when the page crashes after the layout answer', async () => {
     const { browser, page } = await openPage({
@@ -762,7 +935,20 @@ describe('when the page crashes', () => {
       name: 'PageCrashedError',
     })
     await expect(page.captureFullPage()).rejects.toMatchObject({ name: 'PageCrashedError' })
+    await expect(page.clearStorage()).rejects.toMatchObject({ name: 'PageCrashedError' })
     expect(sentOf(browser, 'Runtime.evaluate')).toEqual([])
+    expect(sentOf(browser, 'Storage.clearCookies')).toEqual([])
+  })
+
+  it('fails a clear in flight with a PageCrashedError', async () => {
+    const { page } = await openPage({
+      handlers: {
+        'Storage.clearCookies': (_command: ReceivedCommand, fake: FakeBrowser) =>
+          fake.emit('Inspector.targetCrashed', {}, sessionId),
+      },
+    })
+
+    await expect(page.clearStorage()).rejects.toMatchObject({ name: 'PageCrashedError' })
   })
 
   it('fails an evaluation in flight with a PageCrashedError', async () => {
@@ -908,6 +1094,8 @@ describe('Page.close', () => {
     await page.close()
     await expect(loading).rejects.toThrow('The page was closed.')
     await expect(page.evaluate('1', 1000)).rejects.toThrow('The page was closed.')
+    await expect(page.clearStorage()).rejects.toThrow('The page was closed.')
     expect(sentOf(browser, 'Runtime.evaluate')).toEqual([])
+    expect(sentOf(browser, 'Storage.clearCookies')).toEqual([])
   })
 })

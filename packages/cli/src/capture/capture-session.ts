@@ -84,9 +84,10 @@ export type StoryCapture = { snapshot: Uint8Array } | { broken: string }
  */
 export interface CaptureSession {
   /**
-   * Captures a story, opening the session's page first when none is open. A story that can't be captured comes back as
-   * a broken story, and the page is replaced by a fresh one for the next. Rejects only with a `BrowserExitedError`,
-   * when the browser exits. Call it once the previous capture has settled.
+   * Captures a story, opening the session's page first when none is open. On a page kept from the previous story, it
+   * first clears the cookies and storage that story left, and when that fails, it captures on a fresh page instead. A
+   * story that can't be captured comes back as a broken story, and the page is replaced by a fresh one for the next.
+   * Rejects only with a `BrowserExitedError`, when the browser exits. Call it once the previous capture has settled.
    */
   capture: (story: StoryToCapture) => Promise<StoryCapture>
   /**
@@ -216,7 +217,13 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
 /**
  * Starts a session that captures stories on `driver`, one at a time, on one page. It opens the page at its first
  * capture, set up with the settings, a user agent ending in `StorybookTestRunner` and the page script. After a broken
- * story, it closes the page and opens a fresh one for the next story.
+ * story, it closes the page and opens a fresh one, in a fresh browser context, for the next story.
+ *
+ * Before each later capture on that page, it clears the cookies, `localStorage`, `sessionStorage` and IndexedDB the
+ * previous story left, keeping Cache Storage and service workers. The previous story's document stays loaded until the
+ * next story's commits, so a timer or handler of it can still write storage after the clearing. When the clearing
+ * fails, such as after the previous story left its document, the story isn't to blame: the session closes the page and
+ * captures the story on a fresh one, whose fresh browser context holds nothing.
  *
  * @public
  */
@@ -237,8 +244,29 @@ export function openCaptureSession(driver: Driver, settings: CaptureSettings): C
     await closing?.close().catch(() => undefined)
   }
 
+  /**
+   * Clears the storage the previous story left on the open page, if one is open: a page stays open only after a story
+   * captured well. When that fails other than by the browser exiting, closes the page, so the next story opens a fresh
+   * one.
+   */
+  const clearOpenPage = async (): Promise<void> => {
+    try {
+      await page?.clearStorage()
+    } catch (error) {
+      if (error instanceof BrowserExitedError) {
+        page = undefined
+
+        throw error
+      }
+
+      await closePage()
+    }
+  }
+
   return {
     capture: async (story) => {
+      await clearOpenPage()
+
       try {
         page ??= await driver.newPage(setup)
       } catch (error) {

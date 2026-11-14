@@ -200,6 +200,7 @@ function fakeDriverOf(stories: Record<string, FakeStory>, record: FakeBrowserRec
       record.setups.push(setup)
 
       return {
+        clearStorage: async () => undefined,
         setViewport: async (viewport) => {
           record.viewports.push(viewport)
         },

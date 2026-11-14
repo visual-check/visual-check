@@ -99,16 +99,25 @@ const defaultContentSize = { x: 0, y: 0, width: 800, height: 1200 }
 export const defaultCaptureData = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64')
 
 /**
+ * The security origin Chromium reports for a frame at this URL: the URL's origin, such as `http://storybook:6006`, or
+ * `://` for an opaque one, such as that of `about:blank`, a `data:` URL or an error page.
+ */
+function securityOriginOf(url: string): string {
+  const origin = URL.canParse(url) ? new URL(url).origin : 'null'
+
+  return origin === 'null' ? '://' : origin
+}
+
+/**
  * The main frame of the page with this target id, committed at this URL by this loader, as `Page.frameNavigated`
  * describes it. In Chromium the main frame's id is its target's id. The URL goes without its fragment, and the
  * fragment on its own, as Chromium reports them.
  */
 export function mainFrame(targetId: string, url: string, loaderId: string): Record<string, unknown> {
   const hash = url.indexOf('#')
+  const frame = { id: targetId, loaderId, securityOrigin: securityOriginOf(url) }
 
-  return hash === -1
-    ? { id: targetId, loaderId, url }
-    : { id: targetId, loaderId, url: url.slice(0, hash), urlFragment: url.slice(hash) }
+  return hash === -1 ? { ...frame, url } : { ...frame, url: url.slice(0, hash), urlFragment: url.slice(hash) }
 }
 
 /**
@@ -116,7 +125,7 @@ export function mainFrame(targetId: string, url: string, loaderId: string): Reco
  * describes it.
  */
 export function childFrame(targetId: string, url: string): Record<string, unknown> {
-  return { id: 'child-frame', parentId: targetId, loaderId: 'child-loader', url }
+  return { id: 'child-frame', parentId: targetId, loaderId: 'child-loader', url, securityOrigin: securityOriginOf(url) }
 }
 
 /**
@@ -220,6 +229,9 @@ const defaultHandlers: Record<string, CommandHandler> = {
   'Runtime.evaluate': evaluateToUndefined,
   'Page.getLayoutMetrics': answerLayoutMetrics,
   'Page.captureScreenshot': answerCapture,
+  'Storage.clearCookies': answerEmpty,
+  'Storage.clearDataForOrigin': answerEmpty,
+  'DOMStorage.clear': answerEmpty,
 }
 
 /**

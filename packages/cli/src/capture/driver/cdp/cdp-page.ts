@@ -5,8 +5,8 @@ import { MainFrameNavigation } from './main-frame-navigation.js'
 import { settlesWithin, startTimeLimit, type TimeLimit, withinTimeLimit } from './time-limit.js'
 
 /**
- * How long opening a page, a viewport change or a capture may take, in ms. Generous, so only a browser that stopped
- * answering hits it.
+ * How long opening a page, a viewport change, a capture or clearing storage may take, in ms. Generous, so only a
+ * browser that stopped answering hits it.
  */
 const commandTimeLimitMs = 30_000
 
@@ -104,6 +104,31 @@ function pageFailureOf(event: CdpEvent, sessionId: string): Error | undefined {
 }
 
 /**
+ * Gives the frame that a `Page.frameNavigated` event of the session commits in the page's main frame, whose id is the
+ * page's target id, or undefined for any other event, a subframe's commit included.
+ */
+function mainFrameCommitOf(event: CdpEvent, ids: PageIds): Record<string, unknown> | undefined {
+  const { frame } = event.params
+  const commits = event.sessionId === ids.sessionId && event.method === 'Page.frameNavigated'
+
+  return commits && isRecord(frame) && frame.id === ids.targetId ? frame : undefined
+}
+
+/**
+ * Reads a frame's security origin, such as `http://127.0.0.1:6006`, or undefined when it is opaque, which Chromium
+ * reports as `://`, as for `about:blank`, a `data:` URL or an error page.
+ */
+function tupleOriginOf(securityOrigin: unknown): string | undefined {
+  if (typeof securityOrigin !== 'string' || !URL.canParse(securityOrigin)) {
+    return undefined
+  }
+
+  const { origin } = new URL(securityOrigin)
+
+  return origin === 'null' ? undefined : origin
+}
+
+/**
  * Asks the browser to dispose a browser context, closing its pages. Resolves once the browser has answered, either way,
  * or after 5 s.
  */
@@ -131,7 +156,8 @@ interface PageIds {
 
 /**
  * A page over CDP: a target in a browser context of its own, attached in a flat session. Every command it sends goes
- * in its session, and it listens only to its session's events and to the browser's word that its session detached.
+ * in its session, but for those about its whole browser context, which go at the browser level. It listens only to its
+ * session's events and to the browser's word that its session detached.
  */
 class CdpPage implements Page {
   /**
@@ -152,7 +178,7 @@ class CdpPage implements Page {
   private readonly usable = new AbortController()
 
   /**
-   * Stops watching the page's session for a crash or a detach.
+   * Stops watching the page's session for a crash, a detach and its main frame's commits.
    */
   private readonly stopWatching: () => void
 
@@ -167,6 +193,19 @@ class CdpPage implements Page {
   private closing: Promise<void> | undefined
 
   /**
+   * How many documents the main frame has committed since the last `goto` started, whether the `goto`, which commits
+   * once even through a server redirect, or the page itself committed them. Reset when a `goto` starts, so a commit
+   * before it, such as the first `about:blank`, doesn't count.
+   */
+  private commitsSinceGoto = 0
+
+  /**
+   * The origin of the first document the main frame committed since the last `goto` started, such as
+   * `http://127.0.0.1:6006`. Undefined before that commit, and when the origin is opaque.
+   */
+  private gotoOrigin: string | undefined
+
+  /**
    * The loaders of the page's navigations since its main frame last committed the document a `goto` asked for, from
    * the answers to `Page.navigate`, failed ones and late answers included. A later `goto` ignores their commits, such
    * as a failed navigation's error page that commits late.
@@ -174,18 +213,12 @@ class CdpPage implements Page {
   private readonly loaderIds = new Set<string>()
 
   /**
-   * Watches the page's session for a crash or a detach, and the connection for its close.
+   * Watches the page's session for a crash, a detach and its main frame's commits, and the connection for its close.
    */
   constructor(connection: CdpConnection, ids: PageIds) {
     this.connection = connection
     this.ids = ids
-    this.stopWatching = connection.onEvent((event: CdpEvent) => {
-      const failure = pageFailureOf(event, ids.sessionId)
-
-      if (failure !== undefined) {
-        this.fail(failure)
-      }
-    })
+    this.stopWatching = connection.onEvent((event: CdpEvent) => this.watch(event))
     this.stopListeningForClose = connection.onClose((error: Error) => this.fail(error))
   }
 
@@ -245,6 +278,8 @@ class CdpPage implements Page {
    */
   async goto(url: string, timeoutMs: number): Promise<void> {
     this.throwIfFailed()
+    this.commitsSinceGoto = 0
+    this.gotoOrigin = undefined
 
     const navigation = new MainFrameNavigation(url, this.ids.targetId, this.loaderIds)
     const stopListening = this.onSessionEvent((event: CdpEvent) => navigation.observe(event))
@@ -298,6 +333,31 @@ class CdpPage implements Page {
   }
 
   /**
+   * Clears every cookie of the page's browser context, at the browser level, and the storage of the origin of the
+   * document the last `goto` loaded, if it isn't opaque. The commands go in parallel, and none turns a domain on.
+   * Fails at once, sending nothing, when the main frame has committed another document since, because the storage that
+   * document and the one before it left may be in origins the page no longer shows.
+   */
+  async clearStorage(): Promise<void> {
+    this.throwIfFailed()
+
+    if (this.commitsSinceGoto > 1) {
+      throw new Error('The page left the document its last goto loaded.')
+    }
+
+    const origin = this.gotoOrigin
+
+    await this.guarded(
+      Promise.all([
+        this.connection.send('Storage.clearCookies', { browserContextId: this.ids.browserContextId }),
+        ...(origin === undefined ? [] : this.clearOrigin(origin)),
+      ]),
+      commandTimeLimitMs,
+      `The page didn't clear its storage within ${commandTimeLimitMs / 1000} s.`,
+    )
+  }
+
+  /**
    * Closes the page: fails every call in flight and every later one, stops listening, and disposes the page's browser
    * context. Resolves once the browser has answered, either way, or after 5 s. Calling it again returns the same
    * promise.
@@ -306,6 +366,49 @@ class CdpPage implements Page {
     this.closing ??= this.shutDown()
 
     return this.closing
+  }
+
+  /**
+   * Starts clearing the origin's storage, in the page's session, which reaches the storage of the page's own context:
+   * `localStorage` and IndexedDB through `Storage.clearDataForOrigin`, and `sessionStorage` through `DOMStorage.clear`,
+   * which needs the main frame to show a document of the origin. In Chromium 157, `local_storage` clears
+   * `sessionStorage` too, but the protocol doesn't say so, so `DOMStorage.clear` stays: it is the documented way. When
+   * it fails, the clearing fails, which costs nothing: the caller replaces a page once a call on it fails.
+   */
+  private clearOrigin(origin: string): Promise<Record<string, unknown>>[] {
+    return [
+      this.send('Storage.clearDataForOrigin', { origin, storageTypes: 'local_storage,indexeddb' }),
+      this.send('DOMStorage.clear', { storageId: { securityOrigin: origin, isLocalStorage: false } }),
+    ]
+  }
+
+  /**
+   * Fails the page when an event says it can no longer be used, and counts every document its main frame commits.
+   */
+  private watch(event: CdpEvent): void {
+    const failure = pageFailureOf(event, this.ids.sessionId)
+
+    if (failure !== undefined) {
+      this.fail(failure)
+    }
+
+    const frame = mainFrameCommitOf(event, this.ids)
+
+    if (frame !== undefined) {
+      this.countCommit(frame)
+    }
+  }
+
+  /**
+   * Counts a document the main frame committed, and keeps its origin when it is the first since the last `goto`
+   * started.
+   */
+  private countCommit(frame: Record<string, unknown>): void {
+    this.commitsSinceGoto += 1
+
+    if (this.commitsSinceGoto === 1) {
+      this.gotoOrigin = tupleOriginOf(frame.securityOrigin)
+    }
   }
 
   /**
