@@ -29,6 +29,7 @@ function entryOf(id: string, fields: Record<string, unknown> = {}): Record<strin
  */
 function createStorybookFolder(): string {
   const folder = realpathSync(mkdtempSync(join(tmpdir(), 'visual-check-stories-')))
+
   folders.push(folder)
   mkdirSync(join(folder, 'src'))
   writeFileSync(join(folder, 'src', 'Button.stories.tsx'), '')
@@ -53,10 +54,13 @@ async function listen(server: Server): Promise<string> {
  */
 async function takeUnusedUrl(): Promise<string> {
   const server = createServer()
+
   await new Promise<void>((resolve) => {
     server.listen(0, '127.0.0.1', resolve)
   })
+
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+
   await new Promise<void>((resolve) => {
     server.close(() => {
       resolve()
@@ -199,7 +203,61 @@ describe('readStories', () => {
     expect((longError as Error).message).toContain(`\n${'x'.repeat(500)}…\n`)
     expect((emptyError as Error).message).toBe(
       `Storybook web's index.json failed at ${empty.url}/index.json: HTTP 404 Not Found.\n` +
-        "Fix what Storybook reports: on a dev server, a stories file that doesn't parse breaks index.json.",
+        'Check that the URL points at the running Storybook.',
+    )
+  })
+
+  it('says a Storybook that answers 401 asks for a login, and names the fix', async () => {
+    const dir = createStorybookFolder()
+    const { url } = await startServer(401, 'Basic realm secret-realm')
+
+    const error = await readStories({ name: 'web', url, dir }, dir).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(StorybookError)
+    expect(error).not.toBeInstanceOf(StorybookUnreachableError)
+    expect((error as Error).message).toBe(
+      `Storybook web asks for a login at ${url}/index.json (HTTP 401 Unauthorized). ` +
+        'visual-check sends no login: serve Storybook where visual-check runs (storybook dev, or its static build ' +
+        'served in the same CI job) and point its URL at that.',
+    )
+  })
+
+  it('says a redirect to a page that is not an index likely leads to a login page, without the final query', async () => {
+    const dir = createStorybookFolder()
+    const login = await listen(
+      createServer((_request, response) => {
+        response.setHeader('content-type', 'text/html')
+        response.end('<html>Sign in</html>')
+      }),
+    )
+    const url = await listen(
+      createServer((_request, response) => {
+        response.statusCode = 302
+        response.setHeader('location', `${login}/sso/login?token=hunter2`)
+        response.end()
+      }),
+    )
+
+    const error = await readStories({ name: 'web', url, dir }, dir).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(StorybookError)
+    expect((error as Error).message).toBe(
+      `Storybook web's index.json at ${url}/index.json redirected to ${login}/sso/login and didn't get a Storybook ` +
+        'index, likely a login page. visual-check sends no login: serve Storybook where visual-check runs ' +
+        '(storybook dev, or its static build served in the same CI job) and point its URL at that.',
+    )
+  })
+
+  it('keeps the body of a 403 and ends with the URL check', async () => {
+    const dir = createStorybookFolder()
+    const { url } = await startServer(403, 'Blocked request. This host is not allowed.')
+
+    const error = await readStories({ name: 'web', url, dir }, dir).catch((caught: unknown) => caught)
+
+    expect((error as Error).message).toBe(
+      `Storybook web's index.json failed at ${url}/index.json: HTTP 403 Forbidden.\n` +
+        'Blocked request. This host is not allowed.\n' +
+        'Check that the URL points at the running Storybook.',
     )
   })
 

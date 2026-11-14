@@ -1,5 +1,5 @@
 import { parseArgs } from 'node:util'
-import { isHttpUrl } from '../config/is-http-url.js'
+import { findStorybookUrlProblem, mayHoldLogin, serveStorybookFix } from '../config/find-storybook-url-problem.js'
 
 /**
  * A command line that can't be run: an unknown command or flag, a missing, empty or extra argument, a flag that doesn't
@@ -122,11 +122,37 @@ function asksForHelp(commandLineArguments: string[]): boolean {
 }
 
 /**
+ * Checks the `--url` flag: an http(s) URL that holds no login. A message never shows a login.
+ *
+ * @throws {UsageError} When the URL isn't an http(s) URL, or holds a user name or password.
+ */
+function checkUrlFlag(url: string | undefined): void {
+  if (url === undefined) {
+    return
+  }
+
+  const problem = findStorybookUrlProblem(url)
+
+  if (problem === 'login') {
+    throw new UsageError(
+      "--url can't hold a user name or password. " +
+        `visual-check sends no login: ${serveStorybookFix} and point --url at that.`,
+    )
+  }
+
+  if (problem === 'not-http') {
+    const got = mayHoldLogin(url) ? '' : ` Got '${url}'.`
+
+    throw new UsageError(`--url takes an http: or https: URL, such as 'http://127.0.0.1:6006'.${got}`)
+  }
+}
+
+/**
  * Reads the command line into the command it names and its options.
  *
  * @throws {UsageError} For an unknown command or flag, a missing, empty or extra argument, a flag that doesn't apply to
- * the command, flags that clash, a `--url` that isn't an http(s) URL, and a `--filter` that isn't a regular
- * expression. `--help` anywhere before a `--` separator wins, so it never throws.
+ * the command, flags that clash, a `--url` that isn't an http(s) URL or holds a login, and a `--filter` that isn't a
+ * regular expression. `--help` anywhere before a `--` separator wins, so it never throws.
  */
 export function parseCommandLine(commandLineArguments: string[]): CommandLine {
   if (asksForHelp(commandLineArguments)) {
@@ -160,11 +186,19 @@ export function parseCommandLine(commandLineArguments: string[]): CommandLine {
   }
 
   if (command !== 'init' && command !== 'test' && command !== 'update') {
-    throw new UsageError(`Unknown command '${command}'. The commands are init, test and update.`)
+    const shown = mayHoldLogin(command)
+      ? 'Unknown command (not shown: it may hold a password).'
+      : `Unknown command '${command}'.`
+
+    throw new UsageError(`${shown} The commands are init, test and update.`)
   }
 
   if (extra !== undefined) {
-    throw new UsageError(`Unexpected argument '${extra}'.`)
+    throw new UsageError(
+      mayHoldLogin(extra)
+        ? 'Unexpected argument (not shown: it may hold a password).'
+        : `Unexpected argument '${extra}'.`,
+    )
   }
 
   if (command === 'init') {
@@ -177,9 +211,7 @@ export function parseCommandLine(commandLineArguments: string[]): CommandLine {
     return { command: 'init' }
   }
 
-  if (values.url !== undefined && !isHttpUrl(values.url)) {
-    throw new UsageError(`--url takes an http: or https: URL, such as 'http://127.0.0.1:6006'. Got '${values.url}'.`)
-  }
+  checkUrlFlag(values.url)
 
   return {
     command,

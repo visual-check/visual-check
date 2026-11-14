@@ -281,6 +281,49 @@ describe('visual-check binary', () => {
     expect(result.stderr).toContain('visual-check init')
   })
 
+  it('exits 2 for a config URL with a login, naming the fix and never printing the password', () => {
+    const project = createProject({
+      'visual-check.config.mjs':
+        "export default { storybooks: { web: { url: { local: 'http://127.0.0.1:6006', ci: 'https://user:hunter2@example.com' } } } }\n",
+    })
+    const result = run({ cwd: project }, 'test')
+
+    expect(result.status).toBe(2)
+    expect(result.stderr).toContain(
+      'storybooks.web.url.ci: holds a user name or password. visual-check sends no login:',
+    )
+    expect(result.stderr).toContain('serve Storybook where visual-check runs')
+    expect(result.stdout + result.stderr).not.toContain('hunter2')
+  })
+
+  it('exits 2 for a --url with a login, never printing the password', () => {
+    const project = createProject({})
+    const result = run({ cwd: project }, 'test', '--url', 'https://user:hunter2@example.com')
+
+    expect(result.status).toBe(2)
+    expect(result.stderr).toContain("--url can't hold a user name or password. visual-check sends no login:")
+    expect(result.stderr).toContain('Run visual-check --help to see the commands and options.')
+    expect(result.stdout + result.stderr).not.toContain('hunter2')
+  })
+
+  it('never prints a password behind a protocol that is not http or a malformed URL', () => {
+    const flagResult = run({ cwd: createProject({}) }, 'test', '--url', 'ftp://u:hunter2@h')
+    const configResult = run(
+      {
+        cwd: createProject({
+          'visual-check.config.mjs': "export default { storybooks: { web: { url: 'user:hunter2@host:6006' } } }\n",
+        }),
+      },
+      'test',
+    )
+
+    expect(flagResult.status).toBe(2)
+    expect(flagResult.stdout + flagResult.stderr).not.toContain('hunter2')
+    expect(configResult.status).toBe(2)
+    expect(configResult.stderr).toContain('storybooks.web.url: must be an http: or https: URL string')
+    expect(configResult.stdout + configResult.stderr).not.toContain('hunter2')
+  })
+
   it('exits 2 when a Storybook has no URL for the environment', () => {
     const project = createProject({
       'visual-check.config.mjs':
@@ -320,6 +363,23 @@ describe('visual-check binary reaching Storybooks', () => {
     expect(result.status).toBe(2)
     expect(result.stderr).toContain(`Storybook docs doesn't answer at ${down}/index.json`)
     expect(result.stderr).toContain('To check one Storybook on its own, pass --storybook <name>.')
+  })
+
+  it('exits 2 for a Storybook that answers 401, saying it asks for a login', async () => {
+    const url = await listen(
+      createServer((_request, response) => {
+        response.statusCode = 401
+        response.end()
+      }),
+    )
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
+    })
+    const result = await runAsynchronously({ cwd: project }, 'test')
+
+    expect(result.status).toBe(2)
+    expect(result.stderr).toContain(`Storybook web asks for a login at ${url}/index.json (HTTP 401 Unauthorized).`)
+    expect(result.stderr).toContain('visual-check sends no login: serve Storybook where visual-check runs')
   })
 
   it('exits 2 for a stories file the index lists and the disk lacks', async () => {

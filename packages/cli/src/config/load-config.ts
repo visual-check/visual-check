@@ -29,7 +29,8 @@ export interface LoadConfigOptions {
    */
   storybook?: string
   /**
-   * The URL `--url` gives. It replaces the URL of the one Storybook the run covers.
+   * The URL `--url` gives. It replaces the URL of the one Storybook the run covers. It must be an http(s) URL with no
+   * login, which the command line reader has checked.
    */
   url?: string
 }
