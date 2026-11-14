@@ -20,7 +20,7 @@
     ],
     "rules": [
       { "from": "cli/browser", "allow": [] },
-      { "from": "cli/commands", "allow": ["cli/browser"] },
+      { "from": "cli/commands", "allow": ["cli/browser", "cli/config"] },
       { "from": "cli/config", "allow": [] },
       { "from": "repo-checks/workspace", "allow": [] },
       { "from": "repo-checks/lockstep", "allow": ["repo-checks/workspace"] },
