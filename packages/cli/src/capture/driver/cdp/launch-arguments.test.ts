@@ -59,4 +59,22 @@ describe('launchArguments', () => {
     expect(browserArguments).toContain('--disable-skia-runtime-opts')
     expect(browserArguments).toHaveLength(launchArguments({ sandbox: false, profileDir: '/profile' }).length - 1)
   })
+
+  it("sends every request through the proxy, loopback included, after visual-check's own switch", () => {
+    const browserArguments = launchArguments({
+      sandbox: false,
+      profileDir: '/profile',
+      proxyServer: 'socks5://host.docker.internal:40123',
+    })
+
+    expect(browserArguments.slice(-6)).toEqual([
+      '--disable-skia-runtime-opts',
+      '--proxy-server=socks5://host.docker.internal:40123',
+      '--proxy-bypass-list=<-loopback>',
+      '--user-data-dir=/profile',
+      '--remote-debugging-pipe',
+      '--no-startup-window',
+    ])
+    expect(browserArguments).toHaveLength(launchArguments({ sandbox: false, profileDir: '/profile' }).length + 2)
+  })
 })

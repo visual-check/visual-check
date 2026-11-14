@@ -15,6 +15,10 @@ export interface DockerHost {
    * How much memory the engine has, in bytes.
    */
   memoryBytes: number
+  /**
+   * Whether the engine is Docker Desktop's, which `docker info` reports as `OperatingSystem: Docker Desktop`.
+   */
+  desktop: boolean
 }
 
 /**
@@ -42,6 +46,10 @@ interface DockerInfo {
    * The engine's operating system, `windows` or `linux`.
    */
   OSType?: unknown
+  /**
+   * The name of the system the engine runs on, such as `Docker Desktop`, `OrbStack` or `Ubuntu 24.04.1 LTS`.
+   */
+  OperatingSystem?: unknown
   /**
    * The problems the daemon reported, such as one that can't be reached. Older Docker CLIs report them with exit
    * code 0.
@@ -106,8 +114,8 @@ function parseInfo(stdout: string): DockerInfo | undefined {
 }
 
 /**
- * Runs `docker info` once, which tells whether Docker is there and running Linux containers, and what its engine has.
- * It is killed when it doesn't finish within `timeoutMs`, 30 s by default.
+ * Runs `docker info` once, which tells whether Docker is there and running Linux containers, what its engine has, and
+ * whether it is Docker Desktop's. It is killed when it doesn't finish within `timeoutMs`, 30 s by default.
  *
  * @public
  * @throws {ContainerError} When Docker is missing, doesn't answer in time, its daemon can't be reached, it runs
@@ -150,5 +158,5 @@ export async function probeDocker(timeoutMs: number = infoTimeoutMs): Promise<Do
     )
   }
 
-  return { cpus: info.NCPU, memoryBytes: info.MemTotal }
+  return { cpus: info.NCPU, memoryBytes: info.MemTotal, desktop: info.OperatingSystem === 'Docker Desktop' }
 }

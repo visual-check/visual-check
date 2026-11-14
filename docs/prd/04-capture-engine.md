@@ -33,7 +33,7 @@ v1 captures in Chromium only, through visual-check's own raw CDP driver. Nothing
 - Launch arguments: Playwright's Chromium arguments, plus `--disable-skia-runtime-opts`, always and with no option ([ADR 0003](../adr/0003-render-in-container-on-amd64.md)).
 - The sandbox flag depends on where the browser runs ([Browser and platform](05-browser-and-platform.md)).
 - In the container, the browser starts through the image's shell with redirections, so CDP uses the container's stdin and stdout and the browser's own output goes to stderr. The image needs no extra program.
-- Chromium's stderr is always drained, because a full stderr pipe freezes the browser. Its last 50 lines are kept and printed only with a failed launch or a browser exit.
+- Chromium's stderr is always drained, because a full stderr pipe freezes the browser. Its last 50 lines are kept, and so is its last fatal log line, first among them, when a stack trace pushes it out. They're printed only with a failed launch or a browser exit.
 - The browser's profile folder is removed on exit.
 
 ## Workers, contexts and pages

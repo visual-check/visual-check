@@ -69,6 +69,10 @@ export interface FakeDockerBehaviour {
      */
     osType?: string
     /**
+     * The engine's operating system, such as `Docker Desktop` or `OrbStack`. `Ubuntu 24.04.1 LTS` by default.
+     */
+    operatingSystem?: string
+    /**
      * The exit code. 0 by default. A non-zero exit prints the zeroed answer, as real Docker does with its daemon
      * unreachable.
      */
@@ -193,6 +197,7 @@ function infoEnvironmentOf(info: FakeDockerBehaviour['info'] = {}): Record<strin
       NCPU: info.cpus ?? 4,
       MemTotal: info.memoryBytes ?? 16 * 2 ** 30,
       OSType: info.osType ?? 'linux',
+      OperatingSystem: info.operatingSystem ?? 'Ubuntu 24.04.1 LTS',
       ServerErrors: info.serverErrors,
     }),
     FAKE_DOCKER_INFO_EXIT: String(info.exitCode ?? 0),

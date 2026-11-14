@@ -5,6 +5,7 @@ import {
   browserThatFailedToStart,
   describeExit,
   PageCrashedError,
+  PageLoadError,
   PageNavigatedAwayError,
   PageTimeoutError,
 } from './driver.js'
@@ -42,14 +43,19 @@ describe('describeExit', () => {
 })
 
 describe('BrowserExitedError', () => {
-  it('names the exit and keeps the output lines', () => {
+  it('names the exit and keeps the output lines, with no graphics failure unless given', () => {
     const error = new BrowserExitedError({ code: 139, signal: null, error: undefined }, ['Segmentation fault'])
 
     expect(error).toMatchObject({
       name: 'BrowserExitedError',
       message: 'The browser exited with code 139 while in use.',
       output: ['Segmentation fault'],
+      graphicsFailed: false,
     })
+  })
+
+  it('keeps whether its graphics process failed', () => {
+    expect(new BrowserExitedError({ code: 133, signal: null, error: undefined }, [], true).graphicsFailed).toBe(true)
   })
 })
 
@@ -69,6 +75,16 @@ describe('PageTimeoutError', () => {
   })
 })
 
+describe('PageLoadError', () => {
+  it("names the URL and keeps the browser's network error", () => {
+    expect(new PageLoadError('http://storybook/a', 'net::ERR_CONNECTION_REFUSED')).toMatchObject({
+      name: 'PageLoadError',
+      message: "The page couldn't load http://storybook/a: net::ERR_CONNECTION_REFUSED",
+      reason: 'net::ERR_CONNECTION_REFUSED',
+    })
+  })
+})
+
 describe('PageNavigatedAwayError', () => {
   it('keeps the URL the page went to and the message', () => {
     expect(new PageNavigatedAwayError('http://storybook/b', 'The page navigated to http://storybook/b.')).toMatchObject(
@@ -82,7 +98,7 @@ describe('PageNavigatedAwayError', () => {
 })
 
 describe('BrowserLaunchError', () => {
-  it('keeps the message, the output lines and whether the browser exited', () => {
+  it('keeps the message, the output lines and whether it exited, with no graphics failure unless given', () => {
     expect(
       new BrowserLaunchError('The browser exited with code 1 before it answered.', ['bad flag'], { exited: true }),
     ).toMatchObject({
@@ -90,7 +106,17 @@ describe('BrowserLaunchError', () => {
       message: 'The browser exited with code 1 before it answered.',
       output: ['bad flag'],
       exited: true,
+      graphicsFailed: false,
     })
+  })
+
+  it('keeps whether its graphics process failed', () => {
+    expect(
+      new BrowserLaunchError('The browser exited with code 133 before it answered.', [], {
+        exited: true,
+        graphicsFailed: true,
+      }).graphicsFailed,
+    ).toBe(true)
   })
 })
 

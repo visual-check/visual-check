@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { PageNavigatedAwayError } from '../driver.js'
+import { PageLoadError, PageNavigatedAwayError } from '../driver.js'
 import type { CdpEvent } from './cdp-connection.js'
 import { childFrame, mainFrame } from './fake-browser.fixture.js'
 import { MainFrameNavigation } from './main-frame-navigation.js'
@@ -125,7 +125,11 @@ describe('MainFrameNavigation', () => {
     )
     navigation.answer({ frameId: targetId, loaderId: 'loader-1', errorText: 'net::ERR_CONNECTION_REFUSED' })
     navigation.observe(load())
-    await expect(navigation.done).rejects.toThrow(`The page couldn't load ${url}: net::ERR_CONNECTION_REFUSED`)
+    await expect(navigation.done).rejects.toBeInstanceOf(PageLoadError)
+    await expect(navigation.done).rejects.toMatchObject({
+      message: `The page couldn't load ${url}: net::ERR_CONNECTION_REFUSED`,
+      reason: 'net::ERR_CONNECTION_REFUSED',
+    })
   })
 
   it('fails when the answer names no loader', async () => {

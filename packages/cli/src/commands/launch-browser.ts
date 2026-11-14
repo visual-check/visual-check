@@ -13,9 +13,14 @@ import { startBrowserProcess } from '../browser-process/start-browser-process.js
 import { type CaptureSession, type CaptureSettings, openCaptureSession } from '../capture/capture-session.js'
 import { type CdpDriverOptions, launchCdpDriver } from '../capture/driver/cdp/cdp-driver.js'
 import { BrowserLaunchError, type BrowserSystem, type Driver } from '../capture/driver/driver.js'
-import { type ContainerPlatform, startBrowserInContainer } from '../container/browser-container.js'
+import {
+  type ContainerNetwork,
+  type ContainerPlatform,
+  startBrowserInContainer,
+} from '../container/browser-container.js'
 import { pullMissingImage } from '../container/image-pull.js'
-import { containerNetwork } from '../container/own-container.js'
+import { launchThroughProxy } from '../container/launch-through-proxy.js'
+import type { BrowserPlace, ContainerRoute } from './browser-route.js'
 
 /**
  * The folder Chromium keeps its profile in, inside the container. The container is removed when the browser exits, and
@@ -33,37 +38,6 @@ const systemOfPlatform: Record<ChromeForTestingPlatform, BrowserSystem> = {
   'mac-arm64': 'macos',
   win64: 'windows',
 }
-
-/**
- * Where a run's browser runs: directly inside visual-check's image, in visual-check's container, or on the host.
- */
-export type BrowserPlace =
-  | {
-      /**
-       * The browser runs directly inside visual-check's image.
-       */
-      in: 'image'
-    }
-  | {
-      /**
-       * The browser runs in visual-check's container.
-       */
-      in: 'container'
-      /**
-       * The platform the container runs on.
-       */
-      platform: ContainerPlatform
-    }
-  | {
-      /**
-       * The browser runs on the host.
-       */
-      in: 'host'
-      /**
-       * The Chrome for Testing platform whose headless shell runs on the machine.
-       */
-      platform: ChromeForTestingPlatform
-    }
 
 /**
  * What launching the browser for a run needs.
@@ -92,6 +66,10 @@ export type BrowserLaunch =
        * The platform the container runs on.
        */
       platform: ContainerPlatform
+      /**
+       * How the browser reaches a Storybook.
+       */
+      route: ContainerRoute
       /**
        * The path of the headless shell's executable inside the image.
        */
@@ -133,11 +111,16 @@ export type BrowserLaunch =
     }
 
 /**
- * Launches the browser a run captures in, and resolves with its driver once it has connected.
+ * Launches the browser a run captures in, and resolves with its driver once it has connected. In visual-check's
+ * container, the launch's route says how the browser reaches a Storybook: with host networking, on the network of the
+ * container the CLI runs in, or through a SOCKS proxy in the CLI that lives as long as the driver, which the browser is
+ * checked to reach before the driver resolves.
  *
- * @throws {ContainerError} When Docker can't be run or the image can't be pulled.
+ * @throws {ContainerError} When Docker can't be run, the image can't be pulled, or the browser can't reach the proxy.
  * @throws {BrowserDownloadError} When the headless shell can't be downloaded to the host.
- * @throws {BrowserLaunchError} When the browser doesn't connect.
+ * @throws {BrowserLaunchError} When the browser doesn't connect, or fails any other way while it is checked to reach
+ * the proxy.
+ * @throws {BrowserExitedError} When the browser exits while it is checked to reach the proxy.
  */
 export type LaunchBrowser = (launch: BrowserLaunch) => Promise<Driver>
 
@@ -193,18 +176,15 @@ async function launchChildBrowser(
 }
 
 /**
- * Pulls the image when Docker doesn't have it for the platform, then starts the browser in visual-check's container,
- * with its sandbox off because the container is the boundary, and connects to it over CDP. The container joins the
- * network of the container the CLI runs in when Docker knows it, else it uses the host's.
+ * Starts the browser in visual-check's container on this network, with its sandbox off because the container is the
+ * boundary, and connects to it over CDP. Every request goes through the proxy when one is given.
  */
-async function launchBrowserInContainer(
+async function launchCdpInContainer(
   launchDriver: (options: CdpDriverOptions) => Promise<Driver>,
   launch: Extract<BrowserLaunch, { in: 'container' }>,
+  network: ContainerNetwork,
+  proxyServer?: string,
 ): Promise<Driver> {
-  await pullMissingImage(launch.image, launch.platform, launch.progress)
-
-  const network = await containerNetwork()
-
   return await launchDriver({
     start: startBrowserInContainer({
       image: launch.image,
@@ -215,7 +195,29 @@ async function launchBrowserInContainer(
     sandbox: false,
     profileDir: containerProfileDir,
     system: 'linux',
+    ...(proxyServer === undefined ? {} : { proxyServer }),
   })
+}
+
+/**
+ * Pulls the image when Docker doesn't have it for the platform, then starts the browser in visual-check's container
+ * and connects to it over CDP. The route decides how it reaches a Storybook: `host` uses the machine's network,
+ * `container:<id>` joins the network of the container the CLI runs in, and `proxy` goes through a SOCKS proxy in the
+ * CLI.
+ */
+async function launchBrowserInContainer(
+  launchDriver: (options: CdpDriverOptions) => Promise<Driver>,
+  launch: Extract<BrowserLaunch, { in: 'container' }>,
+): Promise<Driver> {
+  await pullMissingImage(launch.image, launch.platform, launch.progress)
+
+  if (launch.route === 'proxy') {
+    // On the bridge network every request, loopback included, goes through the proxy, so the Storybook is reached from
+    // the CLI's machine.
+    return await launchThroughProxy((proxyServer) => launchCdpInContainer(launchDriver, launch, 'bridge', proxyServer))
+  }
+
+  return await launchCdpInContainer(launchDriver, launch, launch.route)
 }
 
 /**
@@ -227,7 +229,8 @@ async function launchBrowserInContainer(
  * - On the host, the first launch downloads the headless shell, unless the cache holds it, and later launches reuse it.
  *   The first launch starts it as a child process of the CLI with Chromium's sandbox. When it exits at launch, as it
  *   does where the OS doesn't allow the sandbox, it starts again without it, printing nothing. Whichever launch first
- *   connects settles the sandbox for the run, and every later launch keeps it, with no fallback.
+ *   connects settles the sandbox for the run, and every later launch keeps it, with no fallback. It never uses Docker
+ *   or the proxy.
  */
 export function createLaunchBrowser(seams: LauncherSeams = {}): LaunchBrowser {
   const install = seams.install ?? installHeadlessShell
@@ -316,9 +319,11 @@ export interface RunBrowser {
    * The capture session of a worker. The first call launches the browser and checks that it is the browser package's
    * build, and every call shares that one browser. A worker's first call opens its session, which keeps its own page.
    *
-   * @throws {ContainerError} When Docker can't be run or the image can't be pulled.
+   * @throws {ContainerError} When Docker can't be run, the image can't be pulled, or the browser can't reach the proxy.
    * @throws {BrowserDownloadError} When the headless shell can't be downloaded to the host.
-   * @throws {BrowserLaunchError} When the browser doesn't connect.
+   * @throws {BrowserLaunchError} When the browser doesn't connect, or fails any other way while it is checked to reach
+   * the proxy.
+   * @throws {BrowserExitedError} When the browser exits while it is checked to reach the proxy.
    * @throws {BrowserMismatchError} When the browser isn't the browser package's build.
    */
   session: (worker: number) => Promise<CaptureSession>
@@ -331,7 +336,8 @@ export interface RunBrowser {
 
 /**
  * Gives what launching the browser needs where it runs: the headless shell's path inside the image; the image, the
- * platform and the path for the container; or the browser package's version and checksum of the download for the host.
+ * platform, the route and the path for the container; or the browser package's version and checksum of the download
+ * for the host.
  */
 function browserLaunchOf(options: RunBrowserOptions): BrowserLaunch {
   const { browserPackage, place } = options
@@ -344,6 +350,7 @@ function browserLaunchOf(options: RunBrowserOptions): BrowserLaunch {
         in: 'container',
         image: runImageOf(browserPackage, options.configImage),
         platform: place.platform,
+        route: place.route,
         executable: browserPackage.headlessShell,
         progress: options.progress,
       }
