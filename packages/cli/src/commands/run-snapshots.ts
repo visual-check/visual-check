@@ -6,10 +6,9 @@ import type { BrowserPackage } from '../browser/read-browser-package.js'
 import type { CaptureSettings, StoryToCapture } from '../capture/capture-session.js'
 import { BrowserExitedError, BrowserLaunchError } from '../capture/driver/driver.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
-import type { ContainerPlatform } from '../container/browser-container.js'
 import { ContainerError } from '../container/container-error.js'
 import { type Story, storyUrlOf } from '../storybook/read-stories.js'
-import { type LaunchBrowser, type RunBrowser, runBrowserOf } from './launch-browser.js'
+import { type BrowserPlace, type LaunchBrowser, type RunBrowser, runBrowserOf } from './launch-browser.js'
 
 /**
  * The stories a run covers in one Storybook, in the order they are captured.
@@ -42,9 +41,9 @@ interface SnapshotRun {
    */
   config: ResolvedConfig
   /**
-   * The container platform the config sets.
+   * Where the browser runs.
    */
-  platform: ContainerPlatform
+  place: BrowserPlace
   /**
    * The installed browser package.
    */
@@ -256,12 +255,16 @@ function browserOutputOf(output: readonly string[]): string {
  * Gives the next step after the browser failed to launch or exited while in use, pointing to its output first when it
  * printed any.
  */
-function browserFixOf(error: BrowserLaunchError | BrowserExitedError, platform: ContainerPlatform): string {
+function browserFixOf(error: BrowserLaunchError | BrowserExitedError, place: BrowserPlace): string {
   const why = error.output.length === 0 ? '' : "The browser's output below may say why. "
 
-  return error instanceof BrowserLaunchError
-    ? `${why}Check that Docker can run images for ${platform}, then run visual-check again.`
-    : `${why}Running out of memory is a common cause. Run visual-check again.`
+  if (!(error instanceof BrowserLaunchError)) {
+    return `${why}Running out of memory is a common cause. Run visual-check again.`
+  }
+
+  return place.in === 'image'
+    ? `${why}Check that this container runs visual-check's image, or an image built FROM it, then run visual-check again.`
+    : `${why}Check that Docker can run images for ${place.platform}, then run visual-check again.`
 }
 
 /**
@@ -278,7 +281,7 @@ function stopMessageOf(error: unknown, run: SnapshotRun): string | undefined {
   }
 
   if (error instanceof BrowserLaunchError || error instanceof BrowserExitedError) {
-    return `${error.message}\n${browserFixOf(error, run.platform)}\n${browserOutputOf(error.output)}`
+    return `${error.message}\n${browserFixOf(error, run.place)}\n${browserOutputOf(error.output)}`
   }
 
   if (error instanceof ContainerError || error instanceof BrowserMismatchError) {
@@ -304,7 +307,7 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
   const browser = runBrowserOf(run.launchBrowser, {
     browserPackage: run.browserPackage,
     configImage: run.config.image,
-    platform: run.platform,
+    place: run.place,
     settings: captureSettingsOf(run.config),
     progress: run.progress,
   })

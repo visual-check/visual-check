@@ -47,7 +47,8 @@ const killGraceMs = 5_000
  */
 export interface CdpDriverOptions {
   /**
-   * Whether Chromium's sandbox is on. In visual-check's container it is off, because the container is the boundary.
+   * Whether Chromium's sandbox is on. In visual-check's container, and inside its image, it is off, because the container
+   * is the boundary.
    */
   sandbox: boolean
   /**

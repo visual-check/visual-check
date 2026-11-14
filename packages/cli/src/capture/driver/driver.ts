@@ -1,4 +1,4 @@
-import type { Readable, Writable } from 'node:stream'
+import { PassThrough, type Readable, Writable } from 'node:stream'
 
 /**
  * How a browser process ended.
@@ -215,6 +215,21 @@ export function describeExit(exit: ProcessExit, when: 'before it answered' | 'wh
   }
 
   return `The browser exited ${when}.`
+}
+
+/**
+ * Builds the process of a browser that couldn't start: empty streams, and `exited` settled with the error.
+ *
+ * @public
+ */
+export function browserThatFailedToStart(error: Error): BrowserProcess {
+  return {
+    toBrowser: new Writable({ write: (_chunk, _encoding, done) => done() }),
+    fromBrowser: new PassThrough().end(),
+    output: new PassThrough().end(),
+    exited: Promise.resolve({ code: null, signal: null, error }),
+    kill: () => undefined,
+  }
 }
 
 /**

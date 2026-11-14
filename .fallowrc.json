@@ -14,6 +14,7 @@
       { "name": "cli/capture/driver", "patterns": ["packages/cli/src/capture/driver/**"] },
       { "name": "cli/capture", "patterns": ["packages/cli/src/capture/**"] },
       { "name": "cli/container", "patterns": ["packages/cli/src/container/**"] },
+      { "name": "cli/browser-process", "patterns": ["packages/cli/src/browser-process/**"] },
       { "name": "cli/baselines", "patterns": ["packages/cli/src/baselines/**"] },
       { "name": "cli/browser", "patterns": ["packages/cli/src/browser/**"] },
       { "name": "cli/commands", "patterns": ["packages/cli/src/commands/**"] },
@@ -30,6 +31,7 @@
       { "from": "cli/capture/driver", "allow": [] },
       { "from": "cli/capture", "allow": ["cli/capture/driver"] },
       { "from": "cli/container", "allow": ["cli/capture/driver"] },
+      { "from": "cli/browser-process", "allow": ["cli/capture/driver"] },
       { "from": "cli/baselines", "allow": [] },
       { "from": "cli/browser", "allow": [] },
       {
@@ -37,6 +39,7 @@
         "allow": [
           "cli/baselines",
           "cli/browser",
+          "cli/browser-process",
           "cli/capture",
           "cli/capture/driver",
           "cli/capture/driver/cdp",

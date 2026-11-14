@@ -165,7 +165,9 @@ function fakeBrowser(
   const progress: string[] = []
   const launchBrowser: LaunchBrowser = async (launch) => {
     record.launches.push(launch)
-    launch.progress(`Pulling ${launch.image}\n`)
+    if (launch.in === 'container') {
+      launch.progress(`Pulling ${launch.image}\n`)
+    }
 
     return fakeDriverOf(stories, record, driverVersion)
   }
@@ -761,6 +763,7 @@ describe('runCli launching the browser', () => {
 
     expect(record.launches).toEqual([
       {
+        in: 'container',
         image: browserPackage.imageReference,
         platform: 'linux/amd64',
         executable: browserPackage.headlessShell,
