@@ -164,25 +164,28 @@ export interface PageViewport {
  */
 export interface Page {
   /**
-   * Sets the size the page lays out and renders at.
+   * Sets the size the page lays out and renders at. Fails with a `PageTimeoutError` when the browser doesn't answer
+   * within the driver's own fixed limit.
    */
   setViewport: (viewport: PageViewport) => Promise<void>
   /**
    * Loads `url` into the page's main frame and resolves on that document's load event. A server redirect is followed.
    * Fails at once with a `PageNavigatedAwayError` when another navigation of the main frame overtakes it, such as one
-   * the page starts itself, and with a plain error when the browser can't load the URL or `timeoutMs` passes first.
+   * the page starts itself, with a plain error when the browser can't load the URL, and with a `PageTimeoutError` when
+   * `timeoutMs` passes first.
    */
   goto: (url: string, timeoutMs: number) => Promise<void>
   /**
    * Evaluates a JavaScript expression in the page's main frame, as if from a user gesture. Awaits the promise the
    * expression gives, if it gives one, and resolves with the value passed through JSON. Fails with the exception the
-   * expression throws or rejects with, when the value is one JSON can't carry, such as `NaN`, `Infinity`, `-0` or a
-   * bigint, and when `timeoutMs` passes first.
+   * expression throws or rejects with, and when the value is one JSON can't carry, such as `NaN`, `Infinity`, `-0` or
+   * a bigint. Fails with a `PageTimeoutError` when `timeoutMs` passes first.
    */
   evaluate: (expression: string, timeoutMs: number) => Promise<unknown>
   /**
    * Captures the whole page, beyond the viewport too, without resizing the viewport. Resolves with the PNG bytes exactly
-   * as the browser made them.
+   * as the browser made them. Fails with a `PageTimeoutError` when the browser doesn't answer within the driver's own
+   * fixed limit.
    */
   captureFullPage: () => Promise<Uint8Array>
   /**
@@ -256,6 +259,32 @@ export class PageCrashedError extends Error {
    */
   constructor() {
     super('The page crashed.')
+  }
+}
+
+/**
+ * A call on a page didn't finish within its time limit: the `timeoutMs` the caller gave, or the driver's own fixed
+ * limit for a call that takes none.
+ *
+ * @public
+ */
+export class PageTimeoutError extends Error {
+  /**
+   * The class's name, so a stack trace or a log line reads `PageTimeoutError`.
+   */
+  override name = 'PageTimeoutError'
+
+  /**
+   * The time limit that passed, in ms.
+   */
+  readonly timeoutMs: number
+
+  /**
+   * Keeps the time limit that passed, with the message saying which call it stopped.
+   */
+  constructor(message: string, timeoutMs: number) {
+    super(message)
+    this.timeoutMs = timeoutMs
   }
 }
 

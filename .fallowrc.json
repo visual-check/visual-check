@@ -26,7 +26,7 @@
     "rules": [
       { "from": "cli/capture/driver/cdp", "allow": ["cli/capture/driver"] },
       { "from": "cli/capture/driver", "allow": [] },
-      { "from": "cli/capture", "allow": [] },
+      { "from": "cli/capture", "allow": ["cli/capture/driver"] },
       { "from": "cli/container", "allow": ["cli/capture/driver"] },
       { "from": "cli/browser", "allow": [] },
       { "from": "cli/commands", "allow": ["cli/browser", "cli/config", "cli/storybook"] },

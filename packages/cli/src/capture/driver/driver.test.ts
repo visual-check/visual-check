@@ -5,6 +5,7 @@ import {
   describeExit,
   PageCrashedError,
   PageNavigatedAwayError,
+  PageTimeoutError,
 } from './driver.js'
 
 describe('describeExit', () => {
@@ -54,6 +55,16 @@ describe('BrowserExitedError', () => {
 describe('PageCrashedError', () => {
   it('says the page crashed', () => {
     expect(new PageCrashedError()).toMatchObject({ name: 'PageCrashedError', message: 'The page crashed.' })
+  })
+})
+
+describe('PageTimeoutError', () => {
+  it('keeps the message and the time limit that passed', () => {
+    expect(new PageTimeoutError("The page didn't load http://storybook/a within 10 s.", 10_000)).toMatchObject({
+      name: 'PageTimeoutError',
+      message: "The page didn't load http://storybook/a within 10 s.",
+      timeoutMs: 10_000,
+    })
   })
 })
 

@@ -37,13 +37,13 @@ export interface TimeLimit {
 }
 
 /**
- * Starts a time limit of `ms`. Once it has passed, every step raced against it rejects with an error carrying
- * `message`.
+ * Starts a time limit of `ms`. Once it has passed, every step raced against it rejects with the error `timeoutError`
+ * makes.
  */
-export function startTimeLimit(ms: number, message: string): TimeLimit {
+export function startTimeLimit(ms: number, timeoutError: () => Error): TimeLimit {
   let timer: ReturnType<typeof setTimeout> | undefined
   const expired = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(message)), ms)
+    timer = setTimeout(() => reject(timeoutError()), ms)
   })
 
   expired.catch(() => undefined)
@@ -55,11 +55,11 @@ export function startTimeLimit(ms: number, message: string): TimeLimit {
 }
 
 /**
- * Settles as the promise does when it settles within `ms`, and otherwise rejects with an error carrying `message`. Its
- * timer is cleared either way.
+ * Settles as the promise does when it settles within `ms`, and otherwise rejects with the error `timeoutError` makes.
+ * Its timer is cleared either way.
  */
-export async function withinTimeLimit<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
-  const limit = startTimeLimit(ms, message)
+export async function withinTimeLimit<T>(promise: Promise<T>, ms: number, timeoutError: () => Error): Promise<T> {
+  const limit = startTimeLimit(ms, timeoutError)
 
   try {
     return await limit.race(promise)
