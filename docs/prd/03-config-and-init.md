@@ -32,7 +32,7 @@ export default defineConfig({
 | ----------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | `storybooks.<name>.dir`       | The config file's folder                             | The folder Storybook runs in. `index.json`'s `importPath` is relative to it                  |
 | `storybooks.<name>.configDir` | `.storybook`, inside `dir`                           |                                                                                              |
-| `storybooks.<name>.url`       | None, required                                       | One value or `{ local, ci }`                                                                 |
+| `storybooks.<name>.url`       | None, required                                       | One value or `{ local, ci }`. No user name or password: visual-check sends no login          |
 | `storybooks.<name>.baselines` | `<dir>/.visual-check/baselines`                      | The only folder a project can move in v1                                                     |
 | `platform`                    | `'linux/amd64'`                                      | Or `'linux/arm64'` or `'host'` ([Browser and platform](05-browser-and-platform.md))          |
 | `image`                       | The browser package's image                          | A custom image must be built `FROM` it                                                       |
