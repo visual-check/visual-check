@@ -39,7 +39,7 @@
   },
   "overrides": [
     {
-      "includes": ["packages/test-storybook-*/visual-check.config.ts"],
+      "includes": ["test-storybooks/*/visual-check.config.ts"],
       "linter": {
         "rules": {
           "correctness": { "noPrivateImports": "off" }

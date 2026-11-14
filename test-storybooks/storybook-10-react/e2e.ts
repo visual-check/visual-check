@@ -1,5 +1,5 @@
 // The end-to-end check of this test Storybook: it serves the static build, runs the built CLI against it and checks
-// what the CLI reports. Run it with `pnpm turbo run e2e --filter @visual-check/test-storybook-react-10`, which builds the
+// what the CLI reports. Run it with `pnpm turbo run e2e --filter @visual-check/test-storybook-10-react`, which builds the
 // CLI and the Storybook first, with TEST_STORYBOOK_IMAGE naming the browser image. It prints one line per case, then
 // each of its problems, and exits 1 when any case fails.
 import { type ChildProcessByStdio, spawn, spawnSync } from 'node:child_process'
@@ -38,9 +38,9 @@ const packageDir = fileURLToPath(new URL('.', import.meta.url))
 const staticDir = join(packageDir, 'storybook-static')
 
 /**
- * The built CLI.
+ * The built CLI, through this package's workspace link to it.
  */
-const cliBin = fileURLToPath(new URL('../cli/dist/bin.js', import.meta.url))
+const cliBin = join(packageDir, 'node_modules', '@visual-check', 'cli', 'dist', 'bin.js')
 
 /**
  * The committed baselines.
@@ -61,7 +61,7 @@ const image = process.env.TEST_STORYBOOK_IMAGE
  * How to run the check so that Turbo builds what it needs first.
  */
 const turboHint =
-  'run the check with pnpm turbo run e2e --filter @visual-check/test-storybook-react-10, which builds the CLI and ' +
+  'run the check with pnpm turbo run e2e --filter @visual-check/test-storybook-10-react, which builds the CLI and ' +
   'the Storybook first.'
 
 /**
