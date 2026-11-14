@@ -43,7 +43,7 @@ interface SnapshotRun {
    */
   config: ResolvedConfig
   /**
-   * How many workers capture at once: the config's `workers`, with `'auto'` already resolved.
+   * How many workers capture at once: `--workers` or the config's `workers`, with `'auto'` already resolved.
    */
   workers: number
   /**

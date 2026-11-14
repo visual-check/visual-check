@@ -472,6 +472,7 @@ Options for test and update:
   --storybook <name>  Cover only this Storybook
   --url <url>         Use this URL for the Storybook (with several Storybooks, needs --storybook)
   --config <path>     Use this config instead of searching for one
+  --workers <n>       Capture with this many workers
 
 Other options:
   --help     Show this help
@@ -788,6 +789,21 @@ describe('runCli test', () => {
     expect(firstLineOf((await runCli(['test'], {}, three, noLaunch)).stdout)).toBe(headerOf('test', 1, 3))
     expect(firstLineOf((await runCli(['test'], {}, one, noLaunch)).stdout)).toBe(headerOf('test', 1, 1))
     expect(firstLineOf((await runCli(['test'], { CI: 'true' }, pair, noLaunch)).stdout)).toBe(headerOf('test', 1, 2))
+  })
+
+  it('lets --workers beat the config, whether a number or auto', async () => {
+    const { project: five } = await createRun(['a'], {}, 'workers: 5')
+    const { project: auto } = await createRun(['a'], {}, "workers: 'auto'")
+
+    expect(firstLineOf((await runCli(['test', '--workers', '2'], {}, five, noLaunch)).stdout)).toBe(
+      headerOf('test', 1, 2),
+    )
+    expect(firstLineOf((await runCli(['test', '--workers', '3'], {}, auto, noLaunch)).stdout)).toBe(
+      headerOf('test', 1, 3),
+    )
+    expect(firstLineOf((await runCli(['test', '--workers', '1'], {}, auto, noLaunch)).stdout)).toBe(
+      headerOf('test', 1, 1),
+    )
   })
 
   it("sizes 'auto' workers from the Docker host the probe finds", async () => {

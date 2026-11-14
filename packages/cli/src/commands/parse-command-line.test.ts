@@ -4,7 +4,13 @@ import { parseCommandLine, UsageError } from './parse-command-line.js'
 /**
  * The options a run has when no flag is given.
  */
-const defaultOptions = { selection: { kind: 'default' }, storybook: undefined, url: undefined, config: undefined }
+const defaultOptions = {
+  selection: { kind: 'default' },
+  storybook: undefined,
+  url: undefined,
+  config: undefined,
+  workers: undefined,
+}
 
 /**
  * Parses the command line and returns the `UsageError` it throws, failing the test when it throws nothing else.
@@ -85,6 +91,7 @@ describe('parseCommandLine', () => {
     ['--storybook', ['--storybook', 'web']],
     ['--url', ['--url', 'http://127.0.0.1:6006']],
     ['--config', ['--config', 'visual-check.config.ts']],
+    ['--workers', ['--workers', '2']],
   ])('rejects %s for init', (flag, flagArguments) => {
     expect(usageErrorOf('init', ...flagArguments).message).toBe(`${flag} doesn't apply to init.`)
   })
@@ -185,5 +192,25 @@ describe('parseCommandLine', () => {
       command: 'test',
       options: { ...defaultOptions, storybook: 'web', url: 'http://127.0.0.1:6006', config: 'a.ts' },
     })
+  })
+
+  it.each([
+    ['test', '2', 2],
+    ['update', '12', 12],
+  ] as const)('carries --workers for %s as a number', (command, value, workers) => {
+    expect(parseCommandLine([command, '--workers', value])).toEqual({
+      command,
+      options: { ...defaultOptions, workers },
+    })
+  })
+
+  it.each(['0', '1.5', '-1', 'auto', '02', '9007199254740992'])('rejects --workers %s, naming the value', (value) => {
+    expect(usageErrorOf('test', `--workers=${value}`).message).toBe(
+      `--workers takes a whole number of 1 or more. Got '${value}'.`,
+    )
+  })
+
+  it('rejects an empty --workers', () => {
+    expect(usageErrorOf('test', '--workers', '').message).toBe('--workers needs a value.')
   })
 })

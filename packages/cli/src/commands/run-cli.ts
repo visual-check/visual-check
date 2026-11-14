@@ -36,6 +36,7 @@ Options for test and update:
   --storybook <name>  Cover only this Storybook
   --url <url>         Use this URL for the Storybook (with several Storybooks, needs --storybook)
   --config <path>     Use this config instead of searching for one
+  --workers <n>       Capture with this many workers
 
 Other options:
   --help     Show this help
@@ -196,7 +197,7 @@ async function runTestOrUpdate(
     command,
     version: readVersion(),
     config,
-    workers: workersOf(config, placement.host),
+    workers: workersOf(options, config, placement.host),
     place: placement.place,
     browserPackage: browserCheck.browserPackage,
     selections: checks.storybooks.map(({ storybook, stories }) => ({
@@ -213,11 +214,13 @@ async function runTestOrUpdate(
 }
 
 /**
- * Gives how many workers the run captures with: the config's number, or, for `'auto'`, what the CPUs and memory where
- * the browser runs allow.
+ * Gives how many workers the run captures with: `--workers`, else the config's number, and for `'auto'` what the CPUs
+ * and memory where the browser runs allow.
  */
-function workersOf(config: ResolvedConfig, host: BrowserHost): number {
-  return config.workers === 'auto' ? autoWorkerCount(host) : config.workers
+function workersOf(options: RunOptions, config: ResolvedConfig, host: BrowserHost): number {
+  const requested = options.workers ?? config.workers
+
+  return requested === 'auto' ? autoWorkerCount(host) : requested
 }
 
 /**
