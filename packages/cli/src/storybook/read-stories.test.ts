@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { parseIndex, readStories } from './read-stories.js'
+import { parseIndex, readStories, storyUrlOf } from './read-stories.js'
 import { StorybookError, StorybookUnreachableError } from './storybook-error.js'
 
 /**
@@ -166,6 +166,26 @@ describe('readStories', () => {
     expect(await readStories({ name: 'web', url, dir }, dir)).toEqual([
       { id: 'button--primary', title: 'Button', name: 'button--primary', importPath: './src/Button.stories.tsx' },
     ])
+  })
+
+  it("names each story whose ID can't name a baseline file, and leaves other entries alone", async () => {
+    const dir = createStorybookFolder()
+    const ids = ['../../escaped', 'a/b', 'a\\b', 'a\u0000b', '.', '..', 'button--primary', '...', 'a.b']
+    const entries = Object.fromEntries(ids.map((id, index) => [`e${index}`, entryOf(id)]))
+    const { url } = await startServer(
+      200,
+      JSON.stringify({ v: 5, entries: { ...entries, docs: { ...entryOf('../docs'), type: 'docs' } } }),
+    )
+
+    const error = await readStories({ name: 'web', url, dir }, dir).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(StorybookError)
+    expect((error as Error).message).toBe(
+      "Storybook web's index.json lists stories whose IDs can't name a baseline file: " +
+        '"../../escaped", "a/b", "a\\\\b", "a\\u0000b", ".", "..". ' +
+        "A story ID can't hold /, \\ or a NUL character, or be . or .. on its own. " +
+        'Give each of these stories an id without them.',
+    )
   })
 
   it.each(['/storybook', '/storybook/'])('reaches index.json under the path of a URL ending in %j', async (path) => {
@@ -370,6 +390,29 @@ describe('readStories', () => {
     expect((error as Error).message).toBe(
       `Storybook web didn't answer at ${url}/index.json within 0.1 s. ` +
         "Check what's listening there, or restart Storybook.",
+    )
+  })
+})
+
+describe('storyUrlOf', () => {
+  it("builds the story's own page at a Storybook served at the root", () => {
+    expect(storyUrlOf('http://127.0.0.1:6006', 'button--primary')).toBe(
+      'http://127.0.0.1:6006/iframe.html?id=button--primary&viewMode=story',
+    )
+  })
+
+  it("keeps the Storybook's path, with or without a trailing slash, and drops its query and hash", () => {
+    expect(storyUrlOf('https://example.com/storybook?path=/story/a#top', 'button--primary')).toBe(
+      'https://example.com/storybook/iframe.html?id=button--primary&viewMode=story',
+    )
+    expect(storyUrlOf('https://example.com/storybook/', 'button--primary')).toBe(
+      'https://example.com/storybook/iframe.html?id=button--primary&viewMode=story',
+    )
+  })
+
+  it('encodes the story ID', () => {
+    expect(storyUrlOf('http://127.0.0.1:6006', 'a&b=c d/é')).toBe(
+      'http://127.0.0.1:6006/iframe.html?id=a%26b%3Dc%20d%2F%C3%A9&viewMode=story',
     )
   })
 })

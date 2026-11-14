@@ -2,7 +2,11 @@
 import { runCli } from './commands/run-cli.js'
 
 try {
-  const result = await runCli(process.argv.slice(2), process.env, process.cwd())
+  const result = await runCli(process.argv.slice(2), process.env, process.cwd(), {
+    progress: (text) => {
+      process.stderr.write(text)
+    },
+  })
 
   process.stdout.write(result.stdout)
   process.stderr.write(result.stderr)

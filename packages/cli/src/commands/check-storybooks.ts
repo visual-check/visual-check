@@ -21,19 +21,19 @@ interface StorybookInRun {
 }
 
 /**
- * What the checks found: every Storybook's stories, or the problems that stop the run. Warnings go to standard error
- * either way and never change the exit code.
+ * What the checks found: every Storybook with its stories, or the problems that stop the run. Warnings go to standard
+ * error either way and never change the exit code.
  */
-type StorybookChecks =
-  | { storybooks: { name: string; stories: Story[] }[]; warnings: string[] }
+type StorybookChecks<T extends StorybookInRun> =
+  | { storybooks: { storybook: T; stories: Story[] }[]; warnings: string[] }
   | { problems: string[]; warnings: string[] }
 
 /**
  * What checking one Storybook gave: the version warning if it has one, and either its stories or the problem that
  * stops the run.
  */
-type StorybookOutcome = { warning: string | undefined } & (
-  | { name: string; stories: Story[] }
+type StorybookOutcome<T extends StorybookInRun> = { warning: string | undefined } & (
+  | { storybook: T; stories: Story[] }
   | { problem: string; unreachable: boolean }
 )
 
@@ -41,13 +41,13 @@ type StorybookOutcome = { warning: string | undefined } & (
  * Checks one Storybook's version, then reads its stories. A version that is too old is the Storybook's problem, and
  * its `index.json` isn't read. A Storybook's own error becomes a problem; any other error is thrown.
  */
-async function checkOneStorybook(storybook: StorybookInRun, cwd: string): Promise<StorybookOutcome> {
+async function checkOneStorybook<T extends StorybookInRun>(storybook: T, cwd: string): Promise<StorybookOutcome<T>> {
   let warning: string | undefined
 
   try {
     warning = checkStorybookVersion(storybook, cwd)
 
-    return { name: storybook.name, stories: await readStories(storybook, cwd), warning }
+    return { storybook, stories: await readStories(storybook, cwd), warning }
   } catch (error) {
     if (error instanceof StorybookError) {
       return { problem: error.message, unreachable: error instanceof StorybookUnreachableError, warning }
@@ -64,7 +64,10 @@ async function checkOneStorybook(storybook: StorybookInRun, cwd: string): Promis
  *
  * @throws {Error} When a check fails in a way that isn't a Storybook's problem.
  */
-export async function checkStorybooks(storybooks: StorybookInRun[], cwd: string): Promise<StorybookChecks> {
+export async function checkStorybooks<T extends StorybookInRun>(
+  storybooks: T[],
+  cwd: string,
+): Promise<StorybookChecks<T>> {
   const outcomes = await Promise.all(storybooks.map((storybook) => checkOneStorybook(storybook, cwd)))
   const warnings = outcomes.flatMap((outcome) => outcome.warning ?? [])
   const failed = outcomes.filter((outcome) => 'problem' in outcome)
@@ -73,7 +76,7 @@ export async function checkStorybooks(storybooks: StorybookInRun[], cwd: string)
     return {
       storybooks: outcomes
         .filter((outcome) => 'stories' in outcome)
-        .map((outcome) => ({ name: outcome.name, stories: outcome.stories })),
+        .map((outcome) => ({ storybook: outcome.storybook, stories: outcome.stories })),
       warnings,
     }
   }
