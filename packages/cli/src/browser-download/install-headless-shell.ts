@@ -191,9 +191,18 @@ interface LockOwner {
 }
 
 /**
- * Where the platform's headless shell lives in the version folder.
+ * Where the headless shell of a Chromium version for a Chrome for Testing platform is cached, whether or not it is
+ * there yet: in `chromium/<version>/` in the cache folder, which is `VISUAL_CHECK_CACHE_DIR`, else `visual-check` in
+ * the OS's user cache folder. The OS and the home folder are this machine's unless given.
  */
-function shellPathsOf(versionFolder: string, platform: string): ShellPaths {
+function shellPathsFor(
+  environment: Record<string, string | undefined>,
+  version: string,
+  platform: string,
+  os: NodeJS.Platform = process.platform,
+  homeDir: string = homedir(),
+): ShellPaths {
+  const versionFolder = join(cacheFolderOf(environment, os, homeDir), 'chromium', version)
   const shellFolderName = `chrome-headless-shell-${platform}`
   const executableName = `${shellFolderName}/chrome-headless-shell${platform === 'win64' ? '.exe' : ''}`
 
@@ -686,19 +695,6 @@ export interface HeadlessShellPaths {
 }
 
 /**
- * Gives the folder the headless shells of a Chromium version are cached in: `chromium/<version>/` in the cache folder,
- * which is `VISUAL_CHECK_CACHE_DIR`, else `visual-check` in the OS's user cache folder.
- */
-function versionFolderOf(
-  environment: Record<string, string | undefined>,
-  version: string,
-  os: NodeJS.Platform,
-  homeDir: string,
-): string {
-  return join(cacheFolderOf(environment, os, homeDir), 'chromium', version)
-}
-
-/**
  * Gives where the headless shell of a Chromium version for a Chrome for Testing platform is cached on this machine,
  * whether or not it is there yet.
  *
@@ -709,9 +705,9 @@ export function headlessShellPathsOf(
   version: string,
   platform: string,
 ): HeadlessShellPaths {
-  const paths = shellPathsOf(versionFolderOf(environment, version, process.platform, homedir()), platform)
+  const { versionFolder, executable } = shellPathsFor(environment, version, platform)
 
-  return { folder: paths.versionFolder, executable: paths.executable }
+  return { folder: versionFolder, executable }
 }
 
 /**
@@ -728,13 +724,8 @@ export function headlessShellPathsOf(
  */
 export async function installHeadlessShell(options: InstallHeadlessShellOptions): Promise<string> {
   const { version, platform, environment } = options
-  const versionFolder = versionFolderOf(
-    environment,
-    version,
-    options.os ?? process.platform,
-    options.homeDir ?? homedir(),
-  )
-  const paths = shellPathsOf(versionFolder, platform)
+  const paths = shellPathsFor(environment, version, platform, options.os, options.homeDir)
+  const { versionFolder } = paths
 
   if (await isReady(paths)) {
     return paths.executable
