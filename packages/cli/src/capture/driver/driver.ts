@@ -152,10 +152,17 @@ export interface PageViewport {
  * - the browser closed the page without a crash: a plain error, "The browser closed the page.";
  * - the browser exited: a `BrowserExitedError`;
  * - `close()` on the driver closed the browser: a plain error, "The browser was closed.";
- * - `close()` on the page: a plain error, "The page was closed.".
+ * - `close()` on the page: a plain error, "The page was closed.";
+ * - the page navigated away from the document the last `goto` loaded: a `PageNavigatedAwayError`.
  *
- * A story that navigates its document away is retried by the engine (#62). For now only `goto` reports it, with a
- * `PageNavigatedAwayError`; #62 makes every page call report it.
+ * A story that navigates its document away is retried by the engine, so the page reports it with a
+ * `PageNavigatedAwayError` naming where it went. `goto` fails with it at once when another navigation of the main frame
+ * overtakes it. Once a `goto` has loaded, the page can no longer be used from the moment its main frame commits a new
+ * document, and a call the browser fails as that document comes, while a navigation of the main frame to a new
+ * document is pending, such as a link the story follows or its `history.back()`, fails with it too. Only new documents
+ * of the main frame count: not a same-document navigation, such as `history.replaceState`, `pushState` or a fragment
+ * link, not an iframe's navigation, and not a navigation that ends without a new document, such as a download or a
+ * `204 No Content` answer.
  *
  * After any call on a page fails, the page may still be in the middle of a navigation, or stuck, and a later call on it
  * can fail because of that. So the caller closes a page once a call on it fails, and opens a fresh page for its next
@@ -196,10 +203,10 @@ export interface Page {
    * its document's origin is opaque, such as that of `about:blank`, a `data:` URL or an error page. Keeps Cache Storage
    * and service workers.
    *
-   * Fails at once, clearing nothing, when the main frame has committed another document since that `goto`, such as one
-   * the page navigated to on its own, because the storage the page left can then be in more than one origin: the caller
-   * replaces the page, as after any failed call. Fails with a `PageTimeoutError` when the browser doesn't answer within
-   * the driver's own fixed limit.
+   * Like every call, fails at once with a `PageNavigatedAwayError`, clearing nothing, once the page has navigated away
+   * from the document that `goto` loaded, because the storage the page left can then be in more than one origin: the
+   * caller replaces the page, as after any failed call. Fails with a `PageTimeoutError` when the browser doesn't answer
+   * within the driver's own fixed limit.
    */
   clearStorage: () => Promise<void>
   /**
@@ -319,7 +326,7 @@ export class PageTimeoutError extends Error {
 
 /**
  * The page's main frame went to another document than the one asked for, on the page's own initiative, such as a
- * story's script following a link.
+ * story's script following a link: before that document loaded, or after.
  *
  * @public
  */
@@ -335,7 +342,7 @@ export class PageNavigatedAwayError extends Error {
   readonly url: string
 
   /**
-   * Keeps the URL the main frame went to, with the message saying what it overtook.
+   * Keeps the URL the main frame went to, with the message saying when it went there.
    */
   constructor(url: string, message: string) {
     super(message)

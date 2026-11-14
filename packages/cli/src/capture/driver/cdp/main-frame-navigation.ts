@@ -5,7 +5,7 @@ import { type CdpEvent, isRecord } from './cdp-connection.js'
  * The URL a frame from `Page.frameNavigated` committed, its fragment included. For an error page, the URL that
  * couldn't be loaded.
  */
-function frameUrl(frame: Record<string, unknown>): string {
+export function frameUrl(frame: Record<string, unknown>): string {
   const url = typeof frame.unreachableUrl === 'string' ? frame.unreachableUrl : String(frame.url)
   const fragment = typeof frame.urlFragment === 'string' ? frame.urlFragment : ''
 
@@ -22,7 +22,8 @@ function frameUrl(frame: Record<string, unknown>): string {
  * main frame, overtakes it with a `PageNavigatedAwayError`.
  *
  * Events that come before the answer to `Page.navigate` are held, and judged in order once the answer names the
- * loader.
+ * loader. Those still held once the document has loaded came after its load event, so they belong to the loaded
+ * document: they go to `onLoad`.
  */
 export class MainFrameNavigation {
   /**
@@ -44,6 +45,11 @@ export class MainFrameNavigation {
    * The loaders of the page's earlier navigations, whose late commits don't count.
    */
   private readonly earlierLoaderIds: ReadonlySet<string>
+
+  /**
+   * Called once, the moment the document has loaded, with the events still held, which came after its load event.
+   */
+  private readonly onLoad: (later: readonly CdpEvent[]) => void
 
   /**
    * Resolves `done`.
@@ -71,13 +77,27 @@ export class MainFrameNavigation {
   private hasCommitted = false
 
   /**
-   * Starts following a navigation of the main frame `mainFrameId` to `url`, ignoring late commits with
-   * `earlierLoaderIds`.
+   * How the navigation has ended: not yet, its document has loaded, which resolved `done`, it has failed, which
+   * rejected `done`, or its caller stopped it, which leaves `done` as it was. Only the first ending counts.
    */
-  constructor(url: string, mainFrameId: string, earlierLoaderIds: ReadonlySet<string>) {
+  private outcome: 'pending' | 'loaded' | 'failed' | 'stopped' = 'pending'
+
+  /**
+   * Starts following a navigation of the main frame `mainFrameId` to `url`, ignoring late commits with
+   * `earlierLoaderIds`. Once the document has loaded, it calls `onLoad` at once, before `done`'s callbacks run, with
+   * the events it still holds, in order: those came after the load event, so they are the loaded document's. It calls
+   * `onLoad` once at most, and never once the navigation has failed or been stopped.
+   */
+  constructor(
+    url: string,
+    mainFrameId: string,
+    earlierLoaderIds: ReadonlySet<string>,
+    onLoad: (later: readonly CdpEvent[]) => void,
+  ) {
     this.url = url
     this.mainFrameId = mainFrameId
     this.earlierLoaderIds = earlierLoaderIds
+    this.onLoad = onLoad
     this.done = new Promise((resolve, reject) => {
       this.resolve = resolve
       this.reject = reject
@@ -93,22 +113,25 @@ export class MainFrameNavigation {
 
   /**
    * Takes in the answer to `Page.navigate`. Fails on its error text, such as `net::ERR_CONNECTION_REFUSED`. Otherwise
-   * keeps the loader it names and judges the events held until now.
+   * keeps the loader it names and judges the events held until now, in order, until the navigation has ended.
    */
   answer(result: Record<string, unknown>): void {
     const { errorText, loaderId } = result
 
     if (typeof errorText === 'string' && errorText !== '') {
-      this.reject(new Error(`The page couldn't load ${this.url}: ${errorText}`))
+      this.failWith(new Error(`The page couldn't load ${this.url}: ${errorText}`))
     } else if (typeof loaderId !== 'string') {
-      this.reject(new Error("The browser's answer to Page.navigate has no loaderId."))
+      this.failWith(new Error("The browser's answer to Page.navigate has no loaderId."))
     } else {
       this.loaderId = loaderId
 
-      const held = this.held
+      while (this.outcome === 'pending') {
+        const event = this.held.shift()
 
-      this.held = []
-      for (const event of held) {
+        if (event === undefined) {
+          return
+        }
+
         this.judge(event)
       }
     }
@@ -118,7 +141,18 @@ export class MainFrameNavigation {
    * Fails the navigation because `Page.navigate` failed.
    */
   fail(error: unknown): void {
-    this.reject(error)
+    this.failWith(error)
+  }
+
+  /**
+   * Stops following the navigation, as `goto` does once it has settled either way. If the navigation hasn't ended yet,
+   * it never loads after that, though a late answer to `Page.navigate` shows that its document did, and `done` never
+   * settles.
+   */
+  stop(): void {
+    if (this.outcome === 'pending') {
+      this.outcome = 'stopped'
+    }
   }
 
   /**
@@ -153,7 +187,7 @@ export class MainFrameNavigation {
     if (event.method === 'Page.frameNavigated') {
       this.frameNavigated(event.params.frame)
     } else if (event.method === 'Page.loadEventFired' && this.hasCommitted) {
-      this.resolve()
+      this.finishLoading()
     }
   }
 
@@ -177,6 +211,32 @@ export class MainFrameNavigation {
    * Fails because a navigation to `url` overtook this one.
    */
   private overtaken(url: string): void {
-    this.reject(new PageNavigatedAwayError(url, `The page navigated to ${url} before ${this.url} loaded.`))
+    this.failWith(new PageNavigatedAwayError(url, `The page navigated to ${url} before ${this.url} loaded.`))
+  }
+
+  /**
+   * Resolves `done` because the document has loaded, unless the navigation has already ended, and hands the events
+   * still held, which came after the load event, to `onLoad`.
+   */
+  private finishLoading(): void {
+    if (this.outcome === 'pending') {
+      const later = this.held
+
+      this.outcome = 'loaded'
+      this.held = []
+      // Resolved first, so `done` still resolves when one of the later events fails the caller's page at once.
+      this.resolve()
+      this.onLoad(later)
+    }
+  }
+
+  /**
+   * Rejects `done` with `error`, unless the navigation has already ended.
+   */
+  private failWith(error: unknown): void {
+    if (this.outcome === 'pending') {
+      this.outcome = 'failed'
+      this.reject(error)
+    }
   }
 }

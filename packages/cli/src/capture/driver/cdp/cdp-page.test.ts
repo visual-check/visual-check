@@ -33,6 +33,16 @@ const storyUrl = 'http://storybook:6006/iframe.html?id=button--primary&viewMode=
 const storyOrigin = 'http://storybook:6006'
 
 /**
+ * The URL a story's script navigates the page to on its own, after the story loaded.
+ */
+const burgersUrl = 'http://storybook:6006/categories/burgers'
+
+/**
+ * The browser's message when it fails a call in flight because the main frame is committing a new document.
+ */
+const navigatedOrClosed = 'Inspected target navigated or closed'
+
+/**
  * The command that clears every cookie of the first page's browser context, at the browser level.
  */
 const clearCookies = { method: 'Storage.clearCookies', params: { browserContextId: 'context-1' }, sessionId: undefined }
@@ -112,12 +122,13 @@ function clearOriginCommands(origin: string): SentCommand[] {
 
 /**
  * Answers `Page.navigate` as Chromium does when the first page loads, committing its main frame as `frame`, which
- * carries loader `loader-1`: where a server redirect landed, or a document whose security origin the test chooses.
+ * carries loader `loaderId`, `loader-1` by default: where a server redirect landed, or a document whose security origin
+ * the test chooses.
  */
-function navigateCommitting(frame: Record<string, unknown>): CommandHandler {
+function navigateCommitting(frame: Record<string, unknown>, loaderId = 'loader-1'): CommandHandler {
   return (command: ReceivedCommand, fake: FakeBrowser) => {
     fake.emit('Page.frameNavigated', { frame }, sessionId)
-    fake.reply(command, { frameId: targetId, loaderId: 'loader-1' })
+    fake.reply(command, { frameId: targetId, loaderId })
     fake.emit('Page.loadEventFired', { timestamp: 1 }, sessionId)
   }
 }
@@ -129,6 +140,25 @@ function navigateAndLoadOnce(command: ReceivedCommand, fake: FakeBrowser): void 
   fake.emit('Page.frameNavigated', { frame: mainFrame(targetId, String(command.params.url), 'loader-1') }, sessionId)
   fake.reply(command, { frameId: targetId, loaderId: 'loader-1' })
   fake.emit('Page.loadEventFired', { timestamp: 1 }, sessionId)
+}
+
+/**
+ * Has the fake browser say that the first page asks to navigate this frame to `url`, in the current tab, as a story's
+ * script does when it follows a link.
+ */
+function requestNavigation(fake: FakeBrowser, frameId: string, url: string): void {
+  fake.emit(
+    'Page.frameRequestedNavigation',
+    { frameId, reason: 'anchorClick', url, disposition: 'currentTab' },
+    sessionId,
+  )
+}
+
+/**
+ * A `PageNavigatedAwayError` as the tests match it: the page navigated to `url` after `gotoUrl` loaded.
+ */
+function navigatedAway(url: string, gotoUrl = storyUrl): Record<string, unknown> {
+  return { name: 'PageNavigatedAwayError', url, message: `The page navigated to ${url} after ${gotoUrl} loaded.` }
 }
 
 /**
@@ -847,6 +877,35 @@ describe('Page.clearStorage', () => {
     },
   )
 
+  it("clears the story's origin though an earlier navigation's error page commits late, before the goto's own document", async () => {
+    const failedUrl = 'http://127.0.0.1:1/x'
+    const { browser, page } = await openPage({
+      handlers: {
+        'Page.navigate': (command: ReceivedCommand, fake: FakeBrowser) => {
+          if (fake.timesReceived(command.method) === 1) {
+            fake.reply(command, { frameId: targetId, loaderId: 'loader-1', errorText: 'net::ERR_UNSAFE_PORT' })
+
+            return
+          }
+
+          fake.emit(
+            'Page.frameNavigated',
+            {
+              frame: { ...mainFrame(targetId, 'chrome-error://chromewebdata/', 'loader-1'), unreachableUrl: failedUrl },
+            },
+            sessionId,
+          )
+          navigateCommitting(mainFrame(targetId, storyUrl, 'loader-2'), 'loader-2')(command, fake)
+        },
+      },
+    })
+
+    await expect(page.goto(failedUrl, 1000)).rejects.toThrow('net::ERR_UNSAFE_PORT')
+    await page.goto(storyUrl, 1000)
+    await page.clearStorage()
+    expect(storageCommands(browser)).toEqual([clearCookies, ...clearOriginCommands(storyOrigin)])
+  })
+
   it('clears the origin a server redirect took the main frame to', async () => {
     const landed = mainFrame(targetId, 'https://www.storybook.test/iframe.html?id=button--primary', 'loader-1')
     const { browser, page } = await openPage({ handlers: { 'Page.navigate': navigateCommitting(landed) } })
@@ -857,28 +916,17 @@ describe('Page.clearStorage', () => {
   })
 
   it.each([['http://elsewhere:7000/'], ['about:blank'], ['data:text/html,away']])(
-    'fails at once, sending nothing, when the page left the document its goto loaded for %s',
+    'fails at once with a PageNavigatedAwayError, sending nothing, when the page left the document its goto loaded for %s',
     async (url) => {
       const { browser, page } = await openPage()
 
       await page.goto(storyUrl, 1000)
       browser.emit('Page.frameNavigated', { frame: mainFrame(targetId, url, 'loader-9') }, sessionId)
       await flush()
-      await expect(page.clearStorage()).rejects.toThrow('The page left the document its last goto loaded.')
+      await expect(page.clearStorage()).rejects.toMatchObject({ name: 'PageNavigatedAwayError', url })
       expect(storageCommands(browser)).toEqual([])
     },
   )
-
-  it('clears the origin again once a goto has loaded another document after the page left one', async () => {
-    const { browser, page } = await openPage()
-
-    await page.goto(storyUrl, 1000)
-    browser.emit('Page.frameNavigated', { frame: mainFrame(targetId, 'http://elsewhere:7000/', 'loader-9') }, sessionId)
-    await flush()
-    await page.goto(storyUrl, 1000)
-    await page.clearStorage()
-    expect(storageCommands(browser)).toEqual([clearCookies, ...clearOriginCommands(storyOrigin)])
-  })
 
   it("ignores a subframe's commits and another session's", async () => {
     const { browser, page } = await openPage()
@@ -922,6 +970,310 @@ describe('Page.clearStorage', () => {
 
     await page.goto(storyUrl, 1000)
     await expect(page.clearStorage()).rejects.toThrow('Frame not found for the given storage id')
+  })
+})
+
+/**
+ * The viewport the tests set.
+ */
+const viewport = { width: 1280, height: 720, deviceScaleFactor: 1 }
+
+/**
+ * Each page call, with the method it is in flight on, as the tests run them after a goto.
+ */
+const callsInFlight: [string, string, (page: Page) => Promise<unknown>][] = [
+  ['evaluate', 'Runtime.evaluate', (page: Page) => page.evaluate('play()', 60_000)],
+  ['captureFullPage', 'Page.captureScreenshot', (page: Page) => page.captureFullPage()],
+  ['setViewport', 'Emulation.setDeviceMetricsOverride', (page: Page) => page.setViewport(viewport)],
+  ['clearStorage', 'DOMStorage.clear', (page: Page) => page.clearStorage()],
+]
+
+describe('when the page navigates away after a goto loaded', () => {
+  it.each(callsInFlight)(
+    'fails %s in flight and every later call with a PageNavigatedAwayError once the main frame commits a new document',
+    async (_call, method, call) => {
+      const { browser, page } = await openPage({
+        handlers: {
+          [method]: (_command: ReceivedCommand, fake: FakeBrowser) =>
+            fake.emit(
+              'Page.frameNavigated',
+              { frame: mainFrame(targetId, `${burgersUrl}#top`, 'loader-9') },
+              sessionId,
+            ),
+        },
+      })
+      const failure = navigatedAway(`${burgersUrl}#top`)
+
+      await page.goto(storyUrl, 1000)
+      await expect(call(page)).rejects.toMatchObject(failure)
+
+      const sentBefore = browser.received.length
+
+      await expect(page.evaluate('1', 60_000)).rejects.toMatchObject(failure)
+      await expect(page.setViewport(viewport)).rejects.toMatchObject(failure)
+      await expect(page.captureFullPage()).rejects.toMatchObject(failure)
+      await expect(page.clearStorage()).rejects.toMatchObject(failure)
+      await expect(page.goto(storyUrl, 60_000)).rejects.toMatchObject(failure)
+      expect(browser.received.length).toBe(sentBefore)
+    },
+  )
+
+  it('names the URL an error page stands for', async () => {
+    const { browser, page } = await openPage()
+    const errorPage = {
+      ...mainFrame(targetId, 'chrome-error://chromewebdata/', 'loader-9'),
+      unreachableUrl: burgersUrl,
+    }
+
+    await page.goto(storyUrl, 1000)
+    browser.emit('Page.frameNavigated', { frame: errorPage }, sessionId)
+    await flush()
+    await expect(page.evaluate('1', 1000)).rejects.toMatchObject(navigatedAway(burgersUrl))
+  })
+
+  it('fails every call from the first commit after the load event, though they come together', async () => {
+    const { page } = await openPage({
+      handlers: {
+        'Page.navigate': (command: ReceivedCommand, fake: FakeBrowser) => {
+          navigateAndLoadOnce(command, fake)
+          fake.emit('Page.frameNavigated', { frame: mainFrame(targetId, burgersUrl, 'loader-9') }, sessionId)
+        },
+      },
+    })
+
+    await expect(page.goto(storyUrl, 1000)).resolves.toBeUndefined()
+    await expect(page.evaluate('1', 1000)).rejects.toMatchObject(navigatedAway(burgersUrl))
+  })
+
+  it('fails every call from a commit that came after the load event but before the answer to Page.navigate', async () => {
+    const { page } = await openPage({
+      handlers: {
+        'Page.navigate': (command: ReceivedCommand, fake: FakeBrowser) => {
+          fake.emit('Page.frameNavigated', { frame: mainFrame(targetId, storyUrl, 'loader-1') }, sessionId)
+          fake.emit('Page.loadEventFired', { timestamp: 1 }, sessionId)
+          fake.emit('Page.frameNavigated', { frame: mainFrame(targetId, burgersUrl, 'loader-9') }, sessionId)
+          fake.reply(command, { frameId: targetId, loaderId: 'loader-1' })
+        },
+      },
+    })
+
+    await expect(page.goto(storyUrl, 1000)).resolves.toBeUndefined()
+    await expect(page.evaluate('1', 1000)).rejects.toMatchObject(navigatedAway(burgersUrl))
+  })
+
+  it('fails an evaluation the browser fails once the main frame has started a history traversal to another document', async () => {
+    const previousStoryUrl = 'http://storybook:6006/iframe.html?id=button--secondary&viewMode=story'
+    const { page } = await openPage({
+      handlers: {
+        'Runtime.evaluate': (command: ReceivedCommand, fake: FakeBrowser) => {
+          fake.emit(
+            'Page.frameStartedNavigating',
+            {
+              frameId: targetId,
+              url: previousStoryUrl,
+              loaderId: 'loader-9',
+              navigationType: 'historyDifferentDocument',
+            },
+            sessionId,
+          )
+          fake.fail(command, -32000, navigatedOrClosed)
+        },
+      },
+    })
+
+    await page.goto(storyUrl, 1000)
+    await expect(page.evaluate('history.back()', 1000)).rejects.toMatchObject(navigatedAway(previousStoryUrl))
+  })
+
+  it.each(callsInFlight)(
+    'fails %s with a PageNavigatedAwayError naming the requested URL when the browser fails it while the page navigates',
+    async (_call, method, call) => {
+      const { page } = await openPage({
+        handlers: {
+          [method]: (command: ReceivedCommand, fake: FakeBrowser) => {
+            requestNavigation(fake, targetId, burgersUrl)
+            fake.fail(command, -32000, navigatedOrClosed)
+          },
+        },
+      })
+
+      await page.goto(storyUrl, 1000)
+      await expect(call(page)).rejects.toMatchObject(navigatedAway(burgersUrl))
+    },
+  )
+
+  it("fails with the browser's error when no navigation the page requested is pending", async () => {
+    const { page } = await openPage({
+      handlers: {
+        'Runtime.evaluate': (command: ReceivedCommand, fake: FakeBrowser) =>
+          fake.fail(command, -32000, navigatedOrClosed),
+      },
+    })
+
+    await page.goto(storyUrl, 1000)
+    await expect(page.evaluate('1', 1000)).rejects.toMatchObject({
+      name: 'CdpError',
+      message: `CDP Runtime.evaluate failed: ${navigatedOrClosed}`,
+    })
+  })
+
+  it("names the URL when the commit and the main frame's stop come right behind the browser's error", async () => {
+    const { page } = await openPage({
+      handlers: {
+        'Runtime.evaluate': (command: ReceivedCommand, fake: FakeBrowser) => {
+          requestNavigation(fake, targetId, burgersUrl)
+          fake.fail(command, -32000, navigatedOrClosed)
+          fake.emit('Page.frameNavigated', { frame: mainFrame(targetId, burgersUrl, 'loader-9') }, sessionId)
+          fake.emit('Page.frameStoppedLoading', { frameId: targetId }, sessionId)
+        },
+      },
+    })
+
+    await page.goto(storyUrl, 1000)
+    await expect(page.evaluate('play()', 1000)).rejects.toMatchObject(navigatedAway(burgersUrl))
+  })
+
+  it("keeps a pending navigation through a same-document one, such as Storybook's history.replaceState", async () => {
+    const { page } = await openPage({
+      handlers: {
+        'Runtime.evaluate': (command: ReceivedCommand, fake: FakeBrowser) => {
+          requestNavigation(fake, targetId, burgersUrl)
+          fake.emit(
+            'Page.navigatedWithinDocument',
+            { frameId: targetId, url: `${storyUrl}&args=`, navigationType: 'historyApi' },
+            sessionId,
+          )
+          fake.fail(command, -32000, navigatedOrClosed)
+        },
+      },
+    })
+
+    await page.goto(storyUrl, 1000)
+    await expect(page.evaluate('play()', 1000)).rejects.toMatchObject(navigatedAway(burgersUrl))
+  })
+
+  it('forgets a navigation the page requested once the main frame stops loading without a new document', async () => {
+    const { page } = await openPage({
+      handlers: {
+        'Runtime.evaluate': (command: ReceivedCommand, fake: FakeBrowser) => {
+          requestNavigation(fake, targetId, 'http://storybook:6006/no-content')
+          fake.emit('Page.frameStoppedLoading', { frameId: targetId }, sessionId)
+          fake.fail(command, -32000, 'Something else went wrong')
+        },
+      },
+    })
+
+    await page.goto(storyUrl, 1000)
+    await expect(page.evaluate('play()', 1000)).rejects.toMatchObject({ name: 'CdpError' })
+  })
+
+  it("ignores a child frame's commits and requests, and another session's", async () => {
+    const { browser, page } = await openPage({
+      handlers: {
+        'Runtime.evaluate': (command: ReceivedCommand, fake: FakeBrowser) =>
+          fake.fail(command, -32000, navigatedOrClosed),
+      },
+    })
+
+    await page.goto(storyUrl, 1000)
+    requestNavigation(browser, 'child-frame', 'http://ads:9000/next')
+    browser.emit('Page.frameNavigated', { frame: childFrame(targetId, 'http://ads:9000/next') }, sessionId)
+    browser.emit(
+      'Page.frameRequestedNavigation',
+      { frameId: targetId, reason: 'anchorClick', url: burgersUrl, disposition: 'currentTab' },
+      'session-other',
+    )
+    browser.emit('Page.frameNavigated', { frame: mainFrame(targetId, burgersUrl, 'loader-9') }, 'session-other')
+    await flush()
+    await expect(page.evaluate('1', 1000)).rejects.toMatchObject({ name: 'CdpError' })
+    await expect(page.captureFullPage()).resolves.toBeDefined()
+  })
+
+  it('counts no commit or request from before a goto loaded', async () => {
+    const { browser, page } = await openPage({
+      handlers: {
+        'Runtime.evaluate': (command: ReceivedCommand, fake: FakeBrowser) =>
+          fake.fail(command, -32000, navigatedOrClosed),
+      },
+    })
+
+    requestNavigation(browser, targetId, 'about:blank')
+    browser.emit('Page.frameNavigated', { frame: mainFrame(targetId, 'about:blank', 'loader-0') }, sessionId)
+    await flush()
+    await expect(page.evaluate('1', 1000)).rejects.toMatchObject({ name: 'CdpError' })
+    await expect(page.captureFullPage()).resolves.toBeDefined()
+  })
+
+  it('counts no commit after a goto that failed', async () => {
+    const { browser, page } = await openPage({
+      handlers: {
+        'Page.navigate': (command: ReceivedCommand, fake: FakeBrowser) =>
+          fake.reply(command, { frameId: targetId, loaderId: 'loader-1', errorText: 'net::ERR_CONNECTION_REFUSED' }),
+      },
+    })
+
+    await expect(page.goto(storyUrl, 1000)).rejects.toThrow('net::ERR_CONNECTION_REFUSED')
+    browser.emit(
+      'Page.frameNavigated',
+      { frame: { ...mainFrame(targetId, 'chrome-error://chromewebdata/', 'loader-1'), unreachableUrl: storyUrl } },
+      sessionId,
+    )
+    await flush()
+    await expect(page.captureFullPage()).resolves.toBeDefined()
+  })
+
+  it('counts no commit after a goto that timed out, though a late answer reveals that its document loaded', async () => {
+    const pending: ReceivedCommand[] = []
+    const { browser, page } = await openPage({
+      handlers: {
+        'Page.navigate': (command: ReceivedCommand, fake: FakeBrowser) => {
+          fake.emit('Page.frameNavigated', { frame: mainFrame(targetId, storyUrl, 'loader-1') }, sessionId)
+          fake.emit('Page.loadEventFired', { timestamp: 1 }, sessionId)
+          pending.push(command)
+        },
+      },
+    })
+
+    await expect(page.goto(storyUrl, 50)).rejects.toBeInstanceOf(PageTimeoutError)
+    browser.reply(pending[0] as ReceivedCommand, { frameId: targetId, loaderId: 'loader-1' })
+    await flush()
+    browser.emit('Page.frameNavigated', { frame: mainFrame(targetId, burgersUrl, 'loader-9') }, sessionId)
+    await flush()
+    await expect(page.captureFullPage()).resolves.toBeDefined()
+  })
+
+  it('forgets a pending navigation when a goto starts, and follows the document that goto loads', async () => {
+    const nextStoryUrl = 'http://storybook:6006/iframe.html?id=button--secondary&viewMode=story'
+    const { browser, page } = await openPage({
+      handlers: {
+        'Runtime.evaluate': (command: ReceivedCommand, fake: FakeBrowser) =>
+          fake.fail(command, -32000, navigatedOrClosed),
+      },
+    })
+
+    await page.goto(storyUrl, 1000)
+    requestNavigation(browser, targetId, burgersUrl)
+    await flush()
+    await page.goto(nextStoryUrl, 1000)
+    await expect(page.evaluate('1', 1000)).rejects.toMatchObject({ name: 'CdpError' })
+    browser.emit('Page.frameNavigated', { frame: mainFrame(targetId, burgersUrl, 'loader-9') }, sessionId)
+    await flush()
+    await expect(page.captureFullPage()).rejects.toMatchObject(navigatedAway(burgersUrl, nextStoryUrl))
+  })
+
+  it('never turns a PageTimeoutError into a PageNavigatedAwayError', async () => {
+    const { page } = await openPage({
+      handlers: {
+        'Runtime.evaluate': (_command: ReceivedCommand, fake: FakeBrowser) =>
+          requestNavigation(fake, targetId, burgersUrl),
+      },
+    })
+
+    await page.goto(storyUrl, 1000)
+
+    const failure = await page.evaluate('new Promise(() => {})', 50).catch((error: unknown) => error)
+
+    expect(failure).toBeInstanceOf(PageTimeoutError)
   })
 })
 

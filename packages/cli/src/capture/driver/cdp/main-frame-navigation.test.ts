@@ -40,10 +40,10 @@ function requested(frameId: string, to: string, disposition: string): CdpEvent {
 }
 
 /**
- * Starts following a navigation to `url` in the main frame, with these earlier loaders.
+ * Starts following a navigation to `url` in the main frame, with these earlier loaders, ignoring its load.
  */
 function navigate(earlierLoaderIds: string[] = []): MainFrameNavigation {
-  return new MainFrameNavigation(url, targetId, new Set(earlierLoaderIds))
+  return new MainFrameNavigation(url, targetId, new Set(earlierLoaderIds), () => undefined)
 }
 
 /**
@@ -76,6 +76,69 @@ describe('MainFrameNavigation', () => {
     expect(await stateOf(navigation.done)).toBe('pending')
     navigation.observe(load())
     expect(await stateOf(navigation.done)).toBe('resolved')
+  })
+
+  it('calls onLoad once, the moment its document loads, with no later events', () => {
+    const loads: (readonly CdpEvent[])[] = []
+    const navigation = new MainFrameNavigation(url, targetId, new Set(), (later) => loads.push(later))
+
+    navigation.answer({ frameId: targetId, loaderId: 'loader-1' })
+    navigation.observe(load())
+    navigation.observe(commit(mainFrame(targetId, url, 'loader-1')))
+    expect(loads).toEqual([])
+    navigation.observe(load())
+    expect(loads).toEqual([[]])
+    navigation.observe(load())
+    expect(loads).toEqual([[]])
+  })
+
+  it('hands the events held after the load event to onLoad, and resolves though one commits another document', async () => {
+    const loads: (readonly CdpEvent[])[] = []
+    const navigation = new MainFrameNavigation(url, targetId, new Set(), (later) => loads.push(later))
+    const elsewhere = commit(mainFrame(targetId, 'http://storybook:6006/categories/burgers', 'loader-other'))
+    const stopped: CdpEvent = {
+      method: 'Page.frameStoppedLoading',
+      params: { frameId: targetId },
+      sessionId: 'session-1',
+    }
+
+    navigation.observe(commit(mainFrame(targetId, url, 'loader-1')))
+    navigation.observe(load())
+    navigation.observe(elsewhere)
+    navigation.observe(stopped)
+    expect(loads).toEqual([])
+    navigation.answer({ frameId: targetId, loaderId: 'loader-1' })
+    expect(loads).toEqual([[elsewhere, stopped]])
+    await expect(navigation.done).resolves.toBeUndefined()
+  })
+
+  it('never calls onLoad once it has failed', async () => {
+    let loaded = false
+    const navigation = new MainFrameNavigation(url, targetId, new Set(), () => {
+      loaded = true
+    })
+    const failure = expect(navigation.done).rejects.toMatchObject({ name: 'PageNavigatedAwayError' })
+
+    navigation.answer({ frameId: targetId, loaderId: 'loader-1' })
+    navigation.observe(commit(mainFrame(targetId, url, 'loader-1')))
+    navigation.observe(requested(targetId, 'http://storybook:6006/categories/burgers', 'currentTab'))
+    navigation.observe(load())
+    await failure
+    expect(loaded).toBe(false)
+  })
+
+  it('never loads once stopped, though a late answer reveals that its document loaded', async () => {
+    let loaded = false
+    const navigation = new MainFrameNavigation(url, targetId, new Set(), () => {
+      loaded = true
+    })
+
+    navigation.observe(commit(mainFrame(targetId, url, 'loader-1')))
+    navigation.observe(load())
+    navigation.stop()
+    navigation.answer({ frameId: targetId, loaderId: 'loader-1' })
+    expect(loaded).toBe(false)
+    expect(await stateOf(navigation.done)).toBe('pending')
   })
 
   it('resolves when the commit and the load event come after the answer', async () => {
