@@ -81,6 +81,7 @@ Each message names what failed and the fix.
 - `index.json` fails, or the preview fails to load. On a dev server, a stories file that doesn't parse breaks `index.json`.
 - `index.json` lists a stories file that isn't on disk.
 - A Storybook is below 9.1.
+- A Storybook asks for a login: `index.json` answers 401, or redirects to a page that isn't a Storybook index. visual-check sends no login. The fix is to serve Storybook where visual-check runs, with `storybook dev` or its static build served in the same CI job.
 
 **Config and options**
 
@@ -88,6 +89,7 @@ Each message names what failed and the fix.
 - Unknown config keys or wrong types.
 - Invalid per-story options, naming the story and the key.
 - A Storybook with no URL for the current environment.
+- A Storybook URL with a user name or password. The message never shows the password.
 - Two Storybooks whose baselines resolve to one folder.
 - Two snapshots whose baselines would be one file.
 
@@ -101,6 +103,7 @@ Each message names what failed and the fix.
 - `--shard` with `--affected`, or with `--consistency`.
 - `--shard` on `update`.
 - `--url` with several Storybooks and no `--storybook`.
+- A `--url` that isn't an `http:` or `https:` URL, or that holds a user name or password.
 
 **Baselines**
 

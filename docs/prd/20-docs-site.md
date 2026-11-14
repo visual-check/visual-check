@@ -30,6 +30,7 @@ All under `/docs`.
 - tsconfig `paths` don't work in the config.
 - `init` under Rush.
 - `timezone`, `locale` and `colorScheme`.
+- `url` takes no user name or password, because visual-check sends no login.
 
 **Modes**
 
@@ -111,6 +112,7 @@ All under `/docs`.
 - Why Linux runners only.
 - Sharding: both matrix shapes, `fail-fast: false`, and shard jobs waiting for the consistency job.
 - Each shard building its own Storybook, building once and passing the build along, or pointing at a deployed Storybook.
+- A deployed Storybook behind a login: visual-check sends none, so the run fails, saying the Storybook asks for a login or redirected to a login page. Serve Storybook in the job instead, or let the runner reach the deployment without one.
 - From a failed check to the report artifact.
 - A job container on visual-check's image, a job container on another image, and devcontainers that use the host's Docker.
 - In a job container, that container is the only boundary, with the checkout and any stored token inside it.
