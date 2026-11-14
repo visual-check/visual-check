@@ -128,7 +128,7 @@ interface RunBrowserOptions {
    */
   place: BrowserPlace
   /**
-   * How the session captures every story.
+   * How each session captures every story.
    */
   settings: CaptureSettings
   /**
@@ -138,20 +138,21 @@ interface RunBrowserOptions {
 }
 
 /**
- * The browser a run captures in, launched at the first story that needs it, with one capture session for the run.
+ * The browser a run captures in, launched at the first story that needs it, with one capture session for each worker.
  */
 export interface RunBrowser {
   /**
-   * The run's capture session. The first call launches the browser, checks that it is the browser package's build and
-   * opens the session.
+   * The capture session of a worker. The first call launches the browser and checks that it is the browser package's
+   * build, and every call shares that one browser. A worker's first call opens its session, which keeps its own page.
    *
    * @throws {ContainerError} When Docker can't be run or the image can't be pulled.
    * @throws {BrowserLaunchError} When the browser doesn't connect.
    * @throws {BrowserMismatchError} When the browser isn't the browser package's build.
    */
-  session: () => Promise<CaptureSession>
+  session: (worker: number) => Promise<CaptureSession>
   /**
-   * Closes the session's page and the browser, if they were opened.
+   * Closes every session's page and the browser, if they were opened. Waits for a launch still in flight, so no
+   * browser is left running, and doesn't throw when the launch failed.
    */
   close: () => Promise<void>
 }
@@ -160,13 +161,12 @@ export interface RunBrowser {
  * Prepares a run's browser, which `launcher` launches. Nothing is launched until the first `session()`.
  */
 export function runBrowserOf(launcher: LaunchBrowser, options: RunBrowserOptions): RunBrowser {
-  let driver: Driver | undefined
-  let session: CaptureSession | undefined
+  let launched: Promise<Driver> | undefined
+  const sessions = new Map<number, CaptureSession>()
 
-  const open = async (): Promise<CaptureSession> => {
+  const launch = async (): Promise<Driver> => {
     const executable = options.browserPackage.headlessShell
-
-    driver = await launcher(
+    const driver = await launcher(
       options.place.in === 'image'
         ? { in: 'image', executable }
         : {
@@ -177,23 +177,41 @@ export function runBrowserOf(launcher: LaunchBrowser, options: RunBrowserOptions
             progress: options.progress,
           },
     )
-    checkBrowserVersion(
-      driver.version,
-      options.browserPackage,
-      options.place.in === 'image' ? { in: 'image' } : { in: 'container', configImage: options.configImage },
-    )
 
-    return openCaptureSession(driver, options.settings)
+    try {
+      checkBrowserVersion(
+        driver.version,
+        options.browserPackage,
+        options.place.in === 'image' ? { in: 'image' } : { in: 'container', configImage: options.configImage },
+      )
+    } catch (error) {
+      await driver.close()
+
+      throw error
+    }
+
+    return driver
   }
 
   return {
-    session: async () => {
-      session ??= await open()
+    session: async (worker) => {
+      launched ??= launch()
+
+      const driver = await launched
+      let session = sessions.get(worker)
+
+      if (session === undefined) {
+        session = openCaptureSession(driver, options.settings)
+        sessions.set(worker, session)
+      }
 
       return session
     },
     close: async () => {
-      await session?.close()
+      await Promise.all([...sessions.values()].map((session) => session.close()))
+
+      const driver = await launched?.catch(() => undefined)
+
       await driver?.close()
     },
   }

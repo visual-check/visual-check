@@ -212,7 +212,7 @@ function allMissingOutputOf(storybook: string, storyIds: string[]): string {
   const count = storyIds.length
 
   return [
-    `visual-check ${version} · test · ${count} ${count === 1 ? 'snapshot' : 'snapshots'} · 1 worker`,
+    `visual-check ${version} · test · ${count} ${count === 1 ? 'snapshot' : 'snapshots'} · 4 workers`,
     ...storyIds.map((id) => `✗ ${storybook}  ${id}  missing: no baseline yet; run visual-check update to write it`),
     `0 passed · ${count} missing`,
   ]

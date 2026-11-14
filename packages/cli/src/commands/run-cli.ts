@@ -1,8 +1,10 @@
 import { readFileSync } from 'node:fs'
+import { availableParallelism, totalmem } from 'node:os'
 import { checkBrowserPackage } from '../browser/browser-package.js'
 import { runImageOf } from '../browser/browser-version.js'
 import { imageMarkerPath } from '../browser/image-marker.js'
 import type { BrowserPackage } from '../browser/read-browser-package.js'
+import { autoWorkerCount, type BrowserHost } from '../capture/worker-pool.js'
 import { ConfigError } from '../config/config-error.js'
 import { isCi } from '../config/is-ci.js'
 import { type LoadConfigOptions, loadConfig } from '../config/load-config.js'
@@ -87,6 +89,11 @@ export interface RunCliOptions {
    * fake.
    */
   probeDocker?: ProbeDocker
+  /**
+   * The CPUs and memory of the machine the CLI runs on, which `workers: 'auto'` reads when the browser runs inside
+   * visual-check's image. By default `os.availableParallelism()` and `os.totalmem()`. A test gives its own.
+   */
+  machine?: BrowserHost
   /**
    * Whether visual-check runs inside a container. By default it looks for the file Docker and Podman leave in a
    * container's root, and for `KUBERNETES_SERVICE_HOST`, which Kubernetes sets in every pod. A test gives its answer.
@@ -189,6 +196,7 @@ async function runTestOrUpdate(
     command,
     version: readVersion(),
     config,
+    workers: workersOf(config, placement.host),
     place: placement.place,
     browserPackage: browserCheck.browserPackage,
     selections: checks.storybooks.map(({ storybook, stories }) => ({
@@ -205,6 +213,14 @@ async function runTestOrUpdate(
 }
 
 /**
+ * Gives how many workers the run captures with: the config's number, or, for `'auto'`, what the CPUs and memory where
+ * the browser runs allow.
+ */
+function workersOf(config: ResolvedConfig, host: BrowserHost): number {
+  return config.workers === 'auto' ? autoWorkerCount(host) : config.workers
+}
+
+/**
  * Whether the run is inside a container: the option when a test gives it, else what the environment and the root's
  * marker files say.
  */
@@ -213,9 +229,9 @@ function insideContainerOf(cliOptions: RunCliOptions, environment: Record<string
 }
 
 /**
- * Decides where the run's browser runs and, when that is visual-check's container, runs the Docker probe. Inside
- * visual-check's image no Docker is used, so the probe doesn't run. Gives the place, or what to print when the browser
- * has no place to run or Docker can't run it.
+ * Decides where the run's browser runs and reads the CPUs and memory there: inside visual-check's image the machine's
+ * own, with no Docker used, and in visual-check's container Docker's engine's, which the Docker probe reads. Gives the
+ * place with them, or what to print when the browser has no place to run or Docker can't run it.
  *
  * @throws {Error} Any error the probe throws besides a `ContainerError`.
  */
@@ -224,7 +240,7 @@ async function placeAndProbe(
   browserPackage: BrowserPackage,
   insideContainer: boolean,
   cliOptions: RunCliOptions,
-): Promise<{ place: BrowserPlace } | { problem: string }> {
+): Promise<{ place: BrowserPlace; host: BrowserHost } | { problem: string }> {
   const placement = placeBrowser(config.platform, browserPackage, cliOptions.imageMarkerPath ?? imageMarkerPath)
 
   if ('problem' in placement) {
@@ -232,13 +248,11 @@ async function placeAndProbe(
   }
 
   if (placement.place.in === 'image') {
-    return placement
+    return { place: placement.place, host: cliOptions.machine ?? machineOf() }
   }
 
   try {
-    await (cliOptions.probeDocker ?? probeDocker)()
-
-    return placement
+    return { place: placement.place, host: await (cliOptions.probeDocker ?? probeDocker)() }
   } catch (error) {
     if (error instanceof ContainerError) {
       return { problem: dockerProblemOf(error, { insideContainer, image: runImageOf(browserPackage, config.image) }) }
@@ -246,6 +260,13 @@ async function placeAndProbe(
 
     throw error
   }
+}
+
+/**
+ * Reads the CPUs and memory of the machine the CLI runs on.
+ */
+function machineOf(): BrowserHost {
+  return { cpus: availableParallelism(), memoryBytes: totalmem() }
 }
 
 /**
