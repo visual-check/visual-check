@@ -67,9 +67,20 @@ afterAll(() => {
 const noMarker: RunCliOptions = { imageMarkerPath: absentMarkerPath }
 
 /**
+ * The options every run gets: a Docker probe and a machine that both have 4 CPUs and 16 GiB, and no container around
+ * the run, so no test runs the real `docker` or reads the machine it runs on.
+ */
+const hostOptions = {
+  probeDocker: async () => ({ cpus: 4, memoryBytes: 16 * 2 ** 30 }),
+  machine: { cpus: 4, memoryBytes: 16 * 2 ** 30 },
+  insideContainer: false,
+} satisfies RunCliOptions
+
+/**
  * Options that fail the run if it launches a browser, for runs that must stop before the launch.
  */
 const noLaunch: RunCliOptions = {
+  ...hostOptions,
   launchBrowser: () => Promise.reject(new Error('The run launched a browser.')),
   imageMarkerPath: absentMarkerPath,
 }
@@ -90,6 +101,12 @@ interface FakeStory {
    * Whether the browser exits while capturing it.
    */
   browserExits?: boolean
+  /**
+   * The ID of a story this one's capture waits for until that story's capture has settled, then one more macrotask, so
+   * its result reaches the pool first. That story must reach its capture on another worker, or the gate never opens
+   * and the test times out. It doesn't wait when not given.
+   */
+  waitsFor?: string
 }
 
 /**
@@ -125,42 +142,93 @@ interface FakeBrowserRecord {
    * Whether the driver was closed.
    */
   closed: boolean
+  /**
+   * How many times the driver was closed.
+   */
+  driverCloses: number
+  /**
+   * The ID of every story whose capture finished, in the order they finished, whether they captured or the browser
+   * exited.
+   */
+  finished: string[]
 }
 
 /**
  * Makes an empty record of what a fake browser saw.
  */
 function newRecord(): FakeBrowserRecord {
-  return { launches: [], urls: [], setups: [], viewports: [], pageCloses: 0, closed: false }
+  return {
+    launches: [],
+    urls: [],
+    setups: [],
+    viewports: [],
+    pageCloses: 0,
+    closed: false,
+    driverCloses: 0,
+    finished: [],
+  }
 }
 
 /**
  * Builds a fake driver whose pages answer each story, by ID, as `stories` says.
  */
 function fakeDriverOf(stories: Record<string, FakeStory>, record: FakeBrowserRecord, driverVersion: string): Driver {
+  const settled = new Map<string, { promise: Promise<void>; resolve: () => void }>()
+  const settledOf = (id: string) => {
+    let gate = settled.get(id)
+
+    if (gate === undefined) {
+      let resolve: () => void = () => undefined
+      const promise = new Promise<void>((resolvePromise) => {
+        resolve = resolvePromise
+      })
+
+      gate = { promise, resolve }
+      settled.set(id, gate)
+    }
+
+    return gate
+  }
+
   return {
     version: driverVersion,
     exited: new Promise(() => undefined),
     newPage: async (setup) => {
       let story: FakeStory = {}
+      let id = ''
 
       record.setups.push(setup)
 
       return {
+        clearStorage: async () => undefined,
         setViewport: async (viewport) => {
           record.viewports.push(viewport)
         },
         goto: async (url) => {
           record.urls.push(url)
-          story = stories[new URL(url).searchParams.get('id') ?? ''] ?? {}
+          id = new URL(url).searchParams.get('id') ?? ''
+          story = stories[id] ?? {}
         },
         evaluate: async () => ({ outcome: 'finished', status: story.broken === true ? 'error' : 'success' }),
         captureFullPage: async () => {
-          if (story.browserExits === true) {
-            throw new BrowserExitedError({ code: null, signal: 'SIGKILL', error: undefined }, ['Out of memory', 'bye'])
+          if (story.waitsFor !== undefined) {
+            await settledOf(story.waitsFor).promise
+            await new Promise((resolve) => setTimeout(resolve, 0))
           }
 
-          return story.snapshot ?? defaultSnapshot
+          try {
+            if (story.browserExits === true) {
+              throw new BrowserExitedError({ code: null, signal: 'SIGKILL', error: undefined }, [
+                'Out of memory',
+                'bye',
+              ])
+            }
+
+            return story.snapshot ?? defaultSnapshot
+          } finally {
+            record.finished.push(id)
+            settledOf(id).resolve()
+          }
         },
         close: async () => {
           record.pageCloses += 1
@@ -169,6 +237,7 @@ function fakeDriverOf(stories: Record<string, FakeStory>, record: FakeBrowserRec
     },
     close: async () => {
       record.closed = true
+      record.driverCloses += 1
     },
   }
 }
@@ -193,7 +262,12 @@ function fakeBrowser(
   }
 
   return {
-    options: { launchBrowser, progress: (text) => progress.push(text), imageMarkerPath: absentMarkerPath },
+    options: {
+      ...hostOptions,
+      launchBrowser,
+      progress: (text) => progress.push(text),
+      imageMarkerPath: absentMarkerPath,
+    },
     record,
     progress,
   }
@@ -203,14 +277,17 @@ function fakeBrowser(
  * Builds options whose launch fails with `error`.
  */
 function failingLaunch(error: Error): RunCliOptions {
-  return { launchBrowser: () => Promise.reject(error), imageMarkerPath: absentMarkerPath }
+  return { ...hostOptions, launchBrowser: () => Promise.reject(error), imageMarkerPath: absentMarkerPath }
 }
 
 /**
- * Builds the header a run prints.
+ * Builds the header a run prints. A run with no `workers` in its config gets 4 workers from the fake probe's and
+ * machine's 4 CPUs.
  */
-function headerOf(command: 'test' | 'update', count: number): string {
-  return `visual-check ${version} · ${command} · ${count} ${count === 1 ? 'snapshot' : 'snapshots'} · 1 worker`
+function headerOf(command: 'test' | 'update', count: number, workers = 4): string {
+  const snapshots = `${count} ${count === 1 ? 'snapshot' : 'snapshots'}`
+
+  return `visual-check ${version} · ${command} · ${snapshots} · ${workers} ${workers === 1 ? 'worker' : 'workers'}`
 }
 
 /**
@@ -396,6 +473,7 @@ Options for test and update:
   --storybook <name>  Cover only this Storybook
   --url <url>         Use this URL for the Storybook (with several Storybooks, needs --storybook)
   --config <path>     Use this config instead of searching for one
+  --workers <n>       Capture with this many workers
 
 Other options:
   --help     Show this help
@@ -486,7 +564,7 @@ Other options:
       'web/button.stories.tsx': '',
       'docs/button.stories.tsx': '',
     })
-    const result = await runCli(['test'], {}, project, noMarker)
+    const result = await runCli(['test'], {}, project, noLaunch)
 
     expect(result.exitCode).toBe(2)
     expect(result.stdout).toBe('')
@@ -521,7 +599,7 @@ Other options:
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${down}' } } }\n`,
       'node_modules/storybook/package.json': JSON.stringify({ version: '12.0.0' }),
     })
-    const result = await runCli(['test'], {}, project, noMarker)
+    const result = await runCli(['test'], {}, project, noLaunch)
 
     expect(result.exitCode).toBe(2)
     expect(result.stderr).toMatch(/^Warning: Storybook web runs storybook 12\.0\.0.*\nStorybook web doesn't answer at /)
@@ -533,7 +611,7 @@ Other options:
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
       'node_modules/storybook/package.json': JSON.stringify({ version: '9.0.0' }),
     })
-    const result = await runCli(['test'], {}, project, noMarker)
+    const result = await runCli(['test'], {}, project, noLaunch)
 
     expect(result.exitCode).toBe(2)
     expect(result.stderr).toContain('Storybook web runs storybook 9.0.0, and visual-check needs 9.1 or later.')
@@ -546,7 +624,7 @@ Other options:
     const project = createProject({
       'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${first}' }, docs: { dir: 'docs', url: '${second}' } } }\n`,
     })
-    const result = await runCli(['test'], {}, project, noMarker)
+    const result = await runCli(['test'], {}, project, noLaunch)
 
     expect(result.stderr.indexOf('Storybook web doesn')).toBeGreaterThanOrEqual(0)
     expect(result.stderr.indexOf('Storybook web doesn')).toBeLessThan(result.stderr.indexOf('Storybook docs doesn'))
@@ -564,7 +642,7 @@ Other options:
       'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${web}' }, docs: { dir: 'docs', url: '${failing}' } } }\n`,
       'docs/button.stories.tsx': '',
     })
-    const result = await runCli(['test'], {}, project, noMarker)
+    const result = await runCli(['test'], {}, project, noLaunch)
 
     expect(result.exitCode).toBe(2)
     expect(result.stderr).toContain("Storybook docs's index.json failed")
@@ -578,7 +656,7 @@ Other options:
     const project = createProject({
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${down}' } } }\n`,
     })
-    const result = await runCli(['test'], {}, project, noMarker)
+    const result = await runCli(['test'], {}, project, noLaunch)
 
     expect(result.exitCode).toBe(2)
     expect(result.stderr).toContain("Storybook web doesn't answer")
@@ -589,7 +667,7 @@ Other options:
     const project = createProject({
       'visual-check.config.mjs': "export default { storybooks: { web: { url: 'http://127.0.0.1:6006' } }, nope: 1 }\n",
     })
-    const result = await runCli(['test'], {}, project, noMarker)
+    const result = await runCli(['test'], {}, project, noLaunch)
 
     expect(result.exitCode).toBe(2)
     expect(result.stdout).toBe('')
@@ -701,7 +779,53 @@ describe('runCli test', () => {
         '2 passed · 1 differs · 1 broken · 1 missing',
       ),
     )
-    expect(record.urls.map((storyUrl) => new URL(storyUrl).searchParams.get('id'))).toEqual(['a', 'b', 'd', 'e'])
+    expect(record.urls.map((storyUrl) => new URL(storyUrl).searchParams.get('id')).sort()).toEqual(['a', 'b', 'd', 'e'])
+  })
+
+  it('prints the configured number of workers in the header, the noun in the right number', async () => {
+    const { project: three } = await createRun(['a'], {}, 'workers: 3')
+    const { project: one } = await createRun(['a'], {}, 'workers: 1')
+    const { project: pair } = await createRun(['a'], {}, 'workers: { local: 5, ci: 2 }')
+
+    expect(firstLineOf((await runCli(['test'], {}, three, noLaunch)).stdout)).toBe(headerOf('test', 1, 3))
+    expect(firstLineOf((await runCli(['test'], {}, one, noLaunch)).stdout)).toBe(headerOf('test', 1, 1))
+    expect(firstLineOf((await runCli(['test'], { CI: 'true' }, pair, noLaunch)).stdout)).toBe(headerOf('test', 1, 2))
+  })
+
+  it('lets --workers beat the config, whether a number or auto', async () => {
+    const { project: five } = await createRun(['a'], {}, 'workers: 5')
+    const { project: auto } = await createRun(['a'], {}, "workers: 'auto'")
+
+    expect(firstLineOf((await runCli(['test', '--workers', '2'], {}, five, noLaunch)).stdout)).toBe(
+      headerOf('test', 1, 2),
+    )
+    expect(firstLineOf((await runCli(['test', '--workers', '3'], {}, auto, noLaunch)).stdout)).toBe(
+      headerOf('test', 1, 3),
+    )
+    expect(firstLineOf((await runCli(['test', '--workers', '1'], {}, auto, noLaunch)).stdout)).toBe(
+      headerOf('test', 1, 1),
+    )
+  })
+
+  it("sizes 'auto' workers from the Docker host the probe finds", async () => {
+    const { project } = await createRun(['a'], {}, "workers: 'auto'")
+    const smallHost = { ...noLaunch, probeDocker: async () => ({ cpus: 2, memoryBytes: 7e9 }) }
+
+    expect(firstLineOf((await runCli(['test'], {}, project, noLaunch)).stdout)).toBe(headerOf('test', 1, 4))
+    expect(firstLineOf((await runCli(['test'], {}, project, smallHost)).stdout)).toBe(headerOf('test', 1, 2))
+  })
+
+  it("sizes 'auto' workers from the machine inside visual-check's image, for any platform", async () => {
+    const { project } = await createRun(['a'], {}, "workers: 'auto'")
+    const { project: host } = await createRun(['a'], {}, "workers: 'auto', platform: 'host'")
+    const inImage = {
+      ...noLaunch,
+      machine: { cpus: 2, memoryBytes: 7e9 },
+      imageMarkerPath: writeMarker(markerOf('amd64')),
+    }
+
+    expect(firstLineOf((await runCli(['test'], {}, project, inImage)).stdout)).toBe(headerOf('test', 1, 2))
+    expect(firstLineOf((await runCli(['test'], {}, host, inImage)).stdout)).toBe(headerOf('test', 1, 2))
   })
 
   it('launches no browser when every selected baseline is missing', async () => {
@@ -837,21 +961,22 @@ describe('runCli launching the browser', () => {
   })
 
   it("exits 2 when the browser isn't the browser package's build, naming both versions", async () => {
-    const { project } = await createRun(['a'])
+    const { project } = await createRun(['a', 'b', 'c'])
     const { options, record } = fakeBrowser({}, '156.0.7000.1')
     const result = await runCli(['update'], {}, project, options)
 
     expect(result).toEqual({
       exitCode: 2,
-      stdout: printed(headerOf('update', 1)),
+      stdout: printed(headerOf('update', 3)),
       stderr: printed(
         `The browser in ${browserPackage.imageReference} is Chromium 156.0.7000.1, but the browser package ` +
           `@visual-check/chromium ${browserPackage.packageVersion} names Chromium ${browserPackage.chromium}.`,
         'Reinstall the browser package @visual-check/chromium, then run visual-check again.',
       ),
     })
+    expect(record.launches).toHaveLength(1)
     expect(record.urls).toEqual([])
-    expect(record.closed).toBe(true)
+    expect(record.driverCloses).toBe(1)
   })
 
   it("says to rebuild a custom image FROM the browser package's image when its browser is another build", async () => {
@@ -869,15 +994,28 @@ describe('runCli launching the browser', () => {
   })
 
   it("exits 2 with the next step and the browser's last output when it fails to launch", async () => {
-    const { project } = await createRun(['a'], { a: defaultSnapshot })
+    const { project } = await createRun(['a', 'b', 'c'], {
+      a: defaultSnapshot,
+      b: defaultSnapshot,
+      c: defaultSnapshot,
+    })
     const error = new BrowserLaunchError('The browser exited with code 127 before it answered.', [
       'exec: not found',
       'bye',
     ])
+    let launches = 0
+    const options: RunCliOptions = {
+      ...hostOptions,
+      launchBrowser: () => {
+        launches += 1
 
-    expect(await runCli(['test'], {}, project, failingLaunch(error))).toEqual({
+        return Promise.reject(error)
+      },
+    }
+
+    expect(await runCli(['test'], {}, project, options)).toEqual({
       exitCode: 2,
-      stdout: printed(headerOf('test', 1)),
+      stdout: printed(headerOf('test', 3)),
       stderr: printed(
         'The browser exited with code 127 before it answered.',
         "The browser's output below may say why. Check that Docker can run images for linux/amd64, then run " +
@@ -887,6 +1025,7 @@ describe('runCli launching the browser', () => {
         '  bye',
       ),
     })
+    expect(launches).toBe(1)
   })
 
   it("names the config's platform in the next step when the browser fails to launch without output", async () => {
@@ -901,6 +1040,72 @@ describe('runCli launching the browser', () => {
     )
   })
 
+  it('exits 2 at once when the Docker probe fails, before it reads a Storybook or launches a browser', async () => {
+    const down = await takeUnusedUrl()
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${down}' } } }\n`,
+    })
+    const probeDocker = () => Promise.reject(new ContainerError("Docker's daemon isn't running."))
+
+    expect(await runCli(['test'], {}, project, { ...noLaunch, probeDocker })).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr: printed(
+        "Docker's daemon isn't running.",
+        "Start or install Docker, or set platform: 'host' in the config.",
+      ),
+    })
+  })
+
+  it('asks for Linux containers without the both-fixes line when the probe finds Windows containers', async () => {
+    const { project } = await createRun(['a'])
+    const probeDocker = () =>
+      Promise.reject(new ContainerError('Switch Docker to Linux containers.', 'linux-containers'))
+
+    expect(await runCli(['test'], {}, project, { ...noLaunch, probeDocker, insideContainer: true })).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr: printed('Switch Docker to Linux containers.'),
+    })
+  })
+
+  it("names the browser package's image as the job container when the probe fails inside a container", async () => {
+    const { project } = await createRun(['a'])
+    const probeDocker = () => Promise.reject(new ContainerError('No docker command.'))
+    const result = await runCli(['test'], {}, project, { ...noLaunch, probeDocker, insideContainer: true })
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stderr).toBe(
+      printed(
+        'No docker command.',
+        "Start or install Docker, or set platform: 'host' in the config.",
+        `Inside a container, run visual-check in a job container on visual-check's image, ${browserPackage.imageReference}, which needs no Docker.`,
+      ),
+    )
+  })
+
+  it("names the config's image as the job container when it sets one", async () => {
+    const { project } = await createRun(['a'], {}, "image: 'example.com/my-chromium:1'")
+    const probeDocker = () => Promise.reject(new ContainerError('No docker command.'))
+    const result = await runCli(['test'], {}, project, { ...noLaunch, probeDocker, insideContainer: true })
+
+    expect(result.stderr).toContain("visual-check's image, example.com/my-chromium:1, which needs no Docker.\n")
+  })
+
+  it('ends a failed pull with both fixes, and with the job container inside a container', async () => {
+    const { project } = await createRun(['a'])
+    const error = new ContainerError('docker pull of example.com/chromium for linux/amd64 failed with exit code 1.')
+    const result = await runCli(['update'], {}, project, { ...failingLaunch(error), insideContainer: true })
+
+    expect(result.stderr).toBe(
+      printed(
+        'docker pull of example.com/chromium for linux/amd64 failed with exit code 1.',
+        "Start or install Docker, or set platform: 'host' in the config.",
+        `Inside a container, run visual-check in a job container on visual-check's image, ${browserPackage.imageReference}, which needs no Docker.`,
+      ),
+    )
+  })
+
   it("exits 2 with Docker's message when the image can't be pulled", async () => {
     const { project } = await createRun(['a'])
     const error = new ContainerError('docker pull of example.com/chromium for linux/amd64 failed with exit code 1.')
@@ -908,17 +1113,24 @@ describe('runCli launching the browser', () => {
     expect(await runCli(['update'], {}, project, failingLaunch(error))).toEqual({
       exitCode: 2,
       stdout: printed(headerOf('update', 1)),
-      stderr: printed('docker pull of example.com/chromium for linux/amd64 failed with exit code 1.'),
+      stderr: printed(
+        'docker pull of example.com/chromium for linux/amd64 failed with exit code 1.',
+        "Start or install Docker, or set platform: 'host' in the config.",
+      ),
     })
   })
 
   it('exits 2 when the browser exits mid-run, keeping the lines printed so far', async () => {
-    const { project } = await createRun(['a', 'b', 'c'], { a: defaultSnapshot, b: defaultSnapshot, c: defaultSnapshot })
+    const { project } = await createRun(
+      ['a', 'b', 'c'],
+      { a: defaultSnapshot, b: defaultSnapshot, c: defaultSnapshot },
+      'workers: 1',
+    )
     const { options, record } = fakeBrowser({ b: { browserExits: true } })
     const result = await runCli(['test'], {}, project, options)
 
     expect(result.exitCode).toBe(2)
-    expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 3), '✓ web  a  N ms'))
+    expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 3, 1), '✓ web  a  N ms'))
     expect(result.stderr).toBe(
       printed(
         'The browser was killed by signal SIGKILL while in use.',
@@ -928,6 +1140,51 @@ describe('runCli launching the browser', () => {
         '  bye',
       ),
     )
+    expect(record.urls).toHaveLength(2)
+    expect(record.closed).toBe(true)
+  })
+
+  it('captures with one browser and a page for each worker, printing the lines in selection order', async () => {
+    const { project } = await createRun(
+      ['a', 'b', 'c'],
+      { a: defaultSnapshot, b: defaultSnapshot, c: defaultSnapshot },
+      'workers: 2',
+    )
+    const { options, record } = fakeBrowser({ a: { waitsFor: 'c' } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(0)
+    expect(withoutTimes(result.stdout)).toBe(
+      printed(headerOf('test', 3, 2), '✓ web  a  N ms', '✓ web  b  N ms', '✓ web  c  N ms', '3 passed'),
+    )
+    expect(record.urls.map((storyUrl) => new URL(storyUrl).searchParams.get('id')).sort()).toEqual(['a', 'b', 'c'])
+    expect(record.finished).toEqual(['b', 'c', 'a'])
+    expect(record.launches).toHaveLength(1)
+    expect(record.setups).toHaveLength(2)
+    expect(record.pageCloses).toBe(2)
+    expect(record.closed).toBe(true)
+  })
+
+  it('opens no more pages than the stories need', async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot }, 'workers: 3')
+    const { options, record } = fakeBrowser()
+
+    await runCli(['test'], {}, project, options)
+    expect(record.setups).toHaveLength(1)
+  })
+
+  it('exits 2 when the browser exits with several workers, keeping the lines of the snapshots that finished', async () => {
+    const { project } = await createRun(
+      ['a', 'b', 'c'],
+      { a: defaultSnapshot, b: defaultSnapshot, c: defaultSnapshot },
+      'workers: 2',
+    )
+    const { options, record } = fakeBrowser({ a: { waitsFor: 'b' }, b: { browserExits: true } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(2)
+    expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 3, 2), '✓ web  a  N ms'))
+    expect(result.stderr).toContain('The browser was killed by signal SIGKILL while in use.')
     expect(record.urls).toHaveLength(2)
     expect(record.closed).toBe(true)
   })
@@ -972,6 +1229,27 @@ describe('runCli launching the browser', () => {
 
     expect(result.exitCode).toBe(0)
     expect(record.launches).toEqual([{ in: 'image', executable: browserPackage.headlessShell }])
+  })
+
+  it.each([
+    ['linux/amd64', ''],
+    ['host', "platform: 'host'"],
+  ])("never probes Docker inside visual-check's image, for platform %s", async (_platform, config) => {
+    const { project } = await createRun(['a'], {}, config)
+    const { options } = fakeBrowser()
+    let probes = 0
+    const result = await runCli(['update'], {}, project, {
+      ...options,
+      probeDocker: async () => {
+        probes += 1
+
+        return { cpus: 4, memoryBytes: 16 * 2 ** 30 }
+      },
+      imageMarkerPath: writeMarker(markerOf('amd64')),
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(probes).toBe(0)
   })
 
   it("exits 2 with the marker's problem before any Storybook request when the image doesn't fit", async () => {
@@ -1024,7 +1302,11 @@ describe('runCli launching the browser', () => {
   })
 
   it("exits 2 when a baseline can't be read, keeping the lines printed so far and closing the browser", async () => {
-    const { project, folder } = await createRun(['a', 'b', 'c'], { a: defaultSnapshot, c: defaultSnapshot })
+    const { project, folder } = await createRun(
+      ['a', 'b', 'c'],
+      { a: defaultSnapshot, c: defaultSnapshot },
+      'workers: 1',
+    )
     const { options, record } = fakeBrowser()
 
     mkdirSync(join(folder, 'b.png'))
@@ -1032,7 +1314,7 @@ describe('runCli launching the browser', () => {
     const result = await runCli(['test'], {}, project, options)
 
     expect(result.exitCode).toBe(2)
-    expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 3), '✓ web  a  N ms'))
+    expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 3, 1), '✓ web  a  N ms'))
     expect(result.stderr).toBe(
       printed(
         "visual-check couldn't read the baseline .visual-check/baselines/b.png: EISDIR: illegal operation on a " +
@@ -1055,7 +1337,11 @@ describe('runCli launching the browser', () => {
     })
 
     await expect(
-      runCli(['update'], {}, project, { launchBrowser: async () => driver, imageMarkerPath: absentMarkerPath }),
+      runCli(['update'], {}, project, {
+        ...hostOptions,
+        launchBrowser: async () => driver,
+        imageMarkerPath: absentMarkerPath,
+      }),
     ).rejects.toThrow('A bug in the driver.')
     expect(record.closed).toBe(true)
   })

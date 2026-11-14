@@ -189,6 +189,19 @@ export interface Page {
    */
   captureFullPage: () => Promise<Uint8Array>
   /**
+   * Clears every cookie of the page's browser context, and `localStorage`, `sessionStorage` and IndexedDB of the origin
+   * of the document the last `goto` loaded, wherever a server redirect took it. Only that origin's: a cross-origin
+   * iframe's `localStorage` and IndexedDB stay. Clears only the cookies when no `goto` has loaded a document yet, or
+   * its document's origin is opaque, such as that of `about:blank`, a `data:` URL or an error page. Keeps Cache Storage
+   * and service workers.
+   *
+   * Fails at once, clearing nothing, when the main frame has committed another document since that `goto`, such as one
+   * the page navigated to on its own, because the storage the page left can then be in more than one origin: the caller
+   * replaces the page, as after any failed call. Fails with a `PageTimeoutError` when the browser doesn't answer within
+   * the driver's own fixed limit.
+   */
+  clearStorage: () => Promise<void>
+  /**
    * Closes the page and its browser context. Every call in flight and every later call fails. Calling it again returns
    * the same promise.
    */

@@ -1,17 +1,19 @@
 import { relative, sep } from 'node:path'
 import { BaselineError } from '../baselines/baseline-error.js'
 import { baselinePathOf, isByteIdentical, readBaseline, writeBaseline } from '../baselines/baseline-files.js'
-import { BrowserMismatchError } from '../browser/browser-version.js'
+import { BrowserMismatchError, runImageOf } from '../browser/browser-version.js'
 import type { BrowserPackage } from '../browser/read-browser-package.js'
-import type { CaptureSettings, StoryToCapture } from '../capture/capture-session.js'
+import type { CaptureSession, CaptureSettings, StoryToCapture } from '../capture/capture-session.js'
 import { BrowserExitedError, BrowserLaunchError } from '../capture/driver/driver.js'
+import { runWorkerPool } from '../capture/worker-pool.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
 import { ContainerError } from '../container/container-error.js'
 import { type Story, storyUrlOf } from '../storybook/read-stories.js'
-import { type BrowserPlace, type LaunchBrowser, type RunBrowser, runBrowserOf } from './launch-browser.js'
+import { dockerProblemOf } from './docker-problem.js'
+import { type BrowserPlace, type LaunchBrowser, runBrowserOf } from './launch-browser.js'
 
 /**
- * The stories a run covers in one Storybook, in the order they are captured.
+ * The stories a run covers in one Storybook, in the order they are taken and printed.
  */
 interface StorybookSelection {
   /**
@@ -41,6 +43,10 @@ interface SnapshotRun {
    */
   config: ResolvedConfig
   /**
+   * How many workers capture at once: `--workers` or the config's `workers`, with `'auto'` already resolved.
+   */
+  workers: number
+  /**
    * Where the browser runs.
    */
   place: BrowserPlace
@@ -56,6 +62,10 @@ interface SnapshotRun {
    * The folder the CLI runs in. Printed paths are relative to it.
    */
   cwd: string
+  /**
+   * Whether visual-check runs inside a container, which decides what a Docker problem suggests.
+   */
+  insideContainer: boolean
   /**
    * Launches the browser, at the first story that needs a capture.
    */
@@ -75,7 +85,8 @@ interface SnapshotRunResult {
    */
   exitCode: number
   /**
-   * The header, one line per snapshot and the counts, or the lines printed before a failure that stopped the run.
+   * The header, one line per snapshot and the counts, or, for a failure that stopped the run, the header and the lines
+   * of the snapshots that finished before it.
    */
   stdout: string
   /**
@@ -132,13 +143,15 @@ const baselineFixes: Record<BaselineError['action'], string> = {
 }
 
 /**
- * Builds the header: the CLI's version, the command, how many snapshots the run captures and how many workers.
+ * Builds the header: the CLI's version, the command, how many snapshots the run captures and how many workers it
+ * runs.
  */
 function headerOf(run: SnapshotRun): string {
   const count = run.selections.reduce((sum, selection) => sum + selection.stories.length, 0)
   const snapshots = `${count} ${count === 1 ? 'snapshot' : 'snapshots'}`
+  const workers = `${run.workers} ${run.workers === 1 ? 'worker' : 'workers'}`
 
-  return `visual-check ${run.version} · ${run.command} · ${snapshots} · 1 worker`
+  return `visual-check ${run.version} · ${run.command} · ${snapshots} · ${workers}`
 }
 
 /**
@@ -172,18 +185,22 @@ function displayPathOf(cwd: string, path: string): string {
 
 /**
  * Tests one story: a missing baseline is reported without a capture, and a snapshot passes only when it holds the
- * baseline's bytes.
+ * baseline's bytes. It asks for the session only when it captures.
  */
-async function testSnapshot(storybook: ResolvedStorybook, story: Story, browser: RunBrowser): Promise<SnapshotResult> {
+async function testSnapshot(
+  storybook: ResolvedStorybook,
+  story: Story,
+  session: () => Promise<CaptureSession>,
+): Promise<SnapshotResult> {
   const baseline = await readBaseline(baselinePathOf(storybook.baselines, story.id))
 
   if (baseline === undefined) {
     return { status: 'missing', detail: 'missing: no baseline yet; run visual-check update to write it' }
   }
 
-  const session = await browser.session()
+  const open = await session()
   const started = performance.now()
-  const capture = await session.capture(storyToCaptureOf(storybook, story))
+  const capture = await open.capture(storyToCaptureOf(storybook, story))
 
   if ('broken' in capture) {
     return { status: 'broken', detail: `broken: ${capture.broken}` }
@@ -203,10 +220,10 @@ async function testSnapshot(storybook: ResolvedStorybook, story: Story, browser:
 async function updateSnapshot(
   storybook: ResolvedStorybook,
   story: Story,
-  browser: RunBrowser,
+  session: () => Promise<CaptureSession>,
   cwd: string,
 ): Promise<SnapshotResult> {
-  const capture = await (await browser.session()).capture(storyToCaptureOf(storybook, story))
+  const capture = await (await session()).capture(storyToCaptureOf(storybook, story))
 
   if ('broken' in capture) {
     return { status: 'broken', detail: `broken: ${capture.broken}` }
@@ -290,7 +307,14 @@ function stopMessageOf(error: unknown, run: SnapshotRun): string | undefined {
     return `${error.message}\n${fix}\n${browserOutputOf(error.output)}`
   }
 
-  if (error instanceof ContainerError || error instanceof BrowserMismatchError) {
+  if (error instanceof ContainerError) {
+    return dockerProblemOf(error, {
+      insideContainer: run.insideContainer,
+      image: runImageOf(run.browserPackage, run.config.image),
+    })
+  }
+
+  if (error instanceof BrowserMismatchError) {
     return `${error.message}\n`
   }
 
@@ -298,18 +322,18 @@ function stopMessageOf(error: unknown, run: SnapshotRun): string | undefined {
 }
 
 /**
- * Captures every selected story, in config order and then selection order, and prints one line per snapshot after
- * the header, then the counts. `test` compares each snapshot with its baseline byte for byte and never captures a
- * missing baseline; `update` writes each snapshot whose baseline is missing or differs. The browser is launched at
- * the first story that needs a capture, so a run with nothing to capture launches nothing. A baseline that can't be
- * read or written, a failed launch, a version mismatch or a browser exit stops the run with exit 2, keeping the lines
- * printed so far. The session and the browser are always closed.
+ * Captures every selected story with a pool of `workers` that share one browser, and prints one line per snapshot after
+ * the header, then the counts. The lines follow config order and then selection order, whatever order the captures
+ * finish in. `test` compares each snapshot with its baseline byte for byte and never captures a missing baseline;
+ * `update` writes each snapshot whose baseline is missing or differs. The browser is launched at the first story that
+ * needs a capture, so a run with nothing to capture launches nothing. A baseline that can't be read or written, a
+ * failed launch, a version mismatch or a browser exit stops the run with exit 2, keeping the lines of the snapshots
+ * that finished. The workers' sessions and the browser are always closed.
  *
- * @throws {Error} Any other error, after closing the session and the browser.
+ * @throws {Error} Any other error, after closing the sessions and the browser.
  */
 export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult> {
-  const lines = [headerOf(run)]
-  const printed = (): string => lines.map((line) => `${line}\n`).join('')
+  const header = headerOf(run)
   const browser = runBrowserOf(run.launchBrowser, {
     browserPackage: run.browserPackage,
     configImage: run.config.image,
@@ -317,20 +341,23 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
     settings: captureSettingsOf(run.config),
     progress: run.progress,
   })
-  const statuses: SnapshotStatus[] = []
+  const items = run.selections.flatMap(({ storybook, stories }) => stories.map((story) => ({ storybook, story })))
+  const results: (SnapshotResult | undefined)[] = items.map(() => undefined)
+  const linesOf = (): string[] =>
+    items.flatMap(({ storybook, story }, index) => {
+      const result = results[index]
+
+      return result === undefined ? [] : [`${marks[result.status]} ${storybook.name}  ${story.id}  ${result.detail}`]
+    })
+  const printed = (lines: string[]): string => [header, ...lines].map((line) => `${line}\n`).join('')
 
   try {
-    for (const { storybook, stories } of run.selections) {
-      for (const story of stories) {
-        const result =
-          run.command === 'test'
-            ? await testSnapshot(storybook, story, browser)
-            : await updateSnapshot(storybook, story, browser, run.cwd)
-
-        statuses.push(result.status)
-        lines.push(`${marks[result.status]} ${storybook.name}  ${story.id}  ${result.detail}`)
-      }
-    }
+    await runWorkerPool(run.workers, items, async ({ storybook, story }, index, worker) => {
+      results[index] =
+        run.command === 'test'
+          ? await testSnapshot(storybook, story, () => browser.session(worker))
+          : await updateSnapshot(storybook, story, () => browser.session(worker), run.cwd)
+    })
   } catch (error) {
     const message = stopMessageOf(error, run)
 
@@ -338,12 +365,16 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
       throw error
     }
 
-    return { exitCode: 2, stdout: printed(), stderr: message }
+    return { exitCode: 2, stdout: printed(linesOf()), stderr: message }
   } finally {
     await browser.close()
   }
 
-  lines.push(countsLineOf(run.command, statuses))
+  const statuses = results.flatMap((result) => (result === undefined ? [] : [result.status]))
 
-  return { exitCode: exitCodeOf(run.command, statuses), stdout: printed(), stderr: '' }
+  return {
+    exitCode: exitCodeOf(run.command, statuses),
+    stdout: printed([...linesOf(), countsLineOf(run.command, statuses)]),
+    stderr: '',
+  }
 }

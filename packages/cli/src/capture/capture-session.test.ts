@@ -113,7 +113,7 @@ describe('a capture', () => {
 
     await session.capture(primary)
     await session.capture(secondary)
-    expect(driver.calls[5]?.args).toEqual([secondary.url, 10_000])
+    expect(driver.calls[6]).toEqual({ page: 1, method: 'goto', args: [secondary.url, 10_000] })
   })
 
   it('gives the snapshot exactly as the browser made it', async () => {
@@ -123,6 +123,88 @@ describe('a capture', () => {
 
     expect(capture).toEqual({ snapshot: bytes })
     expect('snapshot' in capture && capture.snapshot).toBe(bytes)
+  })
+})
+
+describe("clearing the previous story's storage", () => {
+  it('clears the page before each later capture on it', async () => {
+    const driver = new FakeDriver()
+    const session = openCaptureSession(driver, settings)
+
+    await session.capture(primary)
+    await session.capture(secondary)
+    await session.capture(primary)
+    expect(driver.methods()).toEqual([
+      '1:setViewport',
+      '1:goto',
+      '1:evaluate',
+      '1:captureFullPage',
+      '1:clearStorage',
+      '1:setViewport',
+      '1:goto',
+      '1:evaluate',
+      '1:captureFullPage',
+      '1:clearStorage',
+      '1:setViewport',
+      '1:goto',
+      '1:evaluate',
+      '1:captureFullPage',
+    ])
+  })
+
+  it("clears nothing on the fresh page that replaced a broken story's page", async () => {
+    const driver = new FakeDriver({ pages: [{ evaluate: async () => ({ outcome: 'finished', status: 'error' }) }] })
+    const session = openCaptureSession(driver, settings)
+
+    await session.capture(primary)
+    await session.capture(secondary)
+    expect(driver.methods()).toEqual([
+      '1:setViewport',
+      '1:goto',
+      '1:evaluate',
+      '1:close',
+      '2:setViewport',
+      '2:goto',
+      '2:evaluate',
+      '2:captureFullPage',
+    ])
+  })
+
+  it('leaves readyTimeout whole for the capture after it', async () => {
+    const driver = new FakeDriver({ pages: [{ clearStorage: async () => pass(3000) }] })
+    const session = openCaptureSession(driver, settings)
+
+    await session.capture(primary)
+    await session.capture(secondary)
+    expect(driver.calls[6]).toEqual({ page: 1, method: 'goto', args: [secondary.url, 10_000] })
+  })
+
+  it.each([
+    ['an error', new Error('The browser said no.')],
+    ['a crash', new PageCrashedError()],
+    ['a timeout', new PageTimeoutError("The page didn't clear its storage within 30 s.", 30_000)],
+  ])('closes the page and captures the story on a fresh page when it fails with %s', async (_how, error) => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          clearStorage: async () => {
+            throw error
+          },
+        },
+      ],
+    })
+    const session = openCaptureSession(driver, settings)
+
+    await session.capture(primary)
+    expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot })
+    expect(driver.methods().slice(4)).toEqual([
+      '1:clearStorage',
+      '1:close',
+      '2:setViewport',
+      '2:goto',
+      '2:evaluate',
+      '2:captureFullPage',
+    ])
   })
 })
 
@@ -412,6 +494,24 @@ describe('a browser exit', () => {
 
     await expect(openCaptureSession(driver, settings).capture(primary)).rejects.toBe(exited)
     expect(driver.methods()).not.toContain('1:close')
+  })
+
+  it("rejects the capture when the previous story's storage is being cleared", async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          clearStorage: async () => {
+            throw exited
+          },
+        },
+      ],
+    })
+    const session = openCaptureSession(driver, settings)
+
+    await session.capture(primary)
+    await expect(session.capture(secondary)).rejects.toBe(exited)
+    expect(driver.methods()).not.toContain('1:close')
+    expect(driver.setups).toHaveLength(1)
   })
 
   it('rejects the capture when the page is being opened', async () => {

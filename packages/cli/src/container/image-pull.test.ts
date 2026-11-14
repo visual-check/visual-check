@@ -101,16 +101,16 @@ describe('pullMissingImage', () => {
 
     await expect(failure).rejects.toBeInstanceOf(ContainerError)
     await expect(failure).rejects.toThrow(`docker pull of ${image} for linux/arm64 failed with exit code 3.`)
-    await expect(failure).rejects.toThrow('Docker is running')
+    await expect(failure).rejects.toThrow('Check the image reference and your access to its registry.')
+    await expect(failure).rejects.toHaveProperty('fix', 'docker')
   })
 
-  it('says to install or start Docker when there is no docker command', async () => {
+  it('says there is no docker command when it is not on PATH', async () => {
     restorePath = removeDockerFromPath()
 
     const failure = pullMissingImage(image, 'linux/amd64', () => undefined)
 
     await expect(failure).rejects.toBeInstanceOf(ContainerError)
-    await expect(failure).rejects.toThrow('no `docker` command on PATH')
-    await expect(failure).rejects.toThrow('Install or start Docker')
+    await expect(failure).rejects.toThrow('no docker command on PATH')
   })
 })

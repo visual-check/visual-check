@@ -66,7 +66,7 @@ Rules for the keys:
 
 ### `workers: 'auto'`
 
-- It's the smaller of the CPU count and ⌊(memory − 1 GiB) ÷ 1 GiB⌋.
+- It's the smaller of the CPU count and the memory in GiB, rounded to the nearest GiB, minus 1. A VM reports a little less than its size, such as 11.73 GiB for OrbStack set to 12 GiB, so a floor would give one worker fewer.
 - Both are read where the browser runs: from `docker info` when it runs in visual-check's container, and from the machine itself for `host` and inside visual-check's image.
 - Expected values:
   - 2 on a private repo's hosted runner (2 vCPU, 7 GB);

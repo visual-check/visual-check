@@ -7,6 +7,10 @@ import type { StoryReadiness } from './page-script.js'
  */
 export interface FakePageBehaviour {
   /**
+   * Answers `clearStorage`.
+   */
+  clearStorage?: () => Promise<void>
+  /**
    * Answers `setViewport`.
    */
   setViewport?: (viewport: PageViewport) => Promise<void>
@@ -121,6 +125,10 @@ export class FakeDriver implements Driver {
     }
 
     return {
+      clearStorage: async () => {
+        record('clearStorage', [])
+        await answers.clearStorage?.()
+      },
       setViewport: async (viewport) => {
         record('setViewport', [viewport])
         await answers.setViewport?.(viewport)

@@ -2,6 +2,8 @@
   "button--primary": "passed",
   "button--secondary": "passed",
   "card--default": "passed",
+  "storage--first": "passed",
+  "storage--second": "passed",
   "tall-list--default": "passed",
   "typography--generic-families": "passed"
 }

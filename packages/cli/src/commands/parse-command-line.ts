@@ -37,6 +37,10 @@ export interface RunOptions {
    * The path `--config` gives, or `undefined` when the flag isn't given.
    */
   config: string | undefined
+  /**
+   * The number of workers `--workers` gives, or `undefined` when the flag isn't given.
+   */
+  workers: number | undefined
 }
 
 /**
@@ -51,12 +55,12 @@ export type CommandLine =
 /**
  * The flags `init` doesn't take, in the order a message names the first one given.
  */
-const flagsInitRejects = ['all', 'filter', 'storybook', 'url', 'config'] as const
+const flagsInitRejects = ['all', 'filter', 'storybook', 'url', 'config', 'workers'] as const
 
 /**
  * The flags that take a value, which can't be empty.
  */
-const flagsWithValue = ['filter', 'storybook', 'url', 'config'] as const
+const flagsWithValue = ['filter', 'storybook', 'url', 'config', 'workers'] as const
 
 /**
  * Turns a thrown value into its message.
@@ -102,6 +106,7 @@ function parseCommandLineArguments(commandLineArguments: string[]) {
       storybook: { type: 'string' },
       url: { type: 'string' },
       config: { type: 'string' },
+      workers: { type: 'string' },
       help: { type: 'boolean' },
       version: { type: 'boolean' },
     },
@@ -148,11 +153,31 @@ function checkUrlFlag(url: string | undefined): void {
 }
 
 /**
+ * Reads the `--workers` flag into a number: a whole number of 1 or more, written in digits.
+ *
+ * @throws {UsageError} When the value is anything else.
+ */
+function workersFlagOf(workers: string | undefined): number | undefined {
+  if (workers === undefined) {
+    return undefined
+  }
+
+  const count = Number(workers)
+
+  if (!/^[1-9]\d*$/.test(workers) || !Number.isSafeInteger(count)) {
+    throw new UsageError(`--workers takes a whole number of 1 or more. Got '${workers}'.`)
+  }
+
+  return count
+}
+
+/**
  * Reads the command line into the command it names and its options.
  *
  * @throws {UsageError} For an unknown command or flag, a missing, empty or extra argument, a flag that doesn't apply to
- * the command, flags that clash, a `--url` that isn't an http(s) URL or holds a login, and a `--filter` that isn't a
- * regular expression. `--help` anywhere before a `--` separator wins, so it never throws.
+ * the command, flags that clash, a `--url` that isn't an http(s) URL or holds a login, a `--filter` that isn't a regular
+ * expression, and a `--workers` that isn't a whole number of 1 or more. `--help` anywhere before a `--` separator wins,
+ * so it never throws.
  */
 export function parseCommandLine(commandLineArguments: string[]): CommandLine {
   if (asksForHelp(commandLineArguments)) {
@@ -220,6 +245,7 @@ export function parseCommandLine(commandLineArguments: string[]): CommandLine {
       storybook: values.storybook,
       url: values.url,
       config: values.config,
+      workers: workersFlagOf(values.workers),
     },
   }
 }

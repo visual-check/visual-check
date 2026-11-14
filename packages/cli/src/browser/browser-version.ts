@@ -10,6 +10,15 @@ export function packageImageOf(browserPackage: BrowserPackage): string {
 }
 
 /**
+ * Gives the image a run's browser runs in: the config's `image`, or the browser package's `<tag>@<digest>`.
+ *
+ * @public
+ */
+export function runImageOf(browserPackage: BrowserPackage, configImage: string | undefined): string {
+  return configImage ?? packageImageOf(browserPackage)
+}
+
+/**
  * The browser that answered isn't the browser package's build.
  *
  * @public
@@ -77,5 +86,5 @@ export function checkBrowserVersion(version: string, browserPackage: BrowserPack
       ? `Reinstall the browser package ${packageName}, then run visual-check again.`
       : `Rebuild ${configImage} FROM ${packageImageOf(browserPackage)}.`
 
-  throw new BrowserMismatchError(`The browser in ${configImage ?? packageImageOf(browserPackage)} ${versions}\n${fix}`)
+  throw new BrowserMismatchError(`The browser in ${runImageOf(browserPackage, configImage)} ${versions}\n${fix}`)
 }

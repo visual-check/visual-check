@@ -107,6 +107,19 @@ const deliberateChange = {
 }
 
 /**
+ * How many workers the committed-baselines case and the update-then-test case capture with, so they capture in
+ * parallel on any machine.
+ */
+const parallelWorkers = 2
+
+/**
+ * The storage stories and their expected outcomes. Each checks that visual-check's markers aren't in cookies,
+ * `localStorage`, `sessionStorage` or IndexedDB, then writes them, so on one page the second fails unless storage is
+ * cleared between them.
+ */
+const storageOutcomes: Outcomes = { 'storage--first': 'passed', 'storage--second': 'passed' }
+
+/**
  * How long the kill case waits for the CLI to start capturing, and for its container to go after the kill, in
  * milliseconds.
  */
@@ -618,13 +631,14 @@ function localEnvironment(): NodeJS.ProcessEnv {
 
 /**
  * Writes a config for this Storybook, served at the URL, with its baselines in the given folder and, when given, its
- * platform. Gives its path.
+ * platform, that captures with 2 workers. Gives its path.
  */
 function writeConfig(folder: string, url: string, baselines: string, platform?: string): string {
   const path = join(folder, 'visual-check.config.mjs')
   const config = {
     storybooks: { react: { url, dir: packageDir, baselines } },
     image,
+    workers: parallelWorkers,
     ...(platform === undefined ? {} : { platform }),
   }
 
@@ -674,11 +688,11 @@ async function waitUntil(condition: () => boolean, timeoutMilliseconds: number):
 }
 
 /**
- * `test` against the committed baselines gives exactly the expected outcomes.
+ * `test` against the committed baselines, with 2 workers, gives exactly the expected outcomes.
  */
 async function checkCommittedBaselines(expected: Outcomes): Promise<string[]> {
   return await withStorybookServer({}, async (server) => {
-    const run = await runCli(['test', '--all', '--url', server.url])
+    const run = await runCli(['test', '--all', '--url', server.url, '--workers', String(parallelWorkers)])
 
     return expectedRunProblems('test', run, expected)
   })
@@ -687,7 +701,7 @@ async function checkCommittedBaselines(expected: Outcomes): Promise<string[]> {
 /**
  * `update` into an empty folder writes every story that isn't broken, `test` then passes them, and the baselines of
  * the stories expected to pass are byte-identical to the committed ones. Only those have a committed baseline the
- * written one must equal.
+ * written one must equal. Both commands take 2 workers from the config.
  */
 async function checkUpdateThenTest(expected: Outcomes): Promise<string[]> {
   rmSync(diagnosticsDir, { recursive: true, force: true })
@@ -726,6 +740,19 @@ async function runAndCheck(command: 'test' | 'update', args: string[], expected:
   const run = await runCli([command, ...args], localEnvironment())
 
   return expectedRunProblems(command, run, expected)
+}
+
+/**
+ * On one worker, the storage stories run one right after the other on the same page, in index order, so the second
+ * passes only when the storage the first filled was cleared between them. `test` against the committed baselines
+ * passes both.
+ */
+async function checkStorageClearing(): Promise<string[]> {
+  return await withStorybookServer({}, async (server) => {
+    const run = await runCli(['test', '--filter', '^storage--', '--workers', '1', '--url', server.url])
+
+    return expectedRunProblems('test', run, storageOutcomes)
+  })
 }
 
 /**
@@ -912,6 +939,10 @@ if (setupProblems.length > 0) {
     {
       name: "update then test: update writes every story that isn't broken, test passes, the baselines match the committed ones",
       run: () => checkUpdateThenTest(expected),
+    },
+    {
+      name: 'storage: with 1 worker, a story finds storage empty after a story that filled it',
+      run: checkStorageClearing,
     },
     {
       name: `deliberate change: test exits 1 and ${deliberateChange.storyId} differs`,

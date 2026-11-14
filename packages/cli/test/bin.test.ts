@@ -3,9 +3,9 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
 const binaryPath = fileURLToPath(new URL('../dist/bin.js', import.meta.url))
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }
@@ -38,7 +38,30 @@ interface CaseOptions {
    * a case never inherits `CI=true` from a CI runner.
    */
   env?: Record<string, string>
+  /**
+   * What `docker` is on PATH: `stub`, which answers `docker info` with a running Linux engine, or `none`. `stub` when
+   * not given, so no case runs the real `docker`.
+   */
+  docker?: 'stub' | 'none'
 }
+
+/**
+ * A folder holding a stub `docker` that answers `docker info` with a running Linux engine and fails any other call.
+ */
+const stubDockerDir = mkdtempSync(join(tmpdir(), 'visual-check-stub-docker-'))
+
+/**
+ * An empty folder, which as PATH holds no `docker`.
+ */
+const emptyDir = mkdtempSync(join(tmpdir(), 'visual-check-no-docker-'))
+
+writeFileSync(
+  join(stubDockerDir, 'docker'),
+  `#!/bin/sh\ncase "$1" in\n  info) echo '{"NCPU":4,"MemTotal":17179869184,"OSType":"linux"}';;\n  *) exit 1;;\nesac\n`,
+  {
+    mode: 0o755,
+  },
+)
 
 /**
  * Builds the spawn options for a case: the inherited environment without `CI`, plus what the case adds, and the
@@ -46,6 +69,8 @@ interface CaseOptions {
  */
 function spawnOptionsOf(options: CaseOptions) {
   const environment = { ...process.env, ...options.env }
+
+  environment.PATH = options.docker === 'none' ? emptyDir : `${stubDockerDir}${delimiter}${process.env.PATH ?? ''}`
 
   if (options.env?.CI === undefined) {
     delete environment.CI
@@ -187,13 +212,18 @@ function allMissingOutputOf(storybook: string, storyIds: string[]): string {
   const count = storyIds.length
 
   return [
-    `visual-check ${version} · test · ${count} ${count === 1 ? 'snapshot' : 'snapshots'} · 1 worker`,
+    `visual-check ${version} · test · ${count} ${count === 1 ? 'snapshot' : 'snapshots'} · 4 workers`,
     ...storyIds.map((id) => `✗ ${storybook}  ${id}  missing: no baseline yet; run visual-check update to write it`),
     `0 passed · ${count} missing`,
   ]
     .map((line) => `${line}\n`)
     .join('')
 }
+
+afterAll(() => {
+  rmSync(stubDockerDir, { recursive: true, force: true })
+  rmSync(emptyDir, { recursive: true, force: true })
+})
 
 afterEach(async () => {
   for (const project of projects.splice(0)) {
@@ -365,6 +395,22 @@ describe('visual-check binary reaching Storybooks', () => {
     expect(Date.now() - started).toBeLessThan(2_000)
     expect(result.stderr).toContain(`Storybook web doesn't answer at ${down}/index.json (ECONNREFUSED)`)
     expect(result.stderr).not.toContain('--storybook')
+  })
+
+  it('exits 2 with both fixes when there is no docker command, before it looks at a Storybook', async () => {
+    const down = await takeUnusedUrl()
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${down}' } } }\n`,
+    })
+    const result = await runAsynchronously({ cwd: project, docker: 'none' }, 'test')
+
+    expect(result.status).toBe(2)
+    expect(result.stdout).toBe('')
+    expect(result.stderr).toContain(
+      "visual-check runs the browser in Docker, and there's no docker command on PATH.\n" +
+        "Start or install Docker, or set platform: 'host' in the config.\n",
+    )
+    expect(result.stderr).not.toContain('Storybook web')
   })
 
   it('suggests --storybook when one of several Storybooks is down', async () => {
