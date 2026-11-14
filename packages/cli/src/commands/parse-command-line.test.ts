@@ -95,6 +95,19 @@ describe('parseCommandLine', () => {
     )
   })
 
+  it.each(['localhost:6006', 'ftp://example.com', 'nope'])('rejects the --url %j', (value) => {
+    expect(usageErrorOf('test', '--url', value).message).toBe(
+      `--url takes an http: or https: URL, such as 'http://127.0.0.1:6006'. Got '${value}'.`,
+    )
+  })
+
+  it('reports an unknown command and a flag that does not apply to init before a bad --url', () => {
+    expect(usageErrorOf('tset', '--url', 'x').message).toBe(
+      "Unknown command 'tset'. The commands are init, test and update.",
+    )
+    expect(usageErrorOf('init', '--url', 'nope').message).toBe("--url doesn't apply to init.")
+  })
+
   it('rejects --all with --filter', () => {
     expect(usageErrorOf('test', '--all', '--filter', 'x').message).toBe(
       "--all and --filter can't be used together. Pick one.",
