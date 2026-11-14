@@ -1,4 +1,4 @@
-import { type Page, PageCrashedError, type PageSetup, type PageViewport } from '../driver.js'
+import { type Page, PageCrashedError, type PageSetup, PageTimeoutError, type PageViewport } from '../driver.js'
 import { type CdpConnection, type CdpEvent, isRecord } from './cdp-connection.js'
 import { linuxFontFamilies } from './font-families.js'
 import { MainFrameNavigation } from './main-frame-navigation.js'
@@ -403,10 +403,15 @@ class CdpPage implements Page {
   }
 
   /**
-   * Settles as `operation` does, unless the page can no longer be used first or `timeLimitMs` passes first.
+   * Settles as `operation` does, unless the page can no longer be used first, or `timeLimitMs` passes first, which
+   * fails it with a `PageTimeoutError` carrying `timeoutMessage`.
    */
   private guarded<T>(operation: Promise<T>, timeLimitMs: number, timeoutMessage: string): Promise<T> {
-    return withinTimeLimit(this.unlessFailed(operation), timeLimitMs, timeoutMessage)
+    return withinTimeLimit(
+      this.unlessFailed(operation),
+      timeLimitMs,
+      () => new PageTimeoutError(timeoutMessage, timeLimitMs),
+    )
   }
 }
 
@@ -477,7 +482,7 @@ export async function openCdpPage(
 ): Promise<Page> {
   const limit = startTimeLimit(
     commandTimeLimitMs,
-    `The browser didn't open a page within ${commandTimeLimitMs / 1000} s.`,
+    () => new Error(`The browser didn't open a page within ${commandTimeLimitMs / 1000} s.`),
   )
 
   try {

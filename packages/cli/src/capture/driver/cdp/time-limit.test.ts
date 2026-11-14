@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { settlesWithin, startTimeLimit, withinTimeLimit } from './time-limit.js'
 
+/**
+ * Makes the error a time limit in these tests rejects with.
+ */
+function tooSlow(): Error {
+  return new Error('too slow')
+}
+
 beforeEach(() => {
   vi.useFakeTimers()
 })
@@ -29,19 +36,19 @@ describe('settlesWithin', () => {
 
 describe('withinTimeLimit', () => {
   it('resolves with the value and clears its timer when the promise resolves in time', async () => {
-    await expect(withinTimeLimit(Promise.resolve('done'), 1000, 'too slow')).resolves.toBe('done')
+    await expect(withinTimeLimit(Promise.resolve('done'), 1000, tooSlow)).resolves.toBe('done')
     expect(vi.getTimerCount()).toBe(0)
   })
 
   it('rejects with the error and clears its timer when the promise rejects in time', async () => {
     const error = new Error('failed')
 
-    await expect(withinTimeLimit(Promise.reject(error), 1000, 'too slow')).rejects.toBe(error)
+    await expect(withinTimeLimit(Promise.reject(error), 1000, tooSlow)).rejects.toBe(error)
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('rejects with the message once the time has passed', async () => {
-    const waiting = withinTimeLimit(new Promise(() => undefined), 1000, 'too slow')
+  it('rejects with the error it was given once the time has passed', async () => {
+    const waiting = withinTimeLimit(new Promise(() => undefined), 1000, tooSlow)
     const failure = expect(waiting).rejects.toThrow(new Error('too slow'))
 
     await vi.advanceTimersByTimeAsync(999)
@@ -53,7 +60,7 @@ describe('withinTimeLimit', () => {
 
 describe('startTimeLimit', () => {
   it('fails every step raced against it once the time has passed', async () => {
-    const limit = startTimeLimit(1000, 'too slow')
+    const limit = startTimeLimit(1000, tooSlow)
 
     await expect(limit.race(Promise.resolve('first'))).resolves.toBe('first')
 
@@ -65,7 +72,7 @@ describe('startTimeLimit', () => {
   })
 
   it('stops its timer when cleared', () => {
-    const limit = startTimeLimit(1000, 'too slow')
+    const limit = startTimeLimit(1000, tooSlow)
 
     expect(vi.getTimerCount()).toBe(1)
     limit.clear()

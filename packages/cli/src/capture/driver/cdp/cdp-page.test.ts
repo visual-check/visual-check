@@ -1,7 +1,7 @@
 import { setFlagsFromString } from 'node:v8'
 import { runInNewContext } from 'node:vm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Driver, Page } from '../driver.js'
+import { type Driver, type Page, PageTimeoutError } from '../driver.js'
 import { launchCdpDriver } from './cdp-driver.js'
 import {
   defaultCaptureData,
@@ -365,20 +365,23 @@ describe('the 30 s limit on a page call', () => {
       (page: Page) => page.captureFullPage(),
       "The page wasn't captured within 30 s.",
     ],
-  ])('fails %s when the browser stays silent for 30 s', async (_call, silentMethod, call, message) => {
-    const { browser, page } = await openPage({ handlers: { [silentMethod]: () => undefined } })
+  ])(
+    'fails %s with a PageTimeoutError when the browser stays silent for 30 s',
+    async (_call, silentMethod, call, message) => {
+      const { browser, page } = await openPage({ handlers: { [silentMethod]: () => undefined } })
 
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
 
-    const calling = call(page)
-    const failure = expect(calling).rejects.toThrow(message)
+      const calling = call(page)
+      const failure = expect(calling).rejects.toEqual(new PageTimeoutError(message, 30_000))
 
-    await flushUntil(() => browser.timesReceived(silentMethod) === 1)
-    await vi.advanceTimersByTimeAsync(29_999)
-    expect(await hasSettled(calling)).toBe(false)
-    await vi.advanceTimersByTimeAsync(1)
-    await failure
-  })
+      await flushUntil(() => browser.timesReceived(silentMethod) === 1)
+      await vi.advanceTimersByTimeAsync(29_999)
+      expect(await hasSettled(calling)).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      await failure
+    },
+  )
 })
 
 describe('Page.goto', () => {
@@ -553,10 +556,12 @@ describe('Page.goto', () => {
     await expect(loading).resolves.toBeUndefined()
   })
 
-  it("fails, naming the URL and the time, when the page doesn't load in time", async () => {
+  it("fails with a PageTimeoutError, naming the URL and the time, when the page doesn't load in time", async () => {
     const { page } = await openPage({ handlers: { 'Page.navigate': () => undefined } })
+    const failure = await page.goto(storyUrl, 50).catch((error: unknown) => error)
 
-    await expect(page.goto(storyUrl, 50)).rejects.toThrow(`The page didn't load ${storyUrl} within 0.05 s.`)
+    expect(failure).toBeInstanceOf(PageTimeoutError)
+    expect(failure).toMatchObject({ message: `The page didn't load ${storyUrl} within 0.05 s.`, timeoutMs: 50 })
   })
 })
 
@@ -658,12 +663,15 @@ describe('Page.evaluate', () => {
     )
   })
 
-  it("fails, naming the time, when the expression doesn't finish in time", async () => {
+  it("fails with a PageTimeoutError, naming the time, when the expression doesn't finish in time", async () => {
     const { page } = await openPage({ handlers: { 'Runtime.evaluate': () => undefined } })
+    const failure = await page.evaluate('new Promise(() => {})', 50).catch((error: unknown) => error)
 
-    await expect(page.evaluate('new Promise(() => {})', 50)).rejects.toThrow(
-      "The expression evaluated in the page didn't finish within 0.05 s.",
-    )
+    expect(failure).toBeInstanceOf(PageTimeoutError)
+    expect(failure).toMatchObject({
+      message: "The expression evaluated in the page didn't finish within 0.05 s.",
+      timeoutMs: 50,
+    })
   })
 })
 
