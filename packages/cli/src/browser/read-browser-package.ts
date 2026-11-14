@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { type ChromeForTestingPlatform, chromeForTestingPlatforms } from './chrome-for-testing-platform.js'
 
 /**
  * The browser package's name, as every message of this module writes it.
@@ -7,7 +8,8 @@ import { createRequire } from 'node:module'
 export const packageName = '@visual-check/chromium'
 
 /**
- * What the browser package names: the exact Chromium build, the image it runs in and where the image holds it.
+ * What the browser package names: the exact Chromium build, the image it runs in, where the image holds it and the
+ * checksums of the headless shell downloads for `platform: 'host'`.
  *
  * @public
  */
@@ -37,6 +39,10 @@ export interface BrowserPackage {
    * The path of the headless shell's executable inside the image.
    */
   headlessShell: string
+  /**
+   * The SHA-256 of Chrome for Testing's headless shell download for each platform, as lowercase hex.
+   */
+  sha256: Record<ChromeForTestingPlatform, string>
 }
 
 /**
@@ -97,6 +103,11 @@ const headlessShellRule: FieldRule = {
 }
 
 /**
+ * The SHA-256 of a platform's headless shell download, whose field is named per platform.
+ */
+const checksumPattern = /^[0-9a-f]{64}$/
+
+/**
  * Builds the error for a malformed field, naming it, what it must be and what it is.
  */
 function malformedField(rule: Pick<FieldRule, 'field' | 'expected'>, value: unknown): Error {
@@ -118,6 +129,35 @@ function stringFieldOf(record: Record<string, unknown>, key: string, rule: Field
   }
 
   throw malformedField(rule, value)
+}
+
+/**
+ * The rule for one platform's checksum.
+ */
+function checksumRuleOf(platform: ChromeForTestingPlatform): FieldRule {
+  return { field: `sha256.${platform}`, pattern: checksumPattern, expected: '64 lowercase hex digits' }
+}
+
+/**
+ * Reads the SHA-256 of every Chrome for Testing platform, ignoring other keys.
+ *
+ * @throws {Error} Naming the field, when `sha256` isn't an object or a platform's checksum isn't 64 lowercase hex
+ * digits.
+ */
+function checksumsOf(json: Record<string, unknown>): Record<ChromeForTestingPlatform, string> {
+  const { sha256 } = json
+
+  if (!isRecord(sha256)) {
+    throw malformedField({ field: 'sha256', expected: 'an object with a checksum for each platform' }, sha256)
+  }
+
+  const checksums = {} as Record<ChromeForTestingPlatform, string>
+
+  for (const platform of chromeForTestingPlatforms) {
+    checksums[platform] = stringFieldOf(sha256, platform, checksumRuleOf(platform))
+  }
+
+  return checksums
 }
 
 /**
@@ -145,6 +185,7 @@ export function parseBrowserPackage(json: unknown, packageVersion: string): Brow
       digest: stringFieldOf(image, 'digest', digestRule),
     },
     headlessShell: stringFieldOf(json, 'headlessShell', headlessShellRule),
+    sha256: checksumsOf(json),
   }
 }
 

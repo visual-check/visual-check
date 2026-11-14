@@ -42,6 +42,7 @@ const browserPackage = (() => {
     chromium: string
     image: { tag: string; digest: string }
     headlessShell: string
+    sha256: Record<string, string>
   }
 
   return { packageVersion, ...json, imageReference: `${json.image.tag}@${json.image.digest}` }

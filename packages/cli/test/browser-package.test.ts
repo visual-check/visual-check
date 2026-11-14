@@ -17,6 +17,13 @@ const chromiumJson = {
   chromium: '157.0.8103.78',
   image: { tag: 'ghcr.io/visual-check/chromium:157.0.0', digest: `sha256:${'0'.repeat(64)}` },
   headlessShell: '/opt/chrome-headless-shell/chrome-headless-shell',
+  sha256: {
+    linux64: '1'.repeat(64),
+    'linux-arm64': '2'.repeat(64),
+    'mac-x64': '3'.repeat(64),
+    'mac-arm64': '4'.repeat(64),
+    win64: '5'.repeat(64),
+  },
 }
 
 /**
