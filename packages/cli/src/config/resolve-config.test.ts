@@ -28,8 +28,10 @@ function messageOf(config: Config, options: { ci?: boolean; cwd?: string } = {})
     resolve(config, options)
   } catch (error) {
     expect(error).toBeInstanceOf(ConfigError)
+
     return (error as ConfigError).message
   }
+
   throw new Error('Expected resolveConfig to throw')
 }
 

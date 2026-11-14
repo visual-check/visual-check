@@ -31,12 +31,16 @@ export function isFile(path: string): boolean {
  */
 export function findConfig(startDirectory: string): string | undefined {
   const found = configFileNames.map((name) => join(startDirectory, name)).find((path) => isFile(path))
+
   if (found !== undefined) {
     return found
   }
+
   const parent = dirname(startDirectory)
+
   if (parent === startDirectory || existsSync(join(startDirectory, '.git'))) {
     return undefined
   }
+
   return findConfig(parent)
 }

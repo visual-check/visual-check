@@ -58,6 +58,7 @@ function createProject(files: Record<string, string>): string {
     mkdirSync(dirname(join(root, path)), { recursive: true })
     writeFileSync(join(root, path), content)
   }
+
   return root
 }
 
@@ -77,6 +78,7 @@ async function configErrorOf(cwd: string, options: Partial<LoadConfigOptions> = 
     (rejection: unknown) => rejection,
   )
   expect(error).toBeInstanceOf(ConfigError)
+
   return error as ConfigError
 }
 

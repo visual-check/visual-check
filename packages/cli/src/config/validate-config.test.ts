@@ -47,8 +47,10 @@ function messageOf(value: unknown, displayPath = 'visual-check.config.ts'): stri
     validateConfig(value, displayPath)
   } catch (error) {
     expect(error).toBeInstanceOf(ConfigError)
+
     return (error as ConfigError).message
   }
+
   return expect.fail('validateConfig accepted an invalid config')
 }
 
@@ -58,6 +60,7 @@ function messageOf(value: unknown, displayPath = 'visual-check.config.ts'): stri
 function issuesOf(value: unknown): string[] {
   const [header, ...lines] = messageOf(value).split('\n')
   expect(header).toBe('visual-check.config.ts is invalid:')
+
   return lines.map((line) => line.replace(/^ {2}- /, ''))
 }
 

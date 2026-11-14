@@ -59,12 +59,14 @@ function displayPathOf(path: string, cwd: string): string {
  */
 function searchConfig(cwd: string): string {
   const path = findConfig(cwd)
+
   if (path === undefined) {
     throw new ConfigError(
       'No visual-check.config.ts (or .mts, .js, .mjs) found in the current folder or its parents. ' +
         'Run visual-check init to create one.',
     )
   }
+
   return path
 }
 
@@ -76,15 +78,18 @@ function searchConfig(cwd: string): string {
 function checkGivenPath(givenPath: string, cwd: string): string {
   const path = resolve(cwd, givenPath)
   const displayPath = displayPathOf(path, cwd)
+
   if (!configFileNames.some((name) => extname(name) === extname(path))) {
     throw new ConfigError(
       `Can't use ${displayPath} as a config: a config is a .ts, .mts, .js or .mjs file, and JSON and YAML aren't ` +
         'supported. Write visual-check.config.ts and pass its path to --config.',
     )
   }
+
   if (!isFile(path)) {
     throw new ConfigError(`No config at ${displayPath}. Check the path given to --config.`)
   }
+
   return path
 }
 
@@ -102,6 +107,7 @@ async function evaluateDefault(path: string): Promise<unknown> {
     async: true,
     forceTranspile: true,
   })
+
   return typeof namespace === 'object' && namespace !== null && 'default' in namespace
     ? await namespace.default
     : undefined
@@ -119,6 +125,7 @@ async function importDefault(path: string, displayPath: string): Promise<unknown
     return await evaluateDefault(path)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
+
     throw new ConfigError(`Couldn't load ${displayPath}: ${message.replaceAll(path, displayPath)}`, { cause: error })
   }
 }
@@ -137,5 +144,6 @@ export async function loadConfig(options: LoadConfigOptions): Promise<ResolvedCo
   const path = options.path === undefined ? searchConfig(options.cwd) : checkGivenPath(options.path, options.cwd)
   const displayPath = displayPathOf(path, options.cwd)
   const config = validateConfig(await importDefault(path, displayPath), displayPath)
+
   return resolveConfig(config, { path, cwd: options.cwd, ci: options.ci })
 }

@@ -31,22 +31,28 @@ export interface CliResult {
  */
 export function runCli(commandLineArguments: string[], environment: Record<string, string | undefined>): CliResult {
   let version: boolean | undefined
+
   try {
     version = parseArgs({ args: commandLineArguments, options: { version: { type: 'boolean' } }, strict: true }).values
       .version
   } catch (error) {
     return usageError(error instanceof Error ? error.message : String(error))
   }
+
   if (version) {
     const manifest = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
       version: string
     }
+
     return { exitCode: 0, stdout: `${manifest.version}\n`, stderr: '' }
   }
+
   const browserProblem = checkBrowserPackage(environment)
+
   if (browserProblem !== undefined) {
     return { exitCode: 2, stdout: '', stderr: browserProblem }
   }
+
   return usageError('No command given.')
 }
 

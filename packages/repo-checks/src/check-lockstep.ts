@@ -8,6 +8,7 @@ if (problems.length > 0) {
   for (const problem of problems) {
     console.error(problem)
   }
+
   process.exitCode = 1
 } else {
   const version = manifests.find((manifest) => manifest.name === lockstepPackages[0])?.version

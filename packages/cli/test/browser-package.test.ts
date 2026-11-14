@@ -18,6 +18,7 @@ function setUp(browserVersion?: string, manifest: Record<string, unknown> = {}):
   temporaryFolders.push(folder)
   cpSync(join(packageFolder, 'dist'), join(folder, 'dist'), { recursive: true })
   cpSync(join(packageFolder, 'package.json'), join(folder, 'package.json'))
+
   if (browserVersion !== undefined) {
     const browserFolder = join(folder, 'node_modules', '@visual-check', 'chromium')
     mkdirSync(browserFolder, { recursive: true })
@@ -31,6 +32,7 @@ function setUp(browserVersion?: string, manifest: Record<string, unknown> = {}):
       }),
     )
   }
+
   return folder
 }
 
@@ -42,9 +44,11 @@ function run(folder: string, options: { arguments?: string[]; userAgent?: string
   const environment = { ...process.env }
   delete environment.npm_config_user_agent
   delete environment.NODE_PATH
+
   if (options.userAgent !== undefined) {
     environment.npm_config_user_agent = options.userAgent
   }
+
   return spawnSync(process.execPath, [join(folder, 'dist', 'bin.js'), ...(options.arguments ?? [])], {
     encoding: 'utf8',
     env: environment,

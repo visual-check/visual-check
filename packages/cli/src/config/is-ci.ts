@@ -5,5 +5,6 @@
  */
 export function isCi(environment: Record<string, string | undefined>): boolean {
   const value = environment.CI
+
   return value !== undefined && !['', '0', 'false'].includes(value.toLowerCase())
 }

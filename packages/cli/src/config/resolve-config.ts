@@ -168,6 +168,7 @@ function pickSide<T extends string | number>(value: T | LocalAndCi<T> | undefine
   if (typeof value === 'object') {
     return ci ? value.ci : value.local
   }
+
   return value
 }
 
@@ -183,6 +184,7 @@ function listNames(names: string[]): string {
  */
 function resolveStorybook(name: string, settings: StorybookSettings, options: ResolveOptions): PendingStorybook {
   const dir = resolve(dirname(options.path), settings.dir ?? '.')
+
   return {
     name,
     dir,
@@ -219,6 +221,7 @@ function findSharedBaselines(storybooks: PendingStorybook[], cwd: string): strin
   for (const storybook of storybooks) {
     namesByFolder.set(storybook.baselines, [...(namesByFolder.get(storybook.baselines) ?? []), storybook.name])
   }
+
   return [...namesByFolder]
     .filter(([, names]) => names.length > 1)
     .map(
@@ -240,10 +243,13 @@ export function resolveConfig(config: Config, options: ResolveOptions): Resolved
     resolveStorybook(name, settings, { ...options, path }),
   )
   const issues = [...findMissingUrls(pending, options.ci), ...findSharedBaselines(pending, options.cwd)]
+
   if (issues.length > 0) {
     const displayPath = relative(options.cwd, path)
+
     throw new ConfigError([`${displayPath} can't be used:`, ...issues.map((issue) => `  - ${issue}`)].join('\n'))
   }
+
   return {
     path,
     storybooks: pending.filter(hasUrl),

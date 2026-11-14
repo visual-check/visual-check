@@ -14,9 +14,11 @@ export type PackageManager = 'npm' | 'pnpm' | 'yarn'
  */
 export function parseMajors(range: string): number[] {
   const majors = range.split('||').map((part) => /^\^(\d+)\.0\.0$/.exec(part.trim())?.[1])
+
   if (majors.some((major) => major === undefined)) {
     throw new Error(`The peer range of ${packageName} must be one or more ^N.0.0 joined by ||, got "${range}".`)
   }
+
   return majors.map(Number)
 }
 
@@ -25,6 +27,7 @@ export function parseMajors(range: string): number[] {
  */
 export function isInRange(version: string, majors: number[]): boolean {
   const match = /^(\d+)\.\d+\.\d+$/.exec(version)
+
   return match !== null && majors.includes(Number(match[1]))
 }
 
@@ -33,12 +36,15 @@ export function isInRange(version: string, majors: number[]): boolean {
  */
 export function installCommand(packageManager: PackageManager, major: number): string {
   const specifier = `${packageName}@${major}`
+
   if (packageManager === 'pnpm') {
     return `pnpm add --save-dev ${specifier}`
   }
+
   if (packageManager === 'yarn') {
     return `yarn add --dev ${specifier}`
   }
+
   return `npm install --save-dev ${specifier}`
 }
 
@@ -58,14 +64,18 @@ export function browserPackageMessage(installed: Installed, range: string, major
   if (installed.status === 'missing') {
     return `The browser package ${packageName} isn't installed. This CLI needs a version in ${range}.\nInstall it: ${command}\n`
   }
+
   if (installed.status === 'unreadable') {
     return `The browser package ${packageName} can't be read: ${installed.reason}.\nReinstall it: ${command}\n`
   }
+
   const message = `The browser package ${packageName} ${installed.version} is outside this CLI's range ${range}.\nInstall a version in range: ${command}\n`
   const installedMajor = Number(installed.version.split('.')[0])
+
   if (installedMajor > Math.max(...majors)) {
     return `${message}Or upgrade @visual-check/cli to a version whose range includes ${installedMajor}.\n`
   }
+
   return message
 }
 
@@ -74,6 +84,7 @@ export function browserPackageMessage(installed: Installed, range: string, major
  */
 function packageManagerOf(environment: Record<string, string | undefined>): PackageManager {
   const name = environment.npm_config_user_agent?.split('/')[0]
+
   return name === 'pnpm' || name === 'yarn' ? name : 'npm'
 }
 
@@ -84,6 +95,7 @@ function findInstalled(): Installed {
   try {
     const manifestPath = createRequire(import.meta.url).resolve(`${packageName}/package.json`)
     const { version } = JSON.parse(readFileSync(manifestPath, 'utf8')) as { version?: unknown }
+
     return typeof version === 'string'
       ? { status: 'found', version }
       : { status: 'unreadable', reason: 'its package.json has no version' }
@@ -91,6 +103,7 @@ function findInstalled(): Installed {
     if ((error as NodeJS.ErrnoException).code === 'MODULE_NOT_FOUND') {
       return { status: 'missing' }
     }
+
     return { status: 'unreadable', reason: error instanceof Error ? error.message : String(error) }
   }
 }
@@ -107,14 +120,19 @@ export function checkBrowserPackage(environment: Record<string, string | undefin
     peerDependencies: Record<string, string>
   }
   const range = manifest.peerDependencies[packageName]
+
   if (range === undefined) {
     throw new Error(`package.json has no peer dependency on ${packageName}.`)
   }
+
   const majors = parseMajors(range)
   const installed = findInstalled()
+
   if (installed.status === 'found' && isInRange(installed.version, majors)) {
     return undefined
   }
+
   const command = installCommand(packageManagerOf(environment), Math.max(...majors))
+
   return browserPackageMessage(installed, range, majors, command)
 }

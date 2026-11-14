@@ -17,11 +17,14 @@ function streamedResponse(failAfterFirstChunk = false): Response {
       start(controller) {
         for (const chunk of chunks) {
           controller.enqueue(chunk)
+
           if (failAfterFirstChunk) {
             controller.error(new Error('reset'))
+
             return
           }
         }
+
         controller.close()
       },
     }),

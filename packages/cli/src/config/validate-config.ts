@@ -63,7 +63,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null) {
     return false
   }
+
   const prototype = Object.getPrototypeOf(value)
+
   return prototype === Object.prototype || prototype === null
 }
 
@@ -73,6 +75,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 function isPair(value: unknown): boolean {
   // Keys set to `undefined` count, so `retries: { ci: isCi ? 2 : undefined }` reads as the pair it is.
   const keys = isPlainObject(value) ? Object.keys(value) : []
+
   return keys.length > 0 && keys.every((key) => key === 'local' || key === 'ci')
 }
 
@@ -82,6 +85,7 @@ function isPair(value: unknown): boolean {
 function succeeds(action: () => unknown): boolean {
   try {
     action()
+
     return true
   } catch {
     return false
@@ -95,8 +99,10 @@ function succeeds(action: () => unknown): boolean {
 function renderObject(value: object): string {
   if (!Array.isArray(value) && !isPlainObject(value)) {
     const name: unknown = Object.getPrototypeOf(value)?.constructor?.name
+
     return typeof name === 'string' && name !== '' ? `an instance of ${name}` : 'an object'
   }
+
   try {
     return JSON.stringify(value)
   } catch {
@@ -111,12 +117,15 @@ function render(value: unknown): string {
   if (typeof value === 'object' && value !== null) {
     return renderObject(value)
   }
+
   if (typeof value === 'string') {
     return JSON.stringify(value)
   }
+
   if (typeof value === 'bigint') {
     return `${value}n`
   }
+
   return typeof value === 'function' ? 'a function' : String(value)
 }
 
@@ -127,6 +136,7 @@ function mustBe(path: string, text: string, value: unknown): string {
   const characters = Array.from(render(value))
   const brief =
     characters.length > maxShownLength ? `${characters.slice(0, maxShownLength - 1).join('')}…` : characters.join('')
+
   return `${path}: must be ${text}. Got ${brief}.`
 }
 
@@ -138,6 +148,7 @@ function join(path: string, key: string): string {
   if (!/^[\w$-]+$/.test(key)) {
     return `${path}[${JSON.stringify(key)}]`
   }
+
   return path === '' ? key : `${path}.${key}`
 }
 
@@ -183,11 +194,14 @@ function pairOf(requirement: Requirement): Check {
   const side = optional(meets(requirement))
   const sides: Keys = { local: side, ci: side }
   const checkPlainValue = meets({ ...requirement, text: `${requirement.text}, or a { local, ci } pair of those` })
+
   return optional((value, path) => {
     if (!isPlainObject(value)) {
       return checkPlainValue(value, path)
     }
+
     const issues = checkKeys(sides, value, path)
+
     return value.local === undefined && value.ci === undefined
       ? [...issues, `${path}: { local, ci } needs local, ci or both.`]
       : issues
@@ -203,6 +217,7 @@ function checkKeys(keys: Keys, value: Record<string, unknown>, path: string): st
   const unknownIssues = Object.keys(value)
     .filter((key) => !Object.hasOwn(keys, key) && value[key] !== undefined)
     .map((key) => `${join(path, key)}: unknown key. Known keys: ${known}.`)
+
   return [...unknownIssues, ...Object.entries(keys).flatMap(([key, check]) => check(value[key], join(path, key)))]
 }
 
@@ -220,6 +235,7 @@ function objectOf(keys: Keys, example: string): Check {
  */
 function arrayOf(item: Requirement, text: string): Check {
   const checkItem = meets(item)
+
   return noPair((value, path) =>
     Array.isArray(value)
       ? Array.from(value).flatMap((entry, index) => checkItem(entry, `${path}[${index}]`))
@@ -247,6 +263,7 @@ function wholeNumber(minimum: number, maximum = Number.MAX_SAFE_INTEGER): Requir
 function oneOf<Member extends string>(members: Record<Member, true>): Requirement {
   const values = Object.keys(members)
   const quoted = values.map((value) => `'${value}'`)
+
   return {
     text: `${quoted.slice(0, -1).join(', ')} or ${quoted.at(-1)}`,
     accepts: (value) => values.some((allowed) => allowed === value),
@@ -286,10 +303,13 @@ const checkStorybook = objectOf(
  */
 function checkStorybooks(value: unknown, path: string): string[] {
   const entries = isPlainObject(value) ? Object.entries(value).filter(([, settings]) => settings !== undefined) : []
+
   if (entries.length === 0) {
     const text = `an object with at least one Storybook by name, such as { web: { url: '${exampleUrl}' } }`
+
     return [mustBe(path, text, value)]
   }
+
   return entries.flatMap(([name, settings]) => [
     ...(/^[a-z0-9-]+$/.test(name)
       ? []
@@ -378,10 +398,13 @@ function withoutUndefined(value: unknown): unknown {
   if (Array.isArray(value)) {
     return [...value]
   }
+
   if (!isPlainObject(value)) {
     return value
   }
+
   const entries = Object.entries(value).filter(([, item]) => item !== undefined)
+
   return Object.fromEntries(entries.map(([key, item]) => [key, withoutUndefined(item)]))
 }
 
@@ -395,10 +418,13 @@ export function validateConfig(value: unknown, displayPath: string): Config {
   if (!isPlainObject(value)) {
     throw new ConfigError(`${displayPath} must export a config object: export default defineConfig({ ... }).`)
   }
+
   const issues = checkKeys(configKeys, value, '')
+
   if (issues.length > 0) {
     throw new ConfigError([`${displayPath} is invalid:`, ...issues.map((issue) => `  - ${issue}`)].join('\n'))
   }
+
   // The checks guarantee that every key set to something other than `undefined` is one `Config` declares, holding a
   // value of its declared type, and that `storybooks` is set. The copy drops the keys set to `undefined`, which
   // `exactOptionalPropertyTypes` rules out.

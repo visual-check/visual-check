@@ -31,6 +31,7 @@ function createFolder(files: Record<string, string>): string {
     mkdirSync(dirname(join(root, path)), { recursive: true })
     writeFileSync(join(root, path), fileContent)
   }
+
   return root
 }
 

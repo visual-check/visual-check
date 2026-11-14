@@ -110,9 +110,11 @@ export function readSourceFiles(root: URL): SourceFile[] {
   const files: SourceFile[] = []
   for (const packageEntry of readdirSync(packagesDirectory, { withFileTypes: true })) {
     const sourceDirectory = new URL(`${packageEntry.name}/src/`, packagesDirectory)
+
     if (!packageEntry.isDirectory() || !existsSync(sourceDirectory)) {
       continue
     }
+
     const sourcePath = fileURLToPath(sourceDirectory)
     for (const entry of readdirSync(sourceDirectory, { recursive: true, withFileTypes: true })) {
       if (entry.isFile()) {
@@ -124,6 +126,7 @@ export function readSourceFiles(root: URL): SourceFile[] {
       }
     }
   }
+
   return files
 }
 
@@ -134,6 +137,7 @@ export function readSourceFiles(root: URL): SourceFile[] {
  */
 export function readFallowBoundaries(root: URL): FallowBoundaries {
   const config = JSON.parse(readFileSync(new URL('.fallowrc.json', root), 'utf8')) as { boundaries: FallowBoundaries }
+
   return config.boundaries
 }
 
@@ -161,14 +165,17 @@ function findModulesWithoutZone(files: readonly SourceFile[], boundaries: Fallow
   const modules = new Set<string>()
   for (const file of files) {
     const match = /^packages\/([^/]+)\/src\/([^/]+)\//.exec(file.path)
+
     if (match) {
       modules.add(`${match[1]}/${match[2]}`)
     }
   }
+
   return [...modules]
     .filter((moduleName) => !zoneNames.has(moduleName))
     .map((moduleName) => {
       const [packageName, moduleFolder] = moduleName.split('/')
+
       return `packages/${packageName}/src/${moduleFolder}/ is a module with no zone: add zone "${moduleName}" with pattern "packages/${packageName}/src/${moduleFolder}/**" to .fallowrc.json boundaries`
     })
 }
@@ -181,12 +188,15 @@ function findMalformedZones(files: readonly SourceFile[], boundaries: FallowBoun
   const problems: string[] = []
   for (const zone of boundaries.zones) {
     const separatorIndex = zone.name.indexOf('/')
+
     if (separatorIndex <= 0 || separatorIndex === zone.name.length - 1) {
       problems.push(`Zone "${zone.name}" must be named "<package>/<path>", for example "cli/commands"`)
       continue
     }
+
     const folder = `packages/${zone.name.slice(0, separatorIndex)}/src/${zone.name.slice(separatorIndex + 1)}/`
     const expectedPatterns = [`${folder}**`]
+
     if (zone.patterns.length !== 1 || zone.patterns[0] !== expectedPatterns[0]) {
       problems.push(
         `Zone "${zone.name}" must have exactly the pattern ${JSON.stringify(expectedPatterns)}, found ${JSON.stringify(zone.patterns)}`,
@@ -195,6 +205,7 @@ function findMalformedZones(files: readonly SourceFile[], boundaries: FallowBoun
       problems.push(`Zone "${zone.name}" is stale: ${folder} has no files, remove the zone and its rule`)
     }
   }
+
   return problems
 }
 
@@ -247,6 +258,7 @@ function findCatchAllFolders(files: readonly SourceFile[]): string[] {
       }
     }
   }
+
   return [...folders].map(
     (folder) =>
       `${folder} is a catch-all folder: name it for what it does in the domain, or move its files into the module that owns them`,
