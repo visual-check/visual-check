@@ -10,6 +10,7 @@ import type {
   Tolerance,
   Viewport,
 } from './define-config.js'
+import { isHttpUrl } from './is-http-url.js'
 
 /**
  * One Storybook with every default filled in and every path made absolute.
@@ -51,7 +52,7 @@ export interface ResolvedConfig {
    */
   path: string
   /**
-   * The Storybooks, in config order.
+   * The Storybooks the run covers, in config order: every one, or the one `--storybook` names.
    */
   storybooks: ResolvedStorybook[]
   /**
@@ -125,6 +126,14 @@ interface ResolveOptions {
    * Whether the `CI` environment variable is set, which picks the `ci` side of every `{ local, ci }` pair.
    */
   ci: boolean
+  /**
+   * The Storybook `--storybook` names. The run covers only it, so only it needs a URL for the current environment.
+   */
+  storybook?: string
+  /**
+   * The URL `--url` gives. It replaces the URL of the one Storybook the run covers.
+   */
+  url?: string
 }
 
 /**
@@ -232,27 +241,70 @@ function findSharedBaselines(storybooks: PendingStorybook[], cwd: string): strin
 }
 
 /**
+ * Checks the Storybook name and the URL the command line gives against the config's Storybooks.
+ *
+ * @throws {ConfigError} With a single message when the name isn't a Storybook in the config, when the URL isn't an
+ * http(s) URL, and when a URL comes with several Storybooks and no name.
+ */
+function checkFlags(names: string[], options: ResolveOptions, displayPath: string): void {
+  const { storybook, url } = options
+
+  if (storybook !== undefined && !names.includes(storybook)) {
+    const choices = names.length > 1 ? `Pick one of ${listNames(names)}.` : `The config has one: ${listNames(names)}.`
+
+    throw new ConfigError(`--storybook ${storybook} isn't a Storybook in ${displayPath}. ${choices}`)
+  }
+
+  if (url !== undefined && !isHttpUrl(url)) {
+    throw new ConfigError(`--url takes an http: or https: URL, such as 'http://127.0.0.1:6006'. Got '${url}'.`)
+  }
+
+  if (url !== undefined && storybook === undefined && names.length > 1) {
+    throw new ConfigError(
+      `--url sets one Storybook's URL, and ${displayPath} has several: ${listNames(names)}. Name the one with --storybook.`,
+    )
+  }
+}
+
+/**
+ * Returns the Storybooks the run covers (every one, or the one `--storybook` names), with the URL `--url` gives in
+ * place of theirs.
+ */
+function storybooksInRun(storybooks: PendingStorybook[], options: ResolveOptions): PendingStorybook[] {
+  const inRun =
+    options.storybook === undefined ? storybooks : storybooks.filter(({ name }) => name === options.storybook)
+
+  return options.url === undefined ? inRun : inRun.map((storybook) => ({ ...storybook, url: options.url }))
+}
+
+/**
  * Fills in the defaults, picks the `{ local, ci }` side for the current environment and resolves the paths.
  *
- * @throws {ConfigError} For a Storybook with no URL for the current environment, and for Storybooks that share a
- * baselines folder.
+ * `storybook` narrows the result to one Storybook before the URL check, and `url` replaces the URL of the one
+ * Storybook the run covers before it. Shared baselines are checked across every Storybook in the config.
+ *
+ * @throws {ConfigError} For a `storybook` or `url` that can't be used, for a Storybook in the run with no URL for the
+ * current environment, and for Storybooks that share a baselines folder.
  */
 export function resolveConfig(config: Config, options: ResolveOptions): ResolvedConfig {
   const path = resolve(options.cwd, options.path)
+  const displayPath = relative(options.cwd, path)
+
+  checkFlags(Object.keys(config.storybooks), options, displayPath)
+
   const pending = Object.entries(config.storybooks).map(([name, settings]) =>
     resolveStorybook(name, settings, { ...options, path }),
   )
-  const issues = [...findMissingUrls(pending, options.ci), ...findSharedBaselines(pending, options.cwd)]
+  const inRun = storybooksInRun(pending, options)
+  const issues = [...findMissingUrls(inRun, options.ci), ...findSharedBaselines(pending, options.cwd)]
 
   if (issues.length > 0) {
-    const displayPath = relative(options.cwd, path)
-
     throw new ConfigError([`${displayPath} can't be used:`, ...issues.map((issue) => `  - ${issue}`)].join('\n'))
   }
 
   return {
     path,
-    storybooks: pending.filter(hasUrl),
+    storybooks: inRun.filter(hasUrl),
     platform: config.platform ?? configDefaults.platform,
     image: config.image,
     tolerance: { ...configDefaults.tolerance, ...config.tolerance },

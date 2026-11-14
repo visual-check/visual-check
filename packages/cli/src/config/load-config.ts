@@ -24,6 +24,14 @@ export interface LoadConfigOptions {
    * The path given to `--config`, absolute or relative to `cwd`. It replaces the search.
    */
   path?: string
+  /**
+   * The Storybook `--storybook` names. The run covers only it, so only it needs a URL for the current environment.
+   */
+  storybook?: string
+  /**
+   * The URL `--url` gives. It replaces the URL of the one Storybook the run covers.
+   */
+  url?: string
 }
 
 /**
@@ -136,7 +144,7 @@ async function importDefault(path: string, displayPath: string): Promise<unknown
  * environment variables say.
  *
  * @throws {ConfigError} When no config is found, when `--config` gives a path that isn't a config file, when the
- * config can't be loaded, and when it's invalid or can't be used.
+ * config can't be loaded, when it's invalid or can't be used, and when `storybook` or `url` can't be used.
  *
  * @public
  */
@@ -145,5 +153,5 @@ export async function loadConfig(options: LoadConfigOptions): Promise<ResolvedCo
   const displayPath = displayPathOf(path, options.cwd)
   const config = validateConfig(await importDefault(path, displayPath), displayPath)
 
-  return resolveConfig(config, { path, cwd: options.cwd, ci: options.ci })
+  return resolveConfig(config, { ...options, path })
 }

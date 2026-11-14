@@ -177,6 +177,19 @@ describe('loadConfig loading', () => {
     })
     expect((await load(root, { ci: true })).storybooks[0]?.url).toBe('http://storybook:6006')
   })
+
+  it('narrows to --storybook and applies --url before the missing-URL check', async () => {
+    const root = createProject({
+      'visual-check.config.ts': `export default { storybooks: {
+  web: { url: { local: '${url}' }, dir: 'web' },
+  ui: { url: { local: '${url}' }, dir: 'ui' },
+} }\n`,
+    })
+    const storybooks = (await load(root, { ci: true, storybook: 'ui', url: 'http://storybook:6006' })).storybooks
+    expect(storybooks.map(({ name, url: storybookUrl }) => [name, storybookUrl])).toStrictEqual([
+      ['ui', 'http://storybook:6006'],
+    ])
+  })
 })
 
 describe('loadConfig with JITI_* environment variables', () => {
