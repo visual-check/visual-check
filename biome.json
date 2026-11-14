@@ -28,6 +28,9 @@
         "noBarrelFile": "error",
         "noReExportAll": "error"
       },
+      "suspicious": {
+        "noUndeclaredEnvVars": { "level": "on", "options": { "allowedEnvVars": ["SystemRoot"] } }
+      },
       "style": {
         "noRestrictedImports": {
           "level": "error",

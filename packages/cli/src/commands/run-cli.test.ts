@@ -15,6 +15,7 @@ import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
+import { BrowserDownloadError } from '../browser-download/browser-download-error.js'
 import {
   BrowserExitedError,
   BrowserLaunchError,
@@ -63,17 +64,55 @@ afterAll(() => {
 })
 
 /**
+ * The cache folder a run on the host names in `VISUAL_CHECK_CACHE_DIR`. Nothing is written there, since the tests'
+ * launches are fakes.
+ */
+const cacheDir = join(absentMarkerFolder, 'cache')
+
+/**
+ * The environment of a run on the host, which keeps its cache folder out of the user's.
+ */
+const hostEnvironment = { VISUAL_CHECK_CACHE_DIR: cacheDir }
+
+/**
+ * The folder in the cache that a run on the host keeps the browser package's headless shell in.
+ */
+const chromiumFolder = join(cacheDir, 'chromium', browserPackage.chromium)
+
+/**
+ * Gives the executable of the headless shell a run on the host keeps in the cache for the Chrome for Testing platform.
+ */
+function hostExecutableOf(platform: 'linux64' | 'linux-arm64'): string {
+  return join(chromiumFolder, `chrome-headless-shell-${platform}`, 'chrome-headless-shell')
+}
+
+/**
+ * The line Linux's dynamic loader prints when the headless shell links against a library the machine lacks.
+ */
+const loaderLine =
+  '/x/chrome-headless-shell: error while loading shared libraries: libnss3.so: cannot open shared object file: ' +
+  'No such file or directory'
+
+/**
+ * Builds the launch error of a browser that exited at once because the machine lacks a library.
+ */
+function missingLibraryError(): BrowserLaunchError {
+  return new BrowserLaunchError('The browser exited with code 127 before it answered.', [loaderLine], { exited: true })
+}
+
+/**
  * Options that only keep the run outside visual-check's image, for runs that stop before the launch.
  */
 const noMarker: RunCliOptions = { imageMarkerPath: absentMarkerPath }
 
 /**
- * The options every run gets: a Docker probe and a machine that both have 4 CPUs and 16 GiB, and no container around
- * the run, so no test runs the real `docker` or reads the machine it runs on.
+ * The options every run gets: a Docker probe and a machine that both have 4 CPUs and 16 GiB, a machine that is Linux on
+ * x64, and no container around the run, so no test runs the real `docker` or reads the machine it runs on.
  */
 const hostOptions = {
   probeDocker: async () => ({ cpus: 4, memoryBytes: 16 * 2 ** 30 }),
   machine: { cpus: 4, memoryBytes: 16 * 2 ** 30 },
+  machineSystem: { os: 'linux', arch: 'x64' },
   insideContainer: false,
 } satisfies RunCliOptions
 
@@ -257,6 +296,10 @@ function fakeBrowser(
     record.launches.push(launch)
     if (launch.in === 'container') {
       launch.progress(`Pulling ${launch.image}\n`)
+    }
+
+    if (launch.in === 'host') {
+      launch.progress(`Downloading Chromium ${launch.version}\n`)
     }
 
     return fakeDriverOf(stories, record, driverVersion)
@@ -1191,20 +1234,145 @@ describe('runCli launching the browser', () => {
     expect(record.closed).toBe(true)
   })
 
-  it("exits 2 for platform 'host' before reaching any Storybook", async () => {
+  it("exits 2 for platform 'host' on Windows on Arm before any Storybook, pointing to linux/arm64", async () => {
     const { url, requests } = await startRecordingServer()
     const project = createProject({
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } }, platform: 'host' }\n`,
     })
+    const windowsOnArm: RunCliOptions = { ...noLaunch, machineSystem: { os: 'win32', arch: 'arm64' } }
 
-    expect(await runCli(['test'], {}, project, noLaunch)).toEqual({
+    expect(await runCli(['test'], {}, project, windowsOnArm)).toEqual({
       exitCode: 2,
       stdout: '',
       stderr: printed(
-        "visual-check can't run the browser on the host yet. Set platform to 'linux/amd64' or 'linux/arm64' in the config.",
+        "Chrome for Testing has no build for Windows on Arm, so platform: 'host' can't run here. " +
+          "Set platform to 'linux/arm64' in the config to run the browser in visual-check's container.",
       ),
     })
     expect(requests).toEqual([])
+  })
+
+  it("launches the machine's headless shell on the host, sized by the machine and with no Docker probe", async () => {
+    const { project } = await createRun(['a'], {}, "platform: 'host', workers: 'auto'")
+    const { options, record, progress } = fakeBrowser()
+    let probes = 0
+    const result = await runCli(['update'], hostEnvironment, project, {
+      ...options,
+      machine: { cpus: 2, memoryBytes: 7e9 },
+      machineSystem: { os: 'darwin', arch: 'arm64' },
+      probeDocker: async () => {
+        probes += 1
+
+        return { cpus: 4, memoryBytes: 16 * 2 ** 30 }
+      },
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(firstLineOf(result.stdout)).toBe(headerOf('update', 1, 2))
+    expect(record.launches).toEqual([
+      {
+        in: 'host',
+        platform: 'mac-arm64',
+        version: browserPackage.chromium,
+        sha256: browserPackage.sha256['mac-arm64'],
+        packageVersion: browserPackage.packageVersion,
+        environment: hostEnvironment,
+        progress: expect.any(Function),
+      },
+    ])
+    expect(progress).toEqual([`Downloading Chromium ${browserPackage.chromium}\n`])
+    expect(probes).toBe(0)
+  })
+
+  it("exits 2 with the download's message when the headless shell can't be downloaded", async () => {
+    const { project } = await createRun(['a'], {}, "platform: 'host'")
+    const error = new BrowserDownloadError(
+      `The download of Chromium ${browserPackage.chromium} (linux64) failed: ECONNRESET. Run visual-check again.`,
+    )
+
+    expect(await runCli(['update'], hostEnvironment, project, failingLaunch(error))).toEqual({
+      exitCode: 2,
+      stdout: printed(headerOf('update', 1)),
+      stderr: printed(error.message),
+    })
+  })
+
+  it.each([
+    ['x64', 'linux64', 'linux/amd64'],
+    ['arm64', 'linux-arm64', 'linux/arm64'],
+  ] as const)(
+    "names the missing library and both fixes on Linux %s, pointing to '%s'",
+    async (arch, shell, platform) => {
+      const { project } = await createRun(['a'], {}, "platform: 'host'")
+      const result = await runCli(['update'], hostEnvironment, project, {
+        ...failingLaunch(missingLibraryError()),
+        machineSystem: { os: 'linux', arch },
+      })
+
+      expect(result.exitCode).toBe(2)
+      expect(result.stderr).toBe(
+        printed(
+          "The browser can't start because libnss3.so is missing.",
+          "Install the libraries the headless shell needs, since visual-check doesn't install system packages, or set " +
+            `platform to '${platform}' in the config to run the browser in visual-check's container.`,
+          `To list every missing library, run: ldd '${hostExecutableOf(shell)}' | grep 'not found'`,
+          "The browser's last output:",
+          `  ${loaderLine}`,
+        ),
+      )
+    },
+  )
+
+  it.each([
+    ['container', false, 'Check that Docker can run images for linux/amd64'],
+    ["visual-check's image", true, `Check that ${browserPackage.headlessShell} starts in this container`],
+  ] as const)(
+    'gives the ordinary next step in the %s when the output names a missing library',
+    async (_place, inImage, check) => {
+      const { project } = await createRun(['a'], { a: defaultSnapshot })
+      const result = await runCli(['test'], {}, project, {
+        ...failingLaunch(missingLibraryError()),
+        ...(inImage ? { imageMarkerPath: writeMarker(markerOf('amd64')) } : {}),
+      })
+
+      expect(result.exitCode).toBe(2)
+      expect(result.stderr).toBe(
+        printed(
+          'The browser exited with code 127 before it answered.',
+          `The browser's output below may say why. ${check}, then run visual-check again.`,
+          "The browser's last output:",
+          `  ${loaderLine}`,
+        ),
+      )
+    },
+  )
+
+  it('names the executable in the next step when the browser fails to launch on the host', async () => {
+    const { project } = await createRun(['a'], {}, "platform: 'host'")
+    const error = new BrowserLaunchError("The browser didn't answer within 30 s.", [], { exited: false })
+
+    expect((await runCli(['update'], hostEnvironment, project, failingLaunch(error))).stderr).toBe(
+      printed(
+        "The browser didn't answer within 30 s.",
+        `Check that ${hostExecutableOf('linux64')} starts on this machine, then run visual-check again.`,
+      ),
+    )
+  })
+
+  it("names the download's folder and says to remove it when the browser on the host is another build", async () => {
+    const { project } = await createRun(['a'], {}, "platform: 'host'")
+    const { options } = fakeBrowser({}, '156.0.7000.1')
+    const result = await runCli(['update'], hostEnvironment, project, options)
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stderr).toBe(
+      printed(
+        `The browser in ${chromiumFolder} is Chromium 156.0.7000.1, but the browser package ` +
+          `@visual-check/chromium ${browserPackage.packageVersion} names Chromium ${browserPackage.chromium}.`,
+        `Remove ${chromiumFolder}, then run visual-check again to download it afresh. ` +
+          'If it happens again, reinstall the browser package @visual-check/chromium.',
+      ),
+    )
   })
 
   it("starts the headless shell directly, with no progress, when the marker of visual-check's image fits", async () => {

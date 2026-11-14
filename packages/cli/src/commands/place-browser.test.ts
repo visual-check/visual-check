@@ -137,10 +137,31 @@ describe('placeBrowser', () => {
     expect(problem.endsWith(`.\n${imageFix}`)).toBe(true)
   })
 
-  it("gives today's message for the host platform outside visual-check's image", () => {
-    expect(placeBrowser('host', browserPackage, absentMarker())).toEqual({
+  it.each([
+    ['linux', 'x64', 'linux64'],
+    ['linux', 'arm64', 'linux-arm64'],
+    ['darwin', 'x64', 'mac-x64'],
+    ['darwin', 'arm64', 'mac-arm64'],
+    ['win32', 'x64', 'win64'],
+  ] as const)("places the browser on a %s %s host outside visual-check's image, as %s", (os, arch, platform) => {
+    expect(placeBrowser('host', browserPackage, absentMarker(), { os, arch })).toEqual({
+      place: { in: 'host', platform },
+    })
+  })
+
+  it('gives the problem that points to linux/arm64 for the host platform on Windows on Arm', () => {
+    expect(placeBrowser('host', browserPackage, absentMarker(), { os: 'win32', arch: 'arm64' })).toEqual({
       problem:
-        "visual-check can't run the browser on the host yet. Set platform to 'linux/amd64' or 'linux/arm64' in the config.",
+        "Chrome for Testing has no build for Windows on Arm, so platform: 'host' can't run here. " +
+        "Set platform to 'linux/arm64' in the config to run the browser in visual-check's container.",
+    })
+  })
+
+  it("keeps the browser inside visual-check's image for the host platform on any machine", () => {
+    const marker = writeMarker('{"version":"157.0.0","arch":"arm64"}\n')
+
+    expect(placeBrowser('host', browserPackage, marker, { os: 'win32', arch: 'arm64' })).toEqual({
+      place: { in: 'image' },
     })
   })
 

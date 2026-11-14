@@ -670,6 +670,52 @@ async function installUnderLock(
 }
 
 /**
+ * Where the headless shell of a Chromium version for a platform is cached.
+ *
+ * @public
+ */
+export interface HeadlessShellPaths {
+  /**
+   * The version folder, `chromium/<version>/` in the cache folder, which holds every platform's headless shell of that
+   * version.
+   */
+  folder: string
+  /**
+   * The headless shell's executable.
+   */
+  executable: string
+}
+
+/**
+ * Gives the folder the headless shells of a Chromium version are cached in: `chromium/<version>/` in the cache folder,
+ * which is `VISUAL_CHECK_CACHE_DIR`, else `visual-check` in the OS's user cache folder.
+ */
+function versionFolderOf(
+  environment: Record<string, string | undefined>,
+  version: string,
+  os: NodeJS.Platform,
+  homeDir: string,
+): string {
+  return join(cacheFolderOf(environment, os, homeDir), 'chromium', version)
+}
+
+/**
+ * Gives where the headless shell of a Chromium version for a Chrome for Testing platform is cached on this machine,
+ * whether or not it is there yet.
+ *
+ * @public
+ */
+export function headlessShellPathsOf(
+  environment: Record<string, string | undefined>,
+  version: string,
+  platform: string,
+): HeadlessShellPaths {
+  const paths = shellPathsOf(versionFolderOf(environment, version, process.platform, homedir()), platform)
+
+  return { folder: paths.versionFolder, executable: paths.executable }
+}
+
+/**
  * Gives the absolute path of the headless shell's executable, downloading it first when the cache doesn't hold it.
  * The cache folder is `VISUAL_CHECK_CACHE_DIR`, else `visual-check` in the OS's user cache folder, and the headless
  * shell goes in its `chromium/<version>/`. A lock lets one run download while others wait. The download, from
@@ -683,8 +729,12 @@ async function installUnderLock(
  */
 export async function installHeadlessShell(options: InstallHeadlessShellOptions): Promise<string> {
   const { version, platform, environment } = options
-  const cacheFolder = cacheFolderOf(environment, options.os ?? process.platform, options.homeDir ?? homedir())
-  const versionFolder = join(cacheFolder, 'chromium', version)
+  const versionFolder = versionFolderOf(
+    environment,
+    version,
+    options.os ?? process.platform,
+    options.homeDir ?? homedir(),
+  )
   const paths = shellPathsOf(versionFolder, platform)
 
   if (await isReady(paths)) {

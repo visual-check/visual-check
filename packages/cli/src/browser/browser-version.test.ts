@@ -77,6 +77,19 @@ describe('checkBrowserVersion', () => {
     )
   })
 
+  it('names the folder the headless shell was downloaded into and says to remove it on the host', () => {
+    const folder = '/home/me/.cache/visual-check/chromium/157.0.8103.78'
+
+    expect(() => checkBrowserVersion('156.0.7000.1', browserPackage, { in: 'host', folder })).toThrow(
+      new BrowserMismatchError(
+        `The browser in ${folder} is Chromium 156.0.7000.1, but the browser package @visual-check/chromium ` +
+          '157.0.0 names Chromium 157.0.8103.78.\n' +
+          `Remove ${folder}, then run visual-check again to download it afresh. ` +
+          'If it happens again, reinstall the browser package @visual-check/chromium.',
+      ),
+    )
+  })
+
   it('throws a BrowserMismatchError', () => {
     expect(() => checkBrowserVersion('1.0.0.0', browserPackage, inContainer())).toThrow(BrowserMismatchError)
   })

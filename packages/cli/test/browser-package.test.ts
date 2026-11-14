@@ -1,13 +1,15 @@
 import { spawnSync } from 'node:child_process'
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 
 const packageFolder = fileURLToPath(new URL('..', import.meta.url))
-const { version } = JSON.parse(readFileSync(join(packageFolder, 'package.json'), 'utf8')) as { version: string }
+const { version, dependencies } = JSON.parse(readFileSync(join(packageFolder, 'package.json'), 'utf8')) as {
+  version: string
+  dependencies: Record<string, string>
+}
 const temporaryFolders: string[] = []
 
 /**
@@ -28,7 +30,7 @@ const chromiumJson = {
 
 /**
  * Copies the built CLI into a fresh temporary folder, so module resolution can't reach the workspace's node_modules
- * beyond jiti, which the binary needs to start.
+ * beyond the CLI's own dependencies, which the binary loads when it starts.
  * When `browserVersion` is given, also installs a fake browser package of that version there, with `manifest` over its
  * `package.json` and `chromium` as its `chromium.json`.
  */
@@ -45,12 +47,12 @@ function setUp(
   writeFileSync(join(folder, '.git', 'HEAD'), 'ref: refs/heads/main\n')
   cpSync(join(packageFolder, 'dist'), join(folder, 'dist'), { recursive: true })
   cpSync(join(packageFolder, 'package.json'), join(folder, 'package.json'))
-  // The binary loads jiti when it starts, so jiti is the one package the copy gets from the workspace.
+  // The binary loads its dependencies when it starts, so they are the only packages the copy gets from the workspace.
   mkdirSync(join(folder, 'node_modules'))
-  symlinkSync(
-    dirname(createRequire(import.meta.url).resolve('jiti/package.json')),
-    join(folder, 'node_modules', 'jiti'),
-  )
+
+  for (const dependency of Object.keys(dependencies)) {
+    symlinkSync(realpathSync(join(packageFolder, 'node_modules', dependency)), join(folder, 'node_modules', dependency))
+  }
 
   if (browserVersion !== undefined) {
     const browserFolder = join(folder, 'node_modules', '@visual-check', 'chromium')

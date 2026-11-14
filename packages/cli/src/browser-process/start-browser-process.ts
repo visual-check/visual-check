@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import { rm } from 'node:fs/promises'
+import { join } from 'node:path'
 import { finished, PassThrough, type Readable, type Writable } from 'node:stream'
 import {
   type BrowserProcess,
@@ -36,12 +37,21 @@ async function removeProfile(profileDir: string): Promise<void> {
 }
 
 /**
- * Spawns the browser in a process group of its own, with pipes for its stdout, stderr and the two CDP fds, or returns
- * the error when `spawn` throws at once, such as for a path with a NUL byte.
+ * Whether the CLI runs on Windows, which has no process groups to signal.
+ */
+const windows = process.platform === 'win32'
+
+/**
+ * Spawns the browser, outside Windows in a process group of its own, with pipes for its stdout, stderr and the two CDP
+ * fds, or returns the error when `spawn` throws at once, such as for a path with a NUL byte. On Windows a detached
+ * child would get a console window of its own, so it isn't detached, as in Playwright.
  */
 function spawnBrowser(executable: string, browserArguments: readonly string[]): ChildProcess | Error {
   try {
-    return spawn(executable, browserArguments, { stdio: ['ignore', 'pipe', 'pipe', 'pipe', 'pipe'], detached: true })
+    return spawn(executable, browserArguments, {
+      stdio: ['ignore', 'pipe', 'pipe', 'pipe', 'pipe'],
+      detached: !windows,
+    })
   } catch (error) {
     return error instanceof Error ? error : new Error(String(error))
   }
@@ -88,13 +98,37 @@ function killProcessGroup(child: ChildProcess): void {
 }
 
 /**
+ * Ends the browser's whole process tree on Windows with `taskkill /T /F`, as Playwright does, since Windows has no
+ * process group to signal. It does nothing while the browser has no pid, because it didn't start, or once it has
+ * exited, because Windows may have given its pid to another process. `taskkill` runs from System32 by its full path,
+ * since a bare name is looked up in the current folder first. A tree that is already gone, or a `taskkill` that fails,
+ * is fine: the driver's own wait after a kill bounds it.
+ */
+function killProcessTree(child: ChildProcess): void {
+  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) {
+    return
+  }
+
+  const taskkill = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe')
+
+  try {
+    const killer = spawn(taskkill, ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
+
+    killer.on('error', () => undefined)
+  } catch {
+    // A taskkill that can't start leaves the browser to quit at the EOF of its CDP pipe.
+  }
+}
+
+/**
  * Provides the browser as a `StartBrowser` that runs the executable as a child process of the CLI, with the CLI's
  * environment. CDP travels over the child's fds 3 and 4, as Chromium's `--remote-debugging-pipe` reads and writes
  * them, and its stdout and stderr merge into `output`. `exited` settles once the child has gone and the profile folder
  * is removed.
  *
- * The browser runs in a process group of its own, which `kill()` ends whole. Chromium also quits by itself when its CDP
- * pipe reaches EOF, such as when the CLI is killed.
+ * Outside Windows the browser runs in a process group of its own, which `kill()` ends whole. On Windows `kill()` ends
+ * its process tree with `taskkill`. Chromium also quits by itself when its CDP pipe reaches EOF, such as when the CLI
+ * is killed.
  *
  * @public
  */
@@ -126,7 +160,7 @@ export function startBrowserProcess(options: BrowserExecutable): StartBrowser {
       fromBrowser: child.stdio[4] as Readable,
       output: mergedOutputOf(child),
       exited,
-      kill: () => killProcessGroup(child),
+      kill: () => (windows ? killProcessTree(child) : killProcessGroup(child)),
     }
 
     return browser
