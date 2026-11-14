@@ -1,4 +1,5 @@
 import { parseArgs } from 'node:util'
+import { isHttpUrl } from '../config/is-http-url.js'
 
 /**
  * A command line that can't be run: an unknown command or flag, a missing, empty or extra argument, a flag that doesn't
@@ -124,8 +125,8 @@ function asksForHelp(commandLineArguments: string[]): boolean {
  * Reads the command line into the command it names and its options.
  *
  * @throws {UsageError} For an unknown command or flag, a missing, empty or extra argument, a flag that doesn't apply to
- * the command, flags that clash, and a `--filter` that isn't a regular expression. `--help` anywhere before a `--`
- * separator wins, so it never throws.
+ * the command, flags that clash, a `--url` that isn't an http(s) URL, and a `--filter` that isn't a regular
+ * expression. `--help` anywhere before a `--` separator wins, so it never throws.
  */
 export function parseCommandLine(commandLineArguments: string[]): CommandLine {
   if (asksForHelp(commandLineArguments)) {
@@ -174,6 +175,10 @@ export function parseCommandLine(commandLineArguments: string[]): CommandLine {
     }
 
     return { command: 'init' }
+  }
+
+  if (values.url !== undefined && !isHttpUrl(values.url)) {
+    throw new UsageError(`--url takes an http: or https: URL, such as 'http://127.0.0.1:6006'. Got '${values.url}'.`)
   }
 
   return {

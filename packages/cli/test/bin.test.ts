@@ -69,6 +69,7 @@ const run = (options: CaseOptions, ...commandLineArguments: string[]) =>
  */
 function createProject(files: Record<string, string>): string {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'visual-check-bin-')))
+
   projects.push(root)
   mkdirSync(join(root, '.git'))
   writeFileSync(join(root, '.git', 'HEAD'), 'ref: refs/heads/main\n')
@@ -90,6 +91,7 @@ function runAsynchronously(options: CaseOptions, ...commandLineArguments: string
     const child = spawn(process.execPath, [binaryPath, ...commandLineArguments], spawnOptionsOf(options))
     let stdout = ''
     let stderr = ''
+
     child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
       stdout += chunk
     })
@@ -120,10 +122,13 @@ async function listen(server: Server): Promise<string> {
  */
 async function takeUnusedUrl(): Promise<string> {
   const server = createServer()
+
   await new Promise<void>((resolve) => {
     server.listen(0, '127.0.0.1', resolve)
   })
+
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+
   await new Promise<void>((resolve) => {
     server.close(() => {
       resolve()
@@ -195,12 +200,14 @@ afterEach(async () => {
 describe('visual-check binary', () => {
   it('prints the package version for --version', () => {
     const result = run({}, '--version')
+
     expect(result.status).toBe(0)
     expect(result.stdout).toBe(`${version}\n`)
   })
 
   it('lists init, test and update for --help', () => {
     const result = run({}, '--help')
+
     expect(result.status).toBe(0)
     expect(result.stdout).toMatch(/^ {2}init +/m)
     expect(result.stdout).toMatch(/^ {2}test +/m)
@@ -209,12 +216,14 @@ describe('visual-check binary', () => {
 
   it('exits 2 with the hint for an unknown flag', () => {
     const result = run({}, '--nope')
+
     expect(result.status).toBe(2)
     expect(result.stderr).toContain('Run visual-check --help to see the commands and options.')
   })
 
   it('exits 2 when --all and --filter are given together', () => {
     const result = run({}, 'test', '--all', '--filter', 'x')
+
     expect(result.status).toBe(2)
     expect(result.stderr).toContain("--all and --filter can't be used together")
   })
@@ -225,6 +234,7 @@ describe('visual-check binary', () => {
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
     })
     const result = await runAsynchronously({ cwd: project, env: { CI: 'true' } }, 'update')
+
     expect(result.status).toBe(2)
     expect(result.stderr).toContain('visual-check update only runs locally, and the CI environment variable is set.')
     expect(requests).toEqual([])
@@ -236,9 +246,20 @@ describe('visual-check binary', () => {
         "export default { storybooks: { web: { url: 'http://127.0.0.1:6006' }, docs: { url: 'http://127.0.0.1:6007' } } }\n",
     })
     const result = run({ cwd: project }, 'test', '--url', 'http://127.0.0.1:1')
+
     expect(result.status).toBe(2)
     expect(result.stderr).toContain("--url sets one Storybook's URL")
     expect(result.stderr).toContain('--storybook')
+  })
+
+  it('exits 2 for a malformed --url before looking for a config', () => {
+    const project = createProject({})
+    const result = run({ cwd: project }, 'test', '--url', 'nope')
+
+    expect(result.status).toBe(2)
+    expect(result.stderr).toContain("--url takes an http: or https: URL, such as 'http://127.0.0.1:6006'. Got 'nope'.")
+    expect(result.stderr).toContain('Run visual-check --help to see the commands and options.')
+    expect(result.stderr).not.toContain('No visual-check.config.ts')
   })
 
   it('exits 2 with the config error for an unknown config key', () => {
@@ -246,6 +267,7 @@ describe('visual-check binary', () => {
       'visual-check.config.mjs': "export default { storybooks: { web: { url: 'http://127.0.0.1:6006' } }, nope: 1 }\n",
     })
     const result = run({ cwd: project }, 'test')
+
     expect(result.status).toBe(2)
     expect(result.stderr).toContain('nope: unknown key')
   })
@@ -253,6 +275,7 @@ describe('visual-check binary', () => {
   it('exits 2 and points to init when no config is found', () => {
     const project = createProject({})
     const result = run({ cwd: project }, 'test')
+
     expect(result.status).toBe(2)
     expect(result.stderr).toContain('No visual-check.config.ts')
     expect(result.stderr).toContain('visual-check init')
@@ -264,6 +287,7 @@ describe('visual-check binary', () => {
         "export default { storybooks: { web: { url: { local: 'http://127.0.0.1:6006' } } } }\n",
     })
     const result = run({ cwd: project, env: { CI: 'true' } }, 'test')
+
     expect(result.status).toBe(2)
     expect(result.stderr).toContain('Storybook web has no URL for CI')
   })
@@ -277,6 +301,7 @@ describe('visual-check binary reaching Storybooks', () => {
     })
     const started = Date.now()
     const result = await runAsynchronously({ cwd: project }, 'test')
+
     expect(result.status).toBe(2)
     expect(Date.now() - started).toBeLessThan(2_000)
     expect(result.stderr).toContain(`Storybook web doesn't answer at ${down}/index.json (ECONNREFUSED)`)
@@ -291,6 +316,7 @@ describe('visual-check binary reaching Storybooks', () => {
       'web/button.stories.tsx': '',
     })
     const result = await runAsynchronously({ cwd: project }, 'test')
+
     expect(result.status).toBe(2)
     expect(result.stderr).toContain(`Storybook docs doesn't answer at ${down}/index.json`)
     expect(result.stderr).toContain('To check one Storybook on its own, pass --storybook <name>.')
@@ -302,6 +328,7 @@ describe('visual-check binary reaching Storybooks', () => {
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
     })
     const result = await runAsynchronously({ cwd: project }, 'test')
+
     expect(result.status).toBe(2)
     expect(result.stderr).toContain("lists stories files that aren't on disk: button.stories.tsx")
   })
@@ -318,6 +345,7 @@ describe('visual-check binary reaching Storybooks', () => {
       'button.stories.tsx': '',
     })
     const result = await runAsynchronously({ cwd: project }, 'test')
+
     expect(result.status).toBe(0)
     expect(result.stdout).toBe('Storybook web: 2 stories\n')
   })
@@ -329,6 +357,7 @@ describe('visual-check binary reaching Storybooks', () => {
       'button.stories.tsx': '',
     })
     const result = await runAsynchronously({ cwd: project }, 'test', '--filter', 'primary$')
+
     expect(result.status).toBe(0)
     expect(result.stdout).toBe('Storybook web: 1 story\n')
   })
@@ -341,6 +370,7 @@ describe('visual-check binary reaching Storybooks', () => {
       'web/button.stories.tsx': '',
     })
     const result = await runAsynchronously({ cwd: project }, 'test', '--storybook', 'web', '--url', url)
+
     expect(result.status).toBe(0)
     expect(result.stdout).toBe('Storybook web: 1 story\n')
   })
@@ -352,6 +382,7 @@ describe('visual-check binary reaching Storybooks', () => {
       'node_modules/storybook/package.json': JSON.stringify({ version: '9.0.0' }),
     })
     const result = await runAsynchronously({ cwd: project }, 'test')
+
     expect(result.status).toBe(2)
     expect(result.stderr).toContain('Storybook web runs storybook 9.0.0, and visual-check needs 9.1 or later.')
     expect(result.stderr).toContain('Upgrade storybook in the current folder.')
@@ -366,6 +397,7 @@ describe('visual-check binary reaching Storybooks', () => {
       'node_modules/storybook/package.json': JSON.stringify({ version: '12.0.0' }),
     })
     const result = await runAsynchronously({ cwd: project }, 'test')
+
     expect(result.status).toBe(0)
     expect(result.stderr).toBe(
       'Warning: Storybook web runs storybook 12.0.0, and visual-check supports 9.1 to 11. The run carries on.\n',
@@ -380,6 +412,7 @@ describe('visual-check binary reaching Storybooks', () => {
       'button.stories.tsx': '',
     })
     const result = await runAsynchronously({ cwd: project }, 'test')
+
     expect(result.status).toBe(0)
     expect(result.stderr).toBe('')
   })

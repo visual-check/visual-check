@@ -10,7 +10,6 @@ import type {
   Tolerance,
   Viewport,
 } from './define-config.js'
-import { isHttpUrl } from './is-http-url.js'
 
 /**
  * One Storybook with every default filled in and every path made absolute.
@@ -227,6 +226,7 @@ function findMissingUrls(storybooks: PendingStorybook[], ci: boolean): string[] 
  */
 function findSharedBaselines(storybooks: PendingStorybook[], cwd: string): string[] {
   const namesByFolder = new Map<string, string[]>()
+
   for (const storybook of storybooks) {
     namesByFolder.set(storybook.baselines, [...(namesByFolder.get(storybook.baselines) ?? []), storybook.name])
   }
@@ -243,8 +243,10 @@ function findSharedBaselines(storybooks: PendingStorybook[], cwd: string): strin
 /**
  * Checks the Storybook name and the URL the command line gives against the config's Storybooks.
  *
- * @throws {ConfigError} With a single message when the name isn't a Storybook in the config, when the URL isn't an
- * http(s) URL, and when a URL comes with several Storybooks and no name.
+ * The command line reader has already checked that the URL is an http(s) URL.
+ *
+ * @throws {ConfigError} With a single message when the name isn't a Storybook in the config, and when a URL comes with
+ * several Storybooks and no name.
  */
 function checkFlags(names: string[], options: ResolveOptions, displayPath: string): void {
   const { storybook, url } = options
@@ -253,10 +255,6 @@ function checkFlags(names: string[], options: ResolveOptions, displayPath: strin
     const choices = names.length > 1 ? `Pick one of ${listNames(names)}.` : `The config has one: ${listNames(names)}.`
 
     throw new ConfigError(`--storybook ${storybook} isn't a Storybook in ${displayPath}. ${choices}`)
-  }
-
-  if (url !== undefined && !isHttpUrl(url)) {
-    throw new ConfigError(`--url takes an http: or https: URL, such as 'http://127.0.0.1:6006'. Got '${url}'.`)
   }
 
   if (url !== undefined && storybook === undefined && names.length > 1) {
@@ -283,8 +281,9 @@ function storybooksInRun(storybooks: PendingStorybook[], options: ResolveOptions
  * `storybook` narrows the result to one Storybook before the URL check, and `url` replaces the URL of the one
  * Storybook the run covers before it. Shared baselines are checked across every Storybook in the config.
  *
- * @throws {ConfigError} For a `storybook` or `url` that can't be used, for a Storybook in the run with no URL for the
- * current environment, and for Storybooks that share a baselines folder.
+ * @throws {ConfigError} For a `storybook` that isn't in the config, for a `url` with several Storybooks and no
+ * `storybook`, for a Storybook in the run with no URL for the current environment, and for Storybooks that share a
+ * baselines folder.
  */
 export function resolveConfig(config: Config, options: ResolveOptions): ResolvedConfig {
   const path = resolve(options.cwd, options.path)

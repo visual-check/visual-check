@@ -81,6 +81,7 @@ describe('resolveConfig defaults', () => {
       retries: 3,
       silenceHosts: ['*.example.com'],
     })
+
     expect(resolved).toMatchObject({
       platform: 'host',
       image: 'my-image',
@@ -100,6 +101,7 @@ describe('resolveConfig defaults', () => {
       viewport: { width: 800, touch: true },
       affected: { ignore: ['docs/**'] },
     })
+
     expect(resolved.tolerance).toStrictEqual({ color: 0.01, pixels: '1%' })
     expect(resolved.viewport).toStrictEqual({ width: 800, height: 720, deviceScaleFactor: 1, touch: true })
     expect(resolved.affected).toStrictEqual({ selectAll: [], ignore: ['docs/**'] })
@@ -107,12 +109,14 @@ describe('resolveConfig defaults', () => {
 
   it('merges affected when only selectAll is set', () => {
     const resolved = resolve({ storybooks: { web: { url } }, affected: { selectAll: ['package.json'] } })
+
     expect(resolved.affected).toStrictEqual({ selectAll: ['package.json'], ignore: [] })
   })
 
   it('does not let the result change the config', () => {
     const silenceHosts = ['a.example.com']
     const resolved = resolve({ storybooks: { web: { url } }, silenceHosts })
+
     resolved.silenceHosts.push('b.example.com')
     expect(silenceHosts).toStrictEqual(['a.example.com'])
   })
@@ -120,6 +124,7 @@ describe('resolveConfig defaults', () => {
   it('does not share default arrays between calls', () => {
     const first = resolve({ storybooks: { web: { url } } })
     const second = resolve({ storybooks: { web: { url } } })
+
     first.silenceHosts.push('example.com')
     first.affected.selectAll.push('a')
     first.affected.ignore.push('b')
@@ -132,6 +137,7 @@ describe('resolveConfig defaults', () => {
     const resolved = resolve({
       storybooks: { zeta: { url, dir: 'z' }, alpha: { url, dir: 'a' }, mid: { url, dir: 'm' } },
     })
+
     expect(resolved.storybooks.map((storybook) => storybook.name)).toStrictEqual(['zeta', 'alpha', 'mid'])
   })
 })
@@ -151,6 +157,7 @@ describe('resolveConfig local and CI values', () => {
 
   it('picks the side the run is on for the url', () => {
     const config = pairs.url({ local: 'http://127.0.0.1:6006', ci: 'http://storybook:6006' })
+
     expect(resolve(config).storybooks[0]?.url).toBe('http://127.0.0.1:6006')
     expect(resolve(config, { ci: true }).storybooks[0]?.url).toBe('http://storybook:6006')
   })
@@ -222,6 +229,7 @@ describe('resolveConfig paths', () => {
       { storybooks: { web: { url, dir: 'web' } } },
       { path: '/repo/sub/visual-check.config.ts', cwd: '/elsewhere', ci: false },
     )
+
     expect(resolved.storybooks[0]?.dir).toBe('/repo/sub/web')
   })
 
@@ -230,6 +238,7 @@ describe('resolveConfig paths', () => {
       { storybooks: { web: { url, dir: 'web' } } },
       { path: 'sub/visual-check.config.ts', cwd: '/repo', ci: false },
     )
+
     expect(resolved.storybooks[0]?.dir).toBe('/repo/sub/web')
     expect(resolved.path).toBe('/repo/sub/visual-check.config.ts')
     expect(() =>
@@ -418,27 +427,9 @@ describe('resolveConfig with --url', () => {
     ])
   })
 
-  it.each(['localhost:6006', 'ftp://example.com'])('rejects %j', (value) => {
-    expect(messageOf({ storybooks: { web: { url } } }, { url: value })).toBe(
-      `--url takes an http: or https: URL, such as 'http://127.0.0.1:6006'. Got '${value}'.`,
-    )
-  })
-
   it('rejects a URL with several Storybooks and no --storybook', () => {
     expect(messageOf({ storybooks: { web: { url, dir: 'web' }, ui: { url, dir: 'ui' } } }, { url: other })).toBe(
       "--url sets one Storybook's URL, and visual-check.config.ts has several: web and ui. Name the one with --storybook.",
-    )
-  })
-
-  it('checks the Storybook name before the URL', () => {
-    expect(messageOf({ storybooks: { web: { url } } }, { storybook: 'ui', url: 'nope' })).toBe(
-      "--storybook ui isn't a Storybook in visual-check.config.ts. The config has one: web.",
-    )
-  })
-
-  it('checks the URL before counting the Storybooks', () => {
-    expect(messageOf({ storybooks: { web: { url, dir: 'web' }, ui: { url, dir: 'ui' } } }, { url: 'nope' })).toBe(
-      "--url takes an http: or https: URL, such as 'http://127.0.0.1:6006'. Got 'nope'.",
     )
   })
 })
