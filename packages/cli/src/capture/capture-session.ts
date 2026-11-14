@@ -33,7 +33,8 @@ export interface CaptureSettings {
    */
   viewport: PageViewport
   /**
-   * The config's `readyTimeout`, in ms, counted from just before the viewport is set. Loading the story (`goto`) and
+   * The config's `readyTimeout`, in ms, per attempt: a story that navigates away is captured again, up to 2 more times,
+   * each with the whole of it. It's counted from just before the viewport is set. Loading the story (`goto`) and
    * waiting for Storybook to report it finished share it, each getting what's left, in whole ms rounded up. The wait in
    * the page gives up when it runs out, and the driver allows up to 1 s more for the page's answer. Setting the
    * viewport and the capture are bound by the driver's own fixed limits instead.
@@ -133,8 +134,10 @@ export interface CaptureSession {
   /**
    * Captures a story, opening the session's page first when none is open. On a page kept from the previous story, it
    * first clears the cookies and storage that story left, and when that fails, it captures on a fresh page instead. A
-   * story that can't be captured comes back as a broken story, and the page is replaced by a fresh one for the next.
-   * Rejects only with a `BrowserExitedError`, when the browser exits. Call it once the previous capture has settled.
+   * story that navigates away is captured again at once, up to 2 more times, each on a fresh page in a fresh browser
+   * context; when it navigates away a third time, it's a broken story. Any other story that can't be captured comes
+   * back as a broken story straight away, and the page is replaced by a fresh one for the next. Rejects only with a
+   * `BrowserExitedError`, when the browser exits. Call it once the previous capture has settled.
    */
   capture: (story: StoryToCapture) => Promise<StoryCapture>
   /**
@@ -298,6 +301,19 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
 }
 
 /**
+ * How many times a story that navigated away is captured again, each on a fresh page, before it's a broken story. The
+ * retries follow at once, with no wait.
+ */
+const navigatedAwayRetries = 2
+
+/**
+ * Whether a capture came back as a broken story that navigated away, the only outcome that's retried.
+ */
+function navigatedAway(capture: StoryCapture): boolean {
+  return 'broken' in capture && capture.broken.reason === 'navigated-away'
+}
+
+/**
  * Starts a session that captures stories on `driver`, one at a time, on one page. It opens the page at its first
  * capture, set up with the settings, a user agent ending in `StorybookTestRunner` and the page script. After a broken
  * story, it closes the page and opens a fresh one, in a fresh browser context, for the next story.
@@ -307,6 +323,11 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
  * next story's commits, so a timer or handler of it can still write storage after the clearing. When the clearing
  * fails, such as after the previous story left its document, the story isn't to blame: the session closes the page and
  * captures the story on a fresh one, whose fresh browser context holds nothing.
+ *
+ * A story that navigates away is captured again at once, up to 2 more times, each on a fresh page in a fresh browser
+ * context. When the third attempt navigates away too, the story is broken, with that attempt's message and URL. Any
+ * other outcome of a retry, a snapshot or another broken reason, is the story's outcome, and no other reason is
+ * retried.
  *
  * @public
  */
@@ -346,30 +367,45 @@ export function openCaptureSession(driver: Driver, settings: CaptureSettings): C
     }
   }
 
+  /**
+   * Captures the story on the open page, opening one first when none is. A story that can't be captured, or whose page
+   * can't be opened, comes back as a broken story, and a broken story's page is closed. Rejects only with a
+   * `BrowserExitedError`, and then drops the page without closing it.
+   */
+  const captureOnOpenPage = async (story: StoryToCapture): Promise<StoryCapture> => {
+    try {
+      page ??= await driver.newPage(setup)
+    } catch (error) {
+      if (error instanceof BrowserExitedError) {
+        throw error
+      }
+
+      return {
+        broken: { reason: 'error', message: `visual-check couldn't open a page for the story: ${reasonOf(error)}` },
+      }
+    }
+
+    const capture = await captureOnPage(page, story, settings).catch((error: unknown) => {
+      page = undefined
+
+      throw error
+    })
+
+    if ('broken' in capture) {
+      await closePage()
+    }
+
+    return capture
+  }
+
   return {
     capture: async (story) => {
       await clearOpenPage()
 
-      try {
-        page ??= await driver.newPage(setup)
-      } catch (error) {
-        if (error instanceof BrowserExitedError) {
-          throw error
-        }
+      let capture = await captureOnOpenPage(story)
 
-        return {
-          broken: { reason: 'error', message: `visual-check couldn't open a page for the story: ${reasonOf(error)}` },
-        }
-      }
-
-      const capture = await captureOnPage(page, story, settings).catch((error: unknown) => {
-        page = undefined
-
-        throw error
-      })
-
-      if ('broken' in capture) {
-        await closePage()
+      for (let retry = 0; retry < navigatedAwayRetries && navigatedAway(capture); retry += 1) {
+        capture = await captureOnOpenPage(story)
       }
 
       return capture

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type CaptureSettings, openCaptureSession } from './capture-session.js'
 import { BrowserExitedError, PageCrashedError, PageNavigatedAwayError, PageTimeoutError } from './driver/driver.js'
-import { defaultSnapshot, FakeDriver } from './fake-driver.fixture.js'
+import { defaultSnapshot, FakeDriver, type FakePageBehaviour } from './fake-driver.fixture.js'
 import { pageInitScript, storyReadinessExpression } from './page-script.js'
 
 /**
@@ -421,15 +421,13 @@ describe('a broken story', () => {
     ['a URL that cannot be parsed, as it is', 'not a url', 'not a url'],
     ["a blob URL of the story's origin, in full", 'blob:http://localhost:6006/abc', 'blob:http://localhost:6006/abc'],
   ])('is one that navigated away to %s, naming where it went', async (_where, url, shown) => {
-    const driver = new FakeDriver({
-      pages: [
-        {
-          goto: async (storyUrl) => {
-            throw new PageNavigatedAwayError(url, `The page navigated to ${url} before ${storyUrl} loaded.`)
-          },
-        },
-      ],
-    })
+    const page: FakePageBehaviour = {
+      goto: async (storyUrl) => {
+        throw new PageNavigatedAwayError(url, `The page navigated to ${url} before ${storyUrl} loaded.`)
+      },
+    }
+    // The story navigates away on every attempt, the retries included.
+    const driver = new FakeDriver({ pages: [page, page, page] })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
       broken: {
@@ -441,15 +439,13 @@ describe('a broken story', () => {
   })
 
   it('is one that navigated away while waiting for the story to finish', async () => {
-    const driver = new FakeDriver({
-      pages: [
-        {
-          evaluate: async () => {
-            throw new PageNavigatedAwayError('http://localhost:6006/next', 'The page navigated to /next.')
-          },
-        },
-      ],
-    })
+    const page: FakePageBehaviour = {
+      evaluate: async () => {
+        throw new PageNavigatedAwayError('http://localhost:6006/next', 'The page navigated to /next.')
+      },
+    }
+    // The story navigates away on every attempt, the retries included.
+    const driver = new FakeDriver({ pages: [page, page, page] })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
       broken: {
@@ -580,6 +576,164 @@ describe('a broken story', () => {
 
     await session.capture(primary)
     expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot })
+  })
+})
+
+describe('a story that navigates away', () => {
+  /**
+   * A page whose story navigates away to `url` as it loads.
+   */
+  const navigatesAway = (url: string): FakePageBehaviour => ({
+    goto: async () => {
+      throw new PageNavigatedAwayError(url, `The page navigated to ${url}.`)
+    },
+  })
+
+  /**
+   * The methods a page that navigated away at its load received: it was set up, failed to load and was closed.
+   */
+  const navigatedAwayAt = (page: number): string[] => [`${page}:setViewport`, `${page}:goto`, `${page}:close`]
+
+  /**
+   * The methods a page that captured well received.
+   */
+  const capturedOn = (page: number): string[] => [
+    `${page}:setViewport`,
+    `${page}:goto`,
+    `${page}:evaluate`,
+    `${page}:captureFullPage`,
+  ]
+
+  it('is broken with the last attempt after 2 retries, each on a fresh page', async () => {
+    const driver = new FakeDriver({
+      pages: [
+        navigatesAway('http://localhost:6006/one'),
+        navigatesAway('http://localhost:6006/two'),
+        navigatesAway('http://localhost:6006/three'),
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'navigated-away',
+        message: 'The story navigated away to /three. Await the new page before clicking.',
+        url: 'http://localhost:6006/three',
+      },
+    })
+    expect(driver.setups).toHaveLength(3)
+    expect(driver.methods()).toEqual([...navigatedAwayAt(1), ...navigatedAwayAt(2), ...navigatedAwayAt(3)])
+  })
+
+  it('gives the snapshot of a retry that captured, keeping that page', async () => {
+    const driver = new FakeDriver({ pages: [navigatesAway('http://localhost:6006/one')] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({ snapshot: defaultSnapshot })
+    expect(driver.methods()).toEqual([...navigatedAwayAt(1), ...capturedOn(2)])
+  })
+
+  it('clears the kept page of a retry before the next story, as after any story that captured', async () => {
+    const driver = new FakeDriver({ pages: [navigatesAway('http://localhost:6006/one')] })
+    const session = openCaptureSession(driver, settings)
+
+    await session.capture(primary)
+    expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot })
+    expect(driver.setups).toHaveLength(2)
+    expect(driver.methods()).toEqual([...navigatedAwayAt(1), ...capturedOn(2), '2:clearStorage', ...capturedOn(2)])
+  })
+
+  /**
+   * Each outcome other than navigating away, as the reason it gives and a page that has it as it loads.
+   */
+  const otherOutcomes: [string, FakePageBehaviour][] = [
+    [
+      'crashed',
+      {
+        goto: async () => {
+          throw new PageCrashedError()
+        },
+      },
+    ],
+    [
+      'error',
+      {
+        goto: async () => {
+          throw new Error('The page broke.')
+        },
+      },
+    ],
+    ['timeout', { evaluate: async () => ({ outcome: 'timed-out', channel: true }) }],
+  ]
+
+  it.each(otherOutcomes)('is not retried when the first attempt is %s', async (reason, behaviour) => {
+    const driver = new FakeDriver({ pages: [behaviour] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toHaveProperty('broken.reason', reason)
+    expect(driver.setups).toHaveLength(1)
+  })
+
+  it.each(otherOutcomes)('gives the outcome of a retry that is %s, retrying no more', async (reason, behaviour) => {
+    const driver = new FakeDriver({ pages: [navigatesAway('http://localhost:6006/one'), behaviour] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toHaveProperty('broken.reason', reason)
+    expect(driver.setups).toHaveLength(2)
+  })
+
+  it('gives each retry the whole readyTimeout', async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          goto: async () => {
+            pass(4_000)
+            throw new PageNavigatedAwayError('http://localhost:6006/one', 'The page navigated to /one.')
+          },
+        },
+      ],
+    })
+
+    await openCaptureSession(driver, settings).capture(primary)
+    expect(driver.calls.filter((call) => call.method === 'goto').map((call) => call.args[1])).toEqual([
+      settings.readyTimeoutMs,
+      settings.readyTimeoutMs,
+    ])
+  })
+
+  it('gives the error of a page that cannot be opened for a retry', async () => {
+    let openings = 0
+    const driver = new FakeDriver({
+      pages: [navigatesAway('http://localhost:6006/one')],
+      newPage: async () => {
+        openings += 1
+
+        if (openings === 2) {
+          throw new Error("The browser didn't open a page within 30 s.")
+        }
+      },
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'error',
+        message: "visual-check couldn't open a page for the story: The browser didn't open a page within 30 s.",
+      },
+    })
+    expect(driver.methods()).toEqual(navigatedAwayAt(1))
+  })
+
+  it('rejects when the browser exits during a retry', async () => {
+    const exited = new BrowserExitedError({ code: 1, signal: null, error: undefined }, [])
+    const driver = new FakeDriver({
+      pages: [
+        navigatesAway('http://localhost:6006/one'),
+        {
+          goto: async () => {
+            throw exited
+          },
+        },
+      ],
+    })
+
+    await expect(openCaptureSession(driver, settings).capture(primary)).rejects.toBe(exited)
+    expect(driver.methods()).toEqual([...navigatedAwayAt(1), '2:setViewport', '2:goto'])
   })
 })
 
