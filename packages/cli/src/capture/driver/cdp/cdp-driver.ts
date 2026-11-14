@@ -4,12 +4,16 @@ import {
   type BrowserProcess,
   type Driver,
   describeExit,
+  type Page,
+  type PageSetup,
   type ProcessExit,
   type StartBrowser,
 } from '../driver.js'
 import { CdpConnection, CdpError } from './cdp-connection.js'
+import { openCdpPage } from './cdp-page.js'
 import { keepLastLines } from './last-lines.js'
 import { launchArguments } from './launch-arguments.js'
+import { settlesWithin } from './time-limit.js'
 
 /**
  * How many of the browser's last output lines an error carries.
@@ -76,30 +80,6 @@ interface BrowserVersion {
 }
 
 /**
- * Waits for a promise to settle, either way, or for `ms` to pass, whichever comes first. Resolves true when the
- * promise settled in time.
- */
-async function settlesWithin(promise: Promise<unknown>, ms: number): Promise<boolean> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const timedOut = new Promise<false>((resolve) => {
-    timer = setTimeout(() => resolve(false), ms)
-  })
-
-  try {
-    return await Promise.race([promise.then(settled, settled), timedOut])
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
-/**
- * Answers true, for a promise that has settled.
- */
-function settled(): true {
-  return true
-}
-
-/**
  * Reads the version and user agent out of a `Browser.getVersion` reply, or undefined when the version is missing or
  * empty, or the user agent is missing. The version is the part of `product` after its `/`, such as `157.0.8103.78` from
  * `HeadlessChrome/157.0.8103.78`, or the whole product when it has no `/`.
@@ -154,6 +134,13 @@ class BrowserSession {
     this.lastLines = keepLastLines(browser.output, outputLineLimit)
     this.connection = new CdpConnection(browser.toBrowser, browser.fromBrowser)
     this.exited = browser.exited.then((exit) => this.onExit(exit))
+  }
+
+  /**
+   * Whether `close()` has been called.
+   */
+  get closeStarted(): boolean {
+    return this.closing !== undefined
   }
 
   /**
@@ -300,6 +287,18 @@ class CdpDriver implements Driver {
     this.version = browserVersion.version
     this.userAgent = browserVersion.userAgent
     this.exited = session.exited
+  }
+
+  /**
+   * Opens a page in a fresh browser context, set up once, with the browser's user agent extended by the setup's suffix.
+   * Rejects at once after `close()` has started, and when the page isn't open within 30 s.
+   */
+  newPage(setup: PageSetup): Promise<Page> {
+    if (this.session.closeStarted) {
+      return Promise.reject(new Error("The browser is closing, so it can't open a page."))
+    }
+
+    return openCdpPage(this.session.connection, this.userAgent, setup)
   }
 
   /**

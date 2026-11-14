@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { BrowserExitedError, BrowserLaunchError, describeExit } from './driver.js'
+import {
+  BrowserExitedError,
+  BrowserLaunchError,
+  describeExit,
+  PageCrashedError,
+  PageNavigatedAwayError,
+} from './driver.js'
 
 describe('describeExit', () => {
   it('names the exit code', () => {
@@ -42,6 +48,24 @@ describe('BrowserExitedError', () => {
       message: 'The browser exited with code 139 while in use.',
       output: ['Segmentation fault'],
     })
+  })
+})
+
+describe('PageCrashedError', () => {
+  it('says the page crashed', () => {
+    expect(new PageCrashedError()).toMatchObject({ name: 'PageCrashedError', message: 'The page crashed.' })
+  })
+})
+
+describe('PageNavigatedAwayError', () => {
+  it('keeps the URL the page went to and the message', () => {
+    expect(new PageNavigatedAwayError('http://storybook/b', 'The page navigated to http://storybook/b.')).toMatchObject(
+      {
+        name: 'PageNavigatedAwayError',
+        message: 'The page navigated to http://storybook/b.',
+        url: 'http://storybook/b',
+      },
+    )
   })
 })
 

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { type CdpDriverOptions, launchCdpDriver } from './cdp-driver.js'
-import { defaultVersionReply, FakeBrowser, type ReceivedCommand } from './fake-browser.fixture.js'
+import { defaultVersionReply, FakeBrowser, pageSetup, type ReceivedCommand } from './fake-browser.fixture.js'
 import { launchArguments } from './launch-arguments.js'
 
 /**
@@ -209,6 +209,18 @@ describe('launchCdpDriver', () => {
     await browser.writeOutput('one\ntwo\n')
     browser.exit(exit)
     await expect(driver.exited).resolves.toMatchObject({ name: 'BrowserExitedError', message, output: ['one', 'two'] })
+  })
+})
+
+describe('Driver.newPage', () => {
+  it('rejects at once, opening nothing, once close() has started', async () => {
+    const browser = new FakeBrowser()
+    const driver = await launch(browser)
+    const closing = driver.close()
+
+    await expect(driver.newPage(pageSetup)).rejects.toThrow("The browser is closing, so it can't open a page.")
+    await closing
+    expect(browser.received.map((command) => command.method)).toEqual(['Browser.getVersion', 'Browser.close'])
   })
 })
 

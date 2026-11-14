@@ -289,6 +289,54 @@ describe('CdpConnection', () => {
     await expect(connection.send('A', { n: 1n })).rejects.toBeInstanceOf(TypeError)
   })
 
+  it('calls each close listener once, with the first error it is closed with', () => {
+    const { connection } = createFixture()
+    const first = new Error('first')
+    const closedWith: Error[] = []
+
+    connection.onClose((error) => closedWith.push(error))
+    expect(closedWith).toEqual([])
+    connection.close(first)
+    connection.close(new Error('second'))
+    expect(closedWith).toEqual([first])
+  })
+
+  it('calls a close listener at once when the connection is already closed', () => {
+    const { connection } = createFixture()
+    const reason = new Error('gone')
+    const closedWith: Error[] = []
+
+    connection.close(reason)
+    connection.onClose((error) => closedWith.push(error))
+    expect(closedWith).toEqual([reason])
+  })
+
+  it('stops calling a close listener once it stops listening', () => {
+    const { connection } = createFixture()
+    const closedWith: Error[] = []
+    const stop = connection.onClose((error) => closedWith.push(error))
+
+    stop()
+    connection.close(new Error('gone'))
+    expect(closedWith).toEqual([])
+  })
+
+  it('calls the other close listeners when one throws, and rethrows its error on a microtask', async () => {
+    const { connection } = createFixture()
+    const closedWith: Error[] = []
+
+    connection.onClose(() => {
+      throw new Error('listener bug')
+    })
+    connection.onClose((error) => closedWith.push(error))
+
+    const uncaught = new Promise((resolve) => process.once('uncaughtException', resolve))
+
+    connection.close(new Error('gone'))
+    expect(closedWith).toEqual([new Error('gone')])
+    expect(await uncaught).toEqual(new Error('listener bug'))
+  })
+
   it('does not close itself when the browser stream ends', async () => {
     const fromBrowser = new PassThrough()
     const connection = new CdpConnection(new PassThrough(), fromBrowser)
