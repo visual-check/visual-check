@@ -89,7 +89,6 @@ async function exitWithin(driver: Driver, waitMs: number): Promise<BrowserExited
  * `waitMs`, 2 s by default, for the browser to exit, as a browser dying under an emulator can fail or time out on the
  * check page before it exits. Only a browser that stays up has its failure taken for what it says.
  *
- * @public
  * @throws {BrowserExitedError} When the browser exits during the check, or within `waitMs` of another failure, so the
  * run can tell why it exited.
  * @throws {ContainerError} When the check URL can't load or doesn't load in time, as when the runtime gives its

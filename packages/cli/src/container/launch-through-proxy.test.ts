@@ -1,8 +1,8 @@
 import { connect } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BrowserExitedError, type Driver, type Page, PageLoadError, type PageSetup } from '../capture/driver/driver.js'
-import { ContainerError } from '../container/container-error.js'
-import { launchThroughProxy } from './launch-browser.js'
+import { ContainerError } from './container-error.js'
+import { launchThroughProxy } from './launch-through-proxy.js'
 
 /**
  * The setup the tests open a page with.

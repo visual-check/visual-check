@@ -6,8 +6,6 @@ import { connect, createServer, type Socket } from 'node:net'
  * a name is resolved and a connection is made from the machine visual-check runs on, whatever the host file, VPN or
  * LAN there says. It speaks the CONNECT command with no authentication, which is all Chromium asks for. It answers
  * one host itself, the one in `checkUrl`, which lets visual-check check that the browser reaches it.
- *
- * @public
  */
 export interface SocksProxy {
   /**
@@ -407,8 +405,6 @@ function serveClient(client: Socket, sockets: Set<Socket>, checkHost: string): v
 /**
  * Starts the proxy on 127.0.0.1 on a random port, with a random check host of its own. It serves every client until
  * `close` is called, and never logs or throws out of a connection.
- *
- * @public
  */
 export async function startSocksProxy(): Promise<SocksProxy> {
   const sockets = new Set<Socket>()
