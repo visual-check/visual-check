@@ -113,11 +113,23 @@ const deliberateChange = {
 const parallelWorkers = 2
 
 /**
- * The storage stories and their expected outcomes. Each checks that visual-check's markers aren't in cookies,
+ * The storage stories, by the pattern their IDs match. Each checks that visual-check's markers aren't in cookies,
  * `localStorage`, `sessionStorage` or IndexedDB, then writes them, so on one page the second fails unless storage is
  * cleared between them.
  */
-const storageOutcomes: Outcomes = { 'storage--first': 'passed', 'storage--second': 'passed' }
+const storageFilter = /^storage--/
+
+/**
+ * The hazard stories, by the pattern their IDs match, and what the hazards case checks beyond their outcomes: where
+ * the one that navigates away goes and how many times its page loads, once and then on each of its 2 retries, what the
+ * one that crashes says, and the stories whose next story must pass, because they leave their page held or crashed.
+ */
+const hazards = {
+  filter: /^hazards--/,
+  navigatesAway: { storyId: 'hazards--navigates-away', says: 'navigated away to /categories/burgers', loads: 3 },
+  crashes: { storyId: 'hazards--crashes', says: 'The page crashed' },
+  followedByPass: ['hazards--before-unload', 'hazards--crashes'],
+}
 
 /**
  * How long the kill case waits for the CLI to start capturing, and for its container to go after the kill, in
@@ -188,9 +200,31 @@ interface StorybookServer {
    */
   storyPageRequested: () => boolean
   /**
+   * How many times the page of the story with this ID, its `iframe.html` with that `id`, has been asked for.
+   */
+  storyPageLoads: (storyId: string) => number
+  /**
    * Stops the server, dropping every open connection.
    */
   stop: () => Promise<void>
+}
+
+/**
+ * One snapshot line of the CLI's output.
+ */
+interface SnapshotLine {
+  /**
+   * The story's ID.
+   */
+  storyId: string
+  /**
+   * The outcome the line gives.
+   */
+  outcome: Outcome
+  /**
+   * What the line says after the story ID, such as `120 ms` or `broken: ` and why.
+   */
+  detail: string
 }
 
 /**
@@ -213,6 +247,10 @@ interface CliRun {
    * Its standard error.
    */
   stderr: string
+  /**
+   * Each snapshot line, in the order the CLI printed them.
+   */
+  snapshots: SnapshotLine[]
   /**
    * Each snapshot line's outcome, by story ID.
    */
@@ -372,15 +410,25 @@ function serveFile(pathname: string, response: ServerResponse, options: ServeOpt
 }
 
 /**
- * Serves the static build on a free port of 127.0.0.1, changed as the options say.
+ * Counts one more request for a story's page, under the story's ID, the `id` search parameter of its `iframe.html`.
+ */
+function countStoryPageLoad(storyPageLoads: Map<string, number>, searchParams: URLSearchParams): void {
+  const storyId = searchParams.get('id') ?? ''
+
+  storyPageLoads.set(storyId, (storyPageLoads.get(storyId) ?? 0) + 1)
+}
+
+/**
+ * Serves the static build on a free port of 127.0.0.1, changed as the options say, and counts the requests for each
+ * story's page.
  */
 async function serveStorybook(options: ServeOptions = {}): Promise<StorybookServer> {
-  let storyPageRequested = false
+  const storyPageLoads = new Map<string, number>()
   const server = createServer((request, response) => {
-    const { pathname } = new URL(request.url ?? '/', 'http://127.0.0.1')
+    const { pathname, searchParams } = new URL(request.url ?? '/', 'http://127.0.0.1')
 
     if (pathname === '/iframe.html') {
-      storyPageRequested = true
+      countStoryPageLoad(storyPageLoads, searchParams)
 
       if (options.holdStoryPages) {
         return
@@ -394,7 +442,8 @@ async function serveStorybook(options: ServeOptions = {}): Promise<StorybookServ
 
   return {
     url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
-    storyPageRequested: () => storyPageRequested,
+    storyPageRequested: () => storyPageLoads.size > 0,
+    storyPageLoads: (storyId: string) => storyPageLoads.get(storyId) ?? 0,
     stop: async () => {
       server.closeAllConnections()
       await new Promise((resolve) => server.close(resolve))
@@ -443,20 +492,20 @@ function startCli(args: string[], env: NodeJS.ProcessEnv): CliProcess {
 }
 
 /**
- * Reads the outcome of every snapshot line in the CLI's output, by story ID.
+ * Reads every snapshot line in the CLI's output, in order.
  *
  * @throws {Error} When a snapshot line ends in a detail no outcome has.
  */
-function parseOutcomes(stdout: string): Outcomes {
-  return Object.fromEntries(stdout.split('\n').flatMap(snapshotOf))
+function parseSnapshots(stdout: string): SnapshotLine[] {
+  return stdout.split('\n').flatMap(snapshotOf)
 }
 
 /**
- * Reads a snapshot line's story ID and outcome. Any other line gives nothing.
+ * Reads a snapshot line's story ID, outcome and detail. Any other line gives nothing.
  *
  * @throws {Error} When a snapshot line ends in a detail no outcome has.
  */
-function snapshotOf(line: string): [string, Outcome][] {
+function snapshotOf(line: string): SnapshotLine[] {
   const match = snapshotLinePattern.exec(line)
 
   if (match === null) {
@@ -470,7 +519,7 @@ function snapshotOf(line: string): [string, Outcome][] {
     throw new Error(`The CLI printed a snapshot line with no known outcome: ${line}`)
   }
 
-  return [[storyId, outcome]]
+  return [{ storyId, outcome, detail }]
 }
 
 /**
@@ -495,8 +544,10 @@ async function runCli(args: string[], env: NodeJS.ProcessEnv = process.env): Pro
   })
 
   const timedOut = signal === 'SIGKILL' && performance.now() - started >= cliTimeoutMilliseconds
+  const snapshots = parseSnapshots(stdout)
+  const outcomes = Object.fromEntries(snapshots.map((snapshot) => [snapshot.storyId, snapshot.outcome]))
 
-  return { exitCode, signal, timedOut, stderr, outcomes: parseOutcomes(stdout) }
+  return { exitCode, signal, timedOut, stderr, snapshots, outcomes }
 }
 
 /**
@@ -584,10 +635,11 @@ function updateOutcomeOf(outcome: Outcome): Outcome {
 }
 
 /**
- * What `test` gives a story right after `update` wrote its baseline: a broken story stays broken, any other passes.
+ * What `test` gives a story right after `update` into an empty folder: a broken story has no baseline, so it's missing,
+ * because `test` never captures a story without one, and any other passes.
  */
 function retestOutcomeOf(outcome: Outcome): Outcome {
-  return outcome === 'broken' ? 'broken' : 'passed'
+  return outcome === 'broken' ? 'missing' : 'passed'
 }
 
 /**
@@ -699,9 +751,9 @@ async function checkCommittedBaselines(expected: Outcomes): Promise<string[]> {
 }
 
 /**
- * `update` into an empty folder writes every story that isn't broken, `test` then passes them, and the baselines of
- * the stories expected to pass are byte-identical to the committed ones. Only those have a committed baseline the
- * written one must equal. Both commands take 2 workers from the config.
+ * `update` into an empty folder writes every story that isn't broken, `test` then passes them and finds the broken
+ * ones missing, and the baselines of the stories expected to pass are byte-identical to the committed ones. Only those
+ * have a committed baseline the written one must equal. Both commands take 2 workers from the config.
  */
 async function checkUpdateThenTest(expected: Outcomes): Promise<string[]> {
   rmSync(diagnosticsDir, { recursive: true, force: true })
@@ -745,13 +797,89 @@ async function runAndCheck(command: 'test' | 'update', args: string[], expected:
 /**
  * On one worker, the storage stories run one right after the other on the same page, in index order, so the second
  * passes only when the storage the first filled was cleared between them. `test` against the committed baselines
- * passes both.
+ * gives their expected outcomes, both passed.
  */
-async function checkStorageClearing(): Promise<string[]> {
+async function checkStorageClearing(expected: Outcomes): Promise<string[]> {
   return await withStorybookServer({}, async (server) => {
-    const run = await runCli(['test', '--filter', '^storage--', '--workers', '1', '--url', server.url])
+    const run = await runCli(['test', '--filter', storageFilter.source, '--workers', '1', '--url', server.url])
 
-    return expectedRunProblems('test', run, storageOutcomes)
+    return expectedRunProblems('test', run, outcomesMatching(expected, storageFilter))
+  })
+}
+
+/**
+ * Keeps the expected outcomes of the stories whose ID matches the pattern.
+ */
+function outcomesMatching(expected: Outcomes, pattern: RegExp): Outcomes {
+  return Object.fromEntries(Object.entries(expected).filter(([storyId]) => pattern.test(storyId)))
+}
+
+/**
+ * Gives the problem with a story's snapshot line when it doesn't say `text`, or none when it does or the run has no
+ * line for the story, which the outcome check reports.
+ */
+function lineSaysProblems(run: CliRun, storyId: string, text: string): string[] {
+  const line = run.snapshots.find((snapshot) => snapshot.storyId === storyId)
+
+  return line === undefined || line.detail.includes(text)
+    ? []
+    : [`test: ${storyId}'s line doesn't say "${text}": ${line.detail}`]
+}
+
+/**
+ * The story that navigates away says where it went, and the server was asked for its page 3 times: once, then on each
+ * of its 2 retries.
+ */
+function navigatedAwayProblems(run: CliRun, server: StorybookServer): string[] {
+  const { storyId, says, loads } = hazards.navigatesAway
+  const seen = server.storyPageLoads(storyId)
+
+  return [
+    ...lineSaysProblems(run, storyId, says),
+    ...(seen === loads ? [] : [`test: the server was asked for ${storyId}'s page ${seen} times, expected ${loads}`]),
+  ]
+}
+
+/**
+ * Gives the problem with the snapshot line after a story's when there is none or it didn't pass, or none when it
+ * passed or the run has no line for the story, which the outcome check reports.
+ */
+function followedByPassProblems(run: CliRun, storyId: string): string[] {
+  const index = run.snapshots.findIndex((snapshot) => snapshot.storyId === storyId)
+
+  return index === -1 ? [] : passedAfterProblems(storyId, run.snapshots[index + 1])
+}
+
+/**
+ * Gives the problem with the snapshot line after a story's when there is none or it didn't pass, or none when it
+ * passed.
+ */
+function passedAfterProblems(storyId: string, next: SnapshotLine | undefined): string[] {
+  if (next === undefined) {
+    return [`test: no story ran after ${storyId}, expected one that passed`]
+  }
+
+  return next.outcome === 'passed'
+    ? []
+    : [`test: ${next.storyId}, the story after ${storyId}, is ${next.outcome}, expected passed`]
+}
+
+/**
+ * On one worker, the hazard stories run one after the other in index order, and `test` against the committed baselines
+ * gives exactly their expected outcomes. The story that navigates away is broken saying where it went, after its page
+ * loaded 3 times. The story that crashes is broken saying its page crashed. The stories after `BeforeUnload` and
+ * `Crashes` pass, so a page that a `beforeunload` dialog holds, or a crashed page that isn't replaced, shows.
+ */
+async function checkHazards(expected: Outcomes): Promise<string[]> {
+  return await withStorybookServer({}, async (server) => {
+    const run = await runCli(['test', '--filter', hazards.filter.source, '--workers', '1', '--url', server.url])
+
+    return [
+      ...expectedRunProblems('test', run, outcomesMatching(expected, hazards.filter)),
+      ...navigatedAwayProblems(run, server),
+      ...lineSaysProblems(run, hazards.crashes.storyId, hazards.crashes.says),
+      ...hazards.followedByPass.flatMap((storyId) => followedByPassProblems(run, storyId)),
+    ]
   })
 }
 
@@ -937,12 +1065,16 @@ if (setupProblems.length > 0) {
   const passed = await runCases([
     { name: 'committed baselines: test gives the expected outcomes', run: () => checkCommittedBaselines(expected) },
     {
-      name: "update then test: update writes every story that isn't broken, test passes, the baselines match the committed ones",
+      name: "update then test: update writes every story that isn't broken, test passes them and finds the broken ones missing, the baselines match the committed ones",
       run: () => checkUpdateThenTest(expected),
     },
     {
       name: 'storage: with 1 worker, a story finds storage empty after a story that filled it',
-      run: checkStorageClearing,
+      run: () => checkStorageClearing(expected),
+    },
+    {
+      name: 'hazards: with 1 worker, test gives the expected outcomes, a story navigates away after 3 loads, a crash is reported, the stories after BeforeUnload and Crashes pass',
+      run: () => checkHazards(expected),
     },
     {
       name: `deliberate change: test exits 1 and ${deliberateChange.storyId} differs`,
