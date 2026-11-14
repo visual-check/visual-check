@@ -98,6 +98,7 @@ describe('CdpConnection', () => {
     expect((error as CdpError).message).toContain('Page.navigate')
     expect((error as CdpError).message).toContain('Cannot navigate')
     expect((error as CdpError).code).toBe(-32000)
+    expect((error as CdpError).browserMessage).toBe('Cannot navigate')
   })
 
   it('sends empty params when none are given', async () => {
@@ -316,6 +317,7 @@ describe('CdpConnection', () => {
 
     expect(error).toBeInstanceOf(CdpError)
     expect(error.code).toBe(0)
+    expect(error.browserMessage).toBe('unknown error')
     expect(error.message).toContain('unknown error')
   })
 

@@ -15,11 +15,17 @@ export class CdpError extends Error {
   readonly code: number
 
   /**
+   * The browser's own message in its reply, such as `Cannot navigate to invalid URL`.
+   */
+  readonly browserMessage: string
+
+  /**
    * Names the failed method and carries the browser's message and code.
    */
   constructor(method: string, code: number, browserMessage: string) {
     super(`CDP ${method} failed: ${browserMessage}`)
     this.code = code
+    this.browserMessage = browserMessage
   }
 }
 

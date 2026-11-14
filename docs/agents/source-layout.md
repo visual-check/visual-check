@@ -50,6 +50,7 @@ Done when `pnpm lint:fallow`, `pnpm lint:biome` and `pnpm test` pass.
 ## Tests
 
 - Unit tests sit beside the code as `<file>.test.ts`. TypeScript fixture builders sit beside the test that uses them. A `<module>/fixtures/` folder holds data files only (JSON, images), because a `.ts` file there would be a submodule.
+- A TypeScript fixture builder is named `<name>.fixture.ts`, and builds leave it out.
 - Tests of an entry or of the built package live in `<package>/test/` as `*.test.ts`.
 
 ## `@visual-check/cli`, as it grows
