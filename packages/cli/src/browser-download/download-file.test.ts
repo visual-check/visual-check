@@ -526,11 +526,12 @@ describe('downloadFile', () => {
       const { proxy } = await startProxy()
       const secureBase = base.replace('http://', 'https://')
 
-      // The target speaks plain HTTP, so a request sent without TLS would succeed and a TLS handshake fails.
+      // The target speaks plain HTTP, so a request sent without TLS would succeed and a TLS handshake fails. OpenSSL's
+      // reason varies by version ("wrong version number", "packet length too long"), so only its library is matched.
       const result = download(`${secureBase}/zip`, { proxy })
 
       await expect(result).rejects.toThrow(`The download of ${label} from ${secureBase}/zip failed: `)
-      await expect(result).rejects.toThrow(/wrong version number/)
+      await expect(result).rejects.toThrow(/SSL routines/)
     })
 
     it('fails when the proxy never answers the CONNECT, which names port 443 by default', async () => {
