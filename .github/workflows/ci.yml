@@ -100,6 +100,47 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
+  inside-image:
+    name: Inside the image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build the CLI and the Storybook
+        run: pnpm turbo run build build-storybook --filter '@visual-check/test-storybook-10-react...'
+      - name: Create a docker-container builder
+        run: docker buildx create --driver docker-container --use
+      - name: Build the browser image
+        run: packages/chromium/image/build.sh amd64 --output type=docker,name=visual-check-chromium:ci
+      # visual-check's image isn't in a registry yet, so this stands in for a job container on it with Node added: it
+      # mounts the workspace and the runner's Node into the image. Unlike a job container it has no network, which
+      # shows the run downloads nothing, and the image has no docker.
+      - name: End-to-end check inside the image
+        run: |
+          node_dir=$(dirname "$(dirname "$(node -p process.execPath)")")
+          docker run --rm --network none --env CI \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
+            --workdir "$GITHUB_WORKSPACE/test-storybooks/storybook-10-react" \
+            --volume "$node_dir:/opt/node:ro" \
+            --env PATH=/opt/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            visual-check-chromium:ci node e2e.ts --inside-image
+      - name: Upload the end-to-end output
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-output-${{ github.job }}
+          path: test-storybooks/storybook-10-react/e2e-output/
+          if-no-files-found: ignore
+          retention-days: 3
+
   lockstep:
     name: Lockstep versions
     runs-on: ubuntu-latest
