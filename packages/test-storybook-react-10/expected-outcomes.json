@@ -1,0 +1,7 @@
+{
+  "button--primary": "passed",
+  "button--secondary": "passed",
+  "card--default": "passed",
+  "tall-list--default": "passed",
+  "typography--generic-families": "passed"
+}

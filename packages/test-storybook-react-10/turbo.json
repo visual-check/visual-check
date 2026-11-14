@@ -1,0 +1,15 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build-storybook": {
+      "inputs": [".storybook/**", "stories/**", "package.json", "tsconfig.json"],
+      "outputs": ["storybook-static/**"]
+    },
+    "e2e": {
+      "cache": false,
+      "dependsOn": ["^build", "build-storybook"],
+      "passThroughEnv": ["TEST_STORYBOOK_IMAGE"]
+    }
+  }
+}
