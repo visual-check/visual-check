@@ -213,8 +213,11 @@ describe('a broken story', () => {
     const driver = new FakeDriver({ pages: [{ evaluate: async () => ({ outcome: 'finished', status: 'error' }) }] })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken:
-        'Storybook reported the story finished with status "error", as it does when a loader, beforeEach or the render throws, when play leaves unhandled errors, or when a check such as accessibility fails.',
+      broken: {
+        reason: 'error',
+        message:
+          'Storybook reported the story finished with status "error", as it does when a loader, beforeEach or the render throws, when play leaves unhandled errors, or when a check such as accessibility fails.',
+      },
     })
     expect(driver.methods()).not.toContain('1:captureFullPage')
   })
@@ -223,7 +226,10 @@ describe('a broken story', () => {
     const driver = new FakeDriver({ pages: [{ evaluate: async () => ({ outcome: 'timed-out', channel: true }) }] })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: "The story wasn't ready within readyTimeout (10000 ms): Storybook never sent storyFinished for it.",
+      broken: {
+        reason: 'timeout',
+        message: "The story wasn't ready within readyTimeout (10000 ms): Storybook never sent storyFinished for it.",
+      },
     })
   })
 
@@ -231,7 +237,11 @@ describe('a broken story', () => {
     const driver = new FakeDriver({ pages: [{ evaluate: async () => ({ outcome: 'timed-out', channel: false }) }] })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: "The story wasn't ready within readyTimeout (10000 ms): Storybook's preview never started in its page.",
+      broken: {
+        reason: 'timeout',
+        message:
+          "The story wasn't ready within readyTimeout (10000 ms): Storybook's preview never started in its page.",
+      },
     })
   })
 
@@ -239,7 +249,11 @@ describe('a broken story', () => {
     const driver = new FakeDriver({ pages: [{ evaluate: async () => ({ outcome: 'script-missing' }) }] })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: "visual-check's page script didn't run in the story's page, so it couldn't wait for the story to finish.",
+      broken: {
+        reason: 'error',
+        message:
+          "visual-check's page script didn't run in the story's page, so it couldn't wait for the story to finish.",
+      },
     })
   })
 
@@ -257,7 +271,10 @@ describe('a broken story', () => {
     })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: "The story wasn't ready within readyTimeout (10000 ms): its page was still loading.",
+      broken: {
+        reason: 'timeout',
+        message: "The story wasn't ready within readyTimeout (10000 ms): its page was still loading.",
+      },
     })
   })
 
@@ -275,8 +292,11 @@ describe('a broken story', () => {
     })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken:
-        "The story wasn't ready within readyTimeout (10000 ms): its page stopped answering while visual-check waited for it to finish.",
+      broken: {
+        reason: 'timeout',
+        message:
+          "The story wasn't ready within readyTimeout (10000 ms): its page stopped answering while visual-check waited for it to finish.",
+      },
     })
   })
 
@@ -294,7 +314,10 @@ describe('a broken story', () => {
     })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: `Loading the story failed: The page couldn't load ${primary.url}: net::ERR_CONNECTION_RESET.`,
+      broken: {
+        reason: 'error',
+        message: `Loading the story failed: The page couldn't load ${primary.url}: net::ERR_CONNECTION_RESET.`,
+      },
     })
   })
 
@@ -310,7 +333,10 @@ describe('a broken story', () => {
     })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: "Setting the viewport failed: The page didn't set its viewport within 30 s.",
+      broken: {
+        reason: 'error',
+        message: "Setting the viewport failed: The page didn't set its viewport within 30 s.",
+      },
     })
   })
 
@@ -326,7 +352,10 @@ describe('a broken story', () => {
     })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: `Loading the story failed: The page couldn't load ${primary.url}: net::ERR_CONNECTION_REFUSED.`,
+      broken: {
+        reason: 'error',
+        message: `Loading the story failed: The page couldn't load ${primary.url}: net::ERR_CONNECTION_REFUSED.`,
+      },
     })
   })
 
@@ -346,7 +375,7 @@ describe('a broken story', () => {
     })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: `${step} failed: The browser said no.`,
+      broken: { reason: 'error', message: `${step} failed: The browser said no.` },
     })
   })
 
@@ -354,8 +383,11 @@ describe('a broken story', () => {
     const driver = new FakeDriver({ pages: [{ evaluate: async () => 42 }] })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken:
-        "Waiting for the story to finish failed: The readiness wait in the page gave an answer visual-check doesn't know: 42.",
+      broken: {
+        reason: 'error',
+        message:
+          "Waiting for the story to finish failed: The readiness wait in the page gave an answer visual-check doesn't know: 42.",
+      },
     })
   })
 
@@ -371,26 +403,96 @@ describe('a broken story', () => {
     })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: 'The page crashed while loading the story, usually because it ran out of memory.',
+      broken: {
+        reason: 'crashed',
+        message:
+          'The page crashed while loading the story, usually because it ran out of memory. Fewer workers leave each page more memory.',
+      },
     })
   })
 
-  it('is one that navigated away, naming where it went', async () => {
+  it.each([
+    [
+      "the story's own origin, as a path",
+      'http://localhost:6006/categories/burgers?tab=a#top',
+      '/categories/burgers?tab=a#top',
+    ],
+    ['another origin, in full', 'https://example.com/x', 'https://example.com/x'],
+    ['a URL that cannot be parsed, as it is', 'not a url', 'not a url'],
+    ["a blob URL of the story's origin, in full", 'blob:http://localhost:6006/abc', 'blob:http://localhost:6006/abc'],
+  ])('is one that navigated away to %s, naming where it went', async (_where, url, shown) => {
     const driver = new FakeDriver({
       pages: [
         {
-          goto: async (url) => {
-            throw new PageNavigatedAwayError(
-              'https://example.com/',
-              `The page navigated to https://example.com/ before ${url} loaded.`,
-            )
+          goto: async (storyUrl) => {
+            throw new PageNavigatedAwayError(url, `The page navigated to ${url} before ${storyUrl} loaded.`)
           },
         },
       ],
     })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: 'The story navigated away to https://example.com/, and a story has to stay on its page to be captured.',
+      broken: {
+        reason: 'navigated-away',
+        message: `The story navigated away to ${shown}. Await the new page before clicking.`,
+        url,
+      },
+    })
+  })
+
+  it('is one that navigated away while waiting for the story to finish', async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          evaluate: async () => {
+            throw new PageNavigatedAwayError('http://localhost:6006/next', 'The page navigated to /next.')
+          },
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'navigated-away',
+        message: 'The story navigated away to /next. Await the new page before clicking.',
+        url: 'http://localhost:6006/next',
+      },
+    })
+  })
+
+  it('is one whose page crashed while waiting for the story to finish, naming that step', async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          evaluate: async () => {
+            throw new PageCrashedError()
+          },
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'crashed',
+        message:
+          'The page crashed while waiting for the story to finish, usually because it ran out of memory. Fewer workers leave each page more memory.',
+      },
+    })
+  })
+
+  it("is one whose capture hits the driver's own time limit, as an error and not a timeout", async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          captureFullPage: async () => {
+            throw new PageTimeoutError("The page didn't capture within 30 s.", 30_000)
+          },
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: { reason: 'error', message: "Capturing the snapshot failed: The page didn't capture within 30 s." },
     })
   })
 
@@ -402,7 +504,10 @@ describe('a broken story', () => {
     })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: "visual-check couldn't open a page for the story: The browser didn't open a page within 30 s.",
+      broken: {
+        reason: 'error',
+        message: "visual-check couldn't open a page for the story: The browser didn't open a page within 30 s.",
+      },
     })
   })
 
@@ -456,7 +561,7 @@ describe('a broken story', () => {
     })
     const session = openCaptureSession(driver, settings)
 
-    expect(await session.capture(primary)).toHaveProperty('broken')
+    expect(await session.capture(primary)).toHaveProperty('broken.reason', 'crashed')
     expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot })
   })
 

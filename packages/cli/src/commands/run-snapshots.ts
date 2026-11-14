@@ -203,7 +203,7 @@ async function testSnapshot(
   const capture = await open.capture(storyToCaptureOf(storybook, story))
 
   if ('broken' in capture) {
-    return { status: 'broken', detail: `broken: ${capture.broken}` }
+    return { status: 'broken', detail: `broken: ${capture.broken.message}` }
   }
 
   if (!isByteIdentical(capture.snapshot, baseline)) {
@@ -226,7 +226,7 @@ async function updateSnapshot(
   const capture = await (await session()).capture(storyToCaptureOf(storybook, story))
 
   if ('broken' in capture) {
-    return { status: 'broken', detail: `broken: ${capture.broken}` }
+    return { status: 'broken', detail: `broken: ${capture.broken.message}` }
   }
 
   const path = baselinePathOf(storybook.baselines, story.id)

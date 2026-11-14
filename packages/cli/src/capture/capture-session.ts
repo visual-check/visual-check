@@ -70,12 +70,59 @@ export interface StoryToCapture {
 }
 
 /**
- * What capturing a story gave: its snapshot, as PNG bytes exactly as the browser made them, or, for a broken story,
- * a one-line message for people saying why it can't be captured.
+ * Why a story can't be captured, as a code a report can group by.
+ *
+ * - `error`: the story, Storybook or the browser failed it: Storybook reported a status other than success, the page
+ *   script didn't run, or a step of the capture failed.
+ * - `timeout`: the story wasn't ready within readyTimeout.
+ * - `navigated-away`: the story's page went to another document.
+ * - `crashed`: the page crashed, usually from running out of memory.
+ * - `browser-exited`: the browser exited while the story was in flight. The run's browser gives it; a capture session
+ *   rejects with a `BrowserExitedError` instead.
  *
  * @public
  */
-export type StoryCapture = { snapshot: Uint8Array } | { broken: string }
+export type BrokenReason = 'error' | 'timeout' | 'navigated-away' | 'crashed' | 'browser-exited'
+
+/**
+ * A story that can't be captured: why, and a one-line message for people saying so. A story that navigated away also
+ * keeps where it went.
+ *
+ * @public
+ */
+export type BrokenStory =
+  | {
+      /**
+       * Why the story can't be captured.
+       */
+      reason: Exclude<BrokenReason, 'navigated-away'>
+      /**
+       * One line for people saying why.
+       */
+      message: string
+    }
+  | {
+      /**
+       * Why the story can't be captured: its page went to another document.
+       */
+      reason: 'navigated-away'
+      /**
+       * One line for people saying why.
+       */
+      message: string
+      /**
+       * The full URL the document went to.
+       */
+      url: string
+    }
+
+/**
+ * What capturing a story gave: its snapshot, as PNG bytes exactly as the browser made them, or, for a broken story,
+ * why it can't be captured.
+ *
+ * @public
+ */
+export type StoryCapture = { snapshot: Uint8Array } | { broken: BrokenStory }
 
 /**
  * Captures stories one at a time on one page of a running browser.
@@ -136,46 +183,82 @@ function reasonOf(error: unknown): string {
 }
 
 /**
+ * Shows a URL the story went to: its path, search and hash when it is an http(s) URL with the story's origin, else the
+ * whole URL, which is also what a URL that can't be parsed comes to.
+ */
+function displayUrlOf(url: string, storyUrl: string): string {
+  if (!URL.canParse(url) || !URL.canParse(storyUrl)) {
+    return url
+  }
+
+  const target = new URL(url)
+  const isWeb = target.protocol === 'http:' || target.protocol === 'https:'
+
+  if (isWeb && target.origin === new URL(storyUrl).origin) {
+    return `${target.pathname}${target.search}${target.hash}`
+  }
+
+  return url
+}
+
+/**
  * Says why a story isn't ready to capture, from what the readiness wait found.
  */
-function describeReadiness(readiness: StoryReadiness, readyTimeoutMs: number): string {
+function describeReadiness(readiness: StoryReadiness, readyTimeoutMs: number): BrokenStory {
   switch (readiness.outcome) {
     case 'finished':
-      return `Storybook reported the story finished with status ${JSON.stringify(readiness.status)}, as it does when a loader, beforeEach or the render throws, when play leaves unhandled errors, or when a check such as accessibility fails.`
+      return {
+        reason: 'error',
+        message: `Storybook reported the story finished with status ${JSON.stringify(readiness.status)}, as it does when a loader, beforeEach or the render throws, when play leaves unhandled errors, or when a check such as accessibility fails.`,
+      }
     case 'timed-out':
-      return notReady(
-        readyTimeoutMs,
-        readiness.channel
-          ? 'Storybook never sent storyFinished for it'
-          : "Storybook's preview never started in its page",
-      )
+      return {
+        reason: 'timeout',
+        message: notReady(
+          readyTimeoutMs,
+          readiness.channel
+            ? 'Storybook never sent storyFinished for it'
+            : "Storybook's preview never started in its page",
+        ),
+      }
     case 'script-missing':
-      return "visual-check's page script didn't run in the story's page, so it couldn't wait for the story to finish."
+      return {
+        reason: 'error',
+        message:
+          "visual-check's page script didn't run in the story's page, so it couldn't wait for the story to finish.",
+      }
   }
 }
 
 /**
  * Says why a story couldn't be captured, from the error a step failed with. A `PageTimeoutError` from loading the story
- * or waiting for it means readyTimeout ran out.
+ * or waiting for it means readyTimeout ran out. `story` shows a URL on the story's own origin as a path.
  */
-function describeFailure(error: unknown, step: Step, readyTimeoutMs: number): string {
+function describeFailure(error: unknown, step: Step, story: StoryToCapture, readyTimeoutMs: number): BrokenStory {
   if (error instanceof PageCrashedError) {
-    return `The page crashed while ${stepNames[step]}, usually because it ran out of memory.`
+    return {
+      reason: 'crashed',
+      message: `The page crashed while ${stepNames[step]}, usually because it ran out of memory. Fewer workers leave each page more memory.`,
+    }
   }
 
   if (error instanceof PageNavigatedAwayError) {
-    return `The story navigated away to ${error.url}, and a story has to stay on its page to be captured.`
+    return {
+      reason: 'navigated-away',
+      message: `The story navigated away to ${displayUrlOf(error.url, story.url)}. Await the new page before clicking.`,
+      url: error.url,
+    }
   }
 
   const doing = stepTimeouts[step]
 
   if (error instanceof PageTimeoutError && doing !== undefined) {
-    return notReady(readyTimeoutMs, doing)
+    return { reason: 'timeout', message: notReady(readyTimeoutMs, doing) }
   }
 
   const name = stepNames[step]
 
-  return `${name.charAt(0).toUpperCase()}${name.slice(1)} failed: ${reasonOf(error)}`
+  return { reason: 'error', message: `${name.charAt(0).toUpperCase()}${name.slice(1)} failed: ${reasonOf(error)}` }
 }
 
 /**
@@ -210,7 +293,7 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
       throw error
     }
 
-    return { broken: describeFailure(error, step, settings.readyTimeoutMs) }
+    return { broken: describeFailure(error, step, story, settings.readyTimeoutMs) }
   }
 }
 
@@ -274,7 +357,9 @@ export function openCaptureSession(driver: Driver, settings: CaptureSettings): C
           throw error
         }
 
-        return { broken: `visual-check couldn't open a page for the story: ${reasonOf(error)}` }
+        return {
+          broken: { reason: 'error', message: `visual-check couldn't open a page for the story: ${reasonOf(error)}` },
+        }
       }
 
       const capture = await captureOnPage(page, story, settings).catch((error: unknown) => {
