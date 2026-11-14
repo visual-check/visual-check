@@ -2,7 +2,7 @@
 
 One of this repo's own test Storybooks ([PRD 18](../../docs/prd/18-repo-ci.md#this-repos-own-test-storybooks)): a private React Storybook on Storybook 10 with a few plain stories and a set of [hazard stories](#the-hazard-stories), their committed baselines in `.visual-check/baselines/` and the expected outcome of every story in `expected-outcomes.json`.
 
-`e2e.ts` is its end-to-end check. It serves the static build on `127.0.0.1`, runs the built CLI against it and checks six cases. Inside visual-check's image the last is replaced; see below.
+`e2e.ts` is its end-to-end check. It serves the static build on `127.0.0.1`, runs the built CLI against it and checks eight cases. Inside visual-check's image the last three are replaced; see below.
 
 - `test` against the committed baselines, with 2 workers, gives exactly the expected outcomes.
 - `update` into an empty folder writes every story that isn't broken, `test` then passes them and finds the broken ones missing, and the baselines of the stories expected to pass are byte-identical to the committed ones. When they aren't, the written baselines are copied to `e2e-output/`. Both commands take 2 workers from the config.
@@ -10,8 +10,10 @@ One of this repo's own test Storybooks ([PRD 18](../../docs/prd/18-repo-ci.md#th
 - With 1 worker, the hazard stories run one after the other, and `test` gives exactly their expected outcomes. The story that navigates away says it went to `/categories/burgers`, and the server is asked for its page 3 times: once, then on each of its 2 retries. The story that crashes says its page crashed. The stories after `BeforeUnload` and `Crashes` pass: the first loads once the `beforeunload` dialog is accepted, the second on a fresh page.
 - A stylesheet that changes the card story makes `test` exit 1 with that story differing.
 - Killing the CLI while it captures leaves none of its containers behind.
+- With 2 workers, `docker kill` on the browser's container while both workers capture breaks those 2 stories, each line saying the browser exited. The browser relaunches for the stories left, which get their expected outcomes, `test` exits 1, its stderr says the browser exited and visual-check relaunches it once, and none of its containers is left.
+- With 2 workers, `docker kill` on the browser's container while both workers capture, then on the relaunched browser's once it captures, stops `test` with exit 2. The first browser's 2 stories are broken, each line saying the browser exited, and no other story finished. Its stderr says the browser exited and visual-check relaunches it once, then that the browser exited again and "Run visual-check again.", and none of its containers is left.
 
-The last two run with the default `workers`, `'auto'`.
+The deliberate change and the CLI kill run with the default `workers`, `'auto'`. In the last three the server holds every story page, so the run is still capturing when the kill comes, and containers that were there before the run don't count. Where the browser exits once, the server answers the story pages right after the kill, so the stories left can pass; where it exits twice, it holds them throughout.
 
 ## The hazard stories
 
@@ -41,7 +43,7 @@ Turbo builds the CLI and the Storybook first. The check prints one line per case
 
 ## Running it inside visual-check's image
 
-`--inside-image` runs the check the way a job container on visual-check's image would: the CLI starts the browser itself, with no Docker. It needs the image's marker (`/etc/visual-check/chromium.json`) and no `docker` on the `PATH`, and it doesn't need `TEST_STORYBOOK_IMAGE`. It runs the first five cases above, then these two in place of the kill case:
+`--inside-image` runs the check the way a job container on visual-check's image would: the CLI starts the browser itself, with no Docker. It needs the image's marker (`/etc/visual-check/chromium.json`) and no `docker` on the `PATH`, and it doesn't need `TEST_STORYBOOK_IMAGE`. It runs the first five cases above, then these two in place of the three that kill the CLI or the browser's container:
 
 - With `platform: 'host'`, `test` uses the image's browser and gives exactly the expected outcomes.
 - With `platform: 'linux/arm64'`, `test` exits 2 before any capture, and its message names the image's architecture and the configured platform.

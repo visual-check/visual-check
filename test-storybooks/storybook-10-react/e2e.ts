@@ -5,7 +5,7 @@
 //
 // With `--inside-image` it runs inside visual-check's amd64 browser image, where the CLI starts the browser itself: it
 // needs no TEST_STORYBOOK_IMAGE and no docker, and checks `platform: 'host'` and a platform mismatch in place of the
-// kill case.
+// cases that kill the CLI or the browser's container.
 import { type ChildProcessByStdio, spawn, spawnSync } from 'node:child_process'
 import {
   accessSync,
@@ -99,6 +99,11 @@ const cliTimeoutMilliseconds = 300_000
 const containerNamePattern = '^visual-check-[0-9a-f]{12}$'
 
 /**
+ * How long one docker command may take before it is killed, in milliseconds.
+ */
+const dockerTimeoutMilliseconds = 30_000
+
+/**
  * The story the deliberate change alters, and the stylesheet that alters it through its `card` class.
  */
 const deliberateChange = {
@@ -132,10 +137,21 @@ const hazards = {
 }
 
 /**
- * How long the kill case waits for the CLI to start capturing, and for its container to go after the kill, in
- * milliseconds.
+ * How long the kill cases wait for the browser to ask for story pages, and for the run's containers to go once the
+ * CLI is killed or ends, in milliseconds.
  */
 const killTimeouts = { capturing: 60_000, removed: 10_000 }
+
+/**
+ * What a run says when its browser exits: each line of a story the browser was capturing, then on standard error, in
+ * this order, that the browser exited and visual-check relaunched it, and when the relaunched browser exits too, that
+ * it exited and the next step.
+ */
+const browserExits = {
+  storyLineSays: 'The browser exited',
+  relaunched: ['The browser exited', 'visual-check relaunches it once for the stories left.'],
+  stopped: ['The browser exited', 'Run visual-check again.'],
+}
 
 /**
  * Each mark a snapshot line starts with, then the Storybook, the story ID and the detail, separated by two spaces.
@@ -182,7 +198,8 @@ interface ServeOptions {
    */
   injectIntoStoryPage?: string
   /**
-   * Leaves every `iframe.html` request unanswered until the server stops, so a run can't finish a capture.
+   * Leaves every `iframe.html` request unanswered until `releaseStoryPages()` or the server stops, so a run can't
+   * finish a capture meanwhile.
    */
   holdStoryPages?: boolean
 }
@@ -196,13 +213,14 @@ interface StorybookServer {
    */
   url: string
   /**
-   * Whether a story page has been asked for, which means the browser is capturing.
+   * The ID of the story each request for a story page was for, the `id` of its `iframe.html`, in the order they came,
+   * held or not. A request means the browser is capturing that story.
    */
-  storyPageRequested: () => boolean
+  storyPageRequests: () => string[]
   /**
-   * How many times the page of the story with this ID, its `iframe.html` with that `id`, has been asked for.
+   * Stops holding the story pages: answers every held request, and every later one as it comes.
    */
-  storyPageLoads: (storyId: string) => number
+  releaseStoryPages: () => void
   /**
    * Stops the server, dropping every open connection.
    */
@@ -262,6 +280,11 @@ interface CliRun {
  */
 interface FollowedCli {
   /**
+   * Resolves with what it printed and how it ended, once it has ended or the time limit has killed it. Rejects when it
+   * couldn't run, or printed a snapshot line with no known outcome.
+   */
+  finished: Promise<CliRun>
+  /**
    * What it has printed on standard error so far.
    */
   stderr: () => string
@@ -269,6 +292,28 @@ interface FollowedCli {
    * How it ended, such as `exited 2`, or `undefined` while it runs.
    */
   ending: () => string | undefined
+  /**
+   * Kills it with `SIGKILL`, unless it has ended.
+   */
+  kill: () => void
+}
+
+/**
+ * A CLI run against a server that holds the story pages, as the kill cases start it.
+ */
+interface HeldRun {
+  /**
+   * The server, which holds the story pages until they're released.
+   */
+  server: StorybookServer
+  /**
+   * The CLI, followed.
+   */
+  cli: FollowedCli
+  /**
+   * The IDs of the visual-check containers that were there before the run, which don't count.
+   */
+  before: ReadonlySet<string>
 }
 
 /**
@@ -410,40 +455,53 @@ function serveFile(pathname: string, response: ServerResponse, options: ServeOpt
 }
 
 /**
- * Counts one more request for a story's page, under the story's ID, the `id` search parameter of its `iframe.html`.
+ * Records a request for a story's page under the story's ID, the `id` search parameter of its `iframe.html`.
  */
-function countStoryPageLoad(storyPageLoads: Map<string, number>, searchParams: URLSearchParams): void {
-  const storyId = searchParams.get('id') ?? ''
-
-  storyPageLoads.set(storyId, (storyPageLoads.get(storyId) ?? 0) + 1)
+function recordStoryPageRequest(storyPageRequests: string[], searchParams: URLSearchParams): void {
+  storyPageRequests.push(searchParams.get('id') ?? '')
 }
 
 /**
- * Serves the static build on a free port of 127.0.0.1, changed as the options say, and counts the requests for each
- * story's page.
+ * Serves the static build on a free port of 127.0.0.1, changed as the options say, and records the requests for story
+ * pages. While it holds them, it keeps each one's answer until they're released.
  */
 async function serveStorybook(options: ServeOptions = {}): Promise<StorybookServer> {
-  const storyPageLoads = new Map<string, number>()
+  const storyPageRequests: string[] = []
+  const heldAnswers: (() => void)[] = []
+  let holding = options.holdStoryPages ?? false
   const server = createServer((request, response) => {
     const { pathname, searchParams } = new URL(request.url ?? '/', 'http://127.0.0.1')
+    const answer = (): void => serveFile(pathname, response, options)
 
-    if (pathname === '/iframe.html') {
-      countStoryPageLoad(storyPageLoads, searchParams)
+    if (pathname !== '/iframe.html') {
+      answer()
 
-      if (options.holdStoryPages) {
-        return
-      }
+      return
     }
 
-    serveFile(pathname, response, options)
+    recordStoryPageRequest(storyPageRequests, searchParams)
+
+    if (holding) {
+      heldAnswers.push(answer)
+
+      return
+    }
+
+    answer()
   })
 
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
 
   return {
     url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
-    storyPageRequested: () => storyPageLoads.size > 0,
-    storyPageLoads: (storyId: string) => storyPageLoads.get(storyId) ?? 0,
+    storyPageRequests: () => [...storyPageRequests],
+    releaseStoryPages: () => {
+      holding = false
+
+      for (const answer of heldAnswers.splice(0)) {
+        answer()
+      }
+    },
     stop: async () => {
       server.closeAllConnections()
       await new Promise((resolve) => server.close(resolve))
@@ -526,49 +584,58 @@ function snapshotOf(line: string): SnapshotLine[] {
  * Runs the built CLI to the end, or until the time limit kills it, and reads its outcomes.
  */
 async function runCli(args: string[], env: NodeJS.ProcessEnv = process.env): Promise<CliRun> {
-  const started = performance.now()
-  const child = startCli(args, env)
-  let stdout = ''
-  let stderr = ''
-
-  child.stdout.setEncoding('utf8').on('data', (text: string) => {
-    stdout += text
-  })
-  child.stderr.setEncoding('utf8').on('data', (text: string) => {
-    stderr += text
-  })
-
-  const [exitCode, signal] = await new Promise<[number | null, NodeJS.Signals | null]>((resolve, reject) => {
-    child.on('error', reject)
-    child.on('close', (code, closeSignal) => resolve([code, closeSignal]))
-  })
-
-  const timedOut = signal === 'SIGKILL' && performance.now() - started >= cliTimeoutMilliseconds
-  const snapshots = parseSnapshots(stdout)
-  const outcomes = Object.fromEntries(snapshots.map((snapshot) => [snapshot.storyId, snapshot.outcome]))
-
-  return { exitCode, signal, timedOut, stderr, snapshots, outcomes }
+  return await followCli(startCli(args, env)).finished
 }
 
 /**
- * Follows a started CLI: collects its standard error and notes how it ends.
+ * Reads a run's snapshot lines and outcomes from what the CLI printed on standard output, given how it ended.
+ *
+ * @throws {Error} When a snapshot line ends in a detail no outcome has.
+ */
+function cliRunOf(stdout: string, ended: Omit<CliRun, 'snapshots' | 'outcomes'>): CliRun {
+  const snapshots = parseSnapshots(stdout)
+  const outcomes = Object.fromEntries(snapshots.map((snapshot) => [snapshot.storyId, snapshot.outcome]))
+
+  return { ...ended, snapshots, outcomes }
+}
+
+/**
+ * Follows a started CLI: collects what it prints, notes how it ends and reads its run once it has ended, or the time
+ * limit has killed it. Follow it as soon as it starts: following it later can miss its `close` event and wait forever,
+ * and the time limit counts from the start.
  */
 function followCli(cli: CliProcess): FollowedCli {
+  const started = performance.now()
+  let stdout = ''
   let stderr = ''
   let ending: string | undefined
 
-  cli.stdout.resume()
+  cli.stdout.setEncoding('utf8').on('data', (text: string) => {
+    stdout += text
+  })
   cli.stderr.setEncoding('utf8').on('data', (text: string) => {
     stderr += text
-  })
-  cli.on('error', (error) => {
-    ending ??= `couldn't run: ${error.message}`
   })
   cli.on('exit', (code, signal) => {
     ending ??= signal === null ? `exited ${code}` : `was ended by ${signal}`
   })
 
-  return { stderr: () => stderr, ending: () => ending }
+  const finished = new Promise<[number | null, NodeJS.Signals | null]>((resolve, reject) => {
+    cli.on('error', (error) => {
+      ending ??= `couldn't run: ${error.message}`
+      reject(error)
+    })
+    cli.on('close', (code, signal) => resolve([code, signal]))
+  }).then(([exitCode, signal]) => {
+    const timedOut = signal === 'SIGKILL' && performance.now() - started >= cliTimeoutMilliseconds
+
+    return cliRunOf(stdout, { exitCode, signal, timedOut, stderr })
+  })
+
+  // A case that stops before the CLI ends never awaits its run, so a CLI that couldn't run mustn't reject unhandled.
+  finished.catch(() => undefined)
+
+  return { finished, stderr: () => stderr, ending: () => ending, kill: () => cli.kill('SIGKILL') }
 }
 
 /**
@@ -700,19 +767,29 @@ function writeConfig(folder: string, url: string, baselines: string, platform?: 
 }
 
 /**
+ * Runs a docker command and gives its standard output. It is killed when it runs past its time limit.
+ *
+ * @throws {Error} When the command fails or runs past its time limit.
+ */
+function docker(args: string[]): string {
+  const result = spawnSync('docker', args, { encoding: 'utf8', timeout: dockerTimeoutMilliseconds })
+
+  if (result.status !== 0) {
+    throw new Error(`docker ${args[0]} failed: ${String(result.error ?? result.stderr.trim())}`)
+  }
+
+  return result.stdout
+}
+
+/**
  * Lists the IDs of visual-check's containers: running ones, or all of them, stopped ones included.
  */
 function visualCheckContainers(which: 'running' | 'all'): string[] {
   const all = which === 'all' ? ['-a'] : []
-  const result = spawnSync('docker', ['ps', ...all, '--filter', `name=${containerNamePattern}`, '-q'], {
-    encoding: 'utf8',
-  })
 
-  if (result.status !== 0) {
-    throw new Error(`docker ps failed: ${String(result.error ?? result.stderr.trim())}`)
-  }
-
-  return result.stdout.split('\n').filter((line) => line !== '')
+  return docker(['ps', ...all, '--filter', `name=${containerNamePattern}`, '-q'])
+    .split('\n')
+    .filter((line) => line !== '')
 }
 
 /**
@@ -720,6 +797,24 @@ function visualCheckContainers(which: 'running' | 'all'): string[] {
  */
 function newContainers(which: 'running' | 'all', before: ReadonlySet<string>): string[] {
   return visualCheckContainers(which).filter((id) => !before.has(id))
+}
+
+/**
+ * Kills every running visual-check container that wasn't there before, other runs' included, so the browser in it
+ * exits, and gives their IDs.
+ *
+ * @throws {Error} When there is no such container, or `docker kill` fails.
+ */
+function killNewContainers(before: ReadonlySet<string>): string[] {
+  const ids = newContainers('running', before)
+
+  if (ids.length === 0) {
+    throw new Error('no new visual-check container to kill')
+  }
+
+  docker(['kill', ...ids])
+
+  return ids
 }
 
 /**
@@ -832,7 +927,7 @@ function lineSaysProblems(run: CliRun, storyId: string, text: string): string[] 
  */
 function navigatedAwayProblems(run: CliRun, server: StorybookServer): string[] {
   const { storyId, says, loads } = hazards.navigatesAway
-  const seen = server.storyPageLoads(storyId)
+  const seen = server.storyPageRequests().filter((requested) => requested === storyId).length
 
   return [
     ...lineSaysProblems(run, storyId, says),
@@ -935,8 +1030,27 @@ async function checkPlatformMismatch(): Promise<string[]> {
     ...[`image for ${arch}`, `platform is ${platform}`]
       .filter((text) => !run.stderr.includes(text))
       .map((text) => `the message doesn't say "${text}"${outputOf(run.stderr)}`),
-    ...(server.storyPageRequested() ? ['the browser asked for a story, so the run captured'] : []),
+    ...(server.storyPageRequests().length > 0 ? ['the browser asked for a story, so the run captured'] : []),
   ])
+}
+
+/**
+ * Notes the visual-check containers that are there, starts a server that holds the story pages and the CLI with these
+ * arguments and the server's `--url`, and hands them to `use`. Kills the CLI, unless it has ended, and stops the server
+ * however `use` ends.
+ */
+async function withHeldRun<T>(args: string[], use: (run: HeldRun) => Promise<T>): Promise<T> {
+  const before = new Set(visualCheckContainers('all'))
+
+  return await withStorybookServer({ holdStoryPages: true }, async (server) => {
+    const cli = followCli(startCli([...args, '--url', server.url], process.env))
+
+    try {
+      return await use({ server, cli, before })
+    } finally {
+      cli.kill()
+    }
+  })
 }
 
 /**
@@ -944,52 +1058,148 @@ async function checkPlatformMismatch(): Promise<string[]> {
  * run is still capturing when the kill comes. Containers that were there before the run don't count.
  */
 async function checkKill(): Promise<string[]> {
-  const before = new Set(visualCheckContainers('all'))
+  return await withHeldRun(['test', '--all'], async ({ server, cli, before }) => {
+    await waitForCapture(server, cli, before, 1)
+    cli.kill()
 
-  return await withStorybookServer({ holdStoryPages: true }, async (server) => {
-    const child = startCli(['test', '--all', '--url', server.url], process.env)
-    const cli = followCli(child)
-
-    try {
-      const notCapturing = await waitForCapture(server, cli, before)
-
-      if (notCapturing !== undefined) {
-        return [notCapturing]
-      }
-
-      child.kill('SIGKILL')
-
-      return await waitForRemoval(before)
-    } finally {
-      child.kill('SIGKILL')
-    }
+    return await waitForRemoval(before)
   })
 }
 
 /**
- * Waits until the browser asks for a story, which the server holds, and a new visual-check container is running.
- * Gives what went wrong instead, or `undefined`.
+ * Runs `test --all` with 2 workers as `withHeldRun` does, waits until both workers have asked the first browser for a
+ * story page, and hands the run and the IDs of those stories, the ones in flight, to `use`.
+ */
+async function withBothWorkersCapturing<T>(use: (run: HeldRun, inFlight: string[]) => Promise<T>): Promise<T> {
+  return await withHeldRun(['test', '--all', '--workers', String(parallelWorkers)], async (run) => {
+    await waitForCapture(run.server, run.cli, run.before, parallelWorkers)
+
+    return await use(run, run.server.storyPageRequests())
+  })
+}
+
+/**
+ * With 2 workers, killing the browser's container once both have asked for a story page, which the server holds,
+ * breaks those 2 stories, each line saying the browser exited. The server then answers every story page, and the
+ * browser relaunches for the stories left, which get their expected outcomes. `test` exits 1, its standard error says
+ * the browser exited and visual-check relaunched it, and none of the run's containers is left. Containers that were
+ * there before the run don't count.
+ */
+async function checkBrowserExitsOnce(expected: Outcomes): Promise<string[]> {
+  return await withBothWorkersCapturing(async ({ server, cli, before }, inFlight) => {
+    killNewContainers(before)
+    server.releaseStoryPages()
+
+    const run = await cli.finished
+
+    return [
+      ...exitCodeProblems('test', run, 1),
+      ...brokenByExitProblems(run, inFlight, expected),
+      ...stderrInOrderProblems('test', run, browserExits.relaunched),
+      ...(await waitForRemoval(before)),
+    ]
+  })
+}
+
+/**
+ * With 2 workers and the story pages held throughout, killing the browser's container once both have asked for a
+ * story page, then the relaunched browser's once it asks for one, stops `test` with exit 2. The 2 stories the first
+ * browser was capturing are broken, each line saying the browser exited, and no other story finished. Standard error
+ * says the browser exited and visual-check relaunched it, then that the browser exited again and the next step, and
+ * none of the run's containers is left. Containers that were there before the run don't count.
+ */
+async function checkBrowserExitsTwice(): Promise<string[]> {
+  return await withBothWorkersCapturing(async ({ server, cli, before }, inFlight) => {
+    const beforeRelaunch = new Set([...before, ...killNewContainers(before)])
+
+    // Each held worker can ask the first browser for only one page, so the next request comes from the relaunch.
+    await waitForCapture(server, cli, beforeRelaunch, parallelWorkers + 1)
+    killNewContainers(beforeRelaunch)
+
+    const run = await cli.finished
+
+    return [
+      ...exitCodeProblems('test', run, 2),
+      ...brokenByExitProblems(run, inFlight, {}),
+      ...stderrInOrderProblems('test', run, [...browserExits.relaunched, ...browserExits.stopped]),
+      ...(await waitForRemoval(before)),
+    ]
+  })
+}
+
+/**
+ * Lists how a run's outcomes differ from these: each story in flight when the first browser exited broken, its line
+ * saying the browser exited, and every other story as `others` gives.
+ */
+function brokenByExitProblems(run: CliRun, inFlight: string[], others: Outcomes): string[] {
+  const brokenByExit = Object.fromEntries(inFlight.map((storyId) => [storyId, 'broken'] as const))
+
+  return [
+    ...outcomeProblems('test', run.outcomes, { ...others, ...brokenByExit }),
+    ...inFlight.flatMap((storyId) => lineSaysProblems(run, storyId, browserExits.storyLineSays)),
+  ]
+}
+
+/**
+ * Whether the text holds each of the parts, each one after the end of the one before.
+ */
+function holdsInOrder(text: string, parts: string[]): boolean {
+  let from = 0
+
+  for (const part of parts) {
+    const index = text.indexOf(part, from)
+
+    if (index === -1) {
+      return false
+    }
+
+    from = index + part.length
+  }
+
+  return true
+}
+
+/**
+ * Gives the problem with a run's standard error when it doesn't say each of the texts, in this order, or none when it
+ * does.
+ */
+function stderrInOrderProblems(command: string, run: CliRun, texts: string[]): string[] {
+  return holdsInOrder(run.stderr, texts)
+    ? []
+    : [`${command} doesn't say ${texts.map((text) => `"${text}"`).join(', then ')}${outputOf(run.stderr)}`]
+}
+
+/**
+ * Waits until the browser has asked for this many story pages in all, which the server holds, and a visual-check
+ * container that isn't in `before` is running.
+ *
+ * @throws {Error} When the CLI ends first, the browser hasn't asked for them in time, or no such container is running.
  */
 async function waitForCapture(
   server: StorybookServer,
   cli: FollowedCli,
   before: ReadonlySet<string>,
-): Promise<string | undefined> {
-  await waitUntil(() => server.storyPageRequested() || cli.ending() !== undefined, killTimeouts.capturing)
+  storyPages: number,
+): Promise<void> {
+  const asked = (): number => server.storyPageRequests().length
+
+  await waitUntil(() => asked() >= storyPages || cli.ending() !== undefined, killTimeouts.capturing)
 
   const ending = cli.ending()
 
   if (ending !== undefined) {
-    return `the CLI ${ending} before the kill${outputOf(cli.stderr())}`
+    throw new Error(`the CLI ${ending} before the kill${outputOf(cli.stderr())}`)
   }
 
-  if (!server.storyPageRequested()) {
-    return `the browser didn't ask for a story within ${killTimeouts.capturing / 1000} s`
+  if (asked() < storyPages) {
+    throw new Error(
+      `the browser asked for ${asked()} story pages in ${killTimeouts.capturing / 1000} s, expected ${storyPages}`,
+    )
   }
 
-  return newContainers('running', before).length === 0
-    ? 'no new visual-check container was running while the CLI captured'
-    : undefined
+  if (newContainers('running', before).length === 0) {
+    throw new Error('no new visual-check container was running while the CLI captured')
+  }
 }
 
 /**
@@ -1000,7 +1210,25 @@ async function waitForRemoval(before: ReadonlySet<string>): Promise<string[]> {
 
   return removed
     ? []
-    : [`containers remain ${killTimeouts.removed / 1000} s after the kill: ${newContainers('all', before).join(', ')}`]
+    : [`containers remain after ${killTimeouts.removed / 1000} s: ${newContainers('all', before).join(', ')}`]
+}
+
+/**
+ * The cases only Docker can run, since they kill the CLI or visual-check's container: the CLI killed, and the browser
+ * exiting once and twice.
+ */
+function outsideImageCases(expected: Outcomes): Case[] {
+  return [
+    { name: 'killing the CLI: no container is left behind', run: checkKill },
+    {
+      name: 'browser exits once: the stories in flight are broken saying so, the browser relaunches for the rest, test exits 1 saying it relaunched, no container is left behind',
+      run: () => checkBrowserExitsOnce(expected),
+    },
+    {
+      name: "browser exits twice: the first browser's stories are broken saying so, test exits 2 saying the browser exited, was relaunched and exited again, no container is left behind",
+      run: checkBrowserExitsTwice,
+    },
+  ]
 }
 
 /**
@@ -1080,9 +1308,7 @@ if (setupProblems.length > 0) {
       name: `deliberate change: test exits 1 and ${deliberateChange.storyId} differs`,
       run: () => checkDeliberateChange(expected),
     },
-    ...(insideImage
-      ? insideImageCases(expected)
-      : [{ name: 'killing the CLI: no container is left behind', run: checkKill }]),
+    ...(insideImage ? insideImageCases(expected) : outsideImageCases(expected)),
   ])
 
   process.exitCode = passed ? 0 : 1
