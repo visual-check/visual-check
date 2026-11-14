@@ -24,6 +24,14 @@ const defaultKillGraceMilliseconds = 3000
 export type ContainerPlatform = 'linux/amd64' | 'linux/arm64'
 
 /**
+ * The network the browser's container runs on: `host`, or `container:<id>` to join the network of the container the CLI
+ * runs in.
+ *
+ * @public
+ */
+export type ContainerNetwork = 'host' | `container:${string}`
+
+/**
  * What the container needs to run the browser.
  *
  * @public
@@ -42,6 +50,11 @@ export interface ContainerBrowser {
    */
   executable: string
   /**
+   * The value of `docker run --network`: `host`, or `container:<id>` to join the network of the container the CLI runs
+   * in.
+   */
+  network: ContainerNetwork
+  /**
    * How long `kill()` lets `docker run` exit by itself before ending it, in milliseconds. 3000 by default.
    */
   killGraceMilliseconds?: number
@@ -51,7 +64,7 @@ export interface ContainerBrowser {
  * Builds the arguments of the `docker run` that runs the browser in a container of this name.
  */
 export function containerRunArguments(
-  options: Pick<ContainerBrowser, 'image' | 'platform' | 'executable'> & { name: string },
+  options: Pick<ContainerBrowser, 'image' | 'platform' | 'executable' | 'network'> & { name: string },
   browserArguments: readonly string[],
 ): string[] {
   return [
@@ -68,7 +81,7 @@ export function containerRunArguments(
     '--cap-drop=ALL',
     '--security-opt=no-new-privileges',
     '--network',
-    'host',
+    options.network,
     options.image,
     'sh',
     '-c',
