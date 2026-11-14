@@ -4,7 +4,7 @@ import { ConfigError } from '../config/config-error.js'
 import { isCi } from '../config/is-ci.js'
 import { type LoadConfigOptions, loadConfig } from '../config/load-config.js'
 import { checkStorybooks } from './check-storybooks.js'
-import { type LaunchBrowser, launchBrowserInContainer } from './launch-browser.js'
+import { type LaunchBrowser, launchBrowser } from './launch-browser.js'
 import { parseCommandLine, type RunOptions, UsageError } from './parse-command-line.js'
 import { runSnapshots } from './run-snapshots.js'
 import { selectStories } from './select-stories.js'
@@ -62,8 +62,9 @@ export interface RunCliOptions {
    */
   progress?: (text: string) => void
   /**
-   * Launches the browser that `test` and `update` capture in. By default the image is pulled when Docker lacks it,
-   * and the browser starts in visual-check's container and connects over CDP. A test gives a fake.
+   * Launches the browser that `test` and `update` capture in. By default, in visual-check's container the image is
+   * pulled when Docker lacks it and the browser starts in the container, and inside visual-check's image the browser
+   * starts directly as a child process. Either way it connects over CDP. A test gives a fake.
    */
   launchBrowser?: LaunchBrowser
 }
@@ -162,14 +163,14 @@ async function runTestOrUpdate(
     command,
     version: readVersion(),
     config,
-    platform,
+    place: { in: 'container', platform },
     browserPackage: browserCheck.browserPackage,
     selections: checks.storybooks.map(({ storybook, stories }) => ({
       storybook,
       stories: selectStories(stories, options.selection),
     })),
     cwd,
-    launchBrowser: cliOptions.launchBrowser ?? launchBrowserInContainer,
+    launchBrowser: cliOptions.launchBrowser ?? launchBrowser,
     progress: cliOptions.progress ?? (() => undefined),
   })
 

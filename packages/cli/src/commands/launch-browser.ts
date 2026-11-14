@@ -1,5 +1,9 @@
+import { mkdtemp } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { checkBrowserVersion, packageImageOf } from '../browser/browser-version.js'
 import type { BrowserPackage } from '../browser/read-browser-package.js'
+import { startBrowserProcess } from '../browser-process/start-browser-process.js'
 import { type CaptureSession, type CaptureSettings, openCaptureSession } from '../capture/capture-session.js'
 import { launchCdpDriver } from '../capture/driver/cdp/cdp-driver.js'
 import type { Driver } from '../capture/driver/driver.js'
@@ -14,26 +18,46 @@ import { containerNetwork } from '../container/own-container.js'
 const containerProfileDir = '/tmp/visual-check-profile'
 
 /**
+ * Where a run's browser runs: directly inside visual-check's image, or in visual-check's container.
+ */
+export type BrowserPlace = { in: 'image' } | { in: 'container'; platform: ContainerPlatform }
+
+/**
  * What launching the browser for a run needs.
  */
-export interface BrowserLaunch {
-  /**
-   * The image the browser runs in: the config's `image`, or the browser package's `<tag>@<digest>`.
-   */
-  image: string
-  /**
-   * The platform the container runs on.
-   */
-  platform: ContainerPlatform
-  /**
-   * The path of the headless shell's executable inside the image.
-   */
-  executable: string
-  /**
-   * Writes the progress of a pull as it happens.
-   */
-  progress: (text: string) => void
-}
+export type BrowserLaunch =
+  | {
+      /**
+       * The browser runs directly inside visual-check's image.
+       */
+      in: 'image'
+      /**
+       * The path of the headless shell's executable inside the image.
+       */
+      executable: string
+    }
+  | {
+      /**
+       * The browser runs in visual-check's container.
+       */
+      in: 'container'
+      /**
+       * The image the browser runs in: the config's `image`, or the browser package's `<tag>@<digest>`.
+       */
+      image: string
+      /**
+       * The platform the container runs on.
+       */
+      platform: ContainerPlatform
+      /**
+       * The path of the headless shell's executable inside the image.
+       */
+      executable: string
+      /**
+       * Writes the progress of a pull as it happens.
+       */
+      progress: (text: string) => void
+    }
 
 /**
  * Launches the browser a run captures in, and resolves with its driver once it has connected.
@@ -44,11 +68,26 @@ export interface BrowserLaunch {
 export type LaunchBrowser = (launch: BrowserLaunch) => Promise<Driver>
 
 /**
+ * Starts the headless shell as a child process of the CLI, which runs inside visual-check's image, and connects to it
+ * over CDP. Chromium's sandbox is off and never tried, because the container the CLI runs in is the boundary. Nothing
+ * is pulled and no `docker` runs.
+ */
+async function launchBrowserInImage(executable: string): Promise<Driver> {
+  const profileDir = await mkdtemp(join(tmpdir(), 'visual-check-profile-'))
+
+  return await launchCdpDriver({
+    start: startBrowserProcess({ executable, profileDir }),
+    sandbox: false,
+    profileDir,
+  })
+}
+
+/**
  * Pulls the image when Docker doesn't have it for the platform, then starts the browser in visual-check's container,
  * with its sandbox off because the container is the boundary, and connects to it over CDP. The container joins the
  * network of the container the CLI runs in when Docker knows it, else it uses the host's.
  */
-export const launchBrowserInContainer: LaunchBrowser = async (launch) => {
+async function launchBrowserInContainer(launch: Extract<BrowserLaunch, { in: 'container' }>): Promise<Driver> {
   await pullMissingImage(launch.image, launch.platform, launch.progress)
 
   const network = await containerNetwork()
@@ -66,6 +105,13 @@ export const launchBrowserInContainer: LaunchBrowser = async (launch) => {
 }
 
 /**
+ * Launches the browser where the launch says: directly inside visual-check's image, or in visual-check's container.
+ */
+export const launchBrowser: LaunchBrowser = async (launch) => {
+  return launch.in === 'image' ? await launchBrowserInImage(launch.executable) : await launchBrowserInContainer(launch)
+}
+
+/**
  * What a run's browser is launched and set up with.
  */
 interface RunBrowserOptions {
@@ -78,9 +124,9 @@ interface RunBrowserOptions {
    */
   configImage: string | undefined
   /**
-   * The platform the container runs on.
+   * Where the browser runs.
    */
-  platform: ContainerPlatform
+  place: BrowserPlace
   /**
    * How the session captures every story.
    */
@@ -111,19 +157,26 @@ export interface RunBrowser {
 }
 
 /**
- * Prepares a run's browser, which `launchBrowser` launches. Nothing is launched until the first `session()`.
+ * Prepares a run's browser, which `launcher` launches. Nothing is launched until the first `session()`.
  */
-export function runBrowserOf(launchBrowser: LaunchBrowser, options: RunBrowserOptions): RunBrowser {
+export function runBrowserOf(launcher: LaunchBrowser, options: RunBrowserOptions): RunBrowser {
   let driver: Driver | undefined
   let session: CaptureSession | undefined
 
   const open = async (): Promise<CaptureSession> => {
-    driver = await launchBrowser({
-      image: options.configImage ?? packageImageOf(options.browserPackage),
-      platform: options.platform,
-      executable: options.browserPackage.headlessShell,
-      progress: options.progress,
-    })
+    const executable = options.browserPackage.headlessShell
+
+    driver = await launcher(
+      options.place.in === 'image'
+        ? { in: 'image', executable }
+        : {
+            in: 'container',
+            image: options.configImage ?? packageImageOf(options.browserPackage),
+            platform: options.place.platform,
+            executable,
+            progress: options.progress,
+          },
+    )
     checkBrowserVersion(driver.version, options.browserPackage, options.configImage)
 
     return openCaptureSession(driver, options.settings)

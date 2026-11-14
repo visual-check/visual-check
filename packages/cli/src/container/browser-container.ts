@@ -1,7 +1,7 @@
 import { type ChildProcessByStdio, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { PassThrough, type Readable, Writable } from 'node:stream'
-import type { BrowserProcess, ProcessExit, StartBrowser } from '../capture/driver/driver.js'
+import type { Readable, Writable } from 'node:stream'
+import { browserThatFailedToStart, type ProcessExit, type StartBrowser } from '../capture/driver/driver.js'
 
 /**
  * The shell script the container runs the browser through. With `sh -c script arg0 args…`, `$0` is the browser's
@@ -113,7 +113,7 @@ export function startBrowserInContainer(options: ContainerBrowser): StartBrowser
     const spawned = spawnClient(containerRunArguments({ ...options, name }, browserArguments))
 
     if (spawned instanceof Error) {
-      return failedToStart(spawned)
+      return browserThatFailedToStart(spawned)
     }
 
     const child = spawned
@@ -169,18 +169,5 @@ function spawnClient(args: string[]): ChildProcessByStdio<Writable, Readable, Re
     return spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'] })
   } catch (error) {
     return error instanceof Error ? error : new Error(String(error))
-  }
-}
-
-/**
- * Builds the process of a browser that couldn't start: empty streams, and `exited` settled with the error.
- */
-function failedToStart(error: Error): BrowserProcess {
-  return {
-    toBrowser: new Writable({ write: (_chunk, _encoding, done) => done() }),
-    fromBrowser: new PassThrough().end(),
-    output: new PassThrough().end(),
-    exited: Promise.resolve({ code: null, signal: null, error }),
-    kill: () => undefined,
   }
 }

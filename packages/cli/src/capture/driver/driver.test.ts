@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   BrowserExitedError,
   BrowserLaunchError,
+  browserThatFailedToStart,
   describeExit,
   PageCrashedError,
   PageNavigatedAwayError,
@@ -87,5 +88,17 @@ describe('BrowserLaunchError', () => {
       message: 'The browser exited with code 1 before it answered.',
       output: ['bad flag'],
     })
+  })
+})
+
+describe('browserThatFailedToStart', () => {
+  it('gives empty ended streams, settles exited with the error and ignores kill', async () => {
+    const error = new Error('spawn ENOENT')
+    const browser = browserThatFailedToStart(error)
+
+    expect(await browser.exited).toEqual({ code: null, signal: null, error })
+    expect(await browser.fromBrowser.toArray()).toEqual([])
+    expect(await browser.output.toArray()).toEqual([])
+    expect(() => browser.kill()).not.toThrow()
   })
 })
