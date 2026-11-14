@@ -138,11 +138,12 @@ function messageOf(error: unknown): string {
 }
 
 /**
- * Builds the URL of a Storybook's `index.json`: the Storybook's path keeps its place, and a query, a hash and
- * credentials are left out, so the credentials are neither sent nor shown. The config and `--url` reject a URL that
- * holds a login, so none reaches here; leaving them out is a second guard against sending or printing one.
+ * Builds the URL a Storybook's own files are found under: the Storybook's path keeps its place and ends in `/`, and a
+ * query, a hash and credentials are left out, so the credentials are neither sent nor shown. The config and `--url`
+ * reject a URL that holds a login, so none reaches here; leaving them out is a second guard against sending or printing
+ * one.
  */
-function indexUrlOf(url: string): URL {
+function storybookBaseOf(url: string): URL {
   const base = new URL(url)
 
   base.search = ''
@@ -154,7 +155,24 @@ function indexUrlOf(url: string): URL {
     base.pathname += '/'
   }
 
-  return new URL('index.json', base)
+  return base
+}
+
+/**
+ * Builds the URL of a Storybook's `index.json`.
+ */
+function indexUrlOf(url: string): URL {
+  return new URL('index.json', storybookBaseOf(url))
+}
+
+/**
+ * Builds the URL of a story on its own page, `iframe.html?id=<story id>&viewMode=story`, under the Storybook's URL as
+ * `index.json` is.
+ *
+ * @public
+ */
+export function storyUrlOf(storybookUrl: string, storyId: string): string {
+  return new URL(`iframe.html?id=${encodeURIComponent(storyId)}&viewMode=story`, storybookBaseOf(storybookUrl)).href
 }
 
 /**
@@ -235,13 +253,39 @@ function checkStoriesFiles(storybook: { name: string; dir: string }, stories: St
 }
 
 /**
+ * Tells whether a story ID can name a file in a flat folder: it holds no `/`, `\\` or NUL character, and isn't `.` or
+ * `..`, so its baseline can't land outside the baselines folder.
+ */
+function isFileNameSafe(id: string): boolean {
+  return !/[/\\\0]/.test(id) && id !== '.' && id !== '..'
+}
+
+/**
+ * Throws when the index lists stories whose IDs can't name a baseline file.
+ *
+ * @throws {StorybookError} Naming the Storybook and each such ID.
+ */
+function checkStoryIds(name: string, stories: Story[]): void {
+  const unsafe = stories.map((story) => story.id).filter((id) => !isFileNameSafe(id))
+
+  if (unsafe.length > 0) {
+    throw new StorybookError(
+      `Storybook ${name}'s index.json lists stories whose IDs can't name a baseline file: ` +
+        `${unsafe.map((id) => JSON.stringify(id)).join(', ')}. A story ID can't hold /, \\ or a NUL character, ` +
+        'or be . or .. on its own. Give each of these stories an id without them.',
+    )
+  }
+}
+
+/**
  * Reaches `<url>/index.json` and returns its stories.
  *
  * `timeoutMilliseconds` limits the whole request, body included. It defaults to 60 s; a test passes a shorter one.
  *
  * @throws {StorybookUnreachableError} When nothing answers at the URL, the Storybook stops answering mid-response, or
  * the request takes longer than the timeout.
- * @throws {StorybookError} When the index fails, isn't a Storybook index, or lists stories files that aren't on disk.
+ * @throws {StorybookError} When the index fails, isn't a Storybook index, lists story IDs that can't name a baseline
+ * file, or lists stories files that aren't on disk.
  *
  * @public
  */
@@ -300,6 +344,7 @@ export async function readStories(
     )
   }
 
+  checkStoryIds(storybook.name, stories)
   checkStoriesFiles(storybook, stories, cwd)
 
   return stories

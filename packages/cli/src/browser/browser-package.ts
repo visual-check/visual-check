@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-
-const packageName = '@visual-check/chromium'
+import { type BrowserPackage, packageName, readBrowserPackage } from './read-browser-package.js'
 
 /**
  * A package manager the install command can be written for.
@@ -109,13 +108,20 @@ function findInstalled(): Installed {
 }
 
 /**
- * Checks that the installed browser package is in this CLI's range. Returns the message to print when it is missing,
- * can't be read or is out of range, and `undefined` when it is fine. The environment names the package manager
- * the install command is written for.
+ * What checking the browser package gave: the package, or the message to print.
  *
  * @public
  */
-export function checkBrowserPackage(environment: Record<string, string | undefined>): string | undefined {
+export type BrowserPackageCheck = { browserPackage: BrowserPackage } | { problem: string }
+
+/**
+ * Checks that the installed browser package is in this CLI's range, then reads its `chromium.json`. Gives the package,
+ * or the message to print when it is missing, out of range, or can't be read, a malformed `chromium.json` included.
+ * The environment names the package manager the install command is written for.
+ *
+ * @public
+ */
+export function checkBrowserPackage(environment: Record<string, string | undefined>): BrowserPackageCheck {
   const manifest = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
     peerDependencies: Record<string, string>
   }
@@ -126,13 +132,18 @@ export function checkBrowserPackage(environment: Record<string, string | undefin
   }
 
   const majors = parseMajors(range)
+  const command = installCommand(packageManagerOf(environment), Math.max(...majors))
   const installed = findInstalled()
 
-  if (installed.status === 'found' && isInRange(installed.version, majors)) {
-    return undefined
+  if (installed.status !== 'found' || !isInRange(installed.version, majors)) {
+    return { problem: browserPackageMessage(installed, range, majors, command) }
   }
 
-  const command = installCommand(packageManagerOf(environment), Math.max(...majors))
+  try {
+    return { browserPackage: readBrowserPackage(installed.version) }
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
 
-  return browserPackageMessage(installed, range, majors, command)
+    return { problem: browserPackageMessage({ status: 'unreadable', reason }, range, majors, command) }
+  }
 }

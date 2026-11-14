@@ -179,6 +179,22 @@ function entryOf(id: string, fields: Record<string, unknown> = {}): Record<strin
   }
 }
 
+/**
+ * Builds what `test` prints when none of the stories has a baseline: the header, a missing line for each story and the
+ * counts. Such a run captures nothing, so it never launches a browser.
+ */
+function allMissingOutputOf(storybook: string, storyIds: string[]): string {
+  const count = storyIds.length
+
+  return [
+    `visual-check ${version} · test · ${count} ${count === 1 ? 'snapshot' : 'snapshots'} · 1 worker`,
+    ...storyIds.map((id) => `✗ ${storybook}  ${id}  missing: no baseline yet; run visual-check update to write it`),
+    `0 passed · ${count} missing`,
+  ]
+    .map((line) => `${line}\n`)
+    .join('')
+}
+
 afterEach(async () => {
   for (const project of projects.splice(0)) {
     rmSync(project, { recursive: true, force: true })
@@ -393,7 +409,7 @@ describe('visual-check binary reaching Storybooks', () => {
     expect(result.stderr).toContain("lists stories files that aren't on disk: button.stories.tsx")
   })
 
-  it('counts stories only, not docs or test entries', async () => {
+  it('counts stories only, not docs or test entries, and reports each missing baseline without a browser', async () => {
     const url = await startStorybookServer({
       a: entryOf('button--primary'),
       b: entryOf('button--secondary'),
@@ -406,8 +422,9 @@ describe('visual-check binary reaching Storybooks', () => {
     })
     const result = await runAsynchronously({ cwd: project }, 'test')
 
-    expect(result.status).toBe(0)
-    expect(result.stdout).toBe('Storybook web: 2 stories\n')
+    expect(result.status).toBe(1)
+    expect(result.stdout).toBe(allMissingOutputOf('web', ['button--primary', 'button--secondary']))
+    expect(result.stderr).toBe('')
   })
 
   it('narrows the count with --filter', async () => {
@@ -418,8 +435,8 @@ describe('visual-check binary reaching Storybooks', () => {
     })
     const result = await runAsynchronously({ cwd: project }, 'test', '--filter', 'primary$')
 
-    expect(result.status).toBe(0)
-    expect(result.stdout).toBe('Storybook web: 1 story\n')
+    expect(result.status).toBe(1)
+    expect(result.stdout).toBe(allMissingOutputOf('web', ['button--primary']))
   })
 
   it('narrows the run to one Storybook with --storybook, which --url points at a server', async () => {
@@ -431,8 +448,8 @@ describe('visual-check binary reaching Storybooks', () => {
     })
     const result = await runAsynchronously({ cwd: project }, 'test', '--storybook', 'web', '--url', url)
 
-    expect(result.status).toBe(0)
-    expect(result.stdout).toBe('Storybook web: 1 story\n')
+    expect(result.status).toBe(1)
+    expect(result.stdout).toBe(allMissingOutputOf('web', ['button--primary']))
   })
 
   it('exits 2 for a storybook older than 9.1, naming the version, and leaves its index unread', async () => {
@@ -458,11 +475,11 @@ describe('visual-check binary reaching Storybooks', () => {
     })
     const result = await runAsynchronously({ cwd: project }, 'test')
 
-    expect(result.status).toBe(0)
+    expect(result.status).toBe(1)
     expect(result.stderr).toBe(
       'Warning: Storybook web runs storybook 12.0.0, and visual-check supports 9.1 to 11. The run carries on.\n',
     )
-    expect(result.stdout).toBe('Storybook web: 1 story\n')
+    expect(result.stdout).toBe(allMissingOutputOf('web', ['button--primary']))
   })
 
   it('skips the version check when no storybook is installed', async () => {
@@ -473,7 +490,7 @@ describe('visual-check binary reaching Storybooks', () => {
     })
     const result = await runAsynchronously({ cwd: project }, 'test')
 
-    expect(result.status).toBe(0)
+    expect(result.status).toBe(1)
     expect(result.stderr).toBe('')
   })
 })

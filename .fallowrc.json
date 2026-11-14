@@ -31,7 +31,19 @@
       { "from": "cli/container", "allow": ["cli/capture/driver"] },
       { "from": "cli/baselines", "allow": [] },
       { "from": "cli/browser", "allow": [] },
-      { "from": "cli/commands", "allow": ["cli/browser", "cli/config", "cli/storybook"] },
+      {
+        "from": "cli/commands",
+        "allow": [
+          "cli/baselines",
+          "cli/browser",
+          "cli/capture",
+          "cli/capture/driver",
+          "cli/capture/driver/cdp",
+          "cli/config",
+          "cli/container",
+          "cli/storybook"
+        ]
+      },
       { "from": "cli/config", "allow": [] },
       { "from": "cli/storybook", "allow": [] },
       { "from": "repo-checks/workspace", "allow": [] },

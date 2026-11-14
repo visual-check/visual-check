@@ -11,11 +11,25 @@ const { version } = JSON.parse(readFileSync(join(packageFolder, 'package.json'),
 const temporaryFolders: string[] = []
 
 /**
+ * A well-formed `chromium.json` for the fake browser package.
+ */
+const chromiumJson = {
+  chromium: '157.0.8103.78',
+  image: { tag: 'ghcr.io/visual-check/chromium:157.0.0', digest: `sha256:${'0'.repeat(64)}` },
+  headlessShell: '/opt/chrome-headless-shell/chrome-headless-shell',
+}
+
+/**
  * Copies the built CLI into a fresh temporary folder, so module resolution can't reach the workspace's node_modules
  * beyond jiti, which the binary needs to start.
- * When `browserVersion` is given, also installs a fake browser package of that version there.
+ * When `browserVersion` is given, also installs a fake browser package of that version there, with `manifest` over its
+ * `package.json` and `chromium` as its `chromium.json`.
  */
-function setUp(browserVersion?: string, manifest: Record<string, unknown> = {}): string {
+function setUp(
+  browserVersion?: string,
+  manifest: Record<string, unknown> = {},
+  chromium: Record<string, unknown> = chromiumJson,
+): string {
   const folder = mkdtempSync(join(tmpdir(), 'visual-check-'))
 
   temporaryFolders.push(folder)
@@ -40,10 +54,11 @@ function setUp(browserVersion?: string, manifest: Record<string, unknown> = {}):
       JSON.stringify({
         name: '@visual-check/chromium',
         version: browserVersion,
-        exports: { './package.json': './package.json' },
+        exports: { '.': './chromium.json', './package.json': './package.json' },
         ...manifest,
       }),
     )
+    writeFileSync(join(browserFolder, 'chromium.json'), JSON.stringify(chromium))
   }
 
   return folder
@@ -125,6 +140,25 @@ describe('browser package check', () => {
     expect(result.status).toBe(2)
     expect(result.stderr).toContain("can't be read")
     expect(result.stderr).toContain('its package.json has no version')
+  })
+
+  it('exits 2 naming the field and the fix when chromium.json is malformed, before looking for a config', () => {
+    const result = run(setUp('157.0.0', {}, { ...chromiumJson, image: { tag: chromiumJson.image.tag } }))
+
+    expect(result.status).toBe(2)
+    expect(result.stderr).toBe(
+      "The browser package @visual-check/chromium can't be read: its chromium.json has no valid image.digest: " +
+        'it must be sha256: and 64 hex digits, and it is missing.\n' +
+        'Reinstall it: npm install --save-dev @visual-check/chromium@157\n',
+    )
+  })
+
+  it('exits 2 when the package does not export its chromium.json', () => {
+    const result = run(setUp('157.0.0', { exports: { './package.json': './package.json' } }))
+
+    expect(result.status).toBe(2)
+    expect(result.stderr).toContain("The browser package @visual-check/chromium can't be read:")
+    expect(result.stderr).toContain('Reinstall it: npm install --save-dev @visual-check/chromium@157')
   })
 
   it('exits 2 when the package does not export its package.json', () => {

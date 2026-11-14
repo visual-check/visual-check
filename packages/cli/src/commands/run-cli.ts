@@ -4,7 +4,9 @@ import { ConfigError } from '../config/config-error.js'
 import { isCi } from '../config/is-ci.js'
 import { type LoadConfigOptions, loadConfig } from '../config/load-config.js'
 import { checkStorybooks } from './check-storybooks.js'
+import { type LaunchBrowser, launchBrowserInContainer } from './launch-browser.js'
 import { parseCommandLine, type RunOptions, UsageError } from './parse-command-line.js'
+import { runSnapshots } from './run-snapshots.js'
 import { selectStories } from './select-stories.js'
 
 /**
@@ -50,8 +52,26 @@ export interface CliResult {
 }
 
 /**
- * Runs the CLI with the given arguments, environment and folder, and returns its result without writing anything.
- * Problems with the command line, the config or the run's setup exit with code 2. Other errors are thrown.
+ * What the CLI's caller gives a run besides its arguments, environment and folder.
+ *
+ * @public
+ */
+export interface RunCliOptions {
+  /**
+   * Writes progress as it happens, such as an image pull's. Progress is dropped when it isn't given.
+   */
+  progress?: (text: string) => void
+  /**
+   * Launches the browser that `test` and `update` capture in. By default the image is pulled when Docker lacks it,
+   * and the browser starts in visual-check's container and connects over CDP. A test gives a fake.
+   */
+  launchBrowser?: LaunchBrowser
+}
+
+/**
+ * Runs the CLI with the given arguments, environment and folder, and returns what it prints on each stream. Only
+ * progress is written as it happens, through `options.progress`; `update` also writes baselines. Problems with the
+ * command line, the config, the run's setup or the browser exit with code 2. Other errors are thrown.
  *
  * @public
  */
@@ -59,6 +79,7 @@ export async function runCli(
   commandLineArguments: string[],
   environment: Record<string, string | undefined>,
   cwd: string,
+  options: RunCliOptions = {},
 ): Promise<CliResult> {
   try {
     const commandLine = parseCommandLine(commandLineArguments)
@@ -72,7 +93,7 @@ export async function runCli(
         return failure("visual-check init isn't available yet. Write visual-check.config.ts by hand for now.")
       case 'test':
       case 'update':
-        return await runTestOrUpdate(commandLine.command, commandLine.options, environment, cwd)
+        return await runTestOrUpdate(commandLine.command, commandLine.options, environment, cwd, options)
     }
   } catch (error) {
     if (error instanceof UsageError) {
@@ -89,9 +110,9 @@ export async function runCli(
 
 /**
  * Runs `test` or `update` after the checks that come first: `update` runs only locally, the browser package is
- * installed, the config is found, valid and usable, every Storybook in the run has a supported `storybook` version
- * installed, and every Storybook in the run answers with an index. Then it
- * reports how many stories each Storybook's selection covers.
+ * installed and readable, the config is found, valid and usable, its platform is one visual-check can run, every
+ * Storybook in the run has a supported `storybook` version installed, and every Storybook in the run answers with an
+ * index. Then it captures the selected stories.
  *
  * @throws {ConfigError} When the config can't be found, loaded or used.
  */
@@ -100,6 +121,7 @@ async function runTestOrUpdate(
   options: RunOptions,
   environment: Record<string, string | undefined>,
   cwd: string,
+  cliOptions: RunCliOptions,
 ): Promise<CliResult> {
   const ci = isCi(environment)
 
@@ -110,13 +132,21 @@ async function runTestOrUpdate(
     )
   }
 
-  const browserProblem = checkBrowserPackage(environment)
+  const browserCheck = checkBrowserPackage(environment)
 
-  if (browserProblem !== undefined) {
-    return { exitCode: 2, stdout: '', stderr: browserProblem }
+  if ('problem' in browserCheck) {
+    return { exitCode: 2, stdout: '', stderr: browserCheck.problem }
   }
 
   const config = await loadConfig(loadConfigOptionsOf(options, ci, cwd))
+  const { platform } = config
+
+  if (platform === 'host') {
+    return failure(
+      "visual-check can't run the browser on the host yet. Set platform to 'linux/amd64' or 'linux/arm64' in the config.",
+    )
+  }
+
   const checks = await checkStorybooks(config.storybooks, cwd)
   const warnings = checks.warnings.map((warning) => `${warning}\n`).join('')
 
@@ -128,20 +158,22 @@ async function runTestOrUpdate(
     }
   }
 
-  const stdout = checks.storybooks
-    .map(
-      ({ name, stories }) => `Storybook ${name}: ${storyCountOf(selectStories(stories, options.selection).length)}\n`,
-    )
-    .join('')
+  const result = await runSnapshots({
+    command,
+    version: readVersion(),
+    config,
+    platform,
+    browserPackage: browserCheck.browserPackage,
+    selections: checks.storybooks.map(({ storybook, stories }) => ({
+      storybook,
+      stories: selectStories(stories, options.selection),
+    })),
+    cwd,
+    launchBrowser: cliOptions.launchBrowser ?? launchBrowserInContainer,
+    progress: cliOptions.progress ?? (() => undefined),
+  })
 
-  return { exitCode: 0, stdout, stderr: warnings }
-}
-
-/**
- * Writes a number of stories as a count, with the noun in the right number.
- */
-function storyCountOf(count: number): string {
-  return `${count} ${count === 1 ? 'story' : 'stories'}`
+  return { ...result, stderr: `${warnings}${result.stderr}` }
 }
 
 /**
