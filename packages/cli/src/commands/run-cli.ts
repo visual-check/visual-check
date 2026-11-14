@@ -1,11 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { checkBrowserPackage } from '../browser/browser-package.js'
+import { imageMarkerPath } from '../browser/image-marker.js'
 import { ConfigError } from '../config/config-error.js'
 import { isCi } from '../config/is-ci.js'
 import { type LoadConfigOptions, loadConfig } from '../config/load-config.js'
 import { checkStorybooks } from './check-storybooks.js'
 import { type LaunchBrowser, launchBrowser } from './launch-browser.js'
 import { parseCommandLine, type RunOptions, UsageError } from './parse-command-line.js'
+import { placeBrowser } from './place-browser.js'
 import { runSnapshots } from './run-snapshots.js'
 import { selectStories } from './select-stories.js'
 
@@ -57,6 +59,11 @@ export interface CliResult {
  * @public
  */
 export interface RunCliOptions {
+  /**
+   * Where the marker of visual-check's image is read from. `/etc/visual-check/chromium.json` by default. A test gives
+   * another.
+   */
+  imageMarkerPath?: string
   /**
    * Writes progress as it happens, such as an image pull's. Progress is dropped when it isn't given.
    */
@@ -111,7 +118,8 @@ export async function runCli(
 
 /**
  * Runs `test` or `update` after the checks that come first: `update` runs only locally, the browser package is
- * installed and readable, the config is found, valid and usable, its platform is one visual-check can run, every
+ * installed and readable, the config is found, valid and usable, the browser has a place to run (inside visual-check's
+ * image when its marker fits the browser package and the platform, else in a container, never on the host), every
  * Storybook in the run has a supported `storybook` version installed, and every Storybook in the run answers with an
  * index. Then it captures the selected stories.
  *
@@ -140,12 +148,14 @@ async function runTestOrUpdate(
   }
 
   const config = await loadConfig(loadConfigOptionsOf(options, ci, cwd))
-  const { platform } = config
+  const placement = placeBrowser(
+    config.platform,
+    browserCheck.browserPackage,
+    cliOptions.imageMarkerPath ?? imageMarkerPath,
+  )
 
-  if (platform === 'host') {
-    return failure(
-      "visual-check can't run the browser on the host yet. Set platform to 'linux/amd64' or 'linux/arm64' in the config.",
-    )
+  if ('problem' in placement) {
+    return failure(placement.problem)
   }
 
   const checks = await checkStorybooks(config.storybooks, cwd)
@@ -163,7 +173,7 @@ async function runTestOrUpdate(
     command,
     version: readVersion(),
     config,
-    place: { in: 'container', platform },
+    place: placement.place,
     browserPackage: browserCheck.browserPackage,
     selections: checks.storybooks.map(({ storybook, stories }) => ({
       storybook,
