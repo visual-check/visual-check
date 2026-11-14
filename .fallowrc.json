@@ -1,5 +1,6 @@
 {
   "$schema": "./node_modules/fallow/schema.json",
+  "supportEntry": ["packages/test-storybook-react-10/visual-check.config.ts"],
   "duplicates": {
     "minOccurrences": 2
   },
@@ -62,6 +63,10 @@
         "packages/storybook-addon/src/preset.ts",
         "packages/repo-checks/src/check-chromium-checksums.ts",
         "packages/repo-checks/src/check-lockstep.ts",
+        "packages/test-storybook-react-10/.storybook/main.ts",
+        "packages/test-storybook-react-10/stories/*.stories.tsx",
+        "packages/test-storybook-react-10/e2e.ts",
+        "packages/test-storybook-react-10/visual-check.config.ts",
         "packages/*/test/**/*.test.ts"
       ]
     }

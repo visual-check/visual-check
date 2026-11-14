@@ -1,0 +1,12 @@
+{
+  "extends": "@visual-check/typescript-config/base.json",
+  "compilerOptions": {
+    "lib": ["es2023", "dom"],
+    "types": ["node"],
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true
+  },
+  "include": [".storybook", "stories", "e2e.ts", "visual-check.config.ts"]
+}
