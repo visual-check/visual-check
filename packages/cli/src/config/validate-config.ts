@@ -8,7 +8,7 @@ import type {
   Tolerance,
   Viewport,
 } from './define-config.js'
-import { isHttpUrl } from './is-http-url.js'
+import { findStorybookUrlProblem, mayHoldLogin, serveStorybookFix } from './find-storybook-url-problem.js'
 
 /**
  * Checks the value at a key path and returns one issue per problem, each starting with its key path. A key that is
@@ -33,6 +33,11 @@ interface Requirement {
    * Whether a value meets the requirement.
    */
   accepts: (value: unknown) => boolean
+  /**
+   * The reason a value that isn't accepted fails, as a sentence that follows its key path, when the usual "must be"
+   * would mislead. `undefined` leaves the usual issue.
+   */
+  explain?: (value: unknown) => string | undefined
 }
 
 /**
@@ -131,10 +136,17 @@ function render(value: unknown): string {
 }
 
 /**
- * The issue for a value at `path` that isn't what `text` says, showing the value briefly.
+ * The issue for a value at `path` that isn't what `text` says, showing the value briefly. A value that may hold a login
+ * isn't shown, so no issue prints a password.
  */
 function mustBe(path: string, text: string, value: unknown): string {
-  const characters = Array.from(render(value))
+  const rendered = render(value)
+
+  if (mayHoldLogin(rendered)) {
+    return `${path}: must be ${text}.`
+  }
+
+  const characters = Array.from(rendered)
   const brief =
     characters.length > maxShownLength ? `${characters.slice(0, maxShownLength - 1).join('')}…` : characters.join('')
 
@@ -157,7 +169,15 @@ function join(path: string, key: string): string {
  * Checks that a value meets a requirement, reporting `undefined` like any other value.
  */
 function meets(requirement: Requirement): Check {
-  return (value, path) => (requirement.accepts(value) ? [] : [mustBe(path, requirement.text, value)])
+  return (value, path) => {
+    if (requirement.accepts(value)) {
+      return []
+    }
+
+    const reason = requirement.explain?.(value)
+
+    return [reason === undefined ? mustBe(path, requirement.text, value) : `${path}: ${reason}`]
+  }
 }
 
 /**
@@ -280,17 +300,24 @@ const nonEmptyString: Requirement = {
 }
 
 /**
+ * A Storybook URL: an http(s) URL string that holds no user name or password. The issue for a login doesn't show the
+ * URL.
+ */
+const storybookUrl: Requirement = {
+  text: 'an http: or https: URL string',
+  accepts: (value) => findStorybookUrlProblem(value) === undefined,
+  explain: (value) =>
+    findStorybookUrlProblem(value) === 'login'
+      ? `holds a user name or password. visual-check sends no login: ${serveStorybookFix} and point the URL at that.`
+      : undefined,
+}
+
+/**
  * Checks one Storybook's settings.
  */
 const checkStorybook = objectOf(
   {
-    url: required(
-      `Set the URL the Storybook answers at, such as '${exampleUrl}'.`,
-      pairOf({
-        text: 'an http: or https: URL string',
-        accepts: isHttpUrl,
-      }),
-    ),
+    url: required(`Set the URL the Storybook answers at, such as '${exampleUrl}'.`, pairOf(storybookUrl)),
     dir: oneValue(nonEmptyString),
     configDir: oneValue(nonEmptyString),
     baselines: oneValue(nonEmptyString),

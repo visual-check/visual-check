@@ -59,6 +59,7 @@ function messageOf(value: unknown, displayPath = 'visual-check.config.ts'): stri
  */
 function issuesOf(value: unknown): string[] {
   const [header, ...lines] = messageOf(value).split('\n')
+
   expect(header).toBe('visual-check.config.ts is invalid:')
 
   return lines.map((line) => line.replace(/^ {2}- /, ''))
@@ -207,6 +208,7 @@ describe('the config object', () => {
 
   it('shows a circular object without crashing', () => {
     const circular: Record<string, unknown> = {}
+
     circular.self = circular
 
     expect(issuesOf(withRoot({ retries: circular }))).toEqual([
@@ -281,6 +283,59 @@ describe('storybooks.<name>', () => {
 
   it.each(['localhost:6006', 'ftp://x', '127.0.0.1:6006', '', 6006])('rejects the url %j', (value) => {
     expect(issuesOf({ storybooks: { web: { url: value } } })).toEqual([wrongValue('storybooks.web.url')])
+  })
+
+  it('rejects a url with a login, naming the key and the fix, without the password', () => {
+    expect(issuesOf({ storybooks: { web: { url: 'https://user:hunter2@example.com' } } })).toEqual([
+      'storybooks.web.url: holds a user name or password. visual-check sends no login: serve Storybook where ' +
+        'visual-check runs (storybook dev, or its static build served in the same CI job) and point the URL at that.',
+    ])
+  })
+
+  it.each([
+    ['a plain url', 'https://user:hunter2@example.com', 'storybooks.web.url'],
+    ['the local side', { local: 'https://user:hunter2@example.com', ci: url }, 'storybooks.web.url.local'],
+    ['the ci side', { local: url, ci: 'https://user:hunter2@example.com' }, 'storybooks.web.url.ci'],
+  ])('rejects a login in %s without printing the password', (_label, value, key) => {
+    const [issue, ...others] = issuesOf({ storybooks: { web: { url: value } } })
+
+    expect(others).toEqual([])
+    expect(issue).toMatch(new RegExp(`^${key.replaceAll('.', '\\.')}: holds a user name or password`))
+    expect(messageOf({ storybooks: { web: { url: value } } })).not.toContain('hunter2')
+  })
+
+  it.each(['ftp://u:hunter2@h', 'user:hunter2@host:6006'])('never prints the password of the url %j', (secret) => {
+    const values = [secret, { local: secret, ci: url }, { local: url, ci: secret }]
+
+    for (const value of values) {
+      expect(messageOf({ storybooks: { web: { url: value } } })).not.toContain('hunter2')
+    }
+  })
+
+  it('leaves out a value with an @ and keeps the requirement, for a plain value and each side', () => {
+    const bad = 'user:hunter2@host:6006'
+
+    expect(issuesOf({ storybooks: { web: { url: bad } } })).toEqual([
+      'storybooks.web.url: must be an http: or https: URL string, or a { local, ci } pair of those.',
+    ])
+    expect(issuesOf({ storybooks: { web: { url: { local: bad, ci: url } } } })).toEqual([
+      'storybooks.web.url.local: must be an http: or https: URL string.',
+    ])
+    expect(issuesOf({ storybooks: { web: { url: { local: url, ci: bad } } } })).toEqual([
+      'storybooks.web.url.ci: must be an http: or https: URL string.',
+    ])
+  })
+
+  it.each([
+    ['a Storybook that is a URL', { web: 'https://u:hunter2@h.io' }],
+    ['storybooks that is a URL', 'https://u:hunter2@h.io'],
+    ['a url array', { web: { url: ['https://u:hunter2@h.io'] } }],
+    ['a url pair side that is an array', { web: { url: { local: ['https://u:hunter2@h.io'] } } }],
+  ])('never prints a password a value holds elsewhere: %s', (_label, storybooks) => {
+    const message = messageOf({ storybooks })
+
+    expect(message).toContain('must be')
+    expect(message).not.toContain('hunter2')
   })
 
   it.each([
@@ -577,6 +632,7 @@ describe('silenceHosts', () => {
 
   it('rejects a hole in the array', () => {
     const silenceHosts: string[] = []
+
     silenceHosts[1] = 'example.com'
 
     expect(issuesOf(withRoot({ silenceHosts }))).toEqual([wrongValue('silenceHosts[0]')])

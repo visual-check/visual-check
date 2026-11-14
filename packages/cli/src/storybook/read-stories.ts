@@ -8,6 +8,14 @@ import { StorybookError, StorybookUnreachableError } from './storybook-error.js'
 const bodyLengthLimit = 500
 
 /**
+ * The fix the messages about a login name, which reads after "visual-check sends no login:". The `config` module words
+ * the same fix for the config and `--url`, and this module can't import it.
+ */
+const loginFix =
+  'serve Storybook where visual-check runs (storybook dev, or its static build served in the same CI job) ' +
+  'and point its URL at that.'
+
+/**
  * How long the index request may take, in milliseconds, body included. A dev server's first `index.json` can be slow,
  * so the limit is generous. Without one, a server that accepts the connection and never answers would hang the run
  * for undici's default 300 s.
@@ -131,10 +139,12 @@ function messageOf(error: unknown): string {
 
 /**
  * Builds the URL of a Storybook's `index.json`: the Storybook's path keeps its place, and a query, a hash and
- * credentials are left out, so the credentials are neither sent nor shown.
+ * credentials are left out, so the credentials are neither sent nor shown. The config and `--url` reject a URL that
+ * holds a login, so none reaches here; leaving them out is a second guard against sending or printing one.
  */
 function indexUrlOf(url: string): URL {
   const base = new URL(url)
+
   base.search = ''
   base.hash = ''
   base.username = ''
@@ -159,14 +169,50 @@ function timeoutErrorOf(name: string, indexUrl: string, timeoutMilliseconds: num
 
 /**
  * Builds the lines that follow a failed index's status: the response body when it has text, cut to a limit, then the
- * fix.
+ * fix. A server error points at the stories file that breaks the index. Any other status points at the URL, since the
+ * body of such a response, such as a dev server's rejected host, often explains the fix.
  */
-function failureDetailOf(body: string): string {
+function failureDetailOf(status: number, body: string): string {
   const text = body.trim()
   const quoted = text.length > bodyLengthLimit ? `${text.slice(0, bodyLengthLimit)}…` : text
   const quotedLine = quoted === '' ? '' : `\n${quoted}`
+  const fix =
+    status >= 500
+      ? "Fix what Storybook reports: on a dev server, a stories file that doesn't parse breaks index.json."
+      : 'Check that the URL points at the running Storybook.'
 
-  return `${quotedLine}\nFix what Storybook reports: on a dev server, a stories file that doesn't parse breaks index.json.`
+  return `${quotedLine}\n${fix}`
+}
+
+/**
+ * Builds the error for a body that isn't a Storybook index after a redirect, which is likely a login page. The final
+ * URL shows without its query, hash and credentials, since a login redirect carries tokens.
+ */
+function redirectedErrorOf(name: string, indexUrl: string, finalUrl: string): StorybookError {
+  const final = new URL(finalUrl)
+
+  return new StorybookError(
+    `Storybook ${name}'s index.json at ${indexUrl} redirected to ${final.origin}${final.pathname} and didn't get a ` +
+      `Storybook index, likely a login page. visual-check sends no login: ${loginFix}`,
+  )
+}
+
+/**
+ * Builds the error for a failed index request: a message that says the Storybook asks for a login on a 401, else the
+ * status, the body and the fix.
+ */
+function failedIndexErrorOf(name: string, indexUrl: string, response: Response, body: string): StorybookError {
+  const status = `HTTP ${response.status} ${response.statusText}`
+
+  if (response.status === 401) {
+    return new StorybookError(
+      `Storybook ${name} asks for a login at ${indexUrl} (${status}). visual-check sends no login: ${loginFix}`,
+    )
+  }
+
+  return new StorybookError(
+    `Storybook ${name}'s index.json failed at ${indexUrl}: ${status}.${failureDetailOf(response.status, body)}`,
+  )
 }
 
 /**
@@ -236,9 +282,7 @@ export async function readStories(
   }
 
   if (!response.ok) {
-    throw new StorybookError(
-      `Storybook ${storybook.name}'s index.json failed at ${indexUrl}: HTTP ${response.status} ${response.statusText}.${failureDetailOf(body)}`,
-    )
+    throw failedIndexErrorOf(storybook.name, indexUrl, response, body)
   }
 
   let stories: Story[]
@@ -246,6 +290,10 @@ export async function readStories(
   try {
     stories = parseIndex(JSON.parse(body))
   } catch (error) {
+    if (response.redirected) {
+      throw redirectedErrorOf(storybook.name, indexUrl, response.url)
+    }
+
     throw new StorybookError(
       `Storybook ${storybook.name}'s index.json at ${indexUrl} isn't a Storybook index: ${messageOf(error)}. ` +
         'Check that the URL points at Storybook 9.1 or later.',

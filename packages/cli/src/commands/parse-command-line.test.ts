@@ -101,6 +101,46 @@ describe('parseCommandLine', () => {
     )
   })
 
+  it.each(['https://user:hunter2@example.com', 'http://:hunter2@127.0.0.1:6006'])(
+    'rejects the --url %j, which holds a login, without printing it',
+    (value) => {
+      const { message } = usageErrorOf('test', '--url', value)
+
+      expect(message).toBe(
+        "--url can't hold a user name or password. visual-check sends no login: serve Storybook where visual-check " +
+          'runs (storybook dev, or its static build served in the same CI job) and point --url at that.',
+      )
+      expect(message).not.toContain('hunter2')
+    },
+  )
+
+  it('finds a login behind a protocol that is not http', () => {
+    const { message } = usageErrorOf('test', '--url', 'ftp://u:hunter2@h')
+
+    expect(message).toContain("--url can't hold a user name or password")
+    expect(message).not.toContain('hunter2')
+  })
+
+  it('leaves out a value with an @ that may hide a password', () => {
+    expect(usageErrorOf('test', '--url', 'user:hunter2@host:6006').message).toBe(
+      "--url takes an http: or https: URL, such as 'http://127.0.0.1:6006'.",
+    )
+  })
+
+  it('leaves out an extra argument that may hold a password, such as a URL given without --url', () => {
+    const { message } = usageErrorOf('test', 'https://u:hunter2@h.io')
+
+    expect(message).toBe('Unexpected argument (not shown: it may hold a password).')
+    expect(message).not.toContain('hunter2')
+  })
+
+  it('leaves out an unknown command that may hold a password, such as a URL given first', () => {
+    const { message } = usageErrorOf('https://u:hunter2@h.io', 'test')
+
+    expect(message).toBe('Unknown command (not shown: it may hold a password). The commands are init, test and update.')
+    expect(message).not.toContain('hunter2')
+  })
+
   it('reports an unknown command and a flag that does not apply to init before a bad --url', () => {
     expect(usageErrorOf('tset', '--url', 'x').message).toBe(
       "Unknown command 'tset'. The commands are init, test and update.",

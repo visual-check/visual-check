@@ -130,7 +130,8 @@ interface ResolveOptions {
    */
   storybook?: string
   /**
-   * The URL `--url` gives. It replaces the URL of the one Storybook the run covers.
+   * The URL `--url` gives. It replaces the URL of the one Storybook the run covers. It must be an http(s) URL with no
+   * login, which the command line reader has checked.
    */
   url?: string
 }
@@ -243,7 +244,7 @@ function findSharedBaselines(storybooks: PendingStorybook[], cwd: string): strin
 /**
  * Checks the Storybook name and the URL the command line gives against the config's Storybooks.
  *
- * The command line reader has already checked that the URL is an http(s) URL.
+ * The command line reader has already checked that the URL is an http(s) URL with no login.
  *
  * @throws {ConfigError} With a single message when the name isn't a Storybook in the config, and when a URL comes with
  * several Storybooks and no name.
