@@ -2,12 +2,15 @@
 
 One of this repo's own test Storybooks ([PRD 18](../../docs/prd/18-repo-ci.md#this-repos-own-test-storybooks)): a private React Storybook on Storybook 10 with a few plain stories, their committed baselines in `.visual-check/baselines/` and the expected outcome of every story in `expected-outcomes.json`.
 
-`e2e.ts` is its end-to-end check. It serves the static build on `127.0.0.1`, runs the built CLI against it and checks four cases. Inside visual-check's image the last is replaced; see below.
+`e2e.ts` is its end-to-end check. It serves the static build on `127.0.0.1`, runs the built CLI against it and checks five cases. Inside visual-check's image the last is replaced; see below.
 
-- `test` against the committed baselines gives exactly the expected outcomes.
-- `update` into an empty folder writes every story that isn't broken, `test` then passes them, and the baselines of the stories expected to pass are byte-identical to the committed ones. When they aren't, the written baselines are copied to `e2e-output/`.
+- `test` against the committed baselines, with 2 workers, gives exactly the expected outcomes.
+- `update` into an empty folder writes every story that isn't broken, `test` then passes them, and the baselines of the stories expected to pass are byte-identical to the committed ones. When they aren't, the written baselines are copied to `e2e-output/`. Both commands take 2 workers from the config.
+- With 1 worker, the two storage stories run one after the other on the same page and both pass. Each checks that visual-check's markers aren't in cookies, `localStorage`, `sessionStorage` or IndexedDB, then writes them and checks they stuck, so the second fails when storage isn't cleared between captures. A broken storage story's line gives only Storybook's generic status: the stores it found are named in the error it throws in its page, which the CLI doesn't print. Opening the story in an ordinary browser won't show them, because nothing clears storage there, so every store holds the marker from the second visit on.
 - A stylesheet that changes the card story makes `test` exit 1 with that story differing.
 - Killing the CLI while it captures leaves none of its containers behind.
+
+The last two run with the default `workers`, `'auto'`.
 
 ## Running the end-to-end check
 
@@ -22,10 +25,12 @@ Turbo builds the CLI and the Storybook first. The check prints one line per case
 
 ## Running it inside visual-check's image
 
-`--inside-image` runs the check the way a job container on visual-check's image would: the CLI starts the browser itself, with no Docker. It needs the image's marker (`/etc/visual-check/chromium.json`) and no `docker` on the `PATH`, and it doesn't need `TEST_STORYBOOK_IMAGE`. It runs the first three cases above, then these two in place of the kill case:
+`--inside-image` runs the check the way a job container on visual-check's image would: the CLI starts the browser itself, with no Docker. It needs the image's marker (`/etc/visual-check/chromium.json`) and no `docker` on the `PATH`, and it doesn't need `TEST_STORYBOOK_IMAGE`. It runs the first four cases above, then these two in place of the kill case:
 
 - With `platform: 'host'`, `test` uses the image's browser and gives exactly the expected outcomes.
 - With `platform: 'linux/arm64'`, `test` exits 2 before any capture, and its message names the image's architecture and the configured platform.
+
+The host case takes 2 workers from the config. The deliberate change runs with `'auto'`, which here reads the machine's own CPUs and memory, since no Docker is used.
 
 Mount the repo and a Linux Node into the image, with no network so that nothing can be downloaded. Build the CLI and the Storybook first, as in the next section, and `$NODE_DIR` is a Linux amd64 Node installation (the committed baselines are linux/amd64, so only the amd64 image works):
 
