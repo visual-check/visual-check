@@ -141,6 +141,56 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
+  # A job container on another image than visual-check's, with the docker CLI added. Actions mounts the Docker socket
+  # into it, so the CLI finds its own container and the browser joins its network to reach the Storybook the
+  # end-to-end check serves on the container's loopback.
+  job-container:
+    name: Job container
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: node:24-bookworm@sha256:9d266751ca3d7fdbe651c878ffd5ad0a42fed49a18c283509267c97f025b7496
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Docker's own apt repository for Debian, the image's base: the CLI and buildx only, no daemon. build.sh reads the
+      # browser package with jq, which the image lacks too.
+      - name: Install the docker CLI and jq
+        run: |
+          repository=https://download.docker.com/linux/debian
+          install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL --retry 5 "$repository/gpg" -o /etc/apt/keyrings/docker.asc
+          chmod a+r /etc/apt/keyrings/docker.asc
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] $repository bookworm stable" \
+            > /etc/apt/sources.list.d/docker.list
+          apt-get -o Acquire::Retries=5 update
+          apt-get -o Acquire::Retries=5 install --yes --no-install-recommends docker-ce-cli docker-buildx-plugin jq
+      - name: Check Docker
+        run: docker version && docker buildx version
+      - name: Create a docker-container builder
+        run: docker buildx create --driver docker-container --use
+      - name: Build the browser image
+        run: packages/chromium/image/build.sh amd64 --output type=docker,name=visual-check-chromium:ci
+      - name: End-to-end check
+        env:
+          TEST_STORYBOOK_IMAGE: visual-check-chromium:ci
+        run: pnpm turbo run e2e --filter @visual-check/test-storybook-10-react
+      - name: Upload the end-to-end output
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-output-${{ github.job }}
+          path: test-storybooks/storybook-10-react/e2e-output/
+          if-no-files-found: ignore
+          retention-days: 3
+
   lockstep:
     name: Lockstep versions
     runs-on: ubuntu-latest
