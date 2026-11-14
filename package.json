@@ -14,7 +14,6 @@
     "lint": "turbo run lint:biome lint:fallow",
     "lint:biome": "biome check .",
     "lint:fallow": "fallow --fail-on-issues --format compact",
-    "prepare": "lefthook install",
     "test": "turbo run test"
   },
   "devDependencies": {
