@@ -1,6 +1,6 @@
 import { answerOptionsReadExpression } from '../storybook/options-read.fixture.js'
 import { finishedAnswer } from '../storybook/preview-script.fixture.js'
-import type { BrowserExitedError, Driver, Page, PageSetup, PageViewport } from './driver/driver.js'
+import type { BrowserExitedError, CaptureArea, Driver, Page, PageSetup, PageViewport } from './driver/driver.js'
 import { settledAnswer } from './end-state.fixture.js'
 import { readyAnswer } from './page-script.fixture.js'
 
@@ -89,9 +89,9 @@ export interface FakePageBehaviour extends FakeEvaluation {
    */
   goto?: (url: string, timeoutMs: number) => Promise<void>
   /**
-   * Answers `captureFullPage`.
+   * Answers `capture`.
    */
-  captureFullPage?: () => Promise<Uint8Array>
+  capture?: (area: CaptureArea) => Promise<Uint8Array>
   /**
    * Answers `close`.
    */
@@ -203,10 +203,10 @@ export class FakeDriver implements Driver {
 
         return await answerEvaluate(answers, expression, timeoutMs)
       },
-      captureFullPage: async () => {
-        record('captureFullPage', [])
+      capture: async (area) => {
+        record('capture', [area])
 
-        return answers.captureFullPage === undefined ? defaultSnapshot : await answers.captureFullPage()
+        return answers.capture === undefined ? defaultSnapshot : await answers.capture(area)
       },
       close: async () => {
         record('close', [])

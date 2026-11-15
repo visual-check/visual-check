@@ -1,7 +1,14 @@
 import { setFlagsFromString } from 'node:v8'
 import { runInNewContext } from 'node:vm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { type BrowserSystem, type Driver, type Page, PageLoadError, PageTimeoutError } from '../driver.js'
+import {
+  type BrowserSystem,
+  CaptureTooLargeError,
+  type Driver,
+  type Page,
+  PageLoadError,
+  PageTimeoutError,
+} from '../driver.js'
 import { launchCdpDriver } from './cdp-driver.js'
 import {
   type CommandHandler,
@@ -527,7 +534,7 @@ describe('Page', () => {
     await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1 })
     await page.goto(storyUrl, 1000)
     await page.evaluate('document.title', 1000)
-    await page.captureFullPage()
+    await page.capture('full-page')
     await page.clearStorage()
     await page.close()
     expect(new Set(browser.received.map((command) => command.method))).toEqual(
@@ -574,7 +581,7 @@ describe('Page', () => {
     await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1 })
     await page.goto(storyUrl, 1000)
     await expect(page.evaluate('fail()', 1000)).rejects.toThrow()
-    await page.captureFullPage()
+    await page.capture('full-page')
     await page.clearStorage()
     await page.close()
     expect(vi.getTimerCount()).toBe(0)
@@ -605,9 +612,9 @@ describe('the 30 s limit on a page call', () => {
       "The page didn't set its viewport within 30 s.",
     ],
     [
-      'captureFullPage',
+      'capture',
       'Page.captureScreenshot',
-      (page: Page) => page.captureFullPage(),
+      (page: Page) => page.capture('full-page'),
       "The page wasn't captured within 30 s.",
     ],
     [
@@ -930,7 +937,30 @@ describe('Page.evaluate', () => {
   })
 })
 
-describe('Page.captureFullPage', () => {
+/**
+ * Answers `Page.getLayoutMetrics` with a layout viewport this wide and content this tall, in CSS pixels. The content
+ * is wider than the viewport, which a full-page capture leaves out.
+ */
+function layoutOf(clientWidth: number, contentHeight: number): CommandHandler {
+  return (command: ReceivedCommand, fake: FakeBrowser) =>
+    fake.reply(command, {
+      cssLayoutViewport: { pageX: 0, pageY: 0, clientWidth, clientHeight: 720 },
+      cssContentSize: { x: 0, y: 0, width: clientWidth + 500, height: contentHeight },
+    })
+}
+
+/**
+ * The capture command the first page sends for this clip, at scale 1.
+ */
+function captureCommand(clip: { x: number; y: number; width: number; height: number }): SentCommand {
+  return {
+    method: 'Page.captureScreenshot',
+    params: { format: 'png', captureBeyondViewport: true, clip: { ...clip, scale: 1 } },
+    sessionId,
+  }
+}
+
+describe('Page.capture', () => {
   it('keeps no hold on the bytes it returned while the page stays open', async () => {
     const data = Buffer.alloc(1024 * 1024, 7).toString('base64')
     const { page } = await openPage({
@@ -938,38 +968,35 @@ describe('Page.captureFullPage', () => {
         'Page.captureScreenshot': (command: ReceivedCommand, fake: FakeBrowser) => fake.reply(command, { data }),
       },
     })
-    const bytes = new WeakRef(await page.captureFullPage())
+    const bytes = new WeakRef(await page.capture('full-page'))
 
     await flush()
     collectGarbage()
     expect(bytes.deref()).toBeUndefined()
   })
 
-  it('captures the whole content as PNG beyond the viewport, its size rounded up', async () => {
-    const { browser, page } = await openPage({
-      handlers: {
-        'Page.getLayoutMetrics': (command: ReceivedCommand, fake: FakeBrowser) =>
-          fake.reply(command, { cssContentSize: { x: 0, y: 0, width: 1280.2, height: 2400.5 } }),
-      },
-    })
+  it("captures the full page as PNG at the layout viewport's width and the content's height, rounded up", async () => {
+    const { browser, page } = await openPage({ handlers: { 'Page.getLayoutMetrics': layoutOf(1280.2, 2400.5) } })
 
-    await page.captureFullPage()
+    await page.capture('full-page')
     expect(sentOf(browser, 'Page.captureScreenshot')).toEqual([
-      {
-        method: 'Page.captureScreenshot',
-        params: {
-          format: 'png',
-          captureBeyondViewport: true,
-          clip: { x: 0, y: 0, width: 1281, height: 2401, scale: 1 },
-        },
-        sessionId,
-      },
+      captureCommand({ x: 0, y: 0, width: 1281, height: 2401 }),
+    ])
+  })
+
+  it('captures a box as given, without reading the layout', async () => {
+    const { browser, page } = await openPage()
+
+    await page.capture({ x: 16, y: 2000, width: 320, height: 48 })
+    expect(sentOf(browser, 'Page.getLayoutMetrics')).toEqual([])
+    expect(sentOf(browser, 'Page.captureScreenshot')).toEqual([
+      captureCommand({ x: 16, y: 2000, width: 320, height: 48 }),
     ])
   })
 
   it('resolves with the exact bytes the browser sent', async () => {
     const { page } = await openPage()
-    const bytes = await page.captureFullPage()
+    const bytes = await page.capture('full-page')
 
     expect([...bytes]).toEqual([...Buffer.from(defaultCaptureData, 'base64')])
   })
@@ -977,13 +1004,107 @@ describe('Page.captureFullPage', () => {
   it("fails when the browser's layout answer has no content size", async () => {
     const { page } = await openPage({
       handlers: {
-        'Page.getLayoutMetrics': (command: ReceivedCommand, fake: FakeBrowser) => fake.reply(command, {}),
+        'Page.getLayoutMetrics': (command: ReceivedCommand, fake: FakeBrowser) =>
+          fake.reply(command, { cssLayoutViewport: { pageX: 0, pageY: 0, clientWidth: 1280, clientHeight: 720 } }),
       },
     })
 
-    await expect(page.captureFullPage()).rejects.toThrow(
+    await expect(page.capture('full-page')).rejects.toThrow(
       "The browser's answer to Page.getLayoutMetrics has no cssContentSize.",
     )
+  })
+
+  it("fails when the browser's layout answer has no layout viewport", async () => {
+    const { page } = await openPage({
+      handlers: {
+        'Page.getLayoutMetrics': (command: ReceivedCommand, fake: FakeBrowser) =>
+          fake.reply(command, { cssContentSize: { x: 0, y: 0, width: 1280, height: 720 } }),
+      },
+    })
+
+    await expect(page.capture('full-page')).rejects.toThrow(
+      "The browser's answer to Page.getLayoutMetrics has no cssLayoutViewport.",
+    )
+  })
+
+  it.each([
+    [
+      'clientWidth',
+      '{"pageX":0,"pageY":0,"clientWidth":1e999,"clientHeight":720}',
+      '{"width":1280,"height":720}',
+      'cssLayoutViewport',
+    ],
+    [
+      'height',
+      '{"pageX":0,"pageY":0,"clientWidth":1280,"clientHeight":720}',
+      '{"width":1280,"height":-1e999}',
+      'cssContentSize',
+    ],
+  ])(
+    'fails, sending no capture, when the layout answer gives an infinite %s',
+    async (_field, viewport, content, named) => {
+      const { browser, page } = await openPage({
+        handlers: {
+          'Page.getLayoutMetrics': (command: ReceivedCommand, fake: FakeBrowser) =>
+            fake.replyWithJson(command, `{"cssLayoutViewport":${viewport},"cssContentSize":${content}}`),
+        },
+      })
+
+      await expect(page.capture('full-page')).rejects.toThrow(
+        `The browser's answer to Page.getLayoutMetrics has no ${named}.`,
+      )
+      expect(sentOf(browser, 'Page.captureScreenshot')).toEqual([])
+    },
+  )
+
+  it('fails with a CaptureTooLargeError, sending no capture, when the full page is over 32,767 device pixels tall', async () => {
+    const { browser, page } = await openPage({ handlers: { 'Page.getLayoutMetrics': layoutOf(1280, 16_384) } })
+
+    await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 2 })
+
+    const failure = await page.capture('full-page').catch((error: unknown) => error)
+
+    expect(failure).toBeInstanceOf(CaptureTooLargeError)
+    expect(failure).toMatchObject({
+      message: 'The capture would be 2560 × 32768 device pixels, over the 32,767 the browser can capture on a side.',
+      deviceWidth: 2560,
+      deviceHeight: 32_768,
+    })
+    expect(sentOf(browser, 'Page.captureScreenshot')).toEqual([])
+  })
+
+  it("captures a full page up to 32,767 device pixels tall at the viewport's scale", async () => {
+    const { browser, page } = await openPage({ handlers: { 'Page.getLayoutMetrics': layoutOf(1280, 16_383) } })
+
+    await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 2 })
+    await page.capture('full-page')
+    expect(sentOf(browser, 'Page.captureScreenshot')).toEqual([
+      captureCommand({ x: 0, y: 0, width: 1280, height: 16_383 }),
+    ])
+  })
+
+  it('counts device pixels at a scale of 1 before any viewport is set', async () => {
+    const { browser, page } = await openPage()
+
+    await expect(page.capture({ x: 0, y: 0, width: 32_768, height: 100 })).rejects.toMatchObject({
+      name: 'CaptureTooLargeError',
+      deviceWidth: 32_768,
+      deviceHeight: 100,
+    })
+    await page.capture({ x: 0, y: 0, width: 32_767, height: 100 })
+    expect(sentOf(browser, 'Page.captureScreenshot')).toEqual([
+      captureCommand({ x: 0, y: 0, width: 32_767, height: 100 }),
+    ])
+  })
+
+  it('rounds the device pixels up at a fractional scale', async () => {
+    const { page } = await openPage()
+
+    await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1.5 })
+    await expect(page.capture({ x: 0, y: 0, width: 21_845, height: 1 })).rejects.toMatchObject({
+      deviceWidth: 32_768,
+      deviceHeight: 2,
+    })
   })
 })
 
@@ -1136,7 +1257,7 @@ const viewport = { width: 1280, height: 720, deviceScaleFactor: 1 }
  */
 const callsInFlight: [string, string, (page: Page) => Promise<unknown>][] = [
   ['evaluate', 'Runtime.evaluate', (page: Page) => page.evaluate('play()', 60_000)],
-  ['captureFullPage', 'Page.captureScreenshot', (page: Page) => page.captureFullPage()],
+  ['capture', 'Page.captureScreenshot', (page: Page) => page.capture('full-page')],
   ['setViewport', 'Emulation.setDeviceMetricsOverride', (page: Page) => page.setViewport(viewport)],
   ['clearStorage', 'DOMStorage.clear', (page: Page) => page.clearStorage()],
 ]
@@ -1164,7 +1285,7 @@ describe('when the page navigates away after a goto loaded', () => {
 
       await expect(page.evaluate('1', 60_000)).rejects.toMatchObject(failure)
       await expect(page.setViewport(viewport)).rejects.toMatchObject(failure)
-      await expect(page.captureFullPage()).rejects.toMatchObject(failure)
+      await expect(page.capture('full-page')).rejects.toMatchObject(failure)
       await expect(page.clearStorage()).rejects.toMatchObject(failure)
       await expect(page.goto(storyUrl, 60_000)).rejects.toMatchObject(failure)
       expect(browser.received.length).toBe(sentBefore)
@@ -1339,7 +1460,7 @@ describe('when the page navigates away after a goto loaded', () => {
     browser.emit('Page.frameNavigated', { frame: mainFrame(targetId, burgersUrl, 'loader-9') }, 'session-other')
     await flush()
     await expect(page.evaluate('1', 1000)).rejects.toMatchObject({ name: 'CdpError' })
-    await expect(page.captureFullPage()).resolves.toBeDefined()
+    await expect(page.capture('full-page')).resolves.toBeDefined()
   })
 
   it('counts no commit or request from before a goto loaded', async () => {
@@ -1354,7 +1475,7 @@ describe('when the page navigates away after a goto loaded', () => {
     browser.emit('Page.frameNavigated', { frame: mainFrame(targetId, 'about:blank', 'loader-0') }, sessionId)
     await flush()
     await expect(page.evaluate('1', 1000)).rejects.toMatchObject({ name: 'CdpError' })
-    await expect(page.captureFullPage()).resolves.toBeDefined()
+    await expect(page.capture('full-page')).resolves.toBeDefined()
   })
 
   it('counts no commit after a goto that failed', async () => {
@@ -1372,7 +1493,7 @@ describe('when the page navigates away after a goto loaded', () => {
       sessionId,
     )
     await flush()
-    await expect(page.captureFullPage()).resolves.toBeDefined()
+    await expect(page.capture('full-page')).resolves.toBeDefined()
   })
 
   it('counts no commit after a goto that timed out, though a late answer reveals that its document loaded', async () => {
@@ -1392,7 +1513,7 @@ describe('when the page navigates away after a goto loaded', () => {
     await flush()
     browser.emit('Page.frameNavigated', { frame: mainFrame(targetId, burgersUrl, 'loader-9') }, sessionId)
     await flush()
-    await expect(page.captureFullPage()).resolves.toBeDefined()
+    await expect(page.capture('full-page')).resolves.toBeDefined()
   })
 
   it('forgets a pending navigation when a goto starts, and follows the document that goto loads', async () => {
@@ -1411,7 +1532,7 @@ describe('when the page navigates away after a goto loaded', () => {
     await expect(page.evaluate('1', 1000)).rejects.toMatchObject({ name: 'CdpError' })
     browser.emit('Page.frameNavigated', { frame: mainFrame(targetId, burgersUrl, 'loader-9') }, sessionId)
     await flush()
-    await expect(page.captureFullPage()).rejects.toMatchObject(navigatedAway(burgersUrl, nextStoryUrl))
+    await expect(page.capture('full-page')).rejects.toMatchObject(navigatedAway(burgersUrl, nextStoryUrl))
   })
 
   it('never turns a PageTimeoutError into a PageNavigatedAwayError', async () => {
@@ -1535,7 +1656,7 @@ describe('when the page crashes', () => {
       },
     })
 
-    await expect(page.captureFullPage()).rejects.toMatchObject({ name: 'PageCrashedError' })
+    await expect(page.capture('full-page')).rejects.toMatchObject({ name: 'PageCrashedError' })
     await flush()
     expect(sentOf(browser, 'Page.captureScreenshot')).toEqual([])
   })
@@ -1553,7 +1674,7 @@ describe('when the page crashes', () => {
     await expect(page.setViewport({ width: 1, height: 1, deviceScaleFactor: 1 })).rejects.toMatchObject({
       name: 'PageCrashedError',
     })
-    await expect(page.captureFullPage()).rejects.toMatchObject({ name: 'PageCrashedError' })
+    await expect(page.capture('full-page')).rejects.toMatchObject({ name: 'PageCrashedError' })
     await expect(page.clearStorage()).rejects.toMatchObject({ name: 'PageCrashedError' })
     expect(sentOf(browser, 'Runtime.evaluate')).toEqual([])
     expect(sentOf(browser, 'Storage.clearCookies')).toEqual([])

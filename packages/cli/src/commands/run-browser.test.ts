@@ -89,7 +89,7 @@ function fakeBrowserOf(version: string = browserPackage.chromium): FakeBrowser {
 
         return await answerEvaluate({}, expression, timeoutMs)
       },
-      captureFullPage: async () => {
+      capture: async () => {
         await holds.get(id)
         failIfGone()
         fake.captured.push(id)

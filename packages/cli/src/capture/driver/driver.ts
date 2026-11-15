@@ -144,6 +144,38 @@ export interface PageViewport {
 }
 
 /**
+ * A rectangle of a page's document, in CSS pixels of the document: whole numbers, `x` and `y` at least 0, and `width`
+ * and `height` over 0.
+ *
+ * @public
+ */
+export interface CaptureBox {
+  /**
+   * The distance from the document's left edge to the box's.
+   */
+  x: number
+  /**
+   * The distance from the document's top edge to the box's.
+   */
+  y: number
+  /**
+   * The box's width.
+   */
+  width: number
+  /**
+   * The box's height.
+   */
+  height: number
+}
+
+/**
+ * What a capture takes in: the full page, or a box of its document.
+ *
+ * @public
+ */
+export type CaptureArea = 'full-page' | CaptureBox
+
+/**
  * A page in a browser context of its own, set up once, that stories are loaded and captured in. It emulates
  * `prefers-reduced-motion: no-preference` and keeps focus as if its window were focused.
  *
@@ -198,11 +230,13 @@ export interface Page {
    */
   evaluate: (expression: string, timeoutMs: number) => Promise<unknown>
   /**
-   * Captures the whole page, beyond the viewport too, without resizing the viewport. Resolves with the PNG bytes exactly
-   * as the browser made them. Fails with a `PageTimeoutError` when the browser doesn't answer within the driver's own
-   * fixed limit.
+   * Captures an area of the page without resizing the viewport. The full page is the whole document at the viewport's
+   * width, beyond the viewport's height too. A box is that rectangle of the document, wherever it lies. Resolves with
+   * the PNG bytes exactly as the browser made them. Fails with a `CaptureTooLargeError`, without capturing, when the
+   * capture would be over 32,767 device pixels on a side. Fails with a `PageTimeoutError` when the browser doesn't
+   * answer within the driver's own fixed limit.
    */
-  captureFullPage: () => Promise<Uint8Array>
+  capture: (area: CaptureArea) => Promise<Uint8Array>
   /**
    * Clears every cookie of the page's browser context, and `localStorage`, `sessionStorage` and IndexedDB of the origin
    * of the document the last `goto` loaded, wherever a server redirect took it. Only that origin's: a cross-origin
@@ -337,6 +371,46 @@ export class PageTimeoutError extends Error {
   constructor(message: string, timeoutMs: number) {
     super(message)
     this.timeoutMs = timeoutMs
+  }
+}
+
+/**
+ * The most device pixels a capture can be on a side: the biggest image the browser can make.
+ *
+ * @public
+ */
+export const maxCaptureSide = 32_767
+
+/**
+ * A capture would be over 32,767 device pixels on a side, more than the browser can capture.
+ *
+ * @public
+ */
+export class CaptureTooLargeError extends Error {
+  /**
+   * The class's name, so a stack trace or a log line reads `CaptureTooLargeError`.
+   */
+  override name = 'CaptureTooLargeError'
+
+  /**
+   * The capture's width, in device pixels.
+   */
+  readonly deviceWidth: number
+
+  /**
+   * The capture's height, in device pixels.
+   */
+  readonly deviceHeight: number
+
+  /**
+   * Keeps the capture's size in device pixels, with the message naming it.
+   */
+  constructor(deviceWidth: number, deviceHeight: number) {
+    super(
+      `The capture would be ${deviceWidth} × ${deviceHeight} device pixels, over the ${maxCaptureSide.toLocaleString('en-US')} the browser can capture on a side.`,
+    )
+    this.deviceWidth = deviceWidth
+    this.deviceHeight = deviceHeight
   }
 }
 

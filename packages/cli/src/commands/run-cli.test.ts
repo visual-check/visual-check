@@ -461,7 +461,7 @@ function fakeDriverOf({
             timeoutMs,
           )
         },
-        captureFullPage: async () => {
+        capture: async () => {
           gateOf(gates, `capturing ${id}`).resolve()
           await Promise.all((story.waitsForCapturing ?? []).map((other) => gateOf(gates, `capturing ${other}`).promise))
 

@@ -5,6 +5,7 @@ import { waitHookExpression } from '../storybook/wait-hook.js'
 import { type CaptureSettings, openCaptureSession } from './capture-session.js'
 import {
   BrowserExitedError,
+  CaptureTooLargeError,
   PageCrashedError,
   PageLoadError,
   PageNavigatedAwayError,
@@ -100,7 +101,7 @@ describe('a capture', () => {
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [waitHookExpression('button--primary', 10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [endStateExpression(10_000), 11_000] },
-      { page: 1, method: 'captureFullPage', args: [] },
+      { page: 1, method: 'capture', args: ['full-page'] },
     ])
   })
 
@@ -113,7 +114,7 @@ describe('a capture', () => {
       { page: 1, method: 'evaluate', args: [waitHookExpression('button--primary', 10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [endStateExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
-      { page: 1, method: 'captureFullPage', args: [] },
+      { page: 1, method: 'capture', args: ['full-page'] },
     ])
   })
 
@@ -169,7 +170,7 @@ describe('a capture', () => {
 
   it('gives the snapshot exactly as the browser made it', async () => {
     const bytes = new Uint8Array([1, 2, 3])
-    const driver = new FakeDriver({ pages: [{ captureFullPage: async () => bytes }] })
+    const driver = new FakeDriver({ pages: [{ capture: async () => bytes }] })
     const capture = await openCaptureSession(driver, settings).capture(primary)
 
     expect(capture).toEqual({ snapshot: bytes })
@@ -209,7 +210,7 @@ describe("the story's wait hook", () => {
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [waitHookExpression('button--primary', 10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [endStateExpression(10_000), 11_000] },
-      { page: 1, method: 'captureFullPage', args: [] },
+      { page: 1, method: 'capture', args: ['full-page'] },
     ])
   })
 
@@ -222,7 +223,7 @@ describe("the story's wait hook", () => {
       { page: 1, method: 'evaluate', args: [waitHookExpression('button--primary', 10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [endStateExpression(10_000), 11_000] },
-      { page: 1, method: 'captureFullPage', args: [] },
+      { page: 1, method: 'capture', args: ['full-page'] },
     ])
   })
 
@@ -341,7 +342,7 @@ describe("the story's wait hook", () => {
     const driver = new FakeDriver({ pages: [checkedAfterTheHook(async () => answer)] })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({ broken })
-    expect(driver.methods()).not.toContain('1:captureFullPage')
+    expect(driver.methods()).not.toContain('1:capture')
   })
 
   it("makes a broken story, timeout, of a page that doesn't answer while it runs, naming that step", async () => {
@@ -475,7 +476,7 @@ describe("clearing the previous story's storage", () => {
       '1:evaluate',
       '1:evaluate',
       '1:evaluate',
-      '1:captureFullPage',
+      '1:capture',
       '1:clearStorage',
       '1:setViewport',
       '1:goto',
@@ -483,7 +484,7 @@ describe("clearing the previous story's storage", () => {
       '1:evaluate',
       '1:evaluate',
       '1:evaluate',
-      '1:captureFullPage',
+      '1:capture',
       '1:clearStorage',
       '1:setViewport',
       '1:goto',
@@ -491,7 +492,7 @@ describe("clearing the previous story's storage", () => {
       '1:evaluate',
       '1:evaluate',
       '1:evaluate',
-      '1:captureFullPage',
+      '1:capture',
     ])
   })
 
@@ -512,7 +513,7 @@ describe("clearing the previous story's storage", () => {
       '2:evaluate',
       '2:evaluate',
       '2:evaluate',
-      '2:captureFullPage',
+      '2:capture',
     ])
   })
 
@@ -552,7 +553,7 @@ describe("clearing the previous story's storage", () => {
       '2:evaluate',
       '2:evaluate',
       '2:evaluate',
-      '2:captureFullPage',
+      '2:capture',
     ])
   })
 })
@@ -568,7 +569,7 @@ describe('a broken story', () => {
           'Storybook reported the story finished with status "error", as it does when a loader, beforeEach or the render throws, or when a check such as accessibility fails.',
       },
     })
-    expect(driver.methods()).not.toContain('1:captureFullPage')
+    expect(driver.methods()).not.toContain('1:capture')
   })
 
   it.each([
@@ -600,7 +601,7 @@ describe('a broken story', () => {
     const driver = new FakeDriver({ pages: [{ storyWait: async () => finishedAnswer(answer) }] })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({ broken: { reason, message } })
-    expect(driver.methods()).not.toContain('1:captureFullPage')
+    expect(driver.methods()).not.toContain('1:capture')
   })
 
   it.each([
@@ -654,7 +655,7 @@ describe('a broken story', () => {
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
       broken: { reason: 'timeout', message: `The story wasn't ready within readyTimeout (10000 ms): ${doing}.` },
     })
-    expect(driver.methods()).not.toContain('1:captureFullPage')
+    expect(driver.methods()).not.toContain('1:capture')
   })
 
   it('is fonts-not-loaded when fonts were still loading at the time limit, naming the faces', async () => {
@@ -669,7 +670,7 @@ describe('a broken story', () => {
         faces,
       },
     })
-    expect(driver.methods()).not.toContain('1:captureFullPage')
+    expect(driver.methods()).not.toContain('1:capture')
   })
 
   it("is a timeout when document.fonts.ready hadn't resolved at the time limit with no face still loading", async () => {
@@ -739,7 +740,7 @@ describe('a broken story', () => {
           "The story wasn't ready within readyTimeout (10000 ms): visual-check was still finishing its animations.",
       },
     })
-    expect(driver.methods()).not.toContain('1:captureFullPage')
+    expect(driver.methods()).not.toContain('1:capture')
   })
 
   it('is a timeout when visual-check was still putting its media on their first frame at the time limit, saying so', async () => {
@@ -752,7 +753,7 @@ describe('a broken story', () => {
           "The story wasn't ready within readyTimeout (10000 ms): visual-check was still putting its media on their first frame.",
       },
     })
-    expect(driver.methods()).not.toContain('1:captureFullPage')
+    expect(driver.methods()).not.toContain('1:capture')
   })
 
   it("is one whose page didn't run the page script when bringing it to its end state", async () => {
@@ -822,7 +823,7 @@ describe('a broken story', () => {
           "The story wasn't ready within readyTimeout (10000 ms): 1 of its images was still loading after its end state.",
       },
     })
-    expect(driver.methods()).not.toContain('1:captureFullPage')
+    expect(driver.methods()).not.toContain('1:capture')
   })
 
   it("is one whose page doesn't load in time, naming that step", async () => {
@@ -933,7 +934,7 @@ describe('a broken story', () => {
     ['assetsWait', 'Waiting for images and fonts'],
     ['waitHook', "Running the story's wait hook"],
     ['endStateWait', 'Bringing the story to its end state'],
-    ['captureFullPage', 'Capturing the snapshot'],
+    ['capture', 'Capturing the snapshot'],
   ] as const)('is one whose %s fails, naming that step and why', async (method, step) => {
     const driver = new FakeDriver({
       pages: [
@@ -1051,7 +1052,7 @@ describe('a broken story', () => {
     const driver = new FakeDriver({
       pages: [
         {
-          captureFullPage: async () => {
+          capture: async () => {
             throw new PageTimeoutError("The page didn't capture within 30 s.", 30_000)
           },
         },
@@ -1061,6 +1062,27 @@ describe('a broken story', () => {
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
       broken: { reason: 'error', message: "Capturing the snapshot failed: The page didn't capture within 30 s." },
     })
+  })
+
+  it('is too tall when the capture is over 32,767 device pixels on a side, and its page is closed', async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          capture: async () => {
+            throw new CaptureTooLargeError(2560, 40_000)
+          },
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'too-tall',
+        message:
+          'The capture is 2560 × 40000 device pixels, over 32,767 on a side. Set element to capture part of the story, or use a smaller viewport.',
+      },
+    })
+    expect(driver.methods()).toContain('1:close')
   })
 
   it('is one whose page fails to open, saying why', async () => {
@@ -1102,7 +1124,7 @@ describe('a broken story', () => {
       '2:evaluate',
       '2:evaluate',
       '2:evaluate',
-      '2:captureFullPage',
+      '2:capture',
     ])
   })
 
@@ -1178,7 +1200,7 @@ describe('a story that navigates away', () => {
     `${page}:evaluate`,
     `${page}:evaluate`,
     `${page}:evaluate`,
-    `${page}:captureFullPage`,
+    `${page}:capture`,
   ]
 
   it('is broken with the last attempt after 2 retries, each on a fresh page', async () => {

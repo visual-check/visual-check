@@ -89,6 +89,11 @@ export const pageSetup: PageSetup = {
 }
 
 /**
+ * The layout viewport the fake browser reports for a page by default, in CSS pixels.
+ */
+const defaultLayoutViewport = { pageX: 0, pageY: 0, clientWidth: 800, clientHeight: 600 }
+
+/**
  * The content size the fake browser reports for a page by default, in CSS pixels.
  */
 const defaultContentSize = { x: 0, y: 0, width: 800, height: 1200 }
@@ -192,10 +197,10 @@ function evaluateToUndefined(command: ReceivedCommand, browser: FakeBrowser): vo
 }
 
 /**
- * Answers with the default content size.
+ * Answers with the default layout viewport and content size.
  */
 function answerLayoutMetrics(command: ReceivedCommand, browser: FakeBrowser): void {
-  browser.reply(command, { cssContentSize: defaultContentSize })
+  browser.reply(command, { cssLayoutViewport: defaultLayoutViewport, cssContentSize: defaultContentSize })
 }
 
 /**
@@ -377,6 +382,16 @@ export class FakeBrowser {
    */
   reply(command: ReceivedCommand, result: Record<string, unknown>): void {
     this.send({ id: command.id, result })
+  }
+
+  /**
+   * Replies to a command with a result written as JSON text, which can carry what `JSON.stringify` can't, such as
+   * `1e999`, which parses as Infinity.
+   */
+  replyWithJson(command: ReceivedCommand, resultJson: string): void {
+    if (!this.exiting) {
+      this.fromBrowser.write(`{"id":${command.id},"result":${resultJson}}\0`)
+    }
   }
 
   /**

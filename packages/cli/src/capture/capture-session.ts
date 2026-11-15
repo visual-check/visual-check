@@ -3,7 +3,9 @@ import { testPathUserAgentSuffix } from '../storybook/test-path.js'
 import { readWaitHookRun, type WaitHookRun, waitHookExpression } from '../storybook/wait-hook.js'
 import {
   BrowserExitedError,
+  CaptureTooLargeError,
   type Driver,
+  maxCaptureSide,
   type Page,
   PageCrashedError,
   PageNavigatedAwayError,
@@ -89,6 +91,7 @@ export interface StoryToCapture {
  * - `wait-threw`: the story's `wait` hook threw or rejected.
  * - `navigated-away`: the story's page went to another document.
  * - `crashed`: the page crashed, usually from running out of memory.
+ * - `too-tall`: the capture is over 32,767 device pixels on a side.
  * - `browser-exited`: the browser exited while the story was in flight. The run's browser gives it; a capture session
  *   rejects with a `BrowserExitedError` instead.
  *
@@ -103,6 +106,7 @@ export type BrokenReason =
   | 'wait-threw'
   | 'navigated-away'
   | 'crashed'
+  | 'too-tall'
   | 'browser-exited'
 
 /**
@@ -430,7 +434,8 @@ function describeWaitHookRun(
 
 /**
  * Says why a story couldn't be captured, from the error a step failed with. A `PageTimeoutError` from loading the story
- * or from a wait in the page means readyTimeout ran out. `story` shows a URL on the story's own origin as a path.
+ * or from a wait in the page means readyTimeout ran out. A `CaptureTooLargeError` means the story is too tall to
+ * capture. `story` shows a URL on the story's own origin as a path.
  */
 function describeFailure(error: unknown, step: Step, story: StoryToCapture, readyTimeoutMs: number): BrokenStory {
   if (error instanceof PageCrashedError) {
@@ -445,6 +450,13 @@ function describeFailure(error: unknown, step: Step, story: StoryToCapture, read
       reason: 'navigated-away',
       message: `The story navigated away to ${displayUrlOf(error.url, story.url)}. Await the new page before clicking.`,
       url: error.url,
+    }
+  }
+
+  if (error instanceof CaptureTooLargeError) {
+    return {
+      reason: 'too-tall',
+      message: `The capture is ${error.deviceWidth} × ${error.deviceHeight} device pixels, over ${maxCaptureSide.toLocaleString('en-US')} on a side. Set element to capture part of the story, or use a smaller viewport.`,
     }
   }
 
@@ -555,7 +567,7 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
 
     step = 'capture'
 
-    return { snapshot: await page.captureFullPage(), completingMs: wait.completingMs }
+    return { snapshot: await page.capture('full-page'), completingMs: wait.completingMs }
   } catch (error) {
     if (error instanceof BrowserExitedError) {
       throw error
