@@ -196,6 +196,7 @@ function runBrowserWith(...browsers: (FakeBrowser | Promise<FakeBrowser> | Error
         timezone: 'UTC',
         locale: 'en-US',
         colorScheme: 'light',
+        maskColor: '#FF00FF',
       },
       progress: () => undefined,
     },

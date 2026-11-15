@@ -1,13 +1,32 @@
 /**
- * The source of a function, evaluated in the page as part of the page script, that gives two helpers for the steps
+ * The source of a function, evaluated in the page as part of the page script, that gives the helpers for the steps
  * that look through a document's elements, never throwing:
  *
  * - `elementsOf(root, selector)` gives the elements of a root that match the selector, or none when the root can't be
  *   queried;
  * - `rootsOf(document, recordedRoots)` gives the document, the shadow roots the page script recorded, closed ones
- *   included, and every open shadow root found by walking each root's elements, nested ones too, each once.
+ *   included, and every open shadow root found by walking each root's elements, nested ones too, each once;
+ * - `read(getter, fallback)` gives what the getter reads in the page, or the fallback when it throws;
+ * - `isObject(value)` says whether a value is an object, not `null`;
+ * - `scrollOf(view, axis)` gives how far a window is scrolled along `scrollX` or `scrollY`, or 0 when that can't be
+ *   read or isn't a finite number.
  */
 export const pageRootsFunction = `() => {
+  const read = (getter, fallback) => {
+    try {
+      return getter()
+    } catch {
+      return fallback
+    }
+  }
+
+  const isObject = (value) => typeof value === 'object' && value !== null
+
+  const scrollOf = (view, axis) => {
+    const scroll = read(() => view[axis], 0)
+    return Number.isFinite(scroll) ? scroll : 0
+  }
+
   const elementsOf = (root, selector) => {
     try {
       return Array.from(root.querySelectorAll(selector))
@@ -17,12 +36,8 @@ export const pageRootsFunction = `() => {
   }
 
   const openShadowRootOf = (element) => {
-    try {
-      const root = element.shadowRoot
-      return typeof root === 'object' && root !== null ? root : undefined
-    } catch {
-      return undefined
-    }
+    const root = read(() => element.shadowRoot, undefined)
+    return isObject(root) ? root : undefined
   }
 
   const rootsOf = (rootDocument, recordedRoots) => {
@@ -39,5 +54,5 @@ export const pageRootsFunction = `() => {
     return roots
   }
 
-  return { elementsOf, rootsOf }
+  return { elementsOf, rootsOf, read, isObject, scrollOf }
 }`

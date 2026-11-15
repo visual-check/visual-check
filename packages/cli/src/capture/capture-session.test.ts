@@ -14,7 +14,7 @@ import {
 import { animationsTimedOutAnswer, mediaTimedOutAnswer, settledAnswer } from './end-state.fixture.js'
 import { defaultSnapshot, FakeDriver, type FakePageBehaviour } from './fake-driver.fixture.js'
 import { fontsTimedOutAnswer, imagesTimedOutAnswer, readyAnswer } from './page-script.fixture.js'
-import { assetsReadyExpression, endStateExpression, pageInitScript } from './page-script.js'
+import { assetsReadyExpression, endStateExpression, pageInitScript, prepareCaptureExpression } from './page-script.js'
 
 /**
  * The settings every session in these tests captures with.
@@ -25,6 +25,7 @@ const settings: CaptureSettings = {
   timezone: 'Europe/Warsaw',
   locale: 'pl-PL',
   colorScheme: 'dark',
+  maskColor: '#00FF00',
 }
 
 /**
@@ -38,6 +39,13 @@ const primary = { id: 'button--primary', url: 'http://localhost:6006/iframe.html
 const secondary = {
   id: 'button--secondary',
   url: 'http://localhost:6006/iframe.html?id=button--secondary&viewMode=story',
+}
+
+/**
+ * Builds the capture preparation expression for a story without element or masks, with this time limit.
+ */
+function plainPrepExpression(timeoutMs: number): string {
+  return prepareCaptureExpression({ element: null, masks: [], maskColor: '#00FF00' }, timeoutMs)
 }
 
 /**
@@ -90,7 +98,7 @@ describe('openCaptureSession', () => {
 })
 
 describe('a capture', () => {
-  it('sets the viewport, loads the story, waits for it to finish and for its images and fonts, runs its wait hook, brings it to its end state and captures the full page', async () => {
+  it('sets the viewport, loads the story, waits for it to finish and for its images and fonts, runs its wait hook, brings it to its end state, paints its masks and captures the full page', async () => {
     const driver = new FakeDriver()
 
     await openCaptureSession(driver, settings).capture(primary)
@@ -101,11 +109,12 @@ describe('a capture', () => {
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [waitHookExpression('button--primary', 10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [endStateExpression(10_000), 11_000] },
+      { page: 1, method: 'evaluate', args: [plainPrepExpression(10_000), 11_000] },
       { page: 1, method: 'capture', args: ['full-page'] },
     ])
   })
 
-  it('checks images and fonts again before the capture when the end state changed anything', async () => {
+  it('checks images and fonts again before the masks when the end state changed anything', async () => {
     const driver = new FakeDriver({ pages: [{ endStateWait: async () => settledAnswer(true) }] })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({ snapshot: defaultSnapshot })
@@ -114,6 +123,7 @@ describe('a capture', () => {
       { page: 1, method: 'evaluate', args: [waitHookExpression('button--primary', 10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [endStateExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
+      { page: 1, method: 'evaluate', args: [plainPrepExpression(10_000), 11_000] },
       { page: 1, method: 'capture', args: ['full-page'] },
     ])
   })
@@ -150,6 +160,7 @@ describe('a capture', () => {
     expect(driver.calls[4]?.args).toEqual([waitHookExpression('button--primary', 3000), 4000])
     expect(driver.calls[5]?.args).toEqual([endStateExpression(3000), 4000])
     expect(driver.calls[6]?.args).toEqual([assetsReadyExpression(1500), 2500])
+    expect(driver.calls[7]?.args).toEqual([plainPrepExpression(0), 1000])
   })
 
   it('rounds the time left up to whole ms', async () => {
@@ -165,7 +176,7 @@ describe('a capture', () => {
 
     await session.capture(primary)
     await session.capture(secondary)
-    expect(driver.calls[9]).toEqual({ page: 1, method: 'goto', args: [secondary.url, 10_000] })
+    expect(driver.calls[10]).toEqual({ page: 1, method: 'goto', args: [secondary.url, 10_000] })
   })
 
   it('gives the snapshot exactly as the browser made it', async () => {
@@ -210,6 +221,7 @@ describe("the story's wait hook", () => {
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [waitHookExpression('button--primary', 10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [endStateExpression(10_000), 11_000] },
+      { page: 1, method: 'evaluate', args: [plainPrepExpression(10_000), 11_000] },
       { page: 1, method: 'capture', args: ['full-page'] },
     ])
   })
@@ -223,6 +235,7 @@ describe("the story's wait hook", () => {
       { page: 1, method: 'evaluate', args: [waitHookExpression('button--primary', 10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [endStateExpression(10_000), 11_000] },
+      { page: 1, method: 'evaluate', args: [plainPrepExpression(10_000), 11_000] },
       { page: 1, method: 'capture', args: ['full-page'] },
     ])
   })
@@ -461,6 +474,184 @@ describe("the story's wait hook", () => {
   })
 })
 
+describe('the masks', () => {
+  /**
+   * A story with an element and masks.
+   */
+  const card = {
+    ...primary,
+    element: '#card',
+    masks: [
+      { name: 'clock', selector: '.clock' },
+      { name: 'images', host: 'images.example.com' },
+    ],
+  }
+
+  it("are painted after the end state, with the story's element and masks and the settings' maskColor", async () => {
+    const driver = new FakeDriver()
+
+    await openCaptureSession(driver, settings).capture(card)
+    expect(driver.calls.slice(5)).toEqual([
+      { page: 1, method: 'evaluate', args: [endStateExpression(10_000), 11_000] },
+      {
+        page: 1,
+        method: 'evaluate',
+        args: [prepareCaptureExpression({ element: '#card', masks: card.masks, maskColor: '#00FF00' }, 10_000), 11_000],
+      },
+      { page: 1, method: 'capture', args: ['full-page'] },
+    ])
+  })
+
+  it('are painted after the check of images and fonts that follows an end state that changed anything', async () => {
+    const driver = new FakeDriver({ pages: [{ endStateWait: async () => settledAnswer(true) }] })
+
+    await openCaptureSession(driver, settings).capture(primary)
+    expect(driver.calls.slice(5)).toEqual([
+      { page: 1, method: 'evaluate', args: [endStateExpression(10_000), 11_000] },
+      { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
+      { page: 1, method: 'evaluate', args: [plainPrepExpression(10_000), 11_000] },
+      { page: 1, method: 'capture', args: ['full-page'] },
+    ])
+  })
+
+  it('get only the time readyTimeout has left', async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          goto: async () => pass(3000),
+          endStateWait: async () => {
+            pass(2500)
+
+            return settledAnswer()
+          },
+        },
+      ],
+    })
+
+    await openCaptureSession(driver, settings).capture(primary)
+    expect(driver.calls[6]?.args).toEqual([plainPrepExpression(4500), 5500])
+  })
+
+  it("capture the element's box when the page gives one", async () => {
+    const box = { x: 8, y: 16, width: 320, height: 200 }
+    const driver = new FakeDriver({ pages: [{ capturePrep: async () => ({ outcome: 'ready', box }) }] })
+
+    expect(await openCaptureSession(driver, settings).capture(card)).toEqual({ snapshot: defaultSnapshot })
+    expect(driver.calls.at(-1)).toEqual({ page: 1, method: 'capture', args: [box] })
+  })
+
+  it.each([
+    [
+      'the element selector matched nothing',
+      { outcome: 'element-missing', found: 'nothing' },
+      { reason: 'element-missing', message: 'The element selector "#card" matched nothing.' },
+    ],
+    [
+      'the element selector matched an element of zero size',
+      { outcome: 'element-missing', found: 'zero-size' },
+      {
+        reason: 'element-missing',
+        message: 'The element selector "#card" matched an element with a box of zero size.',
+      },
+    ],
+    [
+      'the element selector is not valid CSS',
+      { outcome: 'invalid-selector', of: 'element', message: "'#card' is not a valid selector" },
+      { reason: 'error', message: `The element selector "#card" isn't valid CSS: '#card' is not a valid selector.` },
+    ],
+    [
+      "a mask's selector is not valid CSS",
+      { outcome: 'invalid-selector', of: 'mask', name: 'clock', message: "'.clock' is not a valid selector." },
+      { reason: 'error', message: `The selector of mask "clock" isn't valid CSS: '.clock' is not a valid selector.` },
+    ],
+    [
+      'the remote content search timed out',
+      { outcome: 'timed-out' },
+      {
+        reason: 'timeout',
+        message:
+          "The story wasn't ready within readyTimeout (10000 ms): visual-check was still looking for remote content to mask.",
+      },
+    ],
+    [
+      "the page script didn't run",
+      { outcome: 'script-missing' },
+      {
+        reason: 'error',
+        message: "visual-check's page script didn't run in the story's page, so it couldn't paint its masks.",
+      },
+    ],
+    [
+      "the page gives an answer visual-check doesn't know",
+      42,
+      {
+        reason: 'error',
+        message:
+          "Painting its masks and hiding the caret failed: Preparing the capture in the page gave an answer visual-check doesn't know: 42.",
+      },
+    ],
+  ])('make a broken story when %s, capturing nothing and closing the page', async (_what, answer, broken) => {
+    const driver = new FakeDriver({ pages: [{ capturePrep: async () => answer }] })
+
+    expect(await openCaptureSession(driver, settings).capture(card)).toEqual({ broken })
+    expect(driver.methods()).not.toContain('1:capture')
+    expect(driver.methods().at(-1)).toBe('1:close')
+  })
+
+  it('quote the selector as JSON in the message, so its own quotes show', async () => {
+    const driver = new FakeDriver({
+      pages: [{ capturePrep: async () => ({ outcome: 'element-missing', found: 'nothing' }) }],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture({ ...primary, element: '[data-id="a"]' })).toEqual({
+      broken: { reason: 'element-missing', message: 'The element selector "[data-id=\\"a\\"]" matched nothing.' },
+    })
+  })
+
+  it("make a broken story, timeout, of a page that doesn't answer while they're painted, naming that step", async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          capturePrep: async (timeoutMs) => {
+            pass(timeoutMs)
+
+            throw new PageTimeoutError("The expression evaluated in the page didn't finish within 11 s.", timeoutMs)
+          },
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(card)).toEqual({
+      broken: {
+        reason: 'timeout',
+        message:
+          "The story wasn't ready within readyTimeout (10000 ms): its page stopped answering while visual-check painted its masks and hid the caret.",
+      },
+    })
+    expect(driver.methods().at(-1)).toBe('1:close')
+  })
+
+  it('name the step when the page crashes while they are painted', async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          capturePrep: async () => {
+            throw new PageCrashedError()
+          },
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(card)).toEqual({
+      broken: {
+        reason: 'crashed',
+        message:
+          'The page crashed while painting its masks and hiding the caret, usually because it ran out of memory. Fewer workers leave each page more memory.',
+      },
+    })
+  })
+})
+
 describe("clearing the previous story's storage", () => {
   it('clears the page before each later capture on it', async () => {
     const driver = new FakeDriver()
@@ -476,18 +667,21 @@ describe("clearing the previous story's storage", () => {
       '1:evaluate',
       '1:evaluate',
       '1:evaluate',
-      '1:capture',
-      '1:clearStorage',
-      '1:setViewport',
-      '1:goto',
-      '1:evaluate',
-      '1:evaluate',
-      '1:evaluate',
       '1:evaluate',
       '1:capture',
       '1:clearStorage',
       '1:setViewport',
       '1:goto',
+      '1:evaluate',
+      '1:evaluate',
+      '1:evaluate',
+      '1:evaluate',
+      '1:evaluate',
+      '1:capture',
+      '1:clearStorage',
+      '1:setViewport',
+      '1:goto',
+      '1:evaluate',
       '1:evaluate',
       '1:evaluate',
       '1:evaluate',
@@ -513,6 +707,7 @@ describe("clearing the previous story's storage", () => {
       '2:evaluate',
       '2:evaluate',
       '2:evaluate',
+      '2:evaluate',
       '2:capture',
     ])
   })
@@ -523,7 +718,7 @@ describe("clearing the previous story's storage", () => {
 
     await session.capture(primary)
     await session.capture(secondary)
-    expect(driver.calls[9]).toEqual({ page: 1, method: 'goto', args: [secondary.url, 10_000] })
+    expect(driver.calls[10]).toEqual({ page: 1, method: 'goto', args: [secondary.url, 10_000] })
   })
 
   it.each([
@@ -544,11 +739,12 @@ describe("clearing the previous story's storage", () => {
 
     await session.capture(primary)
     expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot })
-    expect(driver.methods().slice(7)).toEqual([
+    expect(driver.methods().slice(8)).toEqual([
       '1:clearStorage',
       '1:close',
       '2:setViewport',
       '2:goto',
+      '2:evaluate',
       '2:evaluate',
       '2:evaluate',
       '2:evaluate',
@@ -1085,6 +1281,27 @@ describe('a broken story', () => {
     expect(driver.methods()).toContain('1:close')
   })
 
+  it("is too tall with a hint to capture a smaller element when the story's element is over 32,767 device pixels", async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          capturePrep: async () => ({ outcome: 'ready', box: { x: 0, y: 0, width: 640, height: 20_000 } }),
+          capture: async () => {
+            throw new CaptureTooLargeError(1280, 40_000)
+          },
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture({ ...primary, element: '#list' })).toEqual({
+      broken: {
+        reason: 'too-tall',
+        message:
+          'The capture is 1280 × 40000 device pixels, over 32,767 on a side. Capture a smaller element, or use a smaller viewport.',
+      },
+    })
+  })
+
   it('is one whose page fails to open, saying why', async () => {
     const driver = new FakeDriver({
       newPage: async () => {
@@ -1120,6 +1337,7 @@ describe('a broken story', () => {
       '1:close',
       '2:setViewport',
       '2:goto',
+      '2:evaluate',
       '2:evaluate',
       '2:evaluate',
       '2:evaluate',
@@ -1196,6 +1414,7 @@ describe('a story that navigates away', () => {
   const capturedOn = (page: number): string[] => [
     `${page}:setViewport`,
     `${page}:goto`,
+    `${page}:evaluate`,
     `${page}:evaluate`,
     `${page}:evaluate`,
     `${page}:evaluate`,

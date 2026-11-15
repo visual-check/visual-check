@@ -5,10 +5,11 @@ import { settledAnswer } from './end-state.fixture.js'
 import { readyAnswer } from './page-script.fixture.js'
 
 /**
- * How a fake page answers the waits, the end state and the options read evaluated in it. One left out answers as on a
- * story that's ready: the story wait gives `finishedAnswer()`, the wait for images and fonts gives `readyAnswer()`, the
- * wait hook finds none to run, the end state gives `settledAnswer()`, changing nothing, and the options read finds every
- * file loaded and no story with options.
+ * How a fake page answers the waits, the end state, the capture preparation and the options read evaluated in it. One
+ * left out answers as on a story that's ready: the story wait gives `finishedAnswer()`, the wait for images and fonts
+ * gives `readyAnswer()`, the wait hook finds none to run, the end state gives `settledAnswer()`, changing nothing, the
+ * capture preparation is ready for the full page, and the options read finds every file loaded and no story with
+ * options.
  */
 interface FakeEvaluation {
   /**
@@ -28,16 +29,34 @@ interface FakeEvaluation {
    */
   endStateWait?: (timeoutMs: number) => Promise<unknown>
   /**
+   * Answers the capture preparation, given the driver's time limit for it.
+   */
+  capturePrep?: (timeoutMs: number) => Promise<unknown>
+  /**
    * Answers the options read, given the driver's time limit for it.
    */
   optionsRead?: (timeoutMs: number) => Promise<unknown>
 }
 
 /**
+ * How a fake page tells each evaluation apart and answers it: the call the expression makes in the page, the answer of
+ * `FakeEvaluation` that answers it, and what it answers when the test gives none, from the expression.
+ */
+const evaluationAnswers: [string, keyof FakeEvaluation, (expression: string) => unknown][] = [
+  ['.waitForStory(', 'storyWait', () => finishedAnswer()],
+  ['.waitForAssets(', 'assetsWait', () => readyAnswer()],
+  ['.runWait(', 'waitHook', () => ({ outcome: 'none' })],
+  ['.bringToEndState(', 'endStateWait', () => settledAnswer()],
+  ['.prepareCapture(', 'capturePrep', () => ({ outcome: 'ready', box: null })],
+  ['.readOptions(', 'optionsRead', answerOptionsReadExpression],
+]
+
+/**
  * Answers an expression evaluated in a fake page as `evaluation` says. It tells the waits apart by the function each
  * calls in the page: `waitForStory` for the story wait, `waitForAssets` for the wait for images and fonts, `runWait`
- * for the wait hook, `bringToEndState` for the end state and `readOptions` for the options read. Throws on any other
- * expression, so one the fake doesn't know, such as a wait whose function was renamed, fails clearly.
+ * for the wait hook, `bringToEndState` for the end state, `prepareCapture` for the capture preparation and
+ * `readOptions` for the options read. Throws on any other expression, so one the fake doesn't know, such as a wait
+ * whose function was renamed, fails clearly.
  *
  * @public
  */
@@ -46,26 +65,12 @@ export async function answerEvaluate(
   expression: string,
   timeoutMs: number,
 ): Promise<unknown> {
-  if (expression.includes('.waitForStory(')) {
-    return evaluation.storyWait === undefined ? finishedAnswer() : await evaluation.storyWait(timeoutMs)
-  }
+  for (const [call, answer, unscripted] of evaluationAnswers) {
+    if (expression.includes(call)) {
+      const scripted = evaluation[answer]
 
-  if (expression.includes('.waitForAssets(')) {
-    return evaluation.assetsWait === undefined ? readyAnswer() : await evaluation.assetsWait(timeoutMs)
-  }
-
-  if (expression.includes('.runWait(')) {
-    return evaluation.waitHook === undefined ? { outcome: 'none' } : await evaluation.waitHook(timeoutMs)
-  }
-
-  if (expression.includes('.bringToEndState(')) {
-    return evaluation.endStateWait === undefined ? settledAnswer() : await evaluation.endStateWait(timeoutMs)
-  }
-
-  if (expression.includes('.readOptions(')) {
-    return evaluation.optionsRead === undefined
-      ? await answerOptionsReadExpression(expression)
-      : await evaluation.optionsRead(timeoutMs)
+      return scripted === undefined ? await unscripted(expression) : await scripted(timeoutMs)
+    }
   }
 
   throw new Error(`The fake page doesn't know this expression: ${expression}`)

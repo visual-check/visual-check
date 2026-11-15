@@ -213,6 +213,7 @@ function captureSettingsOf(config: ResolvedConfig): CaptureSettings {
     timezone: config.timezone,
     locale: config.locale,
     colorScheme: config.colorScheme,
+    maskColor: config.maskColor,
   }
 }
 

@@ -43,7 +43,7 @@ import { pageRootsFunction } from './page-roots.js'
  */
 export const remoteContentFunction = `(context) => {
   const { shadowRoots, setTimer, clearTimer } = context
-  const { elementsOf, rootsOf } = (${pageRootsFunction})()
+  const { elementsOf, rootsOf, read, isObject, scrollOf } = (${pageRootsFunction})()
   // What the deadline gives once the time limit passes.
   const timedOut = Symbol('timed out')
 
@@ -63,18 +63,6 @@ export const remoteContentFunction = `(context) => {
   const withoutPseudoElements = new Set([
     'img', 'video', 'iframe', 'frame', 'input', 'canvas', 'br', 'hr', 'embed', 'object', 'audio', 'select', 'textarea',
   ])
-
-  // Reads something in the page, giving the fallback when it throws.
-  const read = (getter, fallback) => {
-    try {
-      return getter()
-    } catch {
-      return fallback
-    }
-  }
-
-  // Whether a value is an object, not null.
-  const isObject = (value) => typeof value === 'object' && value !== null
 
   // Every url() in a computed value, unescaped. Chromium gives each as url("…"), in image-set() too.
   const urlsIn = (value) => {
@@ -261,12 +249,6 @@ export const remoteContentFunction = `(context) => {
         } catch {}
       }
     }
-  }
-
-  // How far the top document is scrolled along an axis, 0 when that can't be read.
-  const scrollOf = (view, axis) => {
-    const scroll = read(() => view[axis], 0)
-    return Number.isFinite(scroll) ? scroll : 0
   }
 
   // The items for the remote URLs found, one per element and host, in CSS pixels of the top document.

@@ -4,8 +4,15 @@ import { animationClasses, fakeAnimation, restoreFinish } from '../storybook/pre
 import { readStoryWait, storyWaitExpression } from '../storybook/preview-script.js'
 import { animationsTimedOutAnswer, FakeFrames, fakeDocument, settledAnswer } from './end-state.fixture.js'
 import { fontsTimedOutAnswer, imagesTimedOutAnswer, readyAnswer } from './page-script.fixture.js'
-import { assetsReadyExpression, endStateExpression, pageInitScript, readAssetsReadiness } from './page-script.js'
-import { fakeImg, fakePageDocument } from './remote-content.fixture.js'
+import {
+  assetsReadyExpression,
+  endStateExpression,
+  pageInitScript,
+  prepareCaptureExpression,
+  readAssetsReadiness,
+} from './page-script.js'
+import { fakeCaptureDocument } from './prepare-capture.fixture.js'
+import { fakeElement, fakeImg, fakePageDocument } from './remote-content.fixture.js'
 
 /**
  * The console methods the fake page has, each a mock standing for the browser's own.
@@ -527,13 +534,25 @@ describe('the page script', () => {
     expect(readStoryWait(await wait)).toHaveProperty('outcome', 'timed-out')
   })
 
-  it('keeps its state out of enumeration, frozen, with the end state and the remote content search in it', () => {
+  it('keeps its state out of enumeration, frozen, with the end state, the search and the capture preparation in it', () => {
     const page = openPage()
 
     expect(page.run("Object.keys(globalThis).includes('__visualCheck')")).toBe(false)
     expect(page.run('Object.isFrozen(globalThis.__visualCheck)')).toBe(true)
     expect(page.run('typeof globalThis.__visualCheck.bringToEndState')).toBe('function')
     expect(page.run('typeof globalThis.__visualCheck.findRemoteContent')).toBe('function')
+    expect(page.run('typeof globalThis.__visualCheck.prepareCapture')).toBe('function')
+  })
+
+  it('creates the capture preparation without reading the document, which it prepares once called', async () => {
+    const { document } = fakeCaptureDocument()
+    const page = openPage({ document })
+
+    expect(page.documentReads()).toBe(0)
+    expect(
+      await page.evaluate(prepareCaptureExpression({ element: null, masks: [], maskColor: '#FF00FF' }, 1000)),
+    ).toEqual({ outcome: 'ready', box: null })
+    expect(page.documentReads()).toBeGreaterThan(0)
   })
 
   it('creates the remote content search without reading the document, which it searches once called', async () => {
@@ -912,5 +931,44 @@ describe('the end state', () => {
 
   it("gives script-missing in a page where the page script didn't run", async () => {
     expect(await blankPage().evaluate(endStateExpression(1000))).toEqual({ outcome: 'script-missing' })
+  })
+})
+
+describe('the capture preparation', () => {
+  it('passes the request into the page, so a selector with quotes and backslashes survives', async () => {
+    const selector = `[data-label="it's \\"odd\\""] .a\\:b`
+    const element = fakeElement('div', { box: { x: 10, y: 20, width: 30, height: 40 } })
+    const { document } = fakeCaptureDocument({ matches: { [selector]: [element] } })
+    const page = openPage({ document })
+
+    expect(
+      await page.evaluate(prepareCaptureExpression({ element: selector, masks: [], maskColor: '#FF00FF' }, 1000)),
+    ).toEqual({ outcome: 'ready', box: { x: 10, y: 20, width: 30, height: 40 } })
+  })
+
+  it("gives the host masks' search its time limit, rounded up to whole ms", async () => {
+    const image = fakeImg({ src: 'https://images.example.com/a.jpg', complete: false })
+    const { document } = fakePageDocument({
+      elements: [image],
+      controlled: true,
+      responses: { 'https://images.example.com/a.jpg': 'stalls' },
+    })
+    const page = openPage({ document, URL })
+    const request = { element: null, masks: [{ name: 'images', host: 'images.example.com' }], maskColor: '#FF00FF' }
+    let settled = false
+    const answer = page.evaluate(prepareCaptureExpression(request, 999.2)).finally(() => {
+      settled = true
+    })
+
+    await vi.advanceTimersByTimeAsync(999)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await answer).toEqual({ outcome: 'timed-out' })
+  })
+
+  it("gives script-missing in a page where the page script didn't run", async () => {
+    const request = { element: '#card', masks: [], maskColor: '#FF00FF' }
+
+    expect(await blankPage().evaluate(prepareCaptureExpression(request, 1000))).toEqual({ outcome: 'script-missing' })
   })
 })

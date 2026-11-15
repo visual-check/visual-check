@@ -286,10 +286,42 @@ export function fakeFrame({
 }
 
 /**
- * Builds a fake shadow root holding these elements.
+ * A fake shadow root: the stylesheets it adopted.
  */
-export function fakeShadowRoot(elements: object[]): object {
-  return { querySelectorAll: (selector: string) => (selector === '*' ? elements : []) }
+export interface FakeShadowRoot {
+  /**
+   * The stylesheets the root adopted, in order: none until a script adopts some.
+   */
+  adoptedStyleSheets: object[]
+}
+
+/**
+ * Gives the elements of a root that a selector matches: every one for `*`, its frames for `iframe, frame`, and none
+ * for any other selector.
+ */
+export function elementsMatching(elements: object[], selector: string): object[] {
+  if (selector === '*') {
+    return elements
+  }
+
+  if (selector !== 'iframe, frame') {
+    return []
+  }
+
+  return elements.filter((element) => ['iframe', 'frame'].includes(String(Reflect.get(element, 'localName'))))
+}
+
+/**
+ * Builds a fake shadow root holding these elements, which adopted no stylesheet yet. It answers `*` and
+ * `iframe, frame` as `elementsMatching` says.
+ */
+export function fakeShadowRoot(elements: object[] = []): FakeShadowRoot {
+  const root = {
+    adoptedStyleSheets: [],
+    querySelectorAll: (selector: string) => elementsMatching(elements, selector),
+  }
+
+  return root
 }
 
 /**
@@ -401,7 +433,7 @@ export function fakePageDocument({
   }
   const document = {
     defaultView: view,
-    querySelectorAll: (selector: string) => (selector === '*' ? elements : []),
+    querySelectorAll: (selector: string) => elementsMatching(elements, selector),
     createElement: (localName: string) => {
       if (localName === 'canvas') {
         canvases += 1
