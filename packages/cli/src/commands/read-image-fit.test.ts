@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { BrowserPackage } from '../browser/read-browser-package.js'
-import { placeBrowser } from './place-browser.js'
+import { readImageFit } from './read-image-fit.js'
 
 /**
  * A browser package as `chromium.json` names it.
@@ -13,6 +13,13 @@ const browserPackage: BrowserPackage = {
   chromium: '157.0.8103.78',
   image: { tag: 'ghcr.io/visual-check/chromium:157.0.0', digest: `sha256:${'ab'.repeat(32)}` },
   headlessShell: '/opt/chrome-headless-shell/chrome-headless-shell',
+  sha256: {
+    linux64: '1'.repeat(64),
+    'linux-arm64': '2'.repeat(64),
+    'mac-x64': '3'.repeat(64),
+    'mac-arm64': '4'.repeat(64),
+    win64: '5'.repeat(64),
+  },
 }
 
 /**
@@ -34,7 +41,7 @@ const folders: string[] = []
  * Makes a temporary folder, to be removed after the test.
  */
 function createFolder(): string {
-  const folder = mkdtempSync(join(tmpdir(), 'visual-check-place-'))
+  const folder = mkdtempSync(join(tmpdir(), 'visual-check-image-fit-'))
 
   folders.push(folder)
 
@@ -65,19 +72,19 @@ afterEach(() => {
   }
 })
 
-describe('placeBrowser', () => {
-  it("places the browser in visual-check's image when the marker fits, for every platform", () => {
+describe('readImageFit', () => {
+  it("says the CLI runs inside visual-check's image when the marker fits, for every platform", () => {
     const amd64 = writeMarker('{"version":"157.0.0","arch":"amd64"}\n')
 
-    expect(placeBrowser('linux/amd64', browserPackage, amd64)).toEqual({ place: { in: 'image' } })
-    expect(placeBrowser('host', browserPackage, amd64)).toEqual({ place: { in: 'image' } })
-    expect(placeBrowser('linux/arm64', browserPackage, writeMarker('{"version":"157.0.0","arch":"arm64"}\n'))).toEqual({
-      place: { in: 'image' },
+    expect(readImageFit('linux/amd64', browserPackage, amd64)).toEqual({ insideImage: true })
+    expect(readImageFit('host', browserPackage, amd64)).toEqual({ insideImage: true })
+    expect(readImageFit('linux/arm64', browserPackage, writeMarker('{"version":"157.0.0","arch":"arm64"}\n'))).toEqual({
+      insideImage: true,
     })
   })
 
   it('gives the version problem when the image is for another browser package version', () => {
-    const problem = placeBrowser('linux/amd64', browserPackage, writeMarker('{"version":"156.0.0","arch":"amd64"}\n'))
+    const problem = readImageFit('linux/amd64', browserPackage, writeMarker('{"version":"156.0.0","arch":"amd64"}\n'))
 
     expect(problem).toEqual({
       problem:
@@ -89,7 +96,7 @@ describe('placeBrowser', () => {
   it("gives the architecture problem when the image's isn't the platform's", () => {
     const marker = writeMarker('{"version":"157.0.0","arch":"arm64"}\n')
 
-    expect(placeBrowser('linux/amd64', browserPackage, marker)).toEqual({
+    expect(readImageFit('linux/amd64', browserPackage, marker)).toEqual({
       problem:
         "This container runs visual-check's image for arm64, but the config's platform is linux/amd64.\n" +
         'Run the container as linux/amd64, such as with docker run --platform linux/amd64 or ' +
@@ -99,14 +106,14 @@ describe('placeBrowser', () => {
   })
 
   it("ignores the image's architecture for the host platform", () => {
-    expect(placeBrowser('host', browserPackage, writeMarker('{"version":"157.0.0","arch":"arm64"}\n'))).toEqual({
-      place: { in: 'image' },
+    expect(readImageFit('host', browserPackage, writeMarker('{"version":"157.0.0","arch":"arm64"}\n'))).toEqual({
+      insideImage: true,
     })
   })
 
   it('gives a problem that names the marker and the fix when it is malformed', () => {
     const path = writeMarker('not json')
-    const result = placeBrowser('linux/amd64', browserPackage, path)
+    const result = readImageFit('linux/amd64', browserPackage, path)
 
     expect(result).toHaveProperty('problem')
 
@@ -119,7 +126,7 @@ describe('placeBrowser', () => {
 
   it("gives a problem that names the marker when it can't be read", () => {
     const path = createFolder()
-    const result = placeBrowser('linux/amd64', browserPackage, path)
+    const result = readImageFit('linux/amd64', browserPackage, path)
 
     expect(result).toHaveProperty('problem')
 
@@ -130,16 +137,14 @@ describe('placeBrowser', () => {
     expect(problem.endsWith(`.\n${imageFix}`)).toBe(true)
   })
 
-  it("gives today's message for the host platform outside visual-check's image", () => {
-    expect(placeBrowser('host', browserPackage, absentMarker())).toEqual({
-      problem:
-        "visual-check can't run the browser on the host yet. Set platform to 'linux/amd64' or 'linux/arm64' in the config.",
-    })
+  it("gives the host platform outside visual-check's image", () => {
+    expect(readImageFit('host', browserPackage, absentMarker())).toEqual({ insideImage: false, platform: 'host' })
   })
 
-  it("places the browser in a container on the config's platform outside visual-check's image", () => {
-    expect(placeBrowser('linux/arm64', browserPackage, absentMarker())).toEqual({
-      place: { in: 'container', platform: 'linux/arm64' },
+  it("gives the config's platform for the container outside visual-check's image", () => {
+    expect(readImageFit('linux/arm64', browserPackage, absentMarker())).toEqual({
+      insideImage: false,
+      platform: 'linux/arm64',
     })
   })
 })

@@ -1,6 +1,13 @@
-import { type Page, PageCrashedError, type PageSetup, PageTimeoutError, type PageViewport } from '../driver.js'
+import {
+  type BrowserSystem,
+  type Page,
+  PageCrashedError,
+  type PageSetup,
+  PageTimeoutError,
+  type PageViewport,
+} from '../driver.js'
 import { type CdpConnection, type CdpEvent, isRecord } from './cdp-connection.js'
-import { linuxFontFamilies } from './font-families.js'
+import { fontFamiliesOf } from './font-families.js'
 import { LoadedDocument } from './loaded-document.js'
 import { MainFrameNavigation } from './main-frame-navigation.js'
 import { settlesWithin, startTimeLimit, type TimeLimit, withinTimeLimit } from './time-limit.js'
@@ -263,16 +270,16 @@ class CdpPage implements Page {
   }
 
   /**
-   * Sets the page up once: the font table, the user agent, the emulated time zone, locale, colour scheme, motion and
-   * focus, and the init script, and denies downloads and every permission in the page's browser context. The commands
-   * go in parallel.
+   * Sets the page up once: the font table of the browser's OS, the user agent, the emulated time zone, locale, colour
+   * scheme, motion and focus, and the init script, and denies downloads and every permission in the page's browser
+   * context. The commands go in parallel.
    */
-  async setUp(browserUserAgent: string, setup: PageSetup): Promise<void> {
+  async setUp(browserUserAgent: string, system: BrowserSystem, setup: PageSetup): Promise<void> {
     await this.unlessFailed(
       Promise.all([
         this.send('Page.enable'),
         this.send('Inspector.enable'),
-        this.send('Page.setFontFamilies', { fontFamilies: linuxFontFamilies }),
+        this.send('Page.setFontFamilies', fontFamiliesOf(system)),
         this.send('Emulation.setUserAgentOverride', {
           userAgent: `${browserUserAgent}${setup.userAgentSuffix}`,
           acceptLanguage: setup.locale,
@@ -627,6 +634,7 @@ async function openInContext(
   connection: CdpConnection,
   browserContextId: string,
   browserUserAgent: string,
+  system: BrowserSystem,
   setup: PageSetup,
   limit: TimeLimit,
 ): Promise<Page> {
@@ -641,7 +649,7 @@ async function openInContext(
     const sessionId = readString(attachReply, 'sessionId', 'Target.attachToTarget')
 
     page = new CdpPage(connection, { browserContextId, targetId, sessionId })
-    await limit.race(page.setUp(browserUserAgent, setup))
+    await limit.race(page.setUp(browserUserAgent, system, setup))
 
     return page
   } catch (error) {
@@ -676,12 +684,14 @@ async function createContext(connection: CdpConnection, limit: TimeLimit): Promi
 
 /**
  * Opens a page over CDP: creates a target in a fresh browser context, attaches to it in a flat session, and sets it up
- * once. From then on the page handles its hazards itself. Its user agent is the browser's own with the setup's suffix.
- * When a step fails, or the page isn't open within 30 s, it disposes the context and rethrows.
+ * once. It gets the font table of `system`, the OS the browser runs on, and the browser's own user agent with the
+ * setup's suffix. From then on the page handles its hazards itself. When a step fails, or the page isn't open within
+ * 30 s, it disposes the context and rethrows.
  */
 export async function openCdpPage(
   connection: CdpConnection,
   browserUserAgent: string,
+  system: BrowserSystem,
   setup: PageSetup,
 ): Promise<Page> {
   const limit = startTimeLimit(
@@ -692,7 +702,7 @@ export async function openCdpPage(
   try {
     const browserContextId = await createContext(connection, limit)
 
-    return await openInContext(connection, browserContextId, browserUserAgent, setup, limit)
+    return await openInContext(connection, browserContextId, browserUserAgent, system, setup, limit)
   } finally {
     limit.clear()
   }

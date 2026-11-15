@@ -88,4 +88,67 @@ describe('keepLastLines', () => {
     await flush()
     expect(lastLines()).toEqual(['one'])
   })
+
+  describe('with a line to keep', () => {
+    /**
+     * Accepts a line that starts with `FATAL`.
+     */
+    const isFatal = (line: string): boolean => line.startsWith('FATAL')
+
+    /**
+     * Gives `count` filler lines, each ending in a newline.
+     */
+    const fillerOf = (count: number): string => Array.from({ length: count }, (_, index) => `line ${index}\n`).join('')
+
+    it('keeps the line first after more than the limit of later lines, within the limit', async () => {
+      const stream = new PassThrough()
+      const lastLines = keepLastLines(stream, 50, isFatal)
+
+      stream.write(`FATAL boom\n${fillerOf(70)}`)
+      await flush()
+
+      const lines = lastLines()
+
+      expect(lines).toHaveLength(50)
+      expect(lines[0]).toBe('FATAL boom')
+      expect(lines[1]).toBe('line 21')
+      expect(lines[49]).toBe('line 69')
+    })
+
+    it('changes nothing while the line is still among the last lines', async () => {
+      const stream = new PassThrough()
+      const lastLines = keepLastLines(stream, 5, isFatal)
+
+      stream.write(`${fillerOf(2)}FATAL boom\n${fillerOf(2)}`)
+      await flush()
+      expect(lastLines()).toEqual(['line 0', 'line 1', 'FATAL boom', 'line 0', 'line 1'])
+    })
+
+    it('keeps the last line it accepts', async () => {
+      const stream = new PassThrough()
+      const lastLines = keepLastLines(stream, 3, isFatal)
+
+      stream.write(`FATAL one\nFATAL two\n${fillerOf(5)}`)
+      await flush()
+      expect(lastLines()).toEqual(['FATAL two', 'line 3', 'line 4'])
+    })
+
+    it('counts a partial last line in the limit', async () => {
+      const stream = new PassThrough()
+      const lastLines = keepLastLines(stream, 3, isFatal)
+
+      stream.write(`FATAL one\n${fillerOf(4)}par`)
+      await flush()
+      expect(lastLines()).toEqual(['FATAL one', 'line 3', 'par'])
+    })
+
+    it('keeps nothing special without a predicate', async () => {
+      const stream = new PassThrough()
+      const lastLines = keepLastLines(stream, 3)
+
+      stream.write(`FATAL one\n${fillerOf(5)}`)
+      await flush()
+      expect(lastLines()).toEqual(['line 2', 'line 3', 'line 4'])
+    })
+  })
 })

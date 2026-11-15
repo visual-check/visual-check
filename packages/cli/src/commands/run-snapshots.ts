@@ -2,15 +2,21 @@ import { relative, sep } from 'node:path'
 import { BaselineError } from '../baselines/baseline-error.js'
 import { baselinePathOf, isByteIdentical, readBaseline, writeBaseline } from '../baselines/baseline-files.js'
 import { BrowserMismatchError, runImageOf } from '../browser/browser-version.js'
+import type { ChromeForTestingPlatform } from '../browser/chrome-for-testing-platform.js'
 import type { BrowserPackage } from '../browser/read-browser-package.js'
+import { BrowserDownloadError } from '../browser-download/browser-download-error.js'
+import { headlessShellPathsOf } from '../browser-download/install-headless-shell.js'
 import type { CaptureSettings, StoryCapture, StoryToCapture } from '../capture/capture-session.js'
 import { BrowserExitedError, BrowserLaunchError } from '../capture/driver/driver.js'
 import { runWorkerPool } from '../capture/worker-pool.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
 import { ContainerError } from '../container/container-error.js'
 import { type Story, storyUrlOf } from '../storybook/read-stories.js'
+import type { BrowserPlace } from './browser-route.js'
 import { dockerProblemOf } from './docker-problem.js'
-import type { BrowserPlace, LaunchBrowser } from './launch-browser.js'
+import type { LaunchBrowser } from './launch-browser.js'
+import { missingLibraryOf } from './missing-library.js'
+import { platformProblemOf } from './platform-problem.js'
 import { type FirstBrowserExit, runBrowserOf } from './run-browser.js'
 
 /**
@@ -68,11 +74,15 @@ interface SnapshotRun {
    */
   insideContainer: boolean
   /**
+   * The environment, for where the headless shell is downloaded to on the host, and through which mirror and proxy.
+   */
+  environment: Record<string, string | undefined>
+  /**
    * Launches the browser, at the first story that needs a capture, and again at the first after the browser exits.
    */
   launchBrowser: LaunchBrowser
   /**
-   * Writes the progress of the browser's launch, such as an image pull, as it happens.
+   * Writes the progress of the browser's launch, such as an image pull or a download, as it happens.
    */
   progress: (text: string) => void
 }
@@ -272,6 +282,11 @@ function exitCodeOf(command: SnapshotRun['command'], statuses: SnapshotStatus[])
 }
 
 /**
+ * The statuses of a snapshot that holds a capture, as a broken or missing one doesn't.
+ */
+const capturedStatuses: readonly SnapshotStatus[] = ['passed', 'differs', 'written', 'kept']
+
+/**
  * Writes the browser's last output lines under a heading, or nothing when there are none.
  */
 function browserOutputOf(output: readonly string[]): string {
@@ -298,28 +313,100 @@ function exitNoticeOf(exit: FirstBrowserExit | undefined): string {
  * Gives the next step after the browser failed to launch or exited while in use, pointing to its output first when it
  * printed any.
  */
-function browserFixOf(
-  error: BrowserLaunchError | BrowserExitedError,
-  place: BrowserPlace,
-  headlessShell: string,
-): string {
+function browserFixOf(error: BrowserLaunchError | BrowserExitedError, run: SnapshotRun): string {
   const why = error.output.length === 0 ? '' : "The browser's output below may say why. "
 
   if (!(error instanceof BrowserLaunchError)) {
     return `${why}Running out of memory is a common cause. Run visual-check again.`
   }
 
-  return place.in === 'image'
-    ? `${why}Check that ${headlessShell} starts in this container, then run visual-check again.`
-    : `${why}Check that Docker can run images for ${place.platform}, then run visual-check again.`
+  return `${why}Check that ${whatToCheckOf(run)}, then run visual-check again.`
+}
+
+/**
+ * Gives what to check after the browser failed to launch where it runs: that the image's headless shell starts in this
+ * container, that Docker can run the platform's images, or that the downloaded executable starts on this machine.
+ */
+function whatToCheckOf(run: SnapshotRun): string {
+  switch (run.place.in) {
+    case 'image':
+      return `${run.browserPackage.headlessShell} starts in this container`
+    case 'container':
+      return `Docker can run images for ${run.place.platform}`
+    case 'host':
+      return `${hostExecutableOf(run, run.place.platform)} starts on this machine`
+  }
+}
+
+/**
+ * Gives the path of the headless shell's executable that visual-check downloads for the platform on the host.
+ */
+function hostExecutableOf(run: SnapshotRun, platform: ChromeForTestingPlatform): string {
+  return headlessShellPathsOf(run.environment, run.browserPackage.chromium, platform).executable
+}
+
+/**
+ * Gives what to print when the browser on the host can't start because Linux lacks a shared library it links against:
+ * the library, both ways out, how to list every missing library, since the loader names only the first, and the
+ * browser's last output.
+ */
+function missingLibraryMessageOf(
+  library: string,
+  run: SnapshotRun,
+  platform: ChromeForTestingPlatform,
+  output: readonly string[],
+): string {
+  const containerPlatform = platform === 'linux-arm64' ? 'linux/arm64' : 'linux/amd64'
+
+  return (
+    `The browser can't start because ${library} is missing.\n` +
+    "Install the libraries the headless shell needs, since visual-check doesn't install system packages, or set " +
+    `platform to '${containerPlatform}' in the config to run the browser in visual-check's container.\n` +
+    `To list every missing library, run: ldd '${hostExecutableOf(run, platform)}' | grep 'not found'\n` +
+    browserOutputOf(output)
+  )
+}
+
+/**
+ * Gives what to print for a browser that failed to launch or exited while in use: the platform problem when it stopped
+ * before any capture with output saying its graphics process can't start, for its container's platform, or the
+ * config's inside visual-check's image unless that is `host`; for a failed launch on the host whose output names a
+ * missing library, that library, both ways out and how to list every missing one. Otherwise the error's message, the
+ * next step and the browser's last output.
+ */
+function browserStopMessageOf(
+  error: BrowserLaunchError | BrowserExitedError,
+  run: SnapshotRun,
+  capturedAny: boolean,
+): string {
+  const platform = run.place.in === 'container' ? run.place.platform : run.config.platform
+
+  if (platform !== 'host' && !capturedAny && error.graphicsFailed) {
+    return `${platformProblemOf(platform)}${browserOutputOf(error.output)}`
+  }
+
+  if (error instanceof BrowserLaunchError && run.place.in === 'host') {
+    const library = missingLibraryOf(error.output)
+
+    if (library !== undefined) {
+      return missingLibraryMessageOf(library, run, run.place.platform, error.output)
+    }
+  }
+
+  return `${error.message}\n${browserFixOf(error, run)}\n${browserOutputOf(error.output)}`
 }
 
 /**
  * Gives what to print for an error that stops the run with exit 2: a baseline that can't be read or written, Docker's
- * error, a failed launch's or a browser exit's with the next step and the browser's last output, or a version
- * mismatch. Any other error gives `undefined`.
+ * error, a failed download, a failed launch's or a browser exit's with the next step and the browser's last output, or
+ * a version mismatch. A browser that fails or exits before any capture, with output saying its graphics process can't
+ * start, gives the platform problem for its container's platform, or the config's inside visual-check's image unless
+ * that is `host`, instead of the next step. A failed launch on the host whose output names a missing library gives
+ * that library and both ways out. Any other error gives `undefined`.
+ *
+ * `capturedAny` is whether a snapshot has been captured, which a broken or missing one hasn't.
  */
-function stopMessageOf(error: unknown, run: SnapshotRun): string | undefined {
+function stopMessageOf(error: unknown, run: SnapshotRun, capturedAny: boolean): string | undefined {
   if (error instanceof BaselineError) {
     return (
       `visual-check couldn't ${error.action} the baseline ${displayPathOf(run.cwd, error.path)}: ${error.reason}. ` +
@@ -328,9 +415,7 @@ function stopMessageOf(error: unknown, run: SnapshotRun): string | undefined {
   }
 
   if (error instanceof BrowserLaunchError || error instanceof BrowserExitedError) {
-    const fix = browserFixOf(error, run.place, run.browserPackage.headlessShell)
-
-    return `${error.message}\n${fix}\n${browserOutputOf(error.output)}`
+    return browserStopMessageOf(error, run, capturedAny)
   }
 
   if (error instanceof ContainerError) {
@@ -340,7 +425,7 @@ function stopMessageOf(error: unknown, run: SnapshotRun): string | undefined {
     })
   }
 
-  if (error instanceof BrowserMismatchError) {
+  if (error instanceof BrowserDownloadError || error instanceof BrowserMismatchError) {
     return `${error.message}\n`
   }
 
@@ -357,8 +442,9 @@ function stopMessageOf(error: unknown, run: SnapshotRun): string | undefined {
  * When the browser exits, every story in flight is broken, `browser-exited`, the browser is relaunched once at the
  * next story that needs a capture, and the run goes on; stderr then says so, with the browser's last output, whatever
  * the run exits with. A baseline that can't be read or written, a failed launch or relaunch, a version mismatch or the
- * relaunched browser's exit stops the run with exit 2, keeping the lines of the snapshots that finished. The workers'
- * sessions and the browsers are always closed.
+ * relaunched browser's exit stops the run with exit 2, keeping the lines of the snapshots that finished. So does a
+ * failed download. A browser that can't start its graphics process before the first capture says the machine can't
+ * run the platform. The workers' sessions and the browsers are always closed.
  *
  * @throws {Error} Any other error, after closing the sessions and the browsers.
  */
@@ -369,6 +455,7 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
     configImage: run.config.image,
     place: run.place,
     settings: captureSettingsOf(run.config),
+    environment: run.environment,
     progress: run.progress,
   })
   const items = run.selections.flatMap(({ storybook, stories }) => stories.map((story) => ({ storybook, story })))
@@ -391,7 +478,8 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
           : await updateSnapshot(storybook, story, captureStory, run.cwd)
     })
   } catch (error) {
-    const message = stopMessageOf(error, run)
+    const capturedAny = results.some((result) => result !== undefined && capturedStatuses.includes(result.status))
+    const message = stopMessageOf(error, run, capturedAny)
 
     if (message === undefined) {
       throw error

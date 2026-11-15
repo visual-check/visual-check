@@ -32,7 +32,7 @@ export class BrowserMismatchError extends Error {
 
 /**
  * Where the browser that answered runs: in visual-check's container, from the config's image or the browser package's,
- * or directly inside the image the CLI runs in.
+ * directly inside the image the CLI runs in, or on the host, from the headless shell visual-check downloaded.
  *
  * @public
  */
@@ -53,14 +53,25 @@ export type CheckedBrowser =
        */
       in: 'image'
     }
+  | {
+      /**
+       * The browser runs on the host.
+       */
+      in: 'host'
+      /**
+       * The folder in visual-check's cache the headless shell was downloaded into.
+       */
+      folder: string
+    }
 
 /**
  * Checks that the browser that answered, with this exact version, is the browser package's build. No option accepts a
  * mismatch, for the config's image too.
  *
  * @throws {BrowserMismatchError} Naming where the browser runs, both versions and the fix: rebuilding the config's
- * image from the browser package's, reinstalling the browser package when the config sets no image, or running in the
- * browser package's image when the browser runs inside the CLI's own image.
+ * image from the browser package's, reinstalling the browser package when the config sets no image, running in the
+ * browser package's image when the browser runs inside the CLI's own image, or removing the download's folder when the
+ * browser runs on the host.
  *
  * @public
  */
@@ -77,6 +88,14 @@ export function checkBrowserVersion(version: string, browserPackage: BrowserPack
     throw new BrowserMismatchError(
       `The browser in this container ${versions}\n` +
         `Run in ${packageImageOf(browserPackage)}, or rebuild your image FROM it.`,
+    )
+  }
+
+  if (browser.in === 'host') {
+    throw new BrowserMismatchError(
+      `The browser in ${browser.folder} ${versions}\n` +
+        `Remove ${browser.folder}, then run visual-check again to download it afresh. ` +
+        `If it happens again, reinstall the browser package ${packageName}.`,
     )
   }
 

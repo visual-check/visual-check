@@ -13,6 +13,13 @@ const browserPackage: BrowserPackage = {
   chromium: '157.0.8103.78',
   image: { tag: 'ghcr.io/visual-check/chromium:157.0.0', digest: 'sha256:0' },
   headlessShell: '/opt/chromium/chrome-headless-shell',
+  sha256: {
+    linux64: '1'.repeat(64),
+    'linux-arm64': '2'.repeat(64),
+    'mac-x64': '3'.repeat(64),
+    'mac-arm64': '4'.repeat(64),
+    win64: '5'.repeat(64),
+  },
 }
 
 /**
@@ -42,9 +49,10 @@ interface FakeBrowser {
   closes: number
   /**
    * Makes the browser exit: `exited` settles with the exit, and every later call on it fails with it, a held capture
-   * included once it's let go. Calling it again gives the same exit.
+   * included once it's let go. The exit says its graphics process couldn't start when `graphicsFailed` is true. Calling
+   * it again gives the same exit.
    */
-  exit: () => BrowserExitedError
+  exit: (graphicsFailed?: boolean) => BrowserExitedError
   /**
    * Holds every capture of the story until the function it gives is called.
    */
@@ -113,8 +121,8 @@ function fakeBrowserOf(version: string = browserPackage.chromium): FakeBrowser {
     captured: [],
     openPages: 0,
     closes: 0,
-    exit: () => {
-      gone ??= new BrowserExitedError({ code: 137, signal: null, error: undefined }, ['Out of memory'])
+    exit: (graphicsFailed = false) => {
+      gone ??= new BrowserExitedError({ code: 137, signal: null, error: undefined }, ['Out of memory'], graphicsFailed)
       settleExited(gone)
 
       return gone
@@ -179,6 +187,7 @@ function runBrowserWith(...browsers: (FakeBrowser | Promise<FakeBrowser> | Error
       browserPackage,
       configImage: undefined,
       place: { in: 'image' },
+      environment: {},
       settings: {
         viewport: { width: 1280, height: 720, deviceScaleFactor: 1 },
         readyTimeoutMs: 15_000,
@@ -220,6 +229,44 @@ async function settle(): Promise<void> {
 }
 
 describe('runBrowserOf', () => {
+  it("throws, relaunching nothing, when the first browser's exit says this machine can't run the platform", async () => {
+    const first = fakeBrowserOf()
+    const { browser, launches } = runBrowserWith(first, fakeBrowserOf())
+    const releaseA = first.hold('a')
+    const a = browser.capture(0, storyOf('a'))
+
+    await settle()
+
+    const exit = first.exit(true)
+
+    releaseA()
+    await expect(a).rejects.toBe(exit)
+    await expect(browser.capture(1, storyOf('b'))).rejects.toBe(exit)
+    expect(launches()).toBe(1)
+    expect(browser.firstExit()).toBeUndefined()
+  })
+
+  it('breaks the story and relaunches when the graphics process fails after a capture gave a snapshot', async () => {
+    const first = fakeBrowserOf()
+    const second = fakeBrowserOf()
+    const { browser, launches } = runBrowserWith(first, second)
+
+    expect(await browser.capture(0, storyOf('a'))).toEqual({ snapshot })
+
+    const releaseB = first.hold('b')
+    const b = browser.capture(0, storyOf('b'))
+
+    await settle()
+
+    const exit = first.exit(true)
+
+    releaseB()
+    expect(await b).toEqual(brokenBy(exit))
+    expect(await browser.capture(0, storyOf('c'))).toEqual({ snapshot })
+    expect(launches()).toBe(2)
+    expect(browser.firstExit()).toEqual({ error: exit, relaunched: true })
+  })
+
   it('breaks the captures in flight when the browser exits, and relaunches it once for every worker after', async () => {
     const first = fakeBrowserOf()
     const second = fakeBrowserOf()
@@ -350,7 +397,7 @@ describe('runBrowserOf', () => {
 
   it('throws when the relaunch fails, and closes without throwing', async () => {
     const first = fakeBrowserOf()
-    const error = new BrowserLaunchError('The browser exited with code 127 before it answered.', [])
+    const error = new BrowserLaunchError('The browser exited with code 127 before it answered.', [], { exited: true })
     const { browser } = runBrowserWith(first, error)
 
     await browser.capture(0, storyOf('a'))
@@ -365,7 +412,7 @@ describe('runBrowserOf', () => {
     const first = fakeBrowserOf()
     const relaunch = deferred<FakeBrowser>()
     const { browser, launches } = runBrowserWith(first, relaunch.promise)
-    const error = new BrowserLaunchError('The browser exited with code 127 before it answered.', [])
+    const error = new BrowserLaunchError('The browser exited with code 127 before it answered.', [], { exited: true })
 
     await browser.capture(0, storyOf('a'))
     first.exit()
@@ -402,7 +449,7 @@ describe('runBrowserOf', () => {
   })
 
   it("doesn't call started when the launch fails", async () => {
-    const error = new BrowserLaunchError('The browser exited with code 127 before it answered.', [])
+    const error = new BrowserLaunchError('The browser exited with code 127 before it answered.', [], { exited: true })
     const { browser } = runBrowserWith(error)
     let started = false
 

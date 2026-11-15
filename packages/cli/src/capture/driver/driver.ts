@@ -62,6 +62,13 @@ export interface BrowserProcess {
 export type StartBrowser = (browserArguments: readonly string[]) => BrowserProcess
 
 /**
+ * The OS a browser runs on, which picks the font table its pages use.
+ *
+ * @public
+ */
+export type BrowserSystem = 'linux' | 'macos' | 'windows'
+
+/**
  * A running browser that snapshots are captured in.
  *
  * @public
@@ -179,8 +186,8 @@ export interface Page {
   /**
    * Loads `url` into the page's main frame and resolves on that document's load event. A server redirect is followed.
    * Fails at once with a `PageNavigatedAwayError` when another navigation of the main frame overtakes it, such as one
-   * the page starts itself, with a plain error when the browser can't load the URL, and with a `PageTimeoutError` when
-   * `timeoutMs` passes first.
+   * the page starts itself, with a `PageLoadError` when the browser can't load the URL, and with a `PageTimeoutError`
+   * when `timeoutMs` passes first.
    */
   goto: (url: string, timeoutMs: number) => Promise<void>
   /**
@@ -265,16 +272,25 @@ export class BrowserExitedError extends Error {
   override name = 'BrowserExitedError'
 
   /**
-   * The browser's last output lines, oldest first, which may say why it exited.
+   * The browser's last output lines, oldest first, with its last fatal log line kept first when it scrolled out. They
+   * may say why it exited.
    */
   readonly output: readonly string[]
 
   /**
-   * Names the exit code or signal and keeps the browser's last output lines.
+   * Whether the browser's output says its graphics process couldn't start, which is how a browser fails under an
+   * emulator that can't run it.
    */
-  constructor(exit: ProcessExit, output: readonly string[]) {
+  readonly graphicsFailed: boolean
+
+  /**
+   * Names the exit code or signal, and keeps the browser's last output lines and whether they say its graphics process
+   * couldn't start, `false` unless given.
+   */
+  constructor(exit: ProcessExit, output: readonly string[], graphicsFailed = false) {
     super(describeExit(exit, 'while in use'))
     this.output = output
+    this.graphicsFailed = graphicsFailed
   }
 }
 
@@ -325,6 +341,32 @@ export class PageTimeoutError extends Error {
 }
 
 /**
+ * The browser couldn't load the URL a `goto` asked for, as when the server refuses the connection or the proxy can't
+ * be reached.
+ *
+ * @public
+ */
+export class PageLoadError extends Error {
+  /**
+   * The class's name, so a stack trace or a log line reads `PageLoadError`.
+   */
+  override name = 'PageLoadError'
+
+  /**
+   * The browser's network error, such as `net::ERR_PROXY_CONNECTION_FAILED`.
+   */
+  readonly reason: string
+
+  /**
+   * Names the URL that couldn't be loaded, and keeps the browser's network error.
+   */
+  constructor(url: string, reason: string) {
+    super(`The page couldn't load ${url}: ${reason}`)
+    this.reason = reason
+  }
+}
+
+/**
  * The page's main frame went to another document than the one asked for, on the page's own initiative, such as a
  * story's script following a link: before that document loaded, or after.
  *
@@ -351,8 +393,9 @@ export class PageNavigatedAwayError extends Error {
 }
 
 /**
- * The browser didn't connect: it exited before answering, didn't answer in time, or answered its first call with an
- * error.
+ * The browser didn't connect, or failed the checks visual-check runs on it before capturing: it exited, or couldn't
+ * start, before answering its launch calls, the version call and the target discovery call, didn't answer one in
+ * time, answered one with an error, answered the version call without a version, or failed a check.
  *
  * @public
  */
@@ -363,15 +406,31 @@ export class BrowserLaunchError extends Error {
   override name = 'BrowserLaunchError'
 
   /**
-   * The browser's last output lines, oldest first, which may say why it didn't connect.
+   * The browser's last output lines, oldest first, with its last fatal log line kept first when it scrolled out. They
+   * may say why it didn't connect. Empty when a check failed.
    */
   readonly output: readonly string[]
 
   /**
-   * Takes the message saying what went wrong and the browser's last output lines.
+   * True only when the browser exited, or couldn't start, before it answered its launch calls. False when it didn't
+   * answer one in time, answered one with an error, answered the version call without a version, or failed a check.
    */
-  constructor(message: string, output: readonly string[]) {
+  readonly exited: boolean
+
+  /**
+   * Whether the browser's output says its graphics process couldn't start, which is how a browser fails under an
+   * emulator that can't run it.
+   */
+  readonly graphicsFailed: boolean
+
+  /**
+   * Takes the message saying what went wrong, the browser's last output lines, whether the browser exited before it
+   * answered, and whether its output says its graphics process couldn't start, `false` unless given.
+   */
+  constructor(message: string, output: readonly string[], options: { exited: boolean; graphicsFailed?: boolean }) {
     super(message)
     this.output = output
+    this.exited = options.exited
+    this.graphicsFailed = options.graphicsFailed ?? false
   }
 }

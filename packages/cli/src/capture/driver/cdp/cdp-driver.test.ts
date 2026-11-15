@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { type CdpDriverOptions, launchCdpDriver } from './cdp-driver.js'
 import { defaultVersionReply, FakeBrowser, pageSetup, type ReceivedCommand } from './fake-browser.fixture.js'
+import { graphicsFailureOutput } from './graphics-failure.fixture.js'
 import { launchArguments } from './launch-arguments.js'
 
 /**
@@ -14,10 +15,25 @@ const profileDir = '/tmp/visual-check-profile'
 const sixtyLines = Array.from({ length: 60 }, (_, index) => `line ${index + 1}`)
 
 /**
+ * Builds a fake browser that writes these lines as its output when asked for its version, then exits with code 133,
+ * as a browser does when its graphics process dies under QEMU.
+ */
+function browserExitingWith(lines: readonly string[]): FakeBrowser {
+  return new FakeBrowser({
+    handlers: {
+      'Browser.getVersion': (_command: ReceivedCommand, fake: FakeBrowser) => {
+        void fake.writeOutput(lines.map((line) => `${line}\n`).join(''))
+        fake.exit({ code: 133 })
+      },
+    },
+  })
+}
+
+/**
  * Launches a driver on the fake browser, with the sandbox off unless the options say otherwise.
  */
 function launch(browser: FakeBrowser, options: Partial<CdpDriverOptions> = {}) {
-  return launchCdpDriver({ sandbox: false, profileDir, start: browser.start, ...options })
+  return launchCdpDriver({ sandbox: false, profileDir, system: 'linux', start: browser.start, ...options })
 }
 
 /**
@@ -91,6 +107,7 @@ describe('launchCdpDriver', () => {
       name: 'BrowserLaunchError',
       message: "The browser couldn't start: spawn docker ENOENT.",
       output: [],
+      exited: true,
     })
   })
 
@@ -108,7 +125,41 @@ describe('launchCdpDriver', () => {
       name: 'BrowserLaunchError',
       message: 'The browser exited with code 1 before it answered.',
       output: sixtyLines.slice(10),
+      exited: true,
     })
+  })
+
+  it('keeps the last fatal log line first when a stack trace pushes it out of the last 50 lines', async () => {
+    const fatal =
+      "[1:1:1114/201503.000000:FATAL:gpu_data_manager_impl_private.cc(1)] GPU process isn't usable. Goodbye."
+    const browser = new FakeBrowser({
+      handlers: {
+        'Browser.getVersion': (_command: ReceivedCommand, fake: FakeBrowser) => {
+          void fake.writeOutput([fatal, ...sixtyLines].map((line) => `${line}\n`).join(''))
+          fake.exit({ code: 133 })
+        },
+      },
+    })
+
+    await expect(launch(browser)).rejects.toMatchObject({
+      name: 'BrowserLaunchError',
+      output: [fatal, ...sixtyLines.slice(11)],
+    })
+  })
+
+  it('keeps no line that only quotes the fatal marker', async () => {
+    const browser = new FakeBrowser({
+      handlers: {
+        'Browser.getVersion': (_command: ReceivedCommand, fake: FakeBrowser) => {
+          void fake.writeOutput(
+            ['see [1:1:1114/201503.000000:FATAL: in the log', ...sixtyLines].map((line) => `${line}\n`).join(''),
+          )
+          fake.exit({ code: 133 })
+        },
+      },
+    })
+
+    await expect(launch(browser)).rejects.toMatchObject({ output: sixtyLines.slice(10) })
   })
 
   it("kills the browser and fails to launch when it doesn't answer in time", async () => {
@@ -124,6 +175,7 @@ describe('launchCdpDriver', () => {
       name: 'BrowserLaunchError',
       message: "The browser didn't answer its version call within 0.05 s.",
       output: ['still starting'],
+      exited: false,
     })
     expect(browser.killed).toBe(true)
   })
@@ -159,6 +211,7 @@ describe('launchCdpDriver', () => {
     await expect(launch(browser)).rejects.toMatchObject({
       name: 'BrowserLaunchError',
       message: 'The browser answered its version call with an error: Internal error',
+      exited: false,
     })
     expect(browser.killed).toBe(true)
   })
@@ -232,6 +285,7 @@ describe('launchCdpDriver', () => {
       await expect(launch(browser)).rejects.toMatchObject({
         name: 'BrowserLaunchError',
         message: "The browser's answer to its version call has no version or user agent.",
+        exited: false,
       })
       expect(browser.killed).toBe(true)
     },
@@ -260,7 +314,50 @@ describe('launchCdpDriver', () => {
 
     await browser.writeOutput('one\ntwo\n')
     browser.exit(exit)
-    await expect(driver.exited).resolves.toMatchObject({ name: 'BrowserExitedError', message, output: ['one', 'two'] })
+    await expect(driver.exited).resolves.toMatchObject({
+      name: 'BrowserExitedError',
+      message,
+      output: ['one', 'two'],
+      graphicsFailed: false,
+    })
+  })
+})
+
+describe("a browser whose graphics process can't start", () => {
+  it('fails to launch with graphicsFailed for the reconstructed output of one under QEMU', async () => {
+    await expect(launch(browserExitingWith(graphicsFailureOutput))).rejects.toMatchObject({
+      name: 'BrowserLaunchError',
+      output: graphicsFailureOutput,
+      graphicsFailed: true,
+    })
+  })
+
+  it('fails to launch with graphicsFailed when a long trailer follows the fatal line', async () => {
+    await expect(launch(browserExitingWith([...graphicsFailureOutput, ...sixtyLines]))).rejects.toMatchObject({
+      name: 'BrowserLaunchError',
+      graphicsFailed: true,
+    })
+  })
+
+  it.each([
+    ['an ordinary crash', ['[1:1:1114/201502.1:ERROR:content/renderer.cc:1] Renderer killed: out of memory', 'bye']],
+    ['a missing library', ['error while loading shared libraries: libnss3.so: cannot open shared object file']],
+    ['GPU process errors without the fatal line', graphicsFailureOutput.slice(0, -1)],
+    ['no output', []],
+  ])('fails to launch without graphicsFailed for %s', async (_name, lines) => {
+    await expect(launch(browserExitingWith(lines))).rejects.toMatchObject({
+      name: 'BrowserLaunchError',
+      graphicsFailed: false,
+    })
+  })
+
+  it('settles exited with graphicsFailed when the browser exits so while in use', async () => {
+    const browser = new FakeBrowser()
+    const driver = await launch(browser)
+
+    await browser.writeOutput(graphicsFailureOutput.map((line) => `${line}\n`).join(''))
+    browser.exit({ code: 133 })
+    await expect(driver.exited).resolves.toMatchObject({ name: 'BrowserExitedError', graphicsFailed: true })
   })
 })
 

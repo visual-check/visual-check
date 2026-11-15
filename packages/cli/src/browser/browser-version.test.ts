@@ -10,6 +10,13 @@ const browserPackage: BrowserPackage = {
   chromium: '157.0.8103.78',
   image: { tag: 'ghcr.io/visual-check/chromium:157.0.0', digest: `sha256:${'ab'.repeat(32)}` },
   headlessShell: '/opt/chrome-headless-shell/chrome-headless-shell',
+  sha256: {
+    linux64: '1'.repeat(64),
+    'linux-arm64': '2'.repeat(64),
+    'mac-x64': '3'.repeat(64),
+    'mac-arm64': '4'.repeat(64),
+    win64: '5'.repeat(64),
+  },
 }
 
 /**
@@ -66,6 +73,19 @@ describe('checkBrowserVersion', () => {
         'The browser in this container is Chromium 156.0.7000.1, but the browser package @visual-check/chromium ' +
           '157.0.0 names Chromium 157.0.8103.78.\n' +
           `Run in ${packageImage}, or rebuild your image FROM it.`,
+      ),
+    )
+  })
+
+  it('names the folder the headless shell was downloaded into and says to remove it on the host', () => {
+    const folder = '/home/me/.cache/visual-check/chromium/157.0.8103.78'
+
+    expect(() => checkBrowserVersion('156.0.7000.1', browserPackage, { in: 'host', folder })).toThrow(
+      new BrowserMismatchError(
+        `The browser in ${folder} is Chromium 156.0.7000.1, but the browser package @visual-check/chromium ` +
+          '157.0.0 names Chromium 157.0.8103.78.\n' +
+          `Remove ${folder}, then run visual-check again to download it afresh. ` +
+          'If it happens again, reinstall the browser package @visual-check/chromium.',
       ),
     )
   })

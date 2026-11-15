@@ -22,6 +22,7 @@ async function readAll(stream: NodeJS.ReadableStream): Promise<string> {
 describe('containerRunArguments', () => {
   it.each([
     ['linux/amd64', 'host'],
+    ['linux/amd64', 'bridge'],
     ['linux/arm64', `container:${'a'.repeat(64)}`],
   ] as const)('builds the exact docker run arguments for %s on the %s network', (platform, network) => {
     expect(

@@ -122,17 +122,23 @@ const headlessSwitches = [
 
 /**
  * Builds the arguments Chromium is launched with: Playwright's switches for a headless launch, `--no-sandbox` when the
- * sandbox is off, `--disable-skia-runtime-opts`, then the profile folder and the CDP pipe.
+ * sandbox is off, `--disable-skia-runtime-opts`, the proxy when one is given, then the profile folder and the CDP pipe.
  *
  * `--disable-skia-runtime-opts` is visual-check's own: it turns off Skia's code paths picked by CPU at run time, so
  * gradients come out the same under Rosetta as on real amd64 runners.
+ *
+ * The proxy is `--proxy-server` with `--proxy-bypass-list=<-loopback>`, which removes Chromium's implicit bypass of
+ * loopback addresses, so a Storybook on `localhost` is reached through the proxy too.
  */
-export function launchArguments(options: { sandbox: boolean; profileDir: string }): string[] {
+export function launchArguments(options: { sandbox: boolean; profileDir: string; proxyServer?: string }): string[] {
   return [
     ...chromiumSwitches,
     ...headlessSwitches,
     ...(options.sandbox ? [] : ['--no-sandbox']),
     '--disable-skia-runtime-opts',
+    ...(options.proxyServer === undefined
+      ? []
+      : [`--proxy-server=${options.proxyServer}`, '--proxy-bypass-list=<-loopback>']),
     `--user-data-dir=${options.profileDir}`,
     '--remote-debugging-pipe',
     '--no-startup-window',

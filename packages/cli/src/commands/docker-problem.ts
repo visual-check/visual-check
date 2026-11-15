@@ -17,11 +17,12 @@ export interface DockerProblemContext {
 /**
  * Builds what to print for a Docker problem: its message, then the fixes. For Docker that is missing, stopped or
  * can't pull, those are to start or install Docker or set `platform: 'host'`, and inside a container also to use
- * visual-check's image as the job container. Windows containers have their fix in the message. Every line ends with a
- * newline.
+ * visual-check's image as the job container. Every other problem has its fix in the message: Windows containers say
+ * to switch to Linux containers, and a runtime that gives containers no name for the machine lists the tested
+ * runtimes. Every line ends with a newline.
  */
 export function dockerProblemOf(error: ContainerError, context: DockerProblemContext): string {
-  if (error.fix === 'linux-containers') {
+  if (error.fix !== 'docker') {
     return `${error.message}\n`
   }
 

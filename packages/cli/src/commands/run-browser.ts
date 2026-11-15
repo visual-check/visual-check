@@ -1,5 +1,6 @@
-import { checkBrowserVersion, runImageOf } from '../browser/browser-version.js'
+import { type CheckedBrowser, checkBrowserVersion, runImageOf } from '../browser/browser-version.js'
 import type { BrowserPackage } from '../browser/read-browser-package.js'
+import { headlessShellPathsOf } from '../browser-download/install-headless-shell.js'
 import {
   type CaptureSession,
   type CaptureSettings,
@@ -8,14 +9,15 @@ import {
   type StoryToCapture,
 } from '../capture/capture-session.js'
 import { BrowserExitedError, type Driver } from '../capture/driver/driver.js'
-import type { BrowserPlace, LaunchBrowser } from './launch-browser.js'
+import type { BrowserPlace } from './browser-route.js'
+import type { BrowserLaunch, LaunchBrowser } from './launch-browser.js'
 
 /**
  * What a run's browser is launched and set up with.
  */
 interface RunBrowserOptions {
   /**
-   * The browser package, which names the image, the headless shell and the build the browser must be.
+   * The browser package, which names the image, the headless shell, its downloads and the build the browser must be.
    */
   browserPackage: BrowserPackage
   /**
@@ -31,7 +33,11 @@ interface RunBrowserOptions {
    */
   settings: CaptureSettings
   /**
-   * Writes the progress of a pull as it happens.
+   * The environment, for where the headless shell is downloaded to on the host, and through which mirror and proxy.
+   */
+  environment: Record<string, string | undefined>
+  /**
+   * Writes the progress of a pull or a download as it happens.
    */
   progress: (text: string) => void
 }
@@ -67,17 +73,27 @@ export interface RunBrowser {
    * the same way, and every call after shares the relaunched one. A worker's session in the first browser is closed when
    * the worker opens one in the relaunched browser. The first browser itself stays open until `close()`.
    *
+   * An exit of the first browser whose output says its graphics process couldn't start, before any capture gave a
+   * snapshot, means this machine can't run the platform: a relaunch would fail the same way, so every capture that
+   * meets it throws it instead.
+   *
    * `started`, when given, is called once the browser is up and the worker's session is open, just before the
    * capture, so the caller can time the capture without the launch.
    *
-   * @throws {ContainerError} When Docker can't be run or the image can't be pulled, at the launch or the relaunch.
-   * @throws {BrowserLaunchError} When the browser doesn't connect, at the launch or the relaunch.
+   * @throws {ContainerError} When Docker can't be run, the image can't be pulled, or the browser can't reach the proxy,
+   * at the launch or the relaunch.
+   * @throws {BrowserDownloadError} When the headless shell can't be downloaded to the host.
+   * @throws {BrowserLaunchError} When the browser doesn't connect, or fails any other way while it is checked to reach
+   * the proxy, at the launch or the relaunch.
    * @throws {BrowserMismatchError} When the browser, launched or relaunched, isn't the browser package's build.
-   * @throws {BrowserExitedError} When the relaunched browser exits during the capture, or has exited before it.
+   * @throws {BrowserExitedError} When the browser exits while it is checked to reach the proxy, when the relaunched
+   * browser exits during the capture or has exited before it, and when the first browser's exit says this machine
+   * can't run the platform.
    */
   capture: (worker: number, story: StoryToCapture, started?: () => void) => Promise<StoryCapture>
   /**
-   * How the first browser exited, once it has exited other than through `close()`, or `undefined`.
+   * How the first browser exited, once it has exited other than through `close()` and the run went on, or `undefined`.
+   * An exit saying this machine can't run the platform gives `undefined`, since it stops the run.
    */
   firstExit: () => FirstBrowserExit | undefined
   /**
@@ -108,35 +124,78 @@ interface LaunchedBrowser {
 }
 
 /**
+ * Gives what launching the browser needs where it runs: the headless shell's path inside the image; the image, the
+ * platform, the route and the path for the container; or the browser package's version and checksum of the download
+ * for the host.
+ */
+function browserLaunchOf(options: RunBrowserOptions): BrowserLaunch {
+  const { browserPackage, place } = options
+
+  switch (place.in) {
+    case 'image':
+      return { in: 'image', executable: browserPackage.headlessShell }
+    case 'container':
+      return {
+        in: 'container',
+        image: runImageOf(browserPackage, options.configImage),
+        platform: place.platform,
+        route: place.route,
+        executable: browserPackage.headlessShell,
+        progress: options.progress,
+      }
+    case 'host':
+      return {
+        in: 'host',
+        platform: place.platform,
+        version: browserPackage.chromium,
+        sha256: browserPackage.sha256[place.platform],
+        packageVersion: browserPackage.packageVersion,
+        environment: options.environment,
+        progress: options.progress,
+      }
+  }
+}
+
+/**
+ * Gives where the browser that answered runs, as the version check names it.
+ */
+function checkedBrowserOf(options: RunBrowserOptions): CheckedBrowser {
+  switch (options.place.in) {
+    case 'image':
+      return { in: 'image' }
+    case 'container':
+      return { in: 'container', configImage: options.configImage }
+    case 'host': {
+      const { environment, browserPackage, place } = options
+      const { folder } = headlessShellPathsOf(environment, browserPackage.chromium, place.platform)
+
+      return { in: 'host', folder }
+    }
+  }
+}
+
+/**
  * Prepares a run's browser, which `launcher` launches. Nothing is launched until the first `capture()`.
  */
 export function runBrowserOf(launcher: LaunchBrowser, options: RunBrowserOptions): RunBrowser {
   let first: LaunchedBrowser | undefined
   let relaunched: LaunchedBrowser | undefined
+  let snapshotTaken = false
+
+  /**
+   * Whether the first browser's exit says this machine can't run the platform: its graphics process couldn't start,
+   * and no capture has given a snapshot yet.
+   */
+  const cannotRunPlatform = (exit: BrowserExitedError): boolean => exit.graphicsFailed && !snapshotTaken
 
   /**
    * Launches the browser and checks that it is the browser package's build, closing it when it isn't.
    */
   const launchChecked = async (): Promise<Driver> => {
-    const executable = options.browserPackage.headlessShell
-    const driver = await launcher(
-      options.place.in === 'image'
-        ? { in: 'image', executable }
-        : {
-            in: 'container',
-            image: runImageOf(options.browserPackage, options.configImage),
-            platform: options.place.platform,
-            executable,
-            progress: options.progress,
-          },
-    )
+    const driver = await launcher(browserLaunchOf(options))
 
     try {
-      checkBrowserVersion(
-        driver.version,
-        options.browserPackage,
-        options.place.in === 'image' ? { in: 'image' } : { in: 'container', configImage: options.configImage },
-      )
+      checkBrowserVersion(driver.version, options.browserPackage, checkedBrowserOf(options))
     } catch (error) {
       await driver.close()
 
@@ -167,13 +226,18 @@ export function runBrowserOf(launcher: LaunchBrowser, options: RunBrowserOptions
    * Gives the browser the next capture runs in: the first one, launching it at the first call, or once it has exited,
    * the relaunched one, relaunching it at the first call after the exit.
    *
-   * @throws {BrowserExitedError} When the relaunched browser has exited too.
+   * @throws {BrowserExitedError} When the relaunched browser has exited too, or the first one's exit says this machine
+   * can't run the platform.
    */
   const browserForCapture = (): LaunchedBrowser => {
     first ??= startLaunch()
 
     if (first.exit === undefined) {
       return first
+    }
+
+    if (cannotRunPlatform(first.exit)) {
+      throw first.exit
     }
 
     relaunched ??= startLaunch()
@@ -221,7 +285,13 @@ export function runBrowserOf(launcher: LaunchBrowser, options: RunBrowserOptions
       started?.()
 
       try {
-        return await session.capture(story)
+        const capture = await session.capture(story)
+
+        if ('snapshot' in capture) {
+          snapshotTaken = true
+        }
+
+        return capture
       } catch (error) {
         if (!(error instanceof BrowserExitedError)) {
           throw error
@@ -229,7 +299,7 @@ export function runBrowserOf(launcher: LaunchBrowser, options: RunBrowserOptions
 
         browser.exit ??= error
 
-        if (browser !== first) {
+        if (browser !== first || cannotRunPlatform(error)) {
           throw error
         }
 
@@ -242,7 +312,7 @@ export function runBrowserOf(launcher: LaunchBrowser, options: RunBrowserOptions
       }
     },
     firstExit: () => {
-      if (first?.exit === undefined) {
+      if (first?.exit === undefined || cannotRunPlatform(first.exit)) {
         return undefined
       }
 

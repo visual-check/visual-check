@@ -31,8 +31,18 @@ describe('probeDocker', () => {
   it("asks `docker info` once and gives the engine's CPUs and memory", async () => {
     fake = installFakeDocker({ info: { cpus: 8, memoryBytes: 2 ** 33 } })
 
-    expect(await probeDocker()).toEqual({ cpus: 8, memoryBytes: 2 ** 33 })
+    expect(await probeDocker()).toEqual({ cpus: 8, memoryBytes: 2 ** 33, desktop: false })
     expect(fake.calls()).toEqual([['info', '--format', '{{json .}}']])
+  })
+
+  it.each([
+    ['Docker Desktop', true],
+    ['OrbStack', false],
+    ['Ubuntu 24.04.1 LTS', false],
+  ])("tells whether the engine is Docker Desktop's from the operating system %s", async (operatingSystem, desktop) => {
+    fake = installFakeDocker({ info: { operatingSystem } })
+
+    expect((await probeDocker()).desktop).toBe(desktop)
   })
 
   it('fails with the install fix when there is no docker command', async () => {

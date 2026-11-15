@@ -9,7 +9,15 @@
     "e2e": {
       "cache": false,
       "dependsOn": ["^build", "build-storybook"],
-      "passThroughEnv": ["TEST_STORYBOOK_IMAGE"]
+      "passThroughEnv": [
+        "TEST_STORYBOOK_IMAGE",
+        "VISUAL_CHECK_CACHE_DIR",
+        "VISUAL_CHECK_CHROMIUM_MIRROR",
+        "HTTPS_PROXY",
+        "https_proxy",
+        "NO_PROXY",
+        "no_proxy"
+      ]
     }
   }
 }

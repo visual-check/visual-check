@@ -1,15 +1,17 @@
 /**
  * Which fix a `ContainerError`'s message needs said after it: `docker` for a Docker that is missing, stopped or
- * can't pull, whose fix is to start or install it or to set `platform: 'host'`, and `linux-containers` for Docker in
- * Windows-containers mode, whose message holds its own fix.
+ * can't pull, whose fix is to start or install it or to set `platform: 'host'`; `linux-containers` for Docker in
+ * Windows-containers mode, whose message holds its own fix; and `tested-runtimes` for a runtime that gives containers
+ * no name for the machine, whose message lists the tested runtimes.
  *
  * @public
  */
-export type ContainerFix = 'docker' | 'linux-containers'
+export type ContainerFix = 'docker' | 'linux-containers' | 'tested-runtimes'
 
 /**
- * Docker couldn't do what visual-check needs of it: it isn't there, isn't running, runs Windows containers, or failed
- * to pull the browser's image.
+ * Docker couldn't do what visual-check needs of it: it isn't there, isn't running, runs Windows containers, failed to
+ * pull the browser's image, or gives its containers no name for the machine, so the browser can't reach
+ * visual-check's proxy.
  *
  * @public
  */
