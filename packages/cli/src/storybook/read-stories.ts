@@ -166,13 +166,76 @@ function indexUrlOf(url: string): URL {
 }
 
 /**
+ * The value of a Storybook global in a story URL.
+ */
+type GlobalValue = string | number | boolean
+
+/**
+ * What Storybook keeps of a global's key or string value in the URL. It drops any other character, with a warning.
+ */
+const urlSafeGlobalPattern = /^[a-zA-Z0-9 _-]*$/
+
+/**
+ * Builds the error for a global Storybook would drop from the URL.
+ */
+function unusableGlobalErrorOf(key: string, reason: string): Error {
+  return new Error(`Storybook can't take the global "${key}" from the URL: ${reason}.`)
+}
+
+/**
+ * Encodes one global as `key:value`, as Storybook reads it from the URL: a string as is, a boolean as `!true` or
+ * `!false`, a number in plain digits.
+ *
+ * @throws {Error} Naming the key when the key is empty or holds a character Storybook drops, a string value holds one,
+ * or a number isn't finite.
+ */
+function encodeGlobal(key: string, value: GlobalValue): string {
+  if (key === '' || !urlSafeGlobalPattern.test(key)) {
+    throw unusableGlobalErrorOf(key, 'its key may hold only letters, digits, spaces, _ and -, and may not be empty')
+  }
+
+  if (typeof value === 'boolean') {
+    return `${key}:!${value}`
+  }
+
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      throw unusableGlobalErrorOf(key, `its value ${value} isn't a finite number`)
+    }
+
+    return `${key}:${value}`
+  }
+
+  if (!urlSafeGlobalPattern.test(value)) {
+    throw unusableGlobalErrorOf(key, `its value "${value}" may hold only letters, digits, spaces, _ and -`)
+  }
+
+  return `${key}:${value}`
+}
+
+/**
  * Builds the URL of a story on its own page, `iframe.html?id=<story id>&viewMode=story`, under the Storybook's URL as
  * `index.json` is.
  *
+ * When `globals` has entries, the URL gains `&globals=<key:value;...>` in their order, which sets them for the story.
+ * With none, or an empty record, the URL has no `globals` parameter.
+ *
+ * @throws {Error} Naming the global when its key or value is one Storybook would drop from the URL.
+ *
  * @public
  */
-export function storyUrlOf(storybookUrl: string, storyId: string): string {
-  return new URL(`iframe.html?id=${encodeURIComponent(storyId)}&viewMode=story`, storybookBaseOf(storybookUrl)).href
+export function storyUrlOf(
+  storybookUrl: string,
+  storyId: string,
+  globals?: Readonly<Record<string, GlobalValue>>,
+): string {
+  const pairs = Object.entries(globals ?? {}).map(([key, value]) => encodeGlobal(key, value))
+  const globalsParameter = pairs.length > 0 ? `&globals=${encodeURIComponent(pairs.join(';'))}` : ''
+
+  return new URL(
+    `iframe.html?id=${encodeURIComponent(storyId)}&viewMode=story${globalsParameter}`,
+    storybookBaseOf(storybookUrl),
+  ).href
 }
 
 /**
