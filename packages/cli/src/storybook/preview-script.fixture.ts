@@ -247,6 +247,10 @@ const animationClassOf: Record<AnimationKind, new (options: FakeAnimationOptions
  * Storybook 11 parked reads, and the end state. Every fake animation finishes through `Animation.prototype.finish`,
  * which the end state wraps, so a test that creates the end state calls `restoreFinish` once it's done.
  *
+ * These fakes live with the Storybook adapter's fixtures, though the end state in `capture/` is their main user: the
+ * predicate's tests in `storybook/` need them too, and `capture/` may import `storybook/`, while `storybook/` may import
+ * nothing. `restoreFinish` lives beside them, as it puts back the fake class's own `finish`.
+ *
  * @public
  */
 export const animationClasses = {

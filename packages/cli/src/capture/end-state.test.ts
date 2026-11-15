@@ -714,6 +714,47 @@ describe('the time limit', () => {
     await vi.advanceTimersByTimeAsync(1)
     expect(await run.answer).toEqual(settledAnswer(true))
   })
+
+  it('counts a frame as two tasks of 16 ms when asking for an animation frame throws', async () => {
+    const requestFrame = vi.fn((): void => {
+      throw new Error('NotSupportedError: no animation frames.')
+    })
+    const page = openEndState({ animations: [fakeAnimation()], requestFrame })
+    const run = page.bringToEndState(1000)
+
+    await vi.advanceTimersByTimeAsync(127)
+    expect(run.settled()).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await run.answer).toEqual(settledAnswer(true))
+    expect(requestFrame).toHaveBeenCalled()
+  })
+
+  it('goes on with tasks of 16 ms when asking for the second animation frame of a frame throws', async () => {
+    let inCallback = false
+    const requestFrame = vi.fn((callback: () => void): void => {
+      if (inCallback) {
+        throw new Error('NotSupportedError: no animation frame from inside one.')
+      }
+
+      setTimeout(() => {
+        inCallback = true
+
+        try {
+          callback()
+        } finally {
+          inCallback = false
+        }
+      }, 16)
+    })
+    const page = openEndState({ animations: [fakeAnimation()], requestFrame })
+    const run = page.bringToEndState(1000)
+
+    // Each frame is an animation frame of 16 ms, then two tasks of 16 ms.
+    await vi.advanceTimersByTimeAsync(191)
+    expect(run.settled()).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await run.answer).toEqual(settledAnswer(true))
+  })
 })
 
 describe('media', () => {
@@ -1037,6 +1078,34 @@ describe('media', () => {
       await vi.runAllTimersAsync()
       expect(await run.answer).toEqual(settledAnswer(true))
       expect(late.actions).toEqual(['finish', 'commitStyles', 'cancel'])
+    })
+
+    it('waits for the end events of an animation the page finishes as it starts, as Storybook 11 does, before pinning it', async () => {
+      const video = fakeVideo()
+      const fadeIn = fakeAnimation({ kind: 'css-animation', holdsEnd: true })
+      const document = fakeDocument({ media: [video] })
+      const page = openEndState({ document })
+      const actionsAtEnd: string[][] = []
+
+      listenForEnd(page.frames, fadeIn, () => {
+        actionsAtEnd.push([...fadeIn.actions])
+      })
+      // The frame for the media events spans animation frames 1 and 2, and the frame after the first quiet check 3
+      // and 4. The fade-in starts at 4, the last before the second check, and Storybook's animationstart listener
+      // finishes it at once, so its end events are still pending at that check.
+      reactToMediaEvent(page.frames, video, 'pause', () =>
+        page.frames.react(3, () => {
+          document.animations.push(fadeIn)
+          fadeIn.finish()
+        }),
+      )
+
+      const run = page.bringToEndState(10_000)
+
+      await vi.runAllTimersAsync()
+      expect(await run.answer).toEqual(settledAnswer(true))
+      expect(actionsAtEnd).toEqual([['finish']])
+      expect(fadeIn.actions).toEqual(['finish', 'commitStyles', 'cancel'])
     })
 
     it('freezes media only once, before it brings the animations to their end again', async () => {
