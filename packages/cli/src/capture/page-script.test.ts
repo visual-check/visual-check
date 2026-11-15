@@ -1,7 +1,8 @@
 import { type Context, createContext, runInContext } from 'node:vm'
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest'
 import { readStoryWait, storyWaitExpression } from '../storybook/preview-script.js'
-import { pageInitScript } from './page-script.js'
+import { fontsTimedOutAnswer, imagesTimedOutAnswer, readyAnswer } from './page-script.fixture.js'
+import { assetsReadyExpression, pageInitScript, readAssetsReadiness } from './page-script.js'
 
 /**
  * The console methods the fake page has, each a mock standing for the browser's own.
@@ -64,9 +65,11 @@ interface FakePage {
 }
 
 /**
- * Builds a fake page with these globals already set, in place of its own, without the page script.
+ * Builds a fake page with these globals already set, in place of its own, without the page script. Its `document` is
+ * the one given as a global, or an empty object.
  */
 function blankPage(globals: Record<string, unknown> = {}): FakePage {
+  const document = 'document' in globals ? globals.document : {}
   const window = new EventTarget()
   const browserConsole: FakeConsole = { debug: vi.fn(), info: vi.fn(), log: vi.fn(), warn: vi.fn(), error: vi.fn() }
   let documentReads = 0
@@ -89,7 +92,7 @@ function blankPage(globals: Record<string, unknown> = {}): FakePage {
     get: () => {
       documentReads += 1
 
-      return {}
+      return document
     },
   })
 
@@ -124,6 +127,183 @@ function openPage(globals: Record<string, unknown> = {}): FakePage {
  */
 function messages(page: FakePage): unknown {
   return JSON.parse(JSON.stringify(page.run('globalThis.__visualCheck.messages')))
+}
+
+/**
+ * A fake `<img>` element: what the wait for images and fonts reads and sets on it.
+ */
+interface FakeImage {
+  /**
+   * The image's `loading` attribute.
+   */
+  loading: string
+  /**
+   * Whether the image finished loading.
+   */
+  complete: boolean
+  /**
+   * Whether the image is in the document, directly or in a shadow root of an element in it.
+   */
+  isConnected: boolean
+  /**
+   * Decodes the image, settling once it's decoded.
+   */
+  decode: () => Promise<void>
+}
+
+/**
+ * Builds a fake image, eager, complete and in the document, whose decoding resolves at once, unless `image` says
+ * otherwise.
+ */
+function fakeImage(image: Partial<FakeImage> = {}): FakeImage {
+  return { loading: 'eager', complete: true, isConnected: true, decode: async () => undefined, ...image }
+}
+
+/**
+ * Gives a promise that resolves after `ms` on the test's clock, as a decoding or font load that takes that long.
+ */
+function resolvesAfter(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
+}
+
+/**
+ * Gives a promise that never settles, as a decoding or font load that never ends.
+ */
+function never(): Promise<void> {
+  return new Promise(() => undefined)
+}
+
+/**
+ * A fake font face, as `document.fonts` lists it.
+ */
+interface FakeFace {
+  /**
+   * The face's family, as the page declared it, quotes included.
+   */
+  family: string
+  /**
+   * The face's weight, such as `400`.
+   */
+  weight: string
+  /**
+   * The face's style, such as `normal`.
+   */
+  style: string
+  /**
+   * Where the face's loading is, such as `loading` or `loaded`.
+   */
+  status: string
+}
+
+/**
+ * Builds a fake font face of this family and status, of weight 400 and style normal unless `face` says otherwise.
+ */
+function fakeFace(family: string, status: string, face: Partial<FakeFace> = {}): FakeFace {
+  return { family, weight: '400', style: 'normal', status, ...face }
+}
+
+/**
+ * What a fake document holds.
+ */
+interface FakeDocumentParts {
+  /**
+   * The document's images, outside shadow roots. An image can lack parts of a fake image, to test how the wait copes.
+   */
+  images?: object[]
+  /**
+   * The font faces `document.fonts` lists, or `null` for a document without `document.fonts`.
+   */
+  faces?: FakeFace[] | null
+  /**
+   * What `document.fonts.ready` gives. It resolves at once by default.
+   */
+  fontsReady?: Promise<void>
+}
+
+/**
+ * A fake document, and what the wait for images and fonts did in it.
+ */
+interface FakeDocument {
+  /**
+   * The document, to set as the page's `document` global.
+   */
+  document: unknown
+  /**
+   * What the wait did in the document, in order: `layout` when it forced layout, `fonts.ready` when it read
+   * `document.fonts.ready`.
+   */
+  events: string[]
+}
+
+/**
+ * Builds a fake document with these images and font faces.
+ */
+function fakeDocument({
+  images = [],
+  faces = [],
+  fontsReady = Promise.resolve(),
+}: FakeDocumentParts = {}): FakeDocument {
+  const events: string[] = []
+  const fonts =
+    faces === null
+      ? undefined
+      : Object.defineProperty([...faces], 'ready', {
+          get: () => {
+            events.push('fonts.ready')
+
+            return fontsReady
+          },
+        })
+  const documentElement = {
+    getBoundingClientRect: () => {
+      events.push('layout')
+
+      return {}
+    },
+  }
+
+  return {
+    document: { querySelectorAll: (selector: string) => (selector === 'img' ? images : []), documentElement, fonts },
+    events,
+  }
+}
+
+/**
+ * The wait for images and fonts, started in a fake page.
+ */
+interface AssetsWait {
+  /**
+   * The page's answer, as the driver gives it.
+   */
+  answer: Promise<unknown>
+  /**
+   * Whether the page has answered.
+   */
+  settled: () => boolean
+}
+
+/**
+ * Starts the wait for images and fonts in the page, with this time limit.
+ */
+function waitForAssets(page: FakePage, timeoutMs: number): AssetsWait {
+  let settled = false
+  const answer = page.evaluate(assetsReadyExpression(timeoutMs)).finally(() => {
+    settled = true
+  })
+
+  return { answer, settled: () => settled }
+}
+
+/**
+ * Runs the page's timers until the wait answers, and gives its answer. The wait yields a task after each round of
+ * decoding, on the test's fake timers.
+ */
+async function finish(wait: AssetsWait): Promise<unknown> {
+  await vi.runAllTimersAsync()
+
+  return await wait.answer
 }
 
 beforeEach(() => {
@@ -352,5 +532,303 @@ describe('the page script', () => {
     page.run("console.log('a line')")
     expect(messages(page)).toEqual([{ kind: 'console.log', text: 'a line' }])
     expect(page.console.log).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('the wait for images and fonts', () => {
+  it('is ready once every image decoded', async () => {
+    const { document } = fakeDocument({ images: [fakeImage({ decode: () => resolvesAfter(300) }), fakeImage()] })
+    const wait = waitForAssets(openPage({ document }), 1000)
+
+    await vi.advanceTimersByTimeAsync(299)
+    expect(wait.settled()).toBe(false)
+    expect(await finish(wait)).toEqual(readyAnswer())
+  })
+
+  it('is ready once the fonts loaded', async () => {
+    const { document } = fakeDocument({ fontsReady: resolvesAfter(500) })
+    const wait = waitForAssets(openPage({ document }), 1000)
+
+    await vi.advanceTimersByTimeAsync(499)
+    expect(wait.settled()).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await wait.answer).toEqual(readyAnswer())
+  })
+
+  it("makes lazy images eager before decoding them, and leaves other images' loading alone", async () => {
+    const lazy = fakeImage({ loading: 'lazy' })
+    const others = [fakeImage({ loading: 'eager' }), fakeImage({ loading: 'auto' })]
+    const decodedAs: string[] = []
+    const { document } = fakeDocument({ images: [lazy, ...others] })
+
+    lazy.decode = async () => {
+      decodedAs.push(lazy.loading)
+    }
+
+    expect(await finish(waitForAssets(openPage({ document }), 1000))).toEqual(readyAnswer())
+    expect([lazy, ...others].map((image) => image.loading)).toEqual(['eager', 'eager', 'auto'])
+    expect(decodedAs).toEqual(['eager'])
+  })
+
+  it('decodes a broken image once: its decoding fails, and it is complete', async () => {
+    const decode = vi.fn(() => Promise.reject(new Error('EncodingError')))
+    const { document } = fakeDocument({ images: [fakeImage({ decode })] })
+
+    expect(await finish(waitForAssets(openPage({ document }), 1000))).toEqual(readyAnswer())
+    expect(decode).toHaveBeenCalledTimes(1)
+  })
+
+  it('decodes an image again when its decoding failed and left it incomplete, as a swapped placeholder does', async () => {
+    const image = fakeImage()
+    const completeAtDecoding: boolean[] = []
+    const { document } = fakeDocument({ images: [image] })
+
+    image.decode = async () => {
+      completeAtDecoding.push(image.complete)
+
+      if (completeAtDecoding.length === 1) {
+        image.complete = false
+
+        throw new Error('EncodingError: the source changed')
+      }
+
+      await resolvesAfter(300)
+      image.complete = true
+    }
+
+    const wait = waitForAssets(openPage({ document }), 1000)
+
+    await vi.advanceTimersByTimeAsync(200)
+    expect(wait.settled()).toBe(false)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(await wait.answer).toEqual(readyAnswer())
+    expect(completeAtDecoding).toEqual([true, false])
+  })
+
+  it('decodes an image again when its load handler swaps its source just after its decoding resolved', async () => {
+    const image = fakeImage()
+    let decodings = 0
+    const { document } = fakeDocument({ images: [image] })
+
+    image.decode = async () => {
+      decodings += 1
+
+      if (decodings === 1) {
+        // As Chromium does for an SVG placeholder: decoding resolves, then the load handler swaps in the full image.
+        setTimeout(() => {
+          image.complete = false
+        }, 0)
+
+        return
+      }
+
+      await resolvesAfter(300)
+      image.complete = true
+    }
+
+    const wait = waitForAssets(openPage({ document }), 1000)
+
+    await vi.advanceTimersByTimeAsync(200)
+    expect(wait.settled()).toBe(false)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(await wait.answer).toEqual(readyAnswer())
+    expect(decodings).toBe(2)
+  })
+
+  it('times out on time with an image that stays incomplete while its decoding fails at once', async () => {
+    const image = fakeImage({ complete: false, decode: () => Promise.reject(new Error('EncodingError')) })
+    const { document } = fakeDocument({ images: [image] })
+    const wait = waitForAssets(openPage({ document }), 1000)
+
+    await vi.advanceTimersByTimeAsync(999)
+    expect(wait.settled()).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await wait.answer).toEqual(imagesTimedOutAnswer(1))
+  })
+
+  it('skips images no longer in the document, such as those in the shadow root of a removed element', async () => {
+    const detached = (): FakeImage => fakeImage({ loading: 'lazy', complete: false, isConnected: false, decode: never })
+    const { document } = fakeDocument({ images: [detached()] })
+    const page = openPage({ document })
+    const root = new page.Element().attachShadow({ mode: 'open' })
+
+    Object.assign(root, { querySelectorAll: () => [detached()] })
+    expect(await waitForAssets(page, 1000).answer).toEqual(readyAnswer())
+  })
+
+  it('treats an image without decode, or whose decode throws, as decoded', async () => {
+    const withoutDecode = { loading: 'eager', complete: true, isConnected: true }
+    const throwing = fakeImage({
+      decode: () => {
+        throw new Error('decode is not supported')
+      },
+    })
+    const { document } = fakeDocument({ images: [withoutDecode, throwing] })
+
+    expect(await finish(waitForAssets(openPage({ document }), 1000))).toEqual(readyAnswer())
+  })
+
+  it('is ready when document.fonts.ready rejects', async () => {
+    const { document } = fakeDocument({ fontsReady: Promise.reject(new Error('fonts failed')) })
+
+    expect(await waitForAssets(openPage({ document }), 1000).answer).toEqual(readyAnswer())
+  })
+
+  it('is ready with a limit of 0 when there is nothing to wait for', async () => {
+    const { document } = fakeDocument()
+
+    expect(await waitForAssets(openPage({ document }), 0).answer).toEqual(readyAnswer())
+  })
+
+  it('times out at once with a limit of 0 on an image still loading', async () => {
+    const { document } = fakeDocument({ images: [fakeImage({ complete: false, decode: never })] })
+    const wait = waitForAssets(openPage({ document }), 0)
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(await wait.answer).toEqual(imagesTimedOutAnswer(1))
+  })
+
+  it('times out while images decode, counting the images not yet complete', async () => {
+    const images = [
+      fakeImage({ decode: never }),
+      fakeImage({ complete: false, decode: never }),
+      fakeImage({ complete: false, decode: never }),
+      fakeImage(),
+    ]
+    const { document } = fakeDocument({ images })
+    const wait = waitForAssets(openPage({ document }), 1000)
+
+    await vi.advanceTimersByTimeAsync(999)
+    expect(wait.settled()).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await wait.answer).toEqual(imagesTimedOutAnswer(2))
+  })
+
+  it('rounds its time limit up to whole ms', async () => {
+    const { document } = fakeDocument({ images: [fakeImage({ decode: never })] })
+    const wait = waitForAssets(openPage({ document }), 999.2)
+
+    await vi.advanceTimersByTimeAsync(999)
+    expect(wait.settled()).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await wait.answer).toEqual(imagesTimedOutAnswer(0))
+  })
+
+  it('forces layout before it reads document.fonts.ready, so the fonts the layout needs start loading', async () => {
+    const { document, events } = fakeDocument()
+
+    await waitForAssets(openPage({ document }), 1000).answer
+    expect(events).toEqual(['layout', 'fonts.ready'])
+  })
+
+  it('times out while fonts load, naming each face still loading once, without quotes around its family', async () => {
+    const faces = [
+      fakeFace('"Never Loads"', 'loading'),
+      fakeFace('Loaded', 'loaded'),
+      fakeFace("'Never Loads'", 'loading'),
+      fakeFace('Slow', 'loading', { weight: '700', style: 'italic' }),
+      fakeFace('Unused', 'unloaded'),
+      fakeFace('Broken', 'error'),
+    ]
+    const { document } = fakeDocument({ faces, fontsReady: never() })
+    const wait = waitForAssets(openPage({ document }), 1000)
+
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(await wait.answer).toEqual(fontsTimedOutAnswer(['Never Loads 400 normal', 'Slow 700 italic']))
+  })
+
+  it('gives the fonts only what the images left of the time limit', async () => {
+    const { document } = fakeDocument({
+      images: [fakeImage({ decode: () => resolvesAfter(400) })],
+      fontsReady: never(),
+    })
+    const wait = waitForAssets(openPage({ document }), 1000)
+
+    await vi.advanceTimersByTimeAsync(999)
+    expect(wait.settled()).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await wait.answer).toEqual(fontsTimedOutAnswer([]))
+  })
+
+  it('is ready after the images in a document without document.fonts', async () => {
+    const { document } = fakeDocument({ images: [fakeImage({ decode: () => resolvesAfter(300) })], faces: null })
+
+    expect(await finish(waitForAssets(openPage({ document }), 1000))).toEqual(readyAnswer())
+  })
+
+  it('includes the images in every shadow root the page script recorded', async () => {
+    const image = fakeImage({ loading: 'lazy', complete: false, decode: never })
+    const { document } = fakeDocument()
+    const page = openPage({ document })
+    const root = new page.Element().attachShadow({ mode: 'closed' })
+
+    Object.assign(root, { querySelectorAll: (selector: string) => (selector === 'img' ? [image] : []) })
+
+    const wait = waitForAssets(page, 1000)
+
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(await wait.answer).toEqual(imagesTimedOutAnswer(1))
+    expect(image.loading).toBe('eager')
+  })
+
+  it("times out on time when the story replaced the page's timers", async () => {
+    const { document } = fakeDocument({ images: [fakeImage({ decode: never })] })
+    const page = openPage({ document })
+
+    page.run('globalThis.setTimeout = () => 0; globalThis.clearTimeout = () => undefined')
+
+    const wait = waitForAssets(page, 1000)
+
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(await wait.answer).toEqual(imagesTimedOutAnswer(0))
+  })
+
+  it('leaves no timer behind once ready', async () => {
+    const { document } = fakeDocument()
+
+    await waitForAssets(openPage({ document }), 1000).answer
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("gives script-missing in a page where the page script didn't run", async () => {
+    expect(await blankPage().evaluate(assetsReadyExpression(1000))).toEqual({ outcome: 'script-missing' })
+  })
+})
+
+describe('readAssetsReadiness', () => {
+  it('reads images and fonts that are ready', () => {
+    expect(readAssetsReadiness(readyAnswer())).toEqual({ outcome: 'ready' })
+  })
+
+  it('reads a timeout while images decoded, with the images not yet complete', () => {
+    expect(readAssetsReadiness(imagesTimedOutAnswer(2))).toEqual({ outcome: 'timed-out', step: 'images', pending: 2 })
+  })
+
+  it('reads a timeout while fonts loaded, with the faces still loading', () => {
+    expect(readAssetsReadiness(fontsTimedOutAnswer(['Inter 400 normal']))).toEqual({
+      outcome: 'timed-out',
+      step: 'fonts',
+      pendingFaces: ['Inter 400 normal'],
+    })
+  })
+
+  it('reads a missing page script', () => {
+    expect(readAssetsReadiness({ outcome: 'script-missing' })).toEqual({ outcome: 'script-missing' })
+  })
+
+  it.each([
+    ['a number', 42],
+    ['null', null],
+    ['a timeout without a step', { outcome: 'timed-out' }],
+    ['a timeout in another step', { outcome: 'timed-out', step: 'layout' }],
+    ['a count of images other than a number', imagesTimedOutAnswer('2')],
+    ['a count of images below zero', imagesTimedOutAnswer(-1)],
+    ['a count of images that is not whole', imagesTimedOutAnswer(1.5)],
+    ['faces other than a list', fontsTimedOutAnswer('Inter 400 normal')],
+    ['a face other than text', fontsTimedOutAnswer([42])],
+  ])('throws on %s, quoting it', (_what, value) => {
+    expect(() => readAssetsReadiness(value)).toThrow(
+      `The wait for images and fonts in the page gave an answer visual-check doesn't know: ${JSON.stringify(value)}.`,
+    )
   })
 })

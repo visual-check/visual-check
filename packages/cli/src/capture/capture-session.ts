@@ -9,7 +9,7 @@ import {
   PageTimeoutError,
   type PageViewport,
 } from './driver/driver.js'
-import { pageInitScript } from './page-script.js'
+import { type AssetsReadiness, assetsReadyExpression, pageInitScript, readAssetsReadiness } from './page-script.js'
 
 /**
  * What every page's user agent ends in. It puts Storybook 9.1 and later on its test path, which skips a fixed 100 ms
@@ -18,10 +18,10 @@ import { pageInitScript } from './page-script.js'
 const userAgentSuffix = ' StorybookTestRunner'
 
 /**
- * How much longer than the story wait in the page the driver waits for its answer, in ms. The wait in the page gives
- * up first and says why; this catches a page that stopped answering.
+ * How much longer than a wait in the page the driver waits for its answer, in ms. The wait in the page gives up first
+ * and says why; this catches a page that stopped answering.
  */
-const storyWaitMarginMs = 1_000
+const waitMarginMs = 1_000
 
 /**
  * How a session captures every story.
@@ -35,10 +35,10 @@ export interface CaptureSettings {
   viewport: PageViewport
   /**
    * The config's `readyTimeout`, in ms, per attempt: a story that navigates away is captured again, up to 2 more times,
-   * each with the whole of it. It's counted from just before the viewport is set. Loading the story (`goto`) and
-   * waiting for Storybook to report it finished share it, each getting what's left, in whole ms rounded up. The wait in
-   * the page gives up when it runs out, and the driver allows up to 1 s more for the page's answer. Setting the
-   * viewport and the capture are bound by the driver's own fixed limits instead.
+   * each with the whole of it. It's counted from just before the viewport is set. Loading the story (`goto`), waiting
+   * for Storybook to report it finished and waiting for its images and fonts share it, each getting what's left, in
+   * whole ms rounded up. Each wait in the page gives up when it runs out, and the driver allows up to 1 s more for the
+   * page's answer. Setting the viewport and the capture are bound by the driver's own fixed limits instead.
    */
   readyTimeoutMs: number
   /**
@@ -78,6 +78,7 @@ export interface StoryToCapture {
  *   the story threw, the page script didn't run, or a step of the capture failed.
  * - `play-threw`: the story's `play` function threw or left unhandled errors.
  * - `timeout`: the story wasn't ready within readyTimeout.
+ * - `fonts-not-loaded`: a font face the story's page uses was still loading when readyTimeout ran out.
  * - `navigated-away`: the story's page went to another document.
  * - `crashed`: the page crashed, usually from running out of memory.
  * - `browser-exited`: the browser exited while the story was in flight. The run's browser gives it; a capture session
@@ -85,11 +86,18 @@ export interface StoryToCapture {
  *
  * @public
  */
-export type BrokenReason = 'error' | 'play-threw' | 'timeout' | 'navigated-away' | 'crashed' | 'browser-exited'
+export type BrokenReason =
+  | 'error'
+  | 'play-threw'
+  | 'timeout'
+  | 'fonts-not-loaded'
+  | 'navigated-away'
+  | 'crashed'
+  | 'browser-exited'
 
 /**
- * A story that can't be captured: why, and a one-line message for people saying so. A story that navigated away also
- * keeps where it went.
+ * A story that can't be captured: why, and a one-line message for people saying so. A story whose fonts didn't load
+ * also keeps the faces still loading, and a story that navigated away keeps where it went.
  *
  * @public
  */
@@ -98,11 +106,26 @@ export type BrokenStory =
       /**
        * Why the story can't be captured.
        */
-      reason: Exclude<BrokenReason, 'navigated-away'>
+      reason: Exclude<BrokenReason, 'fonts-not-loaded' | 'navigated-away'>
       /**
        * One line for people saying why.
        */
       message: string
+    }
+  | {
+      /**
+       * Why the story can't be captured: a font face was still loading when readyTimeout ran out.
+       */
+      reason: 'fonts-not-loaded'
+      /**
+       * One line for people saying why, naming the faces still loading.
+       */
+      message: string
+      /**
+       * The font faces still loading, each as its family, weight and style. The weight and style are as declared, such
+       * as `Inter normal normal` or `Inter 100 900 normal`.
+       */
+      faces: string[]
     }
   | {
       /**
@@ -151,7 +174,7 @@ export interface CaptureSession {
 /**
  * A step of one capture.
  */
-type Step = 'viewport' | 'load' | 'story' | 'capture'
+type Step = 'viewport' | 'load' | 'story' | 'assets' | 'capture'
 
 /**
  * What each step does, as a phrase that follows "while".
@@ -160,6 +183,7 @@ const stepNames: Record<Step, string> = {
   viewport: 'setting the viewport',
   load: 'loading the story',
   story: 'waiting for the story to finish',
+  assets: 'waiting for images and fonts',
   capture: 'capturing the snapshot',
 }
 
@@ -169,6 +193,7 @@ const stepNames: Record<Step, string> = {
 const stepTimeouts: Partial<Record<Step, string>> = {
   load: 'its page was still loading',
   story: 'its page stopped answering while visual-check waited for the story to finish',
+  assets: 'its page stopped answering while visual-check waited for its images and fonts',
 }
 
 /**
@@ -246,8 +271,51 @@ function describeStoryWait(wait: Exclude<StoryWait, { outcome: 'finished' }>, re
 }
 
 /**
+ * Says what the images of a story were doing when the wait for them timed out, by how many hadn't finished loading.
+ */
+function imagesStillLoading(pending: number): string {
+  if (pending === 0) {
+    return 'its images were still decoding'
+  }
+
+  return pending === 1 ? '1 of its images was still loading' : `${pending} of its images were still loading`
+}
+
+/**
+ * Says why a story isn't ready to capture, from what the wait for its images and fonts found.
+ */
+function describeAssetsWait(
+  assets: Exclude<AssetsReadiness, { outcome: 'ready' }>,
+  readyTimeoutMs: number,
+): BrokenStory {
+  if (assets.outcome === 'script-missing') {
+    return {
+      reason: 'error',
+      message:
+        "visual-check's page script didn't run in the story's page, so it couldn't wait for its images and fonts.",
+    }
+  }
+
+  if (assets.step === 'images') {
+    return { reason: 'timeout', message: notReady(readyTimeoutMs, imagesStillLoading(assets.pending)) }
+  }
+
+  const faces = assets.pendingFaces
+
+  if (faces.length === 0) {
+    return { reason: 'timeout', message: notReady(readyTimeoutMs, "document.fonts.ready hadn't resolved") }
+  }
+
+  return {
+    reason: 'fonts-not-loaded',
+    message: `The story's fonts hadn't loaded within readyTimeout (${readyTimeoutMs} ms). Still loading: ${faces.join(', ')}.`,
+    faces,
+  }
+}
+
+/**
  * Says why a story couldn't be captured, from the error a step failed with. A `PageTimeoutError` from loading the story
- * or waiting for it means readyTimeout ran out. `story` shows a URL on the story's own origin as a path.
+ * or from a wait in the page means readyTimeout ran out. `story` shows a URL on the story's own origin as a path.
  */
 function describeFailure(error: unknown, step: Step, story: StoryToCapture, readyTimeoutMs: number): BrokenStory {
   if (error instanceof PageCrashedError) {
@@ -278,13 +346,24 @@ function describeFailure(error: unknown, step: Step, story: StoryToCapture, read
 
 /**
  * Captures a story on an open page: sets the viewport, loads the story, waits until Storybook reports it finished with
- * nothing gone wrong and captures the full page. Loading and waiting share readyTimeout, each getting only what's left
- * of it. A story that can't be captured comes back as a broken story. Rejects only with a `BrowserExitedError`.
+ * nothing gone wrong, waits for its images and fonts and captures the full page. Loading and both waits share
+ * readyTimeout, each getting only what's left of it. A story that can't be captured comes back as a broken story.
+ * Rejects only with a `BrowserExitedError`.
  */
 async function captureOnPage(page: Page, story: StoryToCapture, settings: CaptureSettings): Promise<StoryCapture> {
   const deadline = performance.now() + settings.readyTimeoutMs
   const timeLeft = (): number => Math.max(0, Math.ceil(deadline - performance.now()))
   let step: Step = 'viewport'
+
+  /**
+   * Evaluates a wait in the page, built by `expressionFor` for what's left of readyTimeout, and gives the page's
+   * answer. The driver allows the margin more for it.
+   */
+  const waitInPage = async (expressionFor: (limitMs: number) => string): Promise<unknown> => {
+    const limit = timeLeft()
+
+    return await page.evaluate(expressionFor(limit), limit + waitMarginMs)
+  }
 
   try {
     await page.setViewport(settings.viewport)
@@ -292,11 +371,18 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
     await page.goto(story.url, timeLeft())
     step = 'story'
 
-    const limit = timeLeft()
-    const wait = readStoryWait(await page.evaluate(storyWaitExpression(story.id, limit), limit + storyWaitMarginMs))
+    const wait = readStoryWait(await waitInPage((limit) => storyWaitExpression(story.id, limit)))
 
     if (wait.outcome !== 'finished') {
       return { broken: describeStoryWait(wait, settings.readyTimeoutMs) }
+    }
+
+    step = 'assets'
+
+    const assets = readAssetsReadiness(await waitInPage(assetsReadyExpression))
+
+    if (assets.outcome !== 'ready') {
+      return { broken: describeAssetsWait(assets, settings.readyTimeoutMs) }
     }
 
     step = 'capture'

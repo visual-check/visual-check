@@ -3,7 +3,7 @@ import { BrowserMismatchError } from '../browser/browser-version.js'
 import type { BrowserPackage } from '../browser/read-browser-package.js'
 import type { StoryCapture, StoryToCapture } from '../capture/capture-session.js'
 import { BrowserExitedError, BrowserLaunchError, type Driver, type Page } from '../capture/driver/driver.js'
-import { finishedAnswer } from '../storybook/preview-script.fixture.js'
+import { answerEvaluate } from '../capture/fake-driver.fixture.js'
 import { type RunBrowser, runBrowserOf } from './run-browser.js'
 
 /**
@@ -83,10 +83,10 @@ function fakeBrowserOf(version: string = browserPackage.chromium): FakeBrowser {
         failIfGone()
         id = new URL(url).searchParams.get('id') ?? ''
       },
-      evaluate: async () => {
+      evaluate: async (expression, timeoutMs) => {
         failIfGone()
 
-        return finishedAnswer()
+        return await answerEvaluate({}, expression, timeoutMs)
       },
       captureFullPage: async () => {
         await holds.get(id)

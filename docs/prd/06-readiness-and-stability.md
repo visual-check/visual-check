@@ -101,7 +101,7 @@ A broken story counts toward exit 1, and the run goes on. Errors and timeouts ar
 | `error`                 | Storybook shows its error display, or `storyFinished` reports an error                                                              |
 | `play-threw`            | `play` threw or left unhandled errors                                                                                               |
 | `timeout`               | Not ready within `readyTimeout`                                                                                                     |
-| `fonts-not-loaded`      | `document.fonts.ready` hadn't resolved by the timeout. The details name the faces still pending                                     |
+| `fonts-not-loaded`      | A font face was still loading when `readyTimeout` ran out. The details name those faces                                             |
 | `wait-threw`            | The `wait` hook threw                                                                                                               |
 | `navigated-away`        | The story left its document, after 2 retries. The details carry the URL, and the message says to await the new page before clicking |
 | `element-missing`       | The `element` selector matched nothing, or a box of zero size                                                                       |

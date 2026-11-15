@@ -23,6 +23,7 @@ import {
   type PageSetup,
   type PageViewport,
 } from '../capture/driver/driver.js'
+import { answerEvaluate } from '../capture/fake-driver.fixture.js'
 import { ContainerError } from '../container/container-error.js'
 import { finishedAnswer } from '../storybook/preview-script.fixture.js'
 import type { ContainerRoute } from './browser-route.js'
@@ -345,10 +346,12 @@ function fakeDriverOf({ stories, record, version, browser = 1, gates = new Map()
           id = new URL(url).searchParams.get('id') ?? ''
           story = stories[id] ?? {}
         },
-        evaluate: async () => {
+        evaluate: async (expression, timeoutMs) => {
           failIfGone()
 
-          return finishedAnswer({ status: story.broken === true ? 'error' : 'success' })
+          const status = story.broken === true ? 'error' : 'success'
+
+          return await answerEvaluate({ storyWait: async () => finishedAnswer({ status }) }, expression, timeoutMs)
         },
         captureFullPage: async () => {
           gateOf(gates, `capturing ${id}`).resolve()
