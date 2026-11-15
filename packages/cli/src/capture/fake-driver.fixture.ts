@@ -1,12 +1,14 @@
 import { answerOptionsReadExpression } from '../storybook/options-read.fixture.js'
 import { finishedAnswer } from '../storybook/preview-script.fixture.js'
 import type { BrowserExitedError, Driver, Page, PageSetup, PageViewport } from './driver/driver.js'
+import { settledAnswer } from './end-state.fixture.js'
 import { readyAnswer } from './page-script.fixture.js'
 
 /**
- * How a fake page answers the waits and the options read evaluated in it. One left out answers as on a story that's
- * ready: the story wait gives `finishedAnswer()`, the wait for images and fonts gives `readyAnswer()`, the wait hook
- * finds none to run, and the options read finds every file loaded and no story with options.
+ * How a fake page answers the waits, the end state and the options read evaluated in it. One left out answers as on a
+ * story that's ready: the story wait gives `finishedAnswer()`, the wait for images and fonts gives `readyAnswer()`, the
+ * wait hook finds none to run, the end state gives `settledAnswer()`, changing nothing, and the options read finds every
+ * file loaded and no story with options.
  */
 interface FakeEvaluation {
   /**
@@ -22,6 +24,10 @@ interface FakeEvaluation {
    */
   waitHook?: (timeoutMs: number) => Promise<unknown>
   /**
+   * Answers the end state, given the driver's time limit for it.
+   */
+  endStateWait?: (timeoutMs: number) => Promise<unknown>
+  /**
    * Answers the options read, given the driver's time limit for it.
    */
   optionsRead?: (timeoutMs: number) => Promise<unknown>
@@ -30,8 +36,8 @@ interface FakeEvaluation {
 /**
  * Answers an expression evaluated in a fake page as `evaluation` says. It tells the waits apart by the function each
  * calls in the page: `waitForStory` for the story wait, `waitForAssets` for the wait for images and fonts, `runWait`
- * for the wait hook and `readOptions` for the options read. Throws on any other expression, so one the fake doesn't
- * know, such as a wait whose function was renamed, fails clearly.
+ * for the wait hook, `bringToEndState` for the end state and `readOptions` for the options read. Throws on any other
+ * expression, so one the fake doesn't know, such as a wait whose function was renamed, fails clearly.
  *
  * @public
  */
@@ -50,6 +56,10 @@ export async function answerEvaluate(
 
   if (expression.includes('.runWait(')) {
     return evaluation.waitHook === undefined ? { outcome: 'none' } : await evaluation.waitHook(timeoutMs)
+  }
+
+  if (expression.includes('.bringToEndState(')) {
+    return evaluation.endStateWait === undefined ? settledAnswer() : await evaluation.endStateWait(timeoutMs)
   }
 
   if (expression.includes('.readOptions(')) {

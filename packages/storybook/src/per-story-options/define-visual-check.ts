@@ -263,17 +263,21 @@ function declareModes(declaration: VisualCheckDeclaration<string>): VisualCheck<
   return function visualCheck(options) {
     const { modes, masks, ...rest } = options
     const parameter: Record<string, unknown> = {}
+
     for (const [key, value] of Object.entries(rest)) {
       if (value !== undefined) {
         parameter[key] = value
       }
     }
+
     if (modes !== undefined) {
       parameter.modes = writeModes(declaration.modes, modes)
     }
+
     if (masks !== undefined) {
       parameter.masks = masks === null ? null : writeMasks(masks)
     }
+
     return { visualCheck: parameter as VisualCheckParameter }
   }
 }
@@ -288,9 +292,11 @@ function writeModes(
 ): Record<string, ModeDefinition | null> {
   const names = new Set<string>(listed)
   const written: Record<string, ModeDefinition | null> = {}
+
   for (const [name, definition] of Object.entries(declared)) {
     written[name] = names.has(name) ? definition : null
   }
+
   return written
 }
 
@@ -300,9 +306,11 @@ function writeModes(
  */
 function writeMasks(masks: Record<string, Mask | null>): Record<string, WrittenMask | null> {
   const written: Record<string, WrittenMask | null> = {}
+
   for (const [name, mask] of Object.entries(masks)) {
     written[name] =
       mask === null ? null : ({ ...mask, selector: mask.selector ?? null, host: mask.host ?? null } as WrittenMask)
   }
+
   return written
 }

@@ -16,4 +16,4 @@ Turbo builds the CLI, `@visual-check/storybook` and the Storybook first.
 
 ## Rewriting the baselines
 
-Follow [Rewriting the baselines](../storybook-10-react/README.md#rewriting-the-baselines) from this folder, building with `--filter @visual-check/test-storybook-11-react...`. The broken stories' baselines are copies of the Storybook 10 test Storybook's, since the stories are the same.
+Follow [Rewriting the baselines](../storybook-10-react/README.md#rewriting-the-baselines) from this folder, building with `--filter @visual-check/test-storybook-11-react...`. The broken stories' baselines are copies of the Storybook 10 test Storybook's, since the stories are the same. The animation stories' baselines must stay byte-identical to the Storybook 10 test Storybook's, or the end-to-end check's committed-baselines case fails.
