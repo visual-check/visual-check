@@ -1,4 +1,12 @@
 /**
+ * What every page's user agent ends in. It puts Storybook 9.1 and later on its test path: a user agent that contains
+ * `StorybookTestRunner` makes Storybook skip a fixed 100 ms wait per story.
+ *
+ * @public
+ */
+export const testPathUserAgentSuffix = ' StorybookTestRunner'
+
+/**
  * The median time of Storybook's `completing` render step, in ms, from which a Storybook seems to ignore the test path.
  * On the test path the step takes about 0 ms; off it, Storybook waits a fixed 100 ms or more.
  */
@@ -45,8 +53,9 @@ export function testPathWarningOf(
     storybook.version === undefined ? 'its storybook version is unknown' : `storybook ${storybook.version}`
 
   return (
-    `Warning: Storybook ${storybook.name} (${version}) seems to ignore visual-check's StorybookTestRunner user agent: ` +
+    `Warning: Storybook ${storybook.name} (${version}) seems to ignore visual-check's ` +
+    `${testPathUserAgentSuffix.trim()} user agent: ` +
     `its "completing" render step took a median of ${Math.round(median)} ms, ` +
-    'so each capture takes about 100 ms longer. Snapshots stay correct.'
+    'so each capture takes at least 100 ms longer. Snapshots stay correct.'
   )
 }

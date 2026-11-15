@@ -1,4 +1,5 @@
 import { readStoryWait, type StoryWait, storyWaitExpression } from '../storybook/preview-script.js'
+import { testPathUserAgentSuffix } from '../storybook/test-path.js'
 import {
   BrowserExitedError,
   type Driver,
@@ -10,12 +11,6 @@ import {
   type PageViewport,
 } from './driver/driver.js'
 import { type AssetsReadiness, assetsReadyExpression, pageInitScript, readAssetsReadiness } from './page-script.js'
-
-/**
- * What every page's user agent ends in. It puts Storybook 9.1 and later on its test path, which skips a fixed 100 ms
- * wait per story.
- */
-const userAgentSuffix = ' StorybookTestRunner'
 
 /**
  * How much longer than a wait in the page the driver waits for its answer, in ms. The wait in the page gives up first
@@ -447,7 +442,7 @@ function navigatedAway(capture: StoryCapture): boolean {
  */
 export function openCaptureSession(driver: Driver, settings: CaptureSettings): CaptureSession {
   const setup: PageSetup = {
-    userAgentSuffix,
+    userAgentSuffix: testPathUserAgentSuffix,
     timezone: settings.timezone,
     locale: settings.locale,
     colorScheme: settings.colorScheme,

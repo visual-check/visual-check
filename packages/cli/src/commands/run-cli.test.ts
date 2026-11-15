@@ -1127,7 +1127,7 @@ function installStorybook(folder: string, version: string): void {
 function testPathWarningOf(name: string, storybookVersion: string, medianMs: number): string {
   return (
     `Warning: Storybook ${name} (${storybookVersion}) seems to ignore visual-check's StorybookTestRunner user agent: ` +
-    `its "completing" render step took a median of ${medianMs} ms, so each capture takes about 100 ms longer. ` +
+    `its "completing" render step took a median of ${medianMs} ms, so each capture takes at least 100 ms longer. ` +
     'Snapshots stay correct.\n'
   )
 }

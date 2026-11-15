@@ -19,7 +19,7 @@ describe('testPathWarningOf', () => {
   it('warns from 50 ms, naming the Storybook, its version and the median', () => {
     expect(testPathWarningOf(web, [50])).toBe(
       "Warning: Storybook web (storybook 9.1.2) seems to ignore visual-check's StorybookTestRunner user agent: " +
-        'its "completing" render step took a median of 50 ms, so each capture takes about 100 ms longer. ' +
+        'its "completing" render step took a median of 50 ms, so each capture takes at least 100 ms longer. ' +
         'Snapshots stay correct.',
     )
   })
