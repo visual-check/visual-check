@@ -159,6 +159,14 @@ function listenForEnd(frames: FakeFrames, animation: FakeAnimation, listener: ()
   }
 }
 
+/**
+ * Has page logic listen for `type` events on a media element, reacting at the next animation frame, as a state update
+ * that a listener makes is committed then.
+ */
+function reactToMediaEvent(frames: FakeFrames, element: FakeMedia, type: string, reaction: () => void): void {
+  element.addEventListener(type, () => frames.react(1, reaction))
+}
+
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
 })
@@ -722,7 +730,7 @@ describe('media', () => {
   }
 
   describe('a video', () => {
-    it('that plays is paused, stops playing on its own and is seeked to 0, then the last frames pass', async () => {
+    it('that plays is paused, stops playing on its own and is seeked to 0, then the animations are checked twice a frame apart and the last frames pass', async () => {
       const video = fakeVideo({ seekMs: 200 })
       const page = openEndState({ media: [video] })
       const run = page.bringToEndState(1000)
@@ -731,10 +739,15 @@ describe('media', () => {
       expect(page.frames.requestFrame).not.toHaveBeenCalled()
       await vi.advanceTimersByTimeAsync(1)
       expect(page.frames.requestFrame).toHaveBeenCalledOnce()
+      // A frame for the media events, a frame between the two checks, then the two last frames: each frame is two
+      // animation frames of 16 ms, then a task.
+      await vi.advanceTimersByTimeAsync(127)
+      expect(run.settled()).toBe(false)
       await vi.runAllTimersAsync()
       expect(await run.answer).toEqual(settledAnswer(true))
       expect(video.actions).toEqual(['pause', 'autoplay = false', 'currentTime = 0'])
-      expect(page.frames.requestFrame).toHaveBeenCalledTimes(4)
+      // No round finished anything.
+      expect(page.frames.requestFrame).toHaveBeenCalledTimes(8)
     })
 
     it.each([
@@ -922,7 +935,7 @@ describe('media', () => {
     expect(image.actions).toEqual(replacedWith(firstFrameUrl(spinner)))
   })
 
-  it('are frozen right after the animations, then one wait of two frames covers both', async () => {
+  it('are frozen right after the animations are pinned, and the last frames pass once, after both', async () => {
     const animation = fakeAnimation({ endTime: Number.POSITIVE_INFINITY })
     const video = fakeVideo()
     const page = openEndState({ animations: [animation], media: [video] })
@@ -939,7 +952,125 @@ describe('media', () => {
     expect(page.frames.requestFrame).toHaveBeenCalledOnce()
     await vi.runAllTimersAsync()
     expect(await run.answer).toEqual(settledAnswer(true))
-    expect(page.frames.requestFrame).toHaveBeenCalledTimes(4)
+    // A frame for the media events, a frame between the two checks, then the two last frames.
+    expect(page.frames.requestFrame).toHaveBeenCalledTimes(8)
+  })
+
+  it('that change nothing let no more frames pass than the animations do', async () => {
+    const animation = fakeAnimation()
+    const page = openEndState({
+      animations: [animation],
+      media: [fakeVideo({ paused: true, currentTime: 0 }), fakeSvg({ holds: null })],
+    })
+    const run = page.bringToEndState(1000)
+
+    await vi.advanceTimersByTimeAsync(127)
+    expect(run.settled()).toBe(false)
+    await vi.runAllTimersAsync()
+    expect(await run.answer).toEqual(settledAnswer(true))
+    expect(animation.actions).toEqual(['finish'])
+    // As with no media: four frames of two callbacks, and the two callbacks of the finish() call's end events.
+    expect(page.frames.requestFrame).toHaveBeenCalledTimes(10)
+  })
+
+  describe('starting animations as they freeze', () => {
+    it("has the animations a video's pause event starts finished, and pinned when their fill mode holds their end", async () => {
+      const video = fakeVideo()
+      const controlsFadeIn = fakeAnimation({ kind: 'css-transition' })
+      const labelFadeIn = fakeAnimation({ kind: 'css-animation', holdsEnd: true })
+      const document = fakeDocument({ media: [video] })
+      const page = openEndState({ document })
+
+      reactToMediaEvent(page.frames, video, 'pause', () => document.animations.push(controlsFadeIn, labelFadeIn))
+
+      const run = page.bringToEndState(10_000)
+
+      await vi.runAllTimersAsync()
+      expect(await run.answer).toEqual(settledAnswer(true))
+      expect(controlsFadeIn.actions).toEqual(['finish'])
+      expect(labelFadeIn.actions).toEqual(['finish', 'commitStyles', 'cancel'])
+    })
+
+    it("has an animation a replaced GIF's load event starts finished and pinned", async () => {
+      const image = fakeImage({ src: spinner })
+      const fadeIn = fakeAnimation({ kind: 'css-animation', holdsEnd: true })
+      const document = fakeDocument({ media: [image] })
+      const page = openEndState({ document })
+
+      reactToMediaEvent(page.frames, image, 'load', () => document.animations.push(fadeIn))
+
+      const run = page.bringToEndState(10_000)
+
+      await vi.runAllTimersAsync()
+      expect(await run.answer).toEqual(settledAnswer(true))
+      expect(image.actions).toEqual(replacedWith(firstFrameUrl(spinner)))
+      expect(fadeIn.actions).toEqual(['finish', 'commitStyles', 'cancel'])
+    })
+
+    it("puts an infinite animation a video's pause event starts on its first keyframe and pins it", async () => {
+      const video = fakeVideo()
+      const spinnerAnimation = fakeAnimation({ kind: 'css-animation', endTime: Number.POSITIVE_INFINITY })
+      const document = fakeDocument({ media: [video] })
+      const page = openEndState({ document })
+
+      reactToMediaEvent(page.frames, video, 'pause', () => document.animations.push(spinnerAnimation))
+
+      const run = page.bringToEndState(10_000)
+
+      await vi.runAllTimersAsync()
+      expect(await run.answer).toEqual(settledAnswer(true))
+      expect(spinnerAnimation.actions).toEqual(['pause', 'currentTime = 0', 'commitStyles', 'cancel'])
+    })
+
+    it('finishes an animation page logic starts a frame after a media event, past the first quiet check', async () => {
+      const video = fakeVideo()
+      const late = fakeAnimation({ kind: 'css-animation', holdsEnd: true })
+      const document = fakeDocument({ media: [video] })
+      const page = openEndState({ document })
+
+      // The frame for the media events spans animation frames 1 and 2, so the frame after the first quiet check
+      // starts at 3.
+      reactToMediaEvent(page.frames, video, 'pause', () => page.frames.react(2, () => document.animations.push(late)))
+
+      const run = page.bringToEndState(10_000)
+
+      await vi.runAllTimersAsync()
+      expect(await run.answer).toEqual(settledAnswer(true))
+      expect(late.actions).toEqual(['finish', 'commitStyles', 'cancel'])
+    })
+
+    it('freezes media only once, before it brings the animations to their end again', async () => {
+      const video = fakeVideo()
+      const fadeIn = fakeAnimation({ kind: 'css-animation', holdsEnd: true })
+      const document = fakeDocument({ media: [video] })
+      const page = openEndState({ document })
+
+      reactToMediaEvent(page.frames, video, 'pause', () => document.animations.push(fadeIn))
+
+      const run = page.bringToEndState(10_000)
+
+      await vi.runAllTimersAsync()
+      expect(await run.answer).toEqual(settledAnswer(true))
+      expect(video.actions).toEqual(['pause', 'autoplay = false', 'currentTime = 0'])
+    })
+
+    it.each([
+      ['while page logic runs on the media events', 40],
+      ['while it finishes what that started', 60],
+    ])('gives a timeout naming the animations when the time limit passes %s', async (_when, timeoutMs) => {
+      const video = fakeVideo()
+      const document = fakeDocument({ media: [video] })
+      const page = openEndState({ document })
+
+      reactToMediaEvent(page.frames, video, 'pause', () => document.animations.push(fakeAnimation()))
+
+      const run = page.bringToEndState(timeoutMs)
+
+      await vi.advanceTimersByTimeAsync(timeoutMs - 1)
+      expect(run.settled()).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(await run.answer).toEqual(animationsTimedOutAnswer())
+    })
   })
 
   it('that throw are coped with', async () => {
@@ -1022,9 +1153,12 @@ describe('media', () => {
   })
 
   it('passing while the last frames pass after media changed gives a timeout naming the media', async () => {
-    const run = openEndState({ media: [fakeVideo()] }).bringToEndState(50)
+    // The video seeks for 20 ms, then the animations are checked over two frames of 32 ms, until 84 ms.
+    const run = openEndState({ media: [fakeVideo()] }).bringToEndState(100)
 
-    await vi.advanceTimersByTimeAsync(50)
+    await vi.advanceTimersByTimeAsync(99)
+    expect(run.settled()).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
     expect(await run.answer).toEqual(mediaTimedOutAnswer())
   })
 })

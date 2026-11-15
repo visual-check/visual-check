@@ -44,8 +44,9 @@ const keptCharacters = 500
  *   `document.fonts.ready`. One time limit covers both. A page without an API it uses, such as `document.fonts`, has
  *   nothing to wait for there;
  * - gives `bringToEndState`, which the end state expression calls at capture. It brings every animation in the
- *   document and in every shadow root to its end state, then freezes their videos, inline SVGs and GIFs, as
- *   `endStateFunction` says, telling the animations Storybook 11 parked apart with the Storybook adapter's predicate.
+ *   document and in every shadow root to its end state, then freezes their videos, inline SVGs and GIFs, then brings
+ *   the animations that freezing them started to their end state too, as `endStateFunction` says, telling the
+ *   animations Storybook 11 parked apart with the Storybook adapter's predicate.
  *
  * It keeps the browser's own `setTimeout`, `clearTimeout` and `requestAnimationFrame`, so a story that fakes or
  * replaces timers or frames doesn't stall the wait or the end state. The adapter's script runs first, so a failure in

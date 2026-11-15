@@ -52,7 +52,12 @@ const taskFrameMs = 16
  *      at the density that keeps the image's size, the image loses its `src`, and it's decoded. It counts once the
  *      image shows the frame. A GIF whose copy fails to load is left as it is, and so is a cross-origin one without
  *      CORS, as it taints the canvas.
- * 5. Lets two more frames pass when it changed anything, as a change made just before capture can still be rastering
+ * 5. When step 4 changed anything, lets a frame pass, so the events freezing media fired, such as a video's `pause`
+ *    and `seeked` or a replaced GIF's `load`, run page logic: a custom player's controls fading in when its video
+ *    pauses, say. Then it runs steps 1 to 3 once more, the settling going on until two checks a frame apart find
+ *    nothing running and nothing pending, as page logic reacting to an event can start an animation a frame later,
+ *    once a framework commits. It doesn't freeze media again. When step 4 changed nothing, this costs nothing.
+ * 6. Lets two more frames pass when it changed anything, as a change made just before capture can still be rastering
  *    on a busy machine.
  *
  * A frame is two `requestFrame` callbacks, then a task, or two tasks of 16 ms in a page without it. Only animations
@@ -67,10 +72,10 @@ const taskFrameMs = 16
  * finished, parked or pinned an animation, paused a playing video or seeked a moving one, paused an SVG holding SMIL
  * animation elements, or replaced a GIF the image then shows. Waiting for end events pending from a `finish()` call
  * counts too, as page logic ran on them: an exit may unmount, a mount may bring images. When the time limit passes
- * while it settles the animations, it answers `{ outcome: 'timed-out', step: 'animations' }`. While it waits for
- * media, or for the last frames after media changed, it answers `{ outcome: 'timed-out', step: 'media' }`, and during
- * the last frames after only animations changed, `step: 'animations'`. It never throws: every call into the page is
- * guarded.
+ * while it settles the animations, the first time or after media changed, it answers
+ * `{ outcome: 'timed-out', step: 'animations' }`. While it waits for media, or for the last frames after media changed,
+ * it answers `{ outcome: 'timed-out', step: 'media' }`, and during the last frames after only animations changed,
+ * `step: 'animations'`. It never throws: every call into the page is guarded.
  */
 export const endStateFunction = `(context) => {
   const { shadowRoots, setTimer, clearTimer, requestFrame, parkedByStorybook } = context
@@ -446,14 +451,16 @@ export const endStateFunction = `(context) => {
       }
       return true
     }
-    try {
-      // Animations whose finish() threw, such as one with a playback rate of 0, aren't finished again: they're put on
-      // their first keyframe with the infinite ones.
-      const unfinishable = new Set()
-      let finished = 0
+    // Animations whose finish() threw, such as one with a playback rate of 0, aren't finished again: they're put on
+    // their first keyframe with the infinite ones.
+    const unfinishable = new Set()
+    // Settles the animations, then puts those still running on their first keyframe and pins them. Gives whether it
+    // changed anything, or timedOut. With checkTwice, it stops only at two quiet checks a frame apart, even when
+    // nothing ran before, as page logic reacting to an event can start an animation a frame later.
+    const endAnimations = async (checkTwice) => {
+      let changed = false
       let rounds = 0
       let quietChecks = 0
-      let waitedForEndEvents = false
       for (;;) {
         const running = animationsOf(rootsOf()).filter(
           (animation) =>
@@ -461,8 +468,9 @@ export const endStateFunction = `(context) => {
         )
         if (running.length === 0 && !endEventsPending) {
           quietChecks += 1
-          // Nothing finished and no end events waited for: no page logic ran that could start another animation.
-          if (quietChecks === 2 || (finished === 0 && !waitedForEndEvents)) {
+          // Nothing finished and no end events waited for: no page logic ran that could start another animation, unless
+          // an event did, as after media changed.
+          if (quietChecks === 2 || (!changed && !checkTwice)) {
             break
           }
         } else {
@@ -470,13 +478,14 @@ export const endStateFunction = `(context) => {
           if (rounds === ${maxRounds}) {
             break
           }
+          // Waiting for end events counts as a change, as page logic runs on them.
           if (endEventsPending) {
-            waitedForEndEvents = true
+            changed = true
           }
           for (const animation of running) {
             try {
               animation.finish()
-              finished += 1
+              changed = true
             } catch {
               unfinishable.add(animation)
             }
@@ -484,17 +493,33 @@ export const endStateFunction = `(context) => {
           rounds += 1
         }
         if (!(await framesPassed(1))) {
-          return { outcome: 'timed-out', step: 'animations' }
+          return timedOut
         }
       }
       const parked = park(animationsOf(rootsOf()))
       const pinned = pin(animationsOf(rootsOf()), parked)
+      return changed || parked.size > 0 || pinned > 0
+    }
+    try {
+      const animationsChanged = await endAnimations(false)
+      if (animationsChanged === timedOut) {
+        return { outcome: 'timed-out', step: 'animations' }
+      }
       const frozen = await Promise.race([Promise.all(freezeMedia(rootsOf())), deadline])
       if (frozen === timedOut) {
         return { outcome: 'timed-out', step: 'media' }
       }
       const mediaChanged = frozen.includes(true)
-      const changed = finished > 0 || waitedForEndEvents || parked.size > 0 || pinned > 0 || mediaChanged
+      // Freezing media fires events, such as a video's pause and seeked or a replaced GIF's load, whose page logic can
+      // start animations. A frame lets it run, then the animations are brought to their end once more, only once. What
+      // that changes adds nothing to changed, which media already made true.
+      if (mediaChanged) {
+        const endedAgain = (await framesPassed(1)) && (await endAnimations(true)) !== timedOut
+        if (!endedAgain) {
+          return { outcome: 'timed-out', step: 'animations' }
+        }
+      }
+      const changed = animationsChanged || mediaChanged
       if (changed && !(await framesPassed(2))) {
         return { outcome: 'timed-out', step: mediaChanged ? 'media' : 'animations' }
       }
@@ -527,8 +552,8 @@ export type EndState =
        */
       outcome: 'timed-out'
       /**
-       * What it was doing: finishing the page's animations, or putting its media on their first frame. The last frames
-       * count toward media when media changed, else toward animations.
+       * What it was doing: finishing the page's animations, before media or after media changed, or putting its media
+       * on their first frame. The last frames count toward media when media changed, else toward animations.
        */
       step: 'animations' | 'media'
     }

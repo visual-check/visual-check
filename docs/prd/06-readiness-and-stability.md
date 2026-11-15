@@ -73,7 +73,8 @@ At capture, after the `wait` hook:
 4. Put infinite animations, and any still starting after 20 rounds, on their first keyframe.
 5. Pin what Chromium might paint stale. Every animation now on its first keyframe, and every finished animation whose fill mode still holds its end, is written into the element's inline style and then cancelled. A pseudo-element can't take an inline style, so its animation stays paused at 0.
 6. Freeze media: videos paused on frame 0, inline SVG animation paused at 0, and GIFs in `<img>` replaced by their first frame.
-7. Check images and fonts again, making newly revealed lazy images eager first.
+7. When step 6 changed anything, let a frame pass so media events run page logic, such as a player's controls fading in when its video pauses, then repeat steps 1 to 5 once, until two checks a frame apart find nothing finite running.
+8. Check images and fonts again, making newly revealed lazy images eager first.
 
 Notes:
 

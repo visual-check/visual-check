@@ -10,6 +10,11 @@ export interface FakeMedia {
    * What was done to the element, in order, such as `pause` or `srcset = …`.
    */
   readonly actions: string[]
+  /**
+   * Adds a listener for the element's events of `type`, as page logic does, removed once it ran when `options` says
+   * `once`.
+   */
+  addEventListener: (type: string, listener: () => void, options?: { once?: boolean }) => void
 }
 
 /**
@@ -72,7 +77,7 @@ interface FakeListener {
 }
 
 /**
- * A fake of the page's `EventTarget`, enough for the events the end state listens for.
+ * A fake of the page's `EventTarget`, enough for the events the end state and a test's page logic listen for.
  */
 class FakeEventTarget {
   /**
@@ -260,11 +265,18 @@ class FakeVideo extends FakeEventTarget implements FakeMedia {
   }
 
   /**
-   * Pauses the video.
+   * Pauses the video, firing `pause` when it was playing. The browser fires it a task later; here it fires at once,
+   * which page logic that reacts at an animation frame can't tell apart.
    */
   pause(): void {
+    const wasPlaying = !this.isPaused
+
     this.actions.push('pause')
     this.isPaused = true
+
+    if (wasPlaying) {
+      this.dispatch('pause')
+    }
   }
 }
 
@@ -286,7 +298,7 @@ interface FakeSvgOptions {
 /**
  * A fake of the page's `SVGSVGElement`, recording what's done to its animations.
  */
-class FakeSvg implements FakeMedia {
+class FakeSvg extends FakeEventTarget implements FakeMedia {
   /**
    * The element's tag name.
    */
@@ -311,6 +323,7 @@ class FakeSvg implements FakeMedia {
    * Builds an SVG that starts as `options` says.
    */
   constructor({ nestedIn, holds = 'animate' }: FakeSvgOptions) {
+    super()
     this.ownerSVGElement = nestedIn ?? null
     this.holds = holds
   }
@@ -373,7 +386,7 @@ interface FakeImageOptions {
 /**
  * A fake of the page's `HTMLImageElement`, recording what's done to it.
  */
-class FakeImage implements FakeMedia {
+class FakeImage extends FakeEventTarget implements FakeMedia {
   /**
    * The element's tag name.
    */
@@ -431,6 +444,7 @@ class FakeImage implements FakeMedia {
     referrerPolicy = '',
     pickedBySource = false,
   }: FakeImageOptions) {
+    super()
     this.src = src
     this.shown = currentSrc
     this.naturalWidth = naturalWidth
@@ -455,7 +469,8 @@ class FakeImage implements FakeMedia {
 
   /**
    * Sets the image's `srcset` to one candidate, a URL and its density, recording the assignment. The image then shows
-   * that URL, unless a `<source>` picks what it shows.
+   * that URL and fires `load`, unless a `<source>` picks what it shows. The browser fires it once the URL loaded; here
+   * it fires at once, which page logic that reacts at an animation frame can't tell apart.
    */
   set srcset(candidates: string) {
     this.actions.push(`srcset = ${candidates}`)
@@ -463,6 +478,7 @@ class FakeImage implements FakeMedia {
 
     if (!this.pickedBySource) {
       this.shown = candidates.slice(0, candidates.lastIndexOf(' '))
+      this.dispatch('load')
     }
   }
 
