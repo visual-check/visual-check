@@ -85,8 +85,9 @@ export interface RunCliOptions {
    */
   machine?: BrowserHost
   /**
-   * The OS the CLI runs on, which decides between host networking and the proxy, and with `arch` picks the headless
-   * shell `platform: 'host'` downloads. `process.platform` by default. A test gives its own.
+   * The OS the CLI runs on, which decides between host networking and the proxy, whether `update` warns about baseline
+   * paths too long for Windows, and with `arch` picks the headless shell `platform: 'host'` downloads.
+   * `process.platform` by default. A test gives its own.
    */
   os?: NodeJS.Platform
   /**
@@ -127,8 +128,8 @@ export interface RunCliOptions {
 
 /**
  * Runs the CLI with the given arguments, environment and folder, and returns what it prints on each stream. Only
- * progress is written as it happens, through `options.progress`; `update` also writes baselines. Problems with the
- * command line, the config, the run's setup or the browser exit with code 2. Other errors are thrown.
+ * progress is written as it happens, through `options.progress`; `update` also writes and deletes baselines. Problems
+ * with the command line, the config, the run's setup or the browser exit with code 2. Other errors are thrown.
  *
  * @public
  */
@@ -174,7 +175,8 @@ export async function runCli(
  * installed, and every Storybook in the run answers with an index. In a container, the browser reaches a Storybook by
  * the route the five rules give, from the container the CLI runs in, Docker's engine and the OS. Then it reads and
  * checks the per-story options of every story each Storybook's index lists, whatever the selection, and captures the
- * selected stories that aren't disabled.
+ * selected stories that aren't disabled. `update` also captures the snapshots outside the selection whose baselines
+ * are missing, then deletes the orphans of the Storybooks in the run.
  *
  * @throws {ConfigError} When the config can't be found, loaded or used.
  */
@@ -233,6 +235,7 @@ async function runTestOrUpdate(
       allStories: stories,
     })),
     cwd,
+    os: cliOptions.os ?? process.platform,
     insideContainer,
     environment,
     launchBrowser: cliOptions.launchBrowser ?? createLaunchBrowser(),

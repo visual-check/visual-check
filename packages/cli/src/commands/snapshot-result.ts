@@ -1,7 +1,14 @@
-import type { StoryCapture, StoryToCapture } from '../capture/capture-session.js'
+import { BaselineError } from '../baselines/baseline-error.js'
+import type { BrokenStory, StoryCapture, StoryToCapture } from '../capture/capture-session.js'
 import type { StoryMask } from '../capture/prepare-capture.js'
 import type { StoryOptions } from '../config/story-options.js'
 import { storyUrlOf } from '../storybook/read-stories.js'
+import {
+  ImageDecodeError,
+  type ImageRegion,
+  type VisualDiff,
+  type VisualDiffResult,
+} from '../visual-diff/visual-diff.js'
 import type { SnapshotToCapture } from './plan-snapshots.js'
 
 /**
@@ -67,5 +74,44 @@ export function storyToCaptureOf({ storybook, story, options, globals, viewport 
     viewport,
     ...(typeof element === 'string' ? { element } : {}),
     ...(masks.length === 0 ? {} : { masks }),
+  }
+}
+
+/**
+ * Gives a broken snapshot's result, whose detail is the broken story's message.
+ */
+export function brokenResultOf(broken: BrokenStory): SnapshotResult {
+  return { status: 'broken', detail: `broken: ${broken.message}` }
+}
+
+/**
+ * Compares a snapshot with its baseline at `path` by the story's tolerance, at its viewport's device scale factor. With
+ * `regions`, a failure by pixels says whether every differing pixel lies inside one of them.
+ *
+ * @throws {BaselineError} When the files differ and the baseline can't be decoded, with the decoder's reason.
+ */
+export async function compareWithBaseline(
+  visualDiff: VisualDiff,
+  item: SnapshotToCapture,
+  baseline: Uint8Array,
+  snapshot: Uint8Array,
+  path: string,
+  regions?: readonly ImageRegion[],
+): Promise<VisualDiffResult> {
+  try {
+    return await visualDiff.compare({
+      baseline,
+      snapshot,
+      tolerance: item.tolerance,
+      scale: item.viewport.deviceScaleFactor,
+      ...(regions === undefined ? {} : { regions }),
+    })
+  } catch (error) {
+    if (error instanceof ImageDecodeError && error.image === 'baseline') {
+      // The bare decoder reason, since the printed line already names the baseline.
+      throw new BaselineError('decode', path, new Error(error.reason, { cause: error }))
+    }
+
+    throw error
   }
 }

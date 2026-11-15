@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { allowedPixels, compareImages, pixelsMessage, sizeMessage } from './diff-thread.js'
+import { allowedPixels, checkDecodable, compareImages, pixelsMessage, sizeMessage } from './diff-thread.js'
 import { decodePng, greyPng, pixelAt, whitePixels } from './images.fixture.js'
 import type { ImageRegion } from './visual-diff.js'
 
@@ -267,6 +267,20 @@ describe('compareImages', () => {
       outcome: 'undecodable',
       image: broken,
       reason: expect.any(String),
+    })
+  })
+})
+
+describe('checkDecodable', () => {
+  it('says a PNG file decodes', async () => {
+    expect(await checkDecodable(await greyPng(4, 4, 128))).toEqual({ outcome: 'decodable' })
+  })
+
+  it("gives the decoder's reason for a file that isn't a PNG file", async () => {
+    expect(await checkDecodable(new TextEncoder().encode('not a PNG file'))).toEqual({
+      outcome: 'undecodable',
+      image: 'baseline',
+      reason: 'Input buffer contains unsupported image format',
     })
   })
 })

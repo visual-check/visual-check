@@ -1,16 +1,16 @@
-import { BaselineError } from '../baselines/baseline-error.js'
-import { baselinePathOf, readBaseline } from '../baselines/baseline-files.js'
+import { baselinePathOf, baselineStemOf, readBaseline } from '../baselines/baseline-files.js'
 import type { BrokenStory, RemoteContentBox, StoryCapture } from '../capture/capture-session.js'
 import { writeFailureImages } from '../report/report-folder.js'
-import {
-  ImageDecodeError,
-  type ImageRegion,
-  type VisualDiff,
-  type VisualDiffResult,
-} from '../visual-diff/visual-diff.js'
+import type { ImageRegion, VisualDiff, VisualDiffResult } from '../visual-diff/visual-diff.js'
 import type { SnapshotToCapture } from './plan-snapshots.js'
 import { remoteContentHintOf } from './remote-content-hint.js'
-import { type CaptureStory, type SnapshotResult, storyToCaptureOf } from './snapshot-result.js'
+import {
+  brokenResultOf,
+  type CaptureStory,
+  compareWithBaseline,
+  type SnapshotResult,
+  storyToCaptureOf,
+} from './snapshot-result.js'
 
 /**
  * What `test` needs besides the run: the visual diff it compares snapshots with, the report folder it writes the
@@ -29,38 +29,6 @@ export interface TestTools {
    * How many more times a snapshot that differs is captured before it fails: the config's `retries`.
    */
   retries: number
-}
-
-/**
- * Compares a snapshot with its baseline at `path` by the story's tolerance, at its viewport's device scale factor. With
- * `regions`, a failure by pixels says whether every differing pixel lies inside one of them.
- *
- * @throws {BaselineError} When the files differ and the baseline can't be decoded, with the decoder's reason.
- */
-async function compareWithBaseline(
-  visualDiff: VisualDiff,
-  item: SnapshotToCapture,
-  baseline: Uint8Array,
-  snapshot: Uint8Array,
-  path: string,
-  regions: readonly ImageRegion[] | undefined,
-): Promise<VisualDiffResult> {
-  try {
-    return await visualDiff.compare({
-      baseline,
-      snapshot,
-      tolerance: item.tolerance,
-      scale: item.viewport.deviceScaleFactor,
-      ...(regions === undefined ? {} : { regions }),
-    })
-  } catch (error) {
-    if (error instanceof ImageDecodeError && error.image === 'baseline') {
-      // The bare decoder reason, since the printed line already names the baseline.
-      throw new BaselineError('read', path, new Error(error.reason, { cause: error }))
-    }
-
-    throw error
-  }
 }
 
 /**
@@ -228,14 +196,14 @@ function remoteHostsOf(retry: Attempt | undefined): string[] | undefined {
 /**
  * Tests one snapshot: a missing baseline is reported without a capture, and a snapshot passes when it differs from
  * its baseline by no more than the story's tolerance. One that differs beyond it, or in size, leaves its baseline,
- * snapshot and visual diff in the report folder at once, then is captured again, up to `retries` more times, each
- * capture a fresh one that also brings back the remote content it shows. The first retry that passes makes the
- * snapshot pass, flaky. A retry that comes back broken stops the retries. When no retry passes, the snapshot differs
- * with its first capture's message, and the report keeps that capture's images. When both the first capture and the
- * last retry differ by pixels, and every differing pixel of the last retry lies inside its remote content, give or take
- * the device scale factor rounded up, the result carries a hint that names those hosts. A broken first capture isn't
- * retried. It asks for a capture only once it has read the baseline. A pass's time is the passing capture's alone: it
- * leaves out the browser's launch and the comparison.
+ * snapshot and visual diff in the report folder at once, named after its baseline's stem, then is captured again, up
+ * to `retries` more times, each capture a fresh one that also brings back the remote content it shows. The first retry
+ * that passes makes the snapshot pass, flaky. A retry that comes back broken stops the retries. When no retry passes,
+ * the snapshot differs with its first capture's message, and the report keeps that capture's images. When both the
+ * first capture and the last retry differ by pixels, and every differing pixel of the last retry lies inside its remote
+ * content, give or take the device scale factor rounded up, the result carries a hint that names those hosts. A broken
+ * first capture isn't retried. It asks for a capture only once it has read the baseline. A pass's time is the passing
+ * capture's alone: it leaves out the browser's launch and the comparison.
  *
  * @throws {BaselineError} When the baseline can't be read or decoded.
  * @throws {ReportError} When an image can't be written to the report folder.
@@ -259,7 +227,7 @@ export async function testSnapshot(
   const first = await attempt({ findRemoteContent: false })
 
   if ('broken' in first) {
-    return { status: 'broken', detail: `broken: ${first.broken.message}` }
+    return brokenResultOf(first.broken)
   }
 
   const { capture, elapsedMs, result } = first
@@ -268,7 +236,7 @@ export async function testSnapshot(
     return { status: 'passed', detail: `${elapsedMs} ms`, completingMs: capture.completingMs }
   }
 
-  await writeFailureImages(reportFolder, item.storybook.name, item.key, {
+  await writeFailureImages(reportFolder, item.storybook.name, baselineStemOf(item.key), {
     baseline: bytes,
     snapshot: capture.snapshot,
     diff: result.diff,

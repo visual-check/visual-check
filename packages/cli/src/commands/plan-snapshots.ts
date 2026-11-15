@@ -1,3 +1,4 @@
+import { type BaselineClash, findBaselineClash } from '../baselines/baseline-clash.js'
 import { snapshotKeyOf } from '../baselines/baseline-files.js'
 import { type BrokenStory, failureReasonOf } from '../capture/capture-session.js'
 import type { OptionsRequest, StorybookOptions, StorybookOptionsRead } from '../capture/read-options.js'
@@ -55,8 +56,8 @@ type StoryOptionsOf =
 type PlanConfig = Pick<ResolvedConfig, 'readyTimeout' | 'viewport' | 'tolerance'>
 
 /**
- * A snapshot the run captures: the default capture or a listed mode of a selected story that isn't disabled, with its
- * Storybook, its key, the story's options and tolerance, and the snapshot's viewport and globals.
+ * A snapshot the run can capture: the default capture or a listed mode of a story that isn't disabled, selected or
+ * not, with its Storybook, its key, the story's options and tolerance, and the snapshot's viewport and globals.
  */
 export interface SnapshotToCapture {
   /**
@@ -76,6 +77,10 @@ export interface SnapshotToCapture {
    */
   key: string
   /**
+   * Whether the story is in the selection.
+   */
+  selected: boolean
+  /**
    * The story's validated options.
    */
   options: StoryOptions
@@ -94,8 +99,8 @@ export interface SnapshotToCapture {
 }
 
 /**
- * The one snapshot of a selected story whose stories file didn't load: broken, with no mode, since its options and so
- * its modes are unknown.
+ * The one snapshot of a story, selected or not, whose stories file didn't load: broken, with no mode, since its options
+ * and so its modes are unknown.
  */
 interface BrokenSnapshot {
   /**
@@ -115,14 +120,18 @@ interface BrokenSnapshot {
    */
   key: string
   /**
+   * Whether the story is in the selection.
+   */
+  selected: boolean
+  /**
    * Why the story can't be captured: `load-failed`, with a message naming its stories file.
    */
   broken: BrokenStory
 }
 
 /**
- * One snapshot the run takes: one it captures or, when the story's stories file didn't load, the broken one the story
- * makes.
+ * One snapshot of a story, selected or not: one it can capture or, when the story's stories file didn't load, the
+ * broken one the story makes.
  */
 export type PlannedSnapshot = SnapshotToCapture | BrokenSnapshot
 
@@ -175,6 +184,21 @@ interface StorybookIssues {
    * Each invalid option, as `<story-id>: <issue>`.
    */
   issues: string[]
+}
+
+/**
+ * A Storybook's name and its first two snapshots whose baselines would be one file, as the problem for clashing
+ * baselines names them.
+ */
+interface StorybookClash {
+  /**
+   * The Storybook's name in the config.
+   */
+  name: string
+  /**
+   * The two snapshots and their file's name.
+   */
+  clash: BaselineClash<PlannedSnapshot>
 }
 
 /**
@@ -319,35 +343,36 @@ function modeRulesStoriesOf(checkedStories: readonly CheckedStory[]): ModeRulesS
 }
 
 /**
- * Gives a selected story's checked options from the checks of every story its Storybook's `index.json` lists.
+ * Checks that every selected story is one the Storybook's `index.json` lists.
  *
- * @throws {Error} When `index.json` doesn't list the story, which selecting stories rules out.
+ * @throws {Error} When a selected story's ID isn't one of the Storybook's stories, which selecting stories rules out.
  */
-function checkedOf(checkedById: ReadonlyMap<string, CheckedStory>, story: Story): CheckedStory['checked'] {
-  const checked = checkedById.get(story.id)
+function checkSelectionListed(stories: readonly Story[], allStories: readonly Story[]): void {
+  const listed = new Set(allStories.map(({ id }) => id))
 
-  if (checked === undefined) {
-    throw new Error(`The selection holds ${story.id}, which the Storybook's index.json doesn't list.`)
+  for (const { id } of stories) {
+    if (!listed.has(id)) {
+      throw new Error(`The selection holds ${id}, which the Storybook's index.json doesn't list.`)
+    }
   }
-
-  return checked.checked
 }
 
 /**
- * Plans a taken story's snapshots: its default capture, at the config's viewport under the story's, key by key, with
- * no globals, then each mode it lists, in the order its options hold them, at the default capture's viewport under the
- * mode's, with the mode's globals. Each has the config's tolerance under the story's, key by key. A mode the story
- * leaves out, `null`, isn't planned. A story whose stories file didn't load gives one broken snapshot with no mode,
- * since its modes are unknown.
+ * Plans a taken story's snapshots, each marked as selected or not: its default capture, at the config's viewport under
+ * the story's, key by key, with no globals, then each mode it lists, in the order its options hold them, at the default
+ * capture's viewport under the mode's, with the mode's globals. Each has the config's tolerance under the story's, key
+ * by key. A mode the story leaves out, `null`, isn't planned. A story whose stories file didn't load gives one broken
+ * snapshot with no mode, since its modes are unknown.
  */
 function storySnapshotsOf(
   storybook: ResolvedStorybook,
   story: Story,
   checked: StoryOptionsOf,
+  selected: boolean,
   config: PlanConfig,
 ): PlannedSnapshot[] {
   if ('broken' in checked) {
-    return [{ storybook, story, mode: undefined, key: snapshotKeyOf(story.id), broken: checked.broken }]
+    return [{ storybook, story, mode: undefined, key: snapshotKeyOf(story.id), selected, broken: checked.broken }]
   }
 
   const { options } = checked
@@ -356,6 +381,7 @@ function storySnapshotsOf(
     story,
     mode: undefined,
     key: snapshotKeyOf(story.id),
+    selected,
     options,
     tolerance: { ...config.tolerance, ...options.tolerance },
     viewport: { ...config.viewport, ...options.viewport },
@@ -380,9 +406,10 @@ function storySnapshotsOf(
 
 /**
  * Plans one Storybook's snapshots from what the page read: every story its `index.json` lists is checked, and each
- * selected story that isn't disabled is planned. Gives its planned snapshots and its issues: the type issues of every
- * story in `index.json` order, then the mode rules' issues of the stories whose options are valid, checked in
- * `index.json` order against the globals the Storybook declares, a rule skipped when the page couldn't read them.
+ * story that isn't disabled is planned, marked selected when it is in the selection. Gives its planned snapshots and
+ * its issues: the type issues of every story in `index.json` order, then the mode rules' issues of the stories whose
+ * options are valid, checked in `index.json` order against the globals the Storybook declares, a rule skipped when the
+ * page couldn't read them.
  */
 function planStorybook(
   selection: StorybookStories,
@@ -391,8 +418,11 @@ function planStorybook(
 ): { snapshots: PlannedSnapshot[]; issues: string[] } {
   const { storybook, stories, allStories } = selection
   const storybookRead = storybookReadOf(files)
+
+  checkSelectionListed(stories, allStories)
+
   const checkedStories = allStories.map((story) => checkedStoryOf(storybookRead, story, config.readyTimeout))
-  const checkedById = new Map(checkedStories.map((checkedStory) => [checkedStory.story.id, checkedStory]))
+  const selectedIds = new Set(stories.map(({ id }) => id))
   const typeIssues = checkedStories.flatMap(({ story, checked }) =>
     'issues' in checked ? checked.issues.map((issue) => `${story.id}: ${issue}`) : [],
   )
@@ -401,11 +431,9 @@ function planStorybook(
     modeRulesStoriesOf(checkedStories),
     declaredGlobals === null ? null : new Set(declaredGlobals),
   )
-  const snapshots = stories.flatMap((story): PlannedSnapshot[] => {
-    const checked = checkedOf(checkedById, story)
-
-    return isTaken(checked) ? storySnapshotsOf(storybook, story, checked, config) : []
-  })
+  const snapshots = checkedStories.flatMap(({ story, checked }): PlannedSnapshot[] =>
+    isTaken(checked) ? storySnapshotsOf(storybook, story, checked, selectedIds.has(story.id), config) : [],
+  )
 
   return { snapshots, issues: [...typeIssues, ...modeIssues] }
 }
@@ -435,17 +463,58 @@ function invalidOptionsProblemOf(storybooks: readonly StorybookIssues[]): string
 }
 
 /**
+ * Names a snapshot in a message: its story ID, then its mode when it has one.
+ */
+function snapshotNameOf({ story, mode }: PlannedSnapshot): string {
+  return mode === undefined ? story.id : `${story.id} in mode ${mode}`
+}
+
+/**
+ * What a Storybook's block in the problem for clashing baselines adds when the two keys aren't the same text, so their
+ * names may print alike.
+ */
+const foldedNamesNote = 'Their names differ only in letter case or in how an accented letter is encoded.\n'
+
+/**
+ * Builds one Storybook's block in the problem for clashing baselines: a line naming its two snapshots and their file,
+ * then a note when their keys differ only once folded.
+ */
+function clashBlockOf({ name, clash: { first, second, fileName } }: StorybookClash): string {
+  const note = first.key === second.key ? '' : foldedNamesNote
+
+  return (
+    `Storybook ${name} has two snapshots whose baselines would be one file, ${fileName}: ` +
+    `${snapshotNameOf(first)} and ${snapshotNameOf(second)}.\n${note}`
+  )
+}
+
+/**
+ * Builds the problem for two snapshots whose baselines would be one file: a block for each Storybook with a clash, in
+ * the order given, then the fix, with no trailing newline. Gives `undefined` when no Storybook has a clash.
+ */
+function baselineClashProblemOf(clashes: readonly StorybookClash[]): string | undefined {
+  if (clashes.length === 0) {
+    return undefined
+  }
+
+  return `${clashes.map(clashBlockOf).join('')}Rename one of the stories or modes, then run visual-check again.`
+}
+
+/**
  * Plans the snapshots of a run from each Storybook's per-story options, which it reads with `readOptions`, one read per
- * Storybook with stories, in the order given. A read covers every story the Storybook's `index.json` lists whatever
- * the selection, and every story's options are checked. Gives the snapshots in the order given and then selection
- * order. Each selected story that isn't disabled gives its default capture, then one snapshot per mode it lists, in
- * the order its options hold them, each with its key, its options, its tolerance and viewport over the config's and
- * its globals.
- * When its stories file failed to load or didn't load within readyTimeout, it gives one snapshot, the broken story it
- * makes, `load-failed`, with no mode. A read's problem stops the planning at once, and the Storybooks after it aren't
- * read. Invalid options stop it once every Storybook is read, with one block of issues per Storybook: each story's
- * type issues, then the mode rules' issues of the stories whose options are valid, checked against the globals the
- * Storybook declares and the globals each story pins. Either way, it gives the problem, with no trailing newline.
+ * Storybook with stories, in the order given. A read covers every story the Storybook's `index.json` lists whatever the
+ * selection, and every story's options are checked. Gives the snapshots of every story, selected or not, in the order
+ * given and then `index.json` order, each marked selected when its story is in the selection. Each story that isn't
+ * disabled gives its default capture, then one snapshot per mode it lists, in the order its options hold them, each
+ * with its key, its options, its tolerance and viewport over the config's and its globals. When its stories file failed
+ * to load or didn't load within readyTimeout, it gives one snapshot, the broken story it makes, `load-failed`, with no
+ * mode. A read's problem stops the planning at once, and the Storybooks after it aren't read. Invalid options stop it
+ * once every Storybook is read, with one block of issues per Storybook: each story's type issues, then the mode rules'
+ * issues of the stories whose options are valid, checked against the globals the Storybook declares and the globals
+ * each story pins. With valid options, two snapshots of one Storybook whose baselines would be one file stop it, with
+ * one block per Storybook that has them, naming its first two. Every planned snapshot counts, selected or not, broken
+ * ones too, and file names that differ only in Unicode normalisation or letter case are one file, as macOS takes them.
+ * Either way, it gives the problem, with no trailing newline.
  *
  * @throws {Error} What `readOptions` throws, when a read leaves out a stories file or a story it was asked for, and
  * when the selection holds a story `index.json` doesn't list.
@@ -457,6 +526,7 @@ export async function planSnapshots(
 ): Promise<{ snapshots: PlannedSnapshot[] } | { problem: string }> {
   const snapshots: PlannedSnapshot[] = []
   const invalid: StorybookIssues[] = []
+  const clashes: StorybookClash[] = []
 
   for (const selection of selections) {
     const read = await readStorybookOptions(readOptions, selection)
@@ -466,12 +536,17 @@ export async function planSnapshots(
     }
 
     const planned = planStorybook(selection, read, config)
+    const clash = findBaselineClash(planned.snapshots)
 
     snapshots.push(...planned.snapshots)
     invalid.push({ name: selection.storybook.name, issues: planned.issues })
+
+    if (clash !== undefined) {
+      clashes.push({ name: selection.storybook.name, clash })
+    }
   }
 
-  const problem = invalidOptionsProblemOf(invalid)
+  const problem = invalidOptionsProblemOf(invalid) ?? baselineClashProblemOf(clashes)
 
   return problem === undefined ? { snapshots } : { problem }
 }

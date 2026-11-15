@@ -13,8 +13,9 @@
 // Its two cases share a cache, VISUAL_CHECK_CACHE_DIR when the caller sets it, so it can look at the cache after the
 // run, else a temporary folder. The cache must start empty: `update` downloads the headless shell into it, then `test`
 // reuses it. They capture one story, against baselines `update` writes, since the committed ones need the image's
-// fonts. `--no-docker`, which needs `--host` and no docker on the PATH, adds a case: with the default platform, `test`
-// exits 2 with the no-Docker error.
+// fonts. Their server lists that one story in `index.json`, since `update` writes every missing baseline whatever the
+// selection. `--no-docker`, which needs `--host` and no docker on the PATH, adds a case: with the default platform,
+// `test` exits 2 with the no-Docker error.
 //
 // With `--arm64` it runs one case, with TEST_STORYBOOK_IMAGE naming an arm64 build of the browser image: `test` with
 // the platform `linux/arm64` and the default tolerance gives the expected outcomes against the committed baselines,
@@ -124,7 +125,8 @@ const chromeForTestingPlatforms: Record<string, string> = {
 }
 
 /**
- * The story the host cases capture. One shows the download and its reuse.
+ * The story the host cases capture, the only one their server's `index.json` lists. One shows the download and its
+ * reuse.
  */
 const hostStoryId = 'card--default'
 
@@ -471,7 +473,7 @@ const outcomeDetails: [Outcome, RegExp][] = [
   ['differs', /^differs: /],
   ['broken', /^broken: /],
   ['missing', /^missing: /],
-  ['written', /^written /],
+  ['written', /^written: /],
   ['kept', /^kept$/],
 ]
 
@@ -514,6 +516,11 @@ interface ServeOptions {
    * a capture meanwhile. The options-reading page is answered at once.
    */
   holdStoryPages?: boolean
+  /**
+   * The one story `index.json` lists, leaving out every other entry, so a run's Storybook has that story alone. Every
+   * entry is listed when not given.
+   */
+  onlyStory?: string
 }
 
 /**
@@ -940,9 +947,15 @@ function withMarkup(page: Buffer, markup: string | undefined): Buffer | string {
 
 /**
  * Answers a request for a URL path with the static build's file, or 404 when it names no file there. An
- * `iframe.html` gets the markup, when there is any.
+ * `iframe.html` gets the markup, when there is any, and `index.json` lists only the story `onlyStory` names, when it
+ * names one.
  */
-function serveFile(pathname: string, response: ServerResponse, markup: string | undefined): void {
+function serveFile(
+  pathname: string,
+  response: ServerResponse,
+  options: ServeOptions,
+  markup: string | undefined,
+): void {
   const filePath = staticFileOf(pathname)
 
   if (filePath === undefined) {
@@ -955,7 +968,38 @@ function serveFile(pathname: string, response: ServerResponse, markup: string | 
 
   response
     .writeHead(200, { 'content-type': contentTypes[extname(filePath)] ?? 'application/octet-stream' })
-    .end(pathname === '/iframe.html' ? withMarkup(body, markup) : body)
+    .end(changedBodyOf(pathname, body, options, markup))
+}
+
+/**
+ * Gives a static file's body as the server changes it: an `iframe.html` with the markup, when there is any, and
+ * `index.json` with only the entry `onlyStory` names.
+ */
+function changedBodyOf(
+  pathname: string,
+  body: Buffer,
+  options: ServeOptions,
+  markup: string | undefined,
+): Buffer | string {
+  if (pathname === '/iframe.html') {
+    return withMarkup(body, markup)
+  }
+
+  if (pathname === '/index.json' && options.onlyStory !== undefined) {
+    return withOnlyEntry(body, options.onlyStory)
+  }
+
+  return body
+}
+
+/**
+ * Gives `index.json` with only the entry of the story, or with no entry when it doesn't list the story.
+ */
+function withOnlyEntry(index: Buffer, storyId: string): string {
+  const parsed = JSON.parse(index.toString('utf8')) as { entries: Record<string, unknown> }
+  const entry = parsed.entries[storyId]
+
+  return JSON.stringify({ ...parsed, entries: entry === undefined ? {} : { [storyId]: entry } })
 }
 
 /**
@@ -1019,12 +1063,12 @@ async function serveStorybook(options: ServeOptions = {}): Promise<StorybookServ
     }
 
     if (storyId !== undefined) {
-      answerStoryPage(storyId, (markup) => serveFile(pathname, response, markup))
+      answerStoryPage(storyId, (markup) => serveFile(pathname, response, options, markup))
 
       return
     }
 
-    serveFile(pathname, response, options.injectIntoIframe)
+    serveFile(pathname, response, options, options.injectIntoIframe)
   })
 
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -2140,7 +2184,8 @@ function hostRunOf(folder: string, url: string): HostRun {
 
 /**
  * With an empty cache, `update` says it is downloading the browser package's Chromium for this machine's platform,
- * writes the story's baseline and exits 0, and the cache then holds the marker of a complete install.
+ * writes the baseline of the one story the server lists and exits 0, and the cache then holds the marker of a complete
+ * install.
  */
 async function checkColdCache(host: HostRun): Promise<string[]> {
   if (!isMissingOrEmpty(host.cacheDir)) {
@@ -2204,11 +2249,12 @@ function hostCases(host: HostRun): Case[] {
 }
 
 /**
- * Runs the host cases and resolves with whether all of them passed. They share one server and a temporary folder,
- * which holds their config and baselines, and their cache when the caller doesn't name one.
+ * Runs the host cases and resolves with whether all of them passed. They share one server, whose `index.json` lists
+ * only the host story, and a temporary folder, which holds their config and baselines, and their cache when the caller
+ * doesn't name one.
  */
 async function runHostCases(): Promise<boolean> {
-  return await withStorybookServer({}, (server) =>
+  return await withStorybookServer({ onlyStory: hostStoryId }, (server) =>
     withTemporaryFolder((folder) => runCases(hostCases(hostRunOf(folder, server.url)))),
   )
 }
