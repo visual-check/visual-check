@@ -100,6 +100,7 @@ Notes:
 - `retries` is one config key for the whole project, `1` by default. It's the same number for every story, and `0` turns retries off.
 - As soon as one capture passes, the story passes and the snapshot is flaky. The report keeps the first attempt's images.
 - If every capture fails, the story fails.
+- A retry that comes back broken ends the retries. The snapshot fails with the first attempt's diff, not as broken.
 - A flaky snapshot never fails a run. Every `test` and `update` lists its flaky snapshots by name at the end: in the terminal, in the GitHub step summary and in the JSON ([Report and output](13-report-and-output.md)).
 - Retries are for visual diffs only. Errors and timeouts aren't retried, and a story that navigates away has its own two retries.
 - `update` doesn't use `retries`. It has its own stability checks, and a snapshot there is flaky when its two loads disagreed and a third decided ([Baselines and update](10-baselines-and-update.md)).
@@ -143,13 +144,16 @@ A broken story counts toward exit 1, and the run goes on. Errors and timeouts ar
   - an ancestor's `overflow` doesn't clip what the search finds.
 - **Service worker mocks:** they're told apart only in a document a service worker controls, by whether the image would taint a canvas. A response the worker built itself doesn't, so it isn't remote. A passthrough of a cross-origin image does, so it is. A check that fails counts as remote.
 - **Not covered:** remote `<video src>`, `<object>` and `<embed>`, sandboxed `srcdoc` frames without `allow-same-origin`, and transformed frames.
-- **Cost:** on a page of about 10,400 elements with 300 remote images, the search takes about 23 ms natively and 50–60 ms in the amd64 image under emulation. Only stories with a host mask pay it.
+- **Cost:** on a page of about 10,400 elements with 300 remote images, the search takes about 23 ms natively and 50–60 ms in the amd64 image under emulation. Only stories with a host mask, and retries, pay it.
 - One in-page search finds it. Host masks and the hint below share it, and it costs nothing unless one of them needs it.
 - **The hint:** when every differing pixel of a failing snapshot lies inside remote content, give or take 1 px for anti-aliased edges, the failure carries a hint. It names the hosts, shows the mask line and links the docs page.
   - Example: "Differs only inside remote content from images.unsplash.com. A CDN can serve different bytes to different machines.", then the mask line `{ host: 'images.unsplash.com' }`.
   - It's a hint and never a pass. Exit codes don't change.
   - It never appears on a size difference.
   - The rectangles are collected on a retry, so passing captures pay nothing.
+  - The last retry's comparison decides it, and the first attempt must differ by pixels too. With `retries: 0` there's no retry, so no hint.
+  - When only the hint needs the search and it times out or fails, there's no hint, and the story isn't broken.
+  - The 1 px is 1 CSS px: on a capture at a higher device scale factor it's that factor, rounded up, in image pixels.
 - `update` warns about remote content and about real network requests ([Baselines and update](10-baselines-and-update.md)).
 - Fonts are neither remote content nor real requests. A face that never loads makes a broken story, and a `wait` hook can't work around it, because it runs after fonts.
 
