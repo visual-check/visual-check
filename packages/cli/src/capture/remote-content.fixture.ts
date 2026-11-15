@@ -255,6 +255,11 @@ interface FakeFrameOptions {
    * The frame's computed `visibility`: `visible` by default.
    */
   visibility?: string
+  /**
+   * The frame's window, which holds the state of the frame's own page script: none by default, as the property reads
+   * `undefined`.
+   */
+  contentWindow?: object
 }
 
 /**
@@ -268,6 +273,7 @@ export function fakeFrame({
   padding = 0,
   localName = 'iframe',
   visibility = 'visible',
+  contentWindow,
 }: FakeFrameOptions): object {
   const paddings = ['left', 'top', 'right', 'bottom'].map((side) => [`padding-${side}`, `${padding}px`])
 
@@ -276,6 +282,7 @@ export function fakeFrame({
     styles: { ...Object.fromEntries(paddings), visibility },
     properties: {
       contentDocument,
+      contentWindow,
       src,
       clientLeft: border,
       clientTop: border,

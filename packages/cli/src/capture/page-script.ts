@@ -301,7 +301,12 @@ export const pageInitScript = `${storybookPageScript};
 
   // The remote content search, run only when a step needs it.
 
-  const findRemoteContent = (${remoteContentFunction})({ shadowRoots, setTimer, clearTimer })
+  const findRemoteContent = (${remoteContentFunction})({
+    shadowRoots,
+    setTimer,
+    clearTimer,
+    stateGlobal: '${stateGlobal}',
+  })
 
   // The capture preparation: masks painted and the caret hidden, only at capture.
 

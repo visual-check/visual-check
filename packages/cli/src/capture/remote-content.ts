@@ -2,9 +2,10 @@ import { pageRootsFunction } from './page-roots.js'
 
 /**
  * The source of a function, evaluated in the page as part of the page script, that creates the remote content search.
- * It takes what the page script kept at document start: `shadowRoots` and the browser's own `setTimer` and
- * `clearTimer`. It gives a function that takes a time limit in ms and finds the remote content the page shows: what
- * comes from an origin other than the top document's, Storybook's. Creating it reads nothing in the page.
+ * It takes what the page script kept at document start: `shadowRoots`, the browser's own `setTimer` and `clearTimer`,
+ * and `stateGlobal`, the name of the global it keeps its state under in every document. It gives a function that
+ * takes a time limit in ms and finds the remote content the page shows: what comes from an origin other than the top
+ * document's, Storybook's. Creating it reads nothing in the page.
  *
  * It looks at every element of the top document, of the shadow roots the page script recorded, closed ones included,
  * and of every open shadow root found by walking each root's elements. An element whose computed `visibility` is
@@ -20,9 +21,10 @@ import { pageRootsFunction } from './page-roots.js'
  *   is `none` or `normal` isn't generated, so it shows nothing, and neither is one of an SVG element or of a replaced
  *   or void HTML element, such as `<img>`, `<input>` or `<br>`, so those aren't read;
  * - an `<iframe>` or `<frame>`. When its document is reachable, as a same-origin or `srcdoc` one's is, it searches that
- *   document too, its open shadow roots included, and the frames in it. Boxes there are moved by the frame's content
- *   box, which clips them, as every outer frame's does. Such a frame is never a box of its own. When its document
- *   isn't reachable and its `src` is remote, its whole border box is remote content.
+ *   document too, with the closed shadow roots the frame's own page script recorded, its open shadow roots and the
+ *   frames in it. Boxes there are moved by the frame's content box, which clips them, as every outer frame's does.
+ *   Such a frame is never a box of its own. When its document isn't reachable and its `src` is remote, its whole
+ *   border box is remote content.
  *
  * A URL counts when it's `http:` or `https:` and its origin isn't the top document's. `data:`, `blob:`, `about:` and
  * any other URL never count. Fonts aren't looked at.
@@ -42,8 +44,8 @@ import { pageRootsFunction } from './page-roots.js'
  * gives what was found that needed no probe.
  */
 export const remoteContentFunction = `(context) => {
-  const { shadowRoots, setTimer, clearTimer } = context
-  const { elementsOf, rootsOf, read, isObject, scrollOf } = (${pageRootsFunction})()
+  const { shadowRoots, setTimer, clearTimer, stateGlobal } = context
+  const { elementsOf, rootsOf, read, isObject, scrollOf, recordedRootsOf } = (${pageRootsFunction})()
   // What the deadline gives once the time limit passes.
   const timedOut = Symbol('timed out')
 
@@ -231,7 +233,7 @@ export const remoteContentFunction = `(context) => {
       }
     }
     if (inside !== undefined) {
-      searchDocument(frameDocument, [], inside, search)
+      searchDocument(frameDocument, recordedRootsOf(element, stateGlobal), inside, search)
     }
   }
 

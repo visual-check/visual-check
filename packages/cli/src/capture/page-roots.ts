@@ -9,7 +9,10 @@
  * - `read(getter, fallback)` gives what the getter reads in the page, or the fallback when it throws;
  * - `isObject(value)` says whether a value is an object, not `null`;
  * - `scrollOf(view, axis)` gives how far a window is scrolled along `scrollX` or `scrollY`, or 0 when that can't be
- *   read or isn't a finite number.
+ *   read or isn't a finite number;
+ * - `recordedRootsOf(frame, stateGlobal)` gives the shadow roots a frame's own page script recorded, closed ones
+ *   included, from the `shadowRoots` of the state it keeps under `stateGlobal` in the frame's window, or none when
+ *   they can't be read or aren't a list.
  */
 export const pageRootsFunction = `() => {
   const read = (getter, fallback) => {
@@ -54,5 +57,10 @@ export const pageRootsFunction = `() => {
     return roots
   }
 
-  return { elementsOf, rootsOf, read, isObject, scrollOf }
+  const recordedRootsOf = (frame, stateGlobal) => {
+    const recorded = read(() => frame.contentWindow[stateGlobal].shadowRoots, undefined)
+    return Array.isArray(recorded) ? recorded : []
+  }
+
+  return { elementsOf, rootsOf, read, isObject, scrollOf, recordedRootsOf }
 }`

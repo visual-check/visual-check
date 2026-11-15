@@ -129,6 +129,34 @@ describe('the element', () => {
     })
   })
 
+  it("keeps the right and bottom edges within the document's scrollable area", async () => {
+    const element = boxed({ x: 700.5, y: 500, width: 300, height: 200.5 })
+    const { document } = fakeCaptureDocument({
+      matches: { '#card': [element] },
+      size: { width: 800, height: 600 },
+    })
+
+    expect(await openPreparation(document).prepare({ element: '#card' })).toEqual({
+      outcome: 'ready',
+      box: { x: 700, y: 500, width: 100, height: 100 },
+    })
+  })
+
+  it("keeps the right and bottom edges as they are when the document's size cannot be read", async () => {
+    const element = boxed({ x: 700, y: 500, width: 300, height: 200 })
+    const { document } = fakeCaptureDocument({ matches: { '#card': [element] } })
+
+    Object.defineProperty(Reflect.get(document, 'documentElement'), 'scrollWidth', {
+      get: () => {
+        throw new Error('TypeError: Illegal invocation.')
+      },
+    })
+    expect(await openPreparation(document).prepare({ element: '#card' })).toEqual({
+      outcome: 'ready',
+      box: { x: 700, y: 500, width: 300, height: 200 },
+    })
+  })
+
   it('takes the first element the selector matches', async () => {
     const first = boxed({ x: 1, y: 2, width: 3, height: 4 })
     const { document } = fakeCaptureDocument({
@@ -154,6 +182,16 @@ describe('the element', () => {
     [
       'matches an element whose box clamps to zero',
       { '#card': [boxed({ x: -50, y: 0, width: 30, height: 10 })] },
+      undefined,
+    ],
+    [
+      'matches an element past the right edge of the document',
+      { '#card': [boxed({ x: 800, y: 0, width: 30, height: 10 })] },
+      undefined,
+    ],
+    [
+      'matches an element past the bottom edge of the document',
+      { '#card': [boxed({ x: 0, y: 600.5, width: 30, height: 10 })] },
       undefined,
     ],
     [

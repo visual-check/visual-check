@@ -56,8 +56,10 @@ export interface CapturePrepRequest {
  * 1. Measures the element, when `element` isn't `null`: the first match of the selector in the top document. A
  *    selector that throws gives `{ outcome: 'invalid-selector', of: 'element', message }`. No match gives
  *    `{ outcome: 'element-missing', found: 'nothing' }`. Its box is the border box, with the page's scroll, out to
- *    whole pixels: the left and top edges rounded down and kept at 0 or more, the right and bottom edges rounded up. A
- *    box of zero width or height, before or after that, or one that can't be read, gives `found: 'zero-size'`.
+ *    whole pixels and cut at the page's edge: the left and top edges rounded down and kept at 0 or more, the right and
+ *    bottom edges kept within the document's scrollable area, read from its root element's `scrollWidth` and
+ *    `scrollHeight`, and rounded up. When that size can't be read, the right and bottom edges aren't cut. A box of zero
+ *    width or height, before or after that, or one that can't be read, gives `found: 'zero-size'`.
  * 2. Finds the masks' boxes. A selector mask covers each element of the top document that matches it and has an
  *    area, by its border box, with the page's scroll, not rounded. A selector that throws gives
  *    `{ outcome: 'invalid-selector', of: 'mask', name, message }`. Host masks run the remote content search once, only
@@ -92,7 +94,7 @@ export interface CapturePrepRequest {
  */
 export const prepareCaptureFunction = `(context) => {
   const { shadowRoots, findRemoteContent, stateGlobal } = context
-  const { elementsOf, rootsOf, read, isObject, scrollOf } = (${pageRootsFunction})()
+  const { elementsOf, rootsOf, read, isObject, scrollOf, recordedRootsOf } = (${pageRootsFunction})()
 
   // The tag name of the element that holds the painted masks. An unknown name with a hyphen gives an HTMLElement.
   const masksTagName = 'visual-check-masks'
@@ -151,10 +153,13 @@ export const prepareCaptureFunction = `(context) => {
     if (box === undefined) {
       return { outcome: 'element-missing', found: 'zero-size' }
     }
+    const size = documentSizeOf()
     const x = Math.max(0, Math.floor(box.left))
     const y = Math.max(0, Math.floor(box.top))
-    const width = Math.ceil(box.right) - x
-    const height = Math.ceil(box.bottom) - y
+    const right = Math.ceil(size === undefined ? box.right : Math.min(box.right, size.width))
+    const bottom = Math.ceil(size === undefined ? box.bottom : Math.min(box.bottom, size.height))
+    const width = right - x
+    const height = bottom - y
     if (width <= 0 || height <= 0) {
       return { outcome: 'element-missing', found: 'zero-size' }
     }
@@ -281,12 +286,6 @@ export const prepareCaptureFunction = `(context) => {
     }
   }
 
-  // The shadow roots a frame's own page script recorded, closed ones included, or none when they can't be read.
-  const recordedRootsOf = (frame) => {
-    const recorded = read(() => frame.contentWindow[stateGlobal].shadowRoots, undefined)
-    return Array.isArray(recorded) ? recorded : []
-  }
-
   // Hides the caret in a document's roots with a sheet its own window made, then in the documents of its frames.
   const hideCaretIn = (hidden, recordedRoots) => {
     let sheet
@@ -303,7 +302,7 @@ export const prepareCaptureFunction = `(context) => {
       for (const frame of elementsOf(root, 'iframe, frame')) {
         const frameDocument = read(() => frame.contentDocument, null)
         if (isObject(frameDocument)) {
-          hideCaretIn(frameDocument, recordedRootsOf(frame))
+          hideCaretIn(frameDocument, recordedRootsOf(frame, stateGlobal))
         }
       }
     }

@@ -12,7 +12,7 @@ import {
   readAssetsReadiness,
 } from './page-script.js'
 import { fakeCaptureDocument } from './prepare-capture.fixture.js'
-import { fakeElement, fakeImg, fakePageDocument } from './remote-content.fixture.js'
+import { fakeElement, fakeFrame, fakeImg, fakePageDocument, fakeShadowRoot } from './remote-content.fixture.js'
 
 /**
  * The console methods the fake page has, each a mock standing for the browser's own.
@@ -565,6 +565,22 @@ describe('the page script', () => {
       items: [{ host: 'images.example.com', hostname: 'images.example.com', x: 10, y: 20, width: 100, height: 50 }],
     })
     expect(page.documentReads()).toBeGreaterThan(0)
+  })
+
+  it("lets the remote content search reach the closed shadow roots a same-origin frame's page script recorded", async () => {
+    const image = fakeImg({ src: 'https://images.example.com/a.jpg', box: { x: 0, y: 0, width: 10, height: 10 } })
+    const frame = fakeFrame({
+      contentDocument: fakePageDocument().document,
+      contentWindow: { __visualCheck: { shadowRoots: [fakeShadowRoot([image])] } },
+      box: { x: 30, y: 40, width: 100, height: 100 },
+    })
+    const { document } = fakePageDocument({ elements: [frame] })
+    const page = openPage({ document, URL })
+
+    expect(await page.evaluate('globalThis.__visualCheck.findRemoteContent(1000)')).toEqual({
+      outcome: 'found',
+      items: [{ host: 'images.example.com', hostname: 'images.example.com', x: 30, y: 40, width: 10, height: 10 }],
+    })
   })
 
   it('does nothing when it runs again in the same page', () => {

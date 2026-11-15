@@ -63,7 +63,7 @@ function openSearch(document: object, shadowRoots: object[] = [], timers: KeptTi
       }),
   )
   const create = run(remoteContentFunction) as (context: object) => (timeoutMs: number) => Promise<unknown>
-  const search = create({ shadowRoots, setTimer, clearTimer })
+  const search = create({ shadowRoots, setTimer, clearTimer, stateGlobal: '__visualCheck' })
 
   return {
     setTimer,
@@ -361,6 +361,27 @@ describe('frames', () => {
 
     expect(await remoteContentOf(document)).toEqual(
       foundAnswer(item('shadow.example.com', { x: 30, y: 40, width: 10, height: 10 })),
+    )
+  })
+
+  it("search the closed shadow roots a same-origin frame's page script recorded", async () => {
+    const inClosed = fakeImg({ src: 'https://closed.example.com/a.png', box: { x: 0, y: 0, width: 10, height: 10 } })
+    const closedRoot = fakeShadowRoot([inClosed])
+    const frameDocument = fakePageDocument().document
+    const frame = fakeFrame({
+      contentDocument: frameDocument,
+      contentWindow: { __visualCheck: { shadowRoots: [closedRoot] } },
+      box: { x: 30, y: 40, width: 100, height: 100 },
+    })
+    const bare = fakeFrame({ contentDocument: fakePageDocument().document, contentWindow: {} })
+    const notAList = fakeFrame({
+      contentDocument: fakePageDocument().document,
+      contentWindow: { __visualCheck: { shadowRoots: 'none' } },
+    })
+    const { document } = fakePageDocument({ elements: [frame, bare, notAList] })
+
+    expect(await remoteContentOf(document)).toEqual(
+      foundAnswer(item('closed.example.com', { x: 30, y: 40, width: 10, height: 10 })),
     )
   })
 
