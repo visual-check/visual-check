@@ -1,7 +1,10 @@
 import { type Context, createContext, runInContext } from 'node:vm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { optionsReadAnswer } from './options-read.fixture.js'
+import { optionsReadExpression, type StoriesFile } from './options-read.js'
 import { finishedAnswer, timedOutAnswer } from './preview-script.fixture.js'
 import { readStoryWait, storybookPageScript, storyWaitExpression } from './preview-script.js'
+import { waitHookExpression } from './wait-hook.js'
 
 /**
  * A stand-in for Storybook's channel: it keeps the listeners `on` adds and calls them on `emit`.
@@ -714,6 +717,915 @@ describe('the error display', () => {
   })
 })
 
+/**
+ * A stand-in for Storybook's preview that is ready at once. Its `loadStory` notes each story it's asked for and loads
+ * it as `loads` says, or else at once, with the story's ID as its options.
+ */
+class FakePreview {
+  /**
+   * The IDs of the stories `loadStory` was asked for, in order.
+   */
+  readonly requested: string[] = []
+
+  /**
+   * How each story loads, by its ID.
+   */
+  readonly loads: Record<string, () => Promise<unknown>>
+
+  /**
+   * Builds a preview that loads the stories in `loads` as it says.
+   */
+  constructor(loads: Record<string, () => Promise<unknown>> = {}) {
+    this.loads = loads
+  }
+
+  /**
+   * Resolves at once, as a preview that has started does.
+   */
+  ready(): Promise<void> {
+    return Promise.resolve()
+  }
+
+  /**
+   * Notes the story and loads it as `loads` says.
+   */
+  loadStory({ storyId }: { storyId: string }): Promise<unknown> {
+    this.requested.push(storyId)
+
+    const load = this.loads[storyId]
+
+    return load === undefined ? Promise.resolve({ id: storyId, parameters: { visualCheck: storyId } }) : load()
+  }
+}
+
+/**
+ * A stories file with one story.
+ */
+const buttonFile: StoriesFile = { importPath: './button.stories.tsx', storyIds: ['button--primary'] }
+
+/**
+ * A stories file with two stories.
+ */
+const cardFile: StoriesFile = { importPath: './card.stories.tsx', storyIds: ['card--default', 'card--wide'] }
+
+/**
+ * Reads the options of these stories files in the page with a time limit of 1000 ms, as the driver does, and gives
+ * the page's answer.
+ */
+function readOptions(page: FakePage, files: readonly StoriesFile[]): Promise<unknown> {
+  return page.evaluate(optionsReadExpression(files, 1000))
+}
+
+/**
+ * What the page answers for stories files whose stories loaded as `FakePreview` loads them by default: each with its
+ * own ID as its options.
+ */
+function loadedAnswer(...files: StoriesFile[]): Record<string, unknown> {
+  return optionsReadAnswer(
+    files.map(({ importPath, storyIds }) => ({
+      importPath,
+      stories: storyIds.map((id) => ({ id, options: id })),
+    })),
+  )
+}
+
+/**
+ * A promise that resolves with `value` after `ms` ms of the test's fake timers.
+ */
+function later(ms: number, value: unknown): Promise<unknown> {
+  return new Promise((resolve) => {
+    setTimeout(() => resolve(value), ms)
+  })
+}
+
+/**
+ * A promise that rejects with `error` after `ms` ms of the test's fake timers.
+ */
+function laterRejection(ms: number, error: unknown): Promise<never> {
+  return new Promise((_resolve, reject) => {
+    setTimeout(() => reject(error), ms)
+  })
+}
+
+/**
+ * A promise that never settles.
+ */
+function never(): Promise<never> {
+  return new Promise(() => undefined)
+}
+
+describe('the options read', () => {
+  it('reads the options of every story of each stories file, in the order given', async () => {
+    const page = openPage()
+    const preview = new FakePreview()
+
+    page.setGlobal('__STORYBOOK_PREVIEW__', preview)
+    expect(await readOptions(page, [cardFile, buttonFile])).toEqual(loadedAnswer(cardFile, buttonFile))
+    expect(preview.requested).toEqual(['card--default', 'card--wide', 'button--primary'])
+  })
+
+  it('reads no files when given none', async () => {
+    const page = openPage()
+
+    page.setGlobal('__STORYBOOK_PREVIEW__', new FakePreview())
+    expect(await readOptions(page, [])).toEqual(optionsReadAnswer([]))
+  })
+
+  it('gives a file without story IDs as loaded, with no stories', async () => {
+    const page = openPage()
+    const file = { importPath: './empty.stories.tsx', storyIds: [] }
+
+    page.setGlobal('__STORYBOOK_PREVIEW__', new FakePreview())
+    expect(await readOptions(page, [file])).toEqual(optionsReadAnswer([{ importPath: file.importPath, stories: [] }]))
+  })
+
+  it('waits for a preview Storybook sets after the read started', async () => {
+    const page = openPage()
+    const read = readOptions(page, [buttonFile])
+
+    await vi.advanceTimersByTimeAsync(500)
+    expect(await settledYet(read)).toBe(false)
+    page.setGlobal('__STORYBOOK_PREVIEW__', new FakePreview())
+    await vi.advanceTimersByTimeAsync(100)
+    expect(await read).toEqual(loadedAnswer(buttonFile))
+  })
+
+  it('waits for the preview to become ready before it loads a story', async () => {
+    const page = openPage()
+    const preview = new FakePreview()
+
+    preview.ready = () => later(500, undefined).then(() => undefined)
+    page.setGlobal('__STORYBOOK_PREVIEW__', preview)
+
+    const read = readOptions(page, [buttonFile])
+
+    await vi.advanceTimersByTimeAsync(400)
+    expect(preview.requested).toEqual([])
+    await vi.advanceTimersByTimeAsync(200)
+    expect(await read).toEqual(loadedAnswer(buttonFile))
+  })
+
+  it('times out in the preview-start step on time when Storybook never set the preview', async () => {
+    const page = openPage()
+    const read = readOptions(page, [buttonFile])
+
+    await vi.advanceTimersByTimeAsync(999)
+    expect(await settledYet(read)).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await read).toEqual({ outcome: 'timed-out', step: 'preview-start' })
+  })
+
+  it('times out in the preview-ready step when the preview never becomes ready', async () => {
+    const page = openPage()
+    const read = readOptions(page, [buttonFile])
+
+    page.setGlobal('__STORYBOOK_PREVIEW__', { ready: never, loadStory: never })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(await read).toEqual({ outcome: 'timed-out', step: 'preview-ready' })
+  })
+
+  it.each([
+    ['rejects', async () => Promise.reject(new Error('The index failed.'))],
+    [
+      'throws',
+      () => {
+        throw new Error('The index failed.')
+      },
+    ],
+  ])('says the preview failed when its ready() %s', async (_how, ready) => {
+    const page = openPage()
+
+    page.setGlobal('__STORYBOOK_PREVIEW__', { ready, loadStory: never })
+    expect(await readOptions(page, [buttonFile])).toEqual({
+      outcome: 'preview-failed',
+      message: 'Error: The index failed.',
+    })
+  })
+
+  it('says the preview failed as soon as its ready() rejects, without waiting out the time limit', async () => {
+    const page = openPage()
+    const read = readOptions(page, [buttonFile])
+
+    page.setGlobal('__STORYBOOK_PREVIEW__', { ready: () => laterRejection(300, new Error('late')), loadStory: never })
+    await vi.advanceTimersByTimeAsync(400)
+    expect(await settledYet(read)).toBe(true)
+    expect(await read).toEqual({ outcome: 'preview-failed', message: 'Error: late' })
+  })
+
+  it.each([
+    [
+      'an error on several lines, on one line',
+      new SyntaxError('Unexpected token\n  in ./button.stories.tsx'),
+      'SyntaxError: Unexpected token in ./button.stories.tsx',
+    ],
+    ['a long error, in 500 characters', new Error('x'.repeat(600)), `Error: ${'x'.repeat(493)}`],
+    ['a value that is not an error, as text', 'no index', 'no index'],
+  ])("describes the preview's failure as %s", async (_what, error, message) => {
+    const page = openPage()
+
+    page.setGlobal('__STORYBOOK_PREVIEW__', { ready: async () => Promise.reject(error), loadStory: never })
+    expect(await readOptions(page, [buttonFile])).toEqual({ outcome: 'preview-failed', message })
+  })
+
+  it("describes a preview's failure it can't read as unprintable", async () => {
+    const page = openPage()
+
+    page.run(`
+      const { proxy, revoke } = Proxy.revocable({}, {})
+      revoke()
+      globalThis.__STORYBOOK_PREVIEW__ = { ready: async () => Promise.reject(proxy), loadStory: async () => ({}) }
+    `)
+    expect(await readOptions(page, [buttonFile])).toEqual({ outcome: 'preview-failed', message: '[unprintable]' })
+  })
+
+  it('reads the latest preview, not one it replaced', async () => {
+    const page = openPage()
+    const first = new FakePreview()
+    const latest = new FakePreview()
+
+    page.setGlobal('__STORYBOOK_PREVIEW__', first)
+    page.setGlobal('__STORYBOOK_PREVIEW__', latest)
+    expect(await readOptions(page, [buttonFile])).toEqual(loadedAnswer(buttonFile))
+    expect(first.requested).toEqual([])
+    expect(latest.requested).toEqual(['button--primary'])
+  })
+
+  it('says the latest preview failed even when one it replaced is ready', async () => {
+    const page = openPage()
+
+    page.setGlobal('__STORYBOOK_PREVIEW__', new FakePreview())
+    page.setGlobal('__STORYBOOK_PREVIEW__', {
+      ready: async () => Promise.reject(new Error('The index failed.')),
+      loadStory: never,
+    })
+    expect(await readOptions(page, [buttonFile])).toEqual({
+      outcome: 'preview-failed',
+      message: 'Error: The index failed.',
+    })
+  })
+
+  it('reads a preview that replaces another while the read waits', async () => {
+    const page = openPage()
+    const first = { ready: never, loadStory: vi.fn(never) }
+    const read = readOptions(page, [buttonFile])
+
+    page.setGlobal('__STORYBOOK_PREVIEW__', first)
+    await vi.advanceTimersByTimeAsync(300)
+    page.setGlobal('__STORYBOOK_PREVIEW__', new FakePreview())
+    expect(await read).toEqual(loadedAnswer(buttonFile))
+    expect(first.loadStory).not.toHaveBeenCalled()
+  })
+
+  it('reads the options once the preview becomes ready after a read that timed out', async () => {
+    const page = openPage()
+    const preview = new FakePreview()
+
+    preview.ready = () => later(1500, undefined).then(() => undefined)
+    page.setGlobal('__STORYBOOK_PREVIEW__', preview)
+
+    const timedOut = readOptions(page, [buttonFile])
+
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(await timedOut).toEqual({ outcome: 'timed-out', step: 'preview-ready' })
+    await vi.advanceTimersByTimeAsync(500)
+    expect(await readOptions(page, [buttonFile])).toEqual(loadedAnswer(buttonFile))
+  })
+
+  it('loads a story ID given twice twice, and gives it twice, in order', async () => {
+    const page = openPage()
+    const preview = new FakePreview()
+    const file = { importPath: buttonFile.importPath, storyIds: ['button--primary', 'button--primary'] }
+
+    page.setGlobal('__STORYBOOK_PREVIEW__', preview)
+    expect(await readOptions(page, [file])).toEqual(loadedAnswer(file))
+    expect(preview.requested).toEqual(['button--primary', 'button--primary'])
+  })
+
+  it.each<[string, object]>([
+    ['an object without ready() or loadStory()', {}],
+    ['a preview without loadStory()', { ready: async () => undefined }],
+    [
+      'a preview whose loadStory() cannot be read',
+      {
+        ready: async () => undefined,
+        get loadStory() {
+          throw new Error('hostile')
+        },
+      },
+    ],
+  ])('says the preview is unsupported for %s', async (_what, preview) => {
+    const page = openPage()
+
+    page.setGlobal('__STORYBOOK_PREVIEW__', preview)
+    expect(await readOptions(page, [buttonFile])).toEqual({ outcome: 'unsupported' })
+  })
+
+  it('loads every stories file at once, so a slow file delays no other', async () => {
+    const page = openPage()
+    const preview = new FakePreview({
+      'card--default': () => later(500, { parameters: { visualCheck: 'card--default' } }),
+    })
+
+    page.setGlobal('__STORYBOOK_PREVIEW__', preview)
+
+    const read = readOptions(page, [cardFile, buttonFile])
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(preview.requested).toEqual(['card--default', 'card--wide', 'button--primary'])
+    await vi.advanceTimersByTimeAsync(500)
+    expect(await read).toEqual(loadedAnswer(cardFile, buttonFile))
+  })
+
+  it('makes a file failed with its first rejection on one line, and leaves the other files loaded', async () => {
+    const page = openPage()
+
+    page.setGlobal(
+      '__STORYBOOK_PREVIEW__',
+      new FakePreview({
+        'card--default': () => laterRejection(100, new Error('later')),
+        'card--wide': async () => Promise.reject(new SyntaxError('Unexpected token\n  in ./card.stories.tsx')),
+      }),
+    )
+
+    const read = readOptions(page, [cardFile, buttonFile])
+
+    await vi.advanceTimersByTimeAsync(100)
+    expect(await read).toEqual(
+      optionsReadAnswer([
+        {
+          importPath: cardFile.importPath,
+          outcome: 'failed',
+          message: 'SyntaxError: Unexpected token in ./card.stories.tsx',
+        },
+        { importPath: buttonFile.importPath, stories: [{ id: 'button--primary', options: 'button--primary' }] },
+      ]),
+    )
+  })
+
+  it('makes a file failed when loadStory() throws', async () => {
+    const page = openPage()
+
+    page.setGlobal('__STORYBOOK_PREVIEW__', {
+      ready: async () => undefined,
+      loadStory: () => {
+        throw new TypeError('Cannot read the index')
+      },
+    })
+    expect(await readOptions(page, [buttonFile])).toEqual(
+      optionsReadAnswer([
+        { importPath: buttonFile.importPath, outcome: 'failed', message: 'TypeError: Cannot read the index' },
+      ]),
+    )
+  })
+
+  it('makes a file timed-out when one of its stories never loads, and leaves the other files loaded', async () => {
+    const page = openPage()
+
+    page.setGlobal('__STORYBOOK_PREVIEW__', new FakePreview({ 'card--wide': never }))
+
+    const read = readOptions(page, [cardFile, buttonFile])
+
+    await vi.advanceTimersByTimeAsync(999)
+    expect(await settledYet(read)).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await read).toEqual(
+      optionsReadAnswer([
+        { importPath: cardFile.importPath, outcome: 'timed-out' },
+        { importPath: buttonFile.importPath, stories: [{ id: 'button--primary', options: 'button--primary' }] },
+      ]),
+    )
+  })
+
+  it("counts each file's time limit from when its stories start loading", async () => {
+    const page = openPage()
+    const read = readOptions(page, [buttonFile])
+
+    await vi.advanceTimersByTimeAsync(400)
+    page.setGlobal('__STORYBOOK_PREVIEW__', new FakePreview({ 'button--primary': never }))
+    await vi.advanceTimersByTimeAsync(900)
+    expect(await settledYet(read)).toBe(false)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(await read).toEqual(optionsReadAnswer([{ importPath: buttonFile.importPath, outcome: 'timed-out' }]))
+  })
+
+  it('clears the time limits of files that loaded', async () => {
+    const page = openPage()
+
+    page.setGlobal('__STORYBOOK_PREVIEW__', new FakePreview())
+    await readOptions(page, [cardFile, buttonFile])
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("keeps the browser's own timers when the page replaces setTimeout and clearTimeout", async () => {
+    const page = openPage()
+
+    page.run('globalThis.setTimeout = () => 0; globalThis.clearTimeout = () => undefined')
+
+    const read = readOptions(page, [buttonFile])
+
+    await vi.advanceTimersByTimeAsync(300)
+    page.setGlobal('__STORYBOOK_PREVIEW__', new FakePreview({ 'button--primary': never }))
+    await vi.advanceTimersByTimeAsync(1100)
+    expect(await read).toEqual(optionsReadAnswer([{ importPath: buttonFile.importPath, outcome: 'timed-out' }]))
+  })
+
+  it('loads the stories again on each read, caching nothing', async () => {
+    const page = openPage()
+    const preview = new FakePreview()
+
+    page.setGlobal('__STORYBOOK_PREVIEW__', preview)
+    await readOptions(page, [buttonFile])
+    await readOptions(page, [buttonFile])
+    expect(preview.requested).toEqual(['button--primary', 'button--primary'])
+  })
+
+  it('touches nothing on the preview but ready() and loadStory(), so extract() never runs', async () => {
+    const page = openPage()
+    const touched = new Set<PropertyKey>()
+    const extract = vi.fn()
+    const preview = new Proxy(
+      { ready: async () => undefined, loadStory: async () => ({ parameters: {} }), extract },
+      {
+        get: (target, key) => {
+          touched.add(key)
+
+          return Reflect.get(target, key)
+        },
+      },
+    )
+
+    page.setGlobal('__STORYBOOK_PREVIEW__', preview)
+    await readOptions(page, [cardFile])
+    expect([...touched]).toEqual(['ready', 'loadStory'])
+    expect(extract).not.toHaveBeenCalled()
+  })
+
+  it("says when the adapter's script didn't run in the page", async () => {
+    const page = blankPage()
+
+    expect(await readOptions(page, [buttonFile])).toEqual({ outcome: 'script-missing' })
+  })
+})
+
+/**
+ * Reads the options of one story whose `loadStory` resolves with what `story` evaluates to in the page, and gives them
+ * as the page encoded them. The value is built in the page, so its objects have the page's own prototypes.
+ */
+async function encodedStoryInPage(story: string): Promise<unknown> {
+  const page = openPage()
+
+  page.run(`globalThis.__STORYBOOK_PREVIEW__ = { loadStory: async () => (${story}) }`)
+
+  const answer = (await readOptions(page, [buttonFile])) as { files: { stories: { options: unknown }[] }[] }
+
+  return answer.files[0]?.stories[0]?.options
+}
+
+describe("each story's options", () => {
+  it("are the story's parameters.visualCheck, encoded, with the page's own plain objects as plain", async () => {
+    expect(
+      await encodedStoryInPage(
+        '{ parameters: { visualCheck: { viewport: { width: 320 }, wait: async () => undefined } } }',
+      ),
+    ).toEqual({
+      kind: 'object',
+      entries: [
+        ['viewport', { kind: 'object', entries: [['width', { kind: 'number', value: 320 }]] }],
+        ['wait', { kind: 'function' }],
+      ],
+    })
+  })
+
+  it.each([
+    ['a story without parameters', '{}'],
+    ['a story that is not an object', 'undefined'],
+    ['parameters without visualCheck', '{ parameters: {} }'],
+  ])('are encoded as undefined for %s', async (_what, story) => {
+    expect(await encodedStoryInPage(story)).toEqual({ kind: 'undefined' })
+  })
+
+  it('are encoded as Unreadable for a story whose parameters cannot be read', async () => {
+    expect(await encodedStoryInPage("{ get parameters() { throw new Error('hostile') } }")).toEqual({
+      kind: 'instance',
+      name: 'Unreadable',
+    })
+  })
+
+  it('are each encoded within a limit of values of their own', async () => {
+    const page = openPage()
+
+    page.run(
+      'globalThis.__STORYBOOK_PREVIEW__ = { loadStory: async () => ({ parameters: { visualCheck: new Array(9999).fill(0) } }) }',
+    )
+
+    const answer = (await readOptions(page, [cardFile])) as {
+      files: { stories: { options: { kind: string; items: unknown[] } }[] }[]
+    }
+
+    expect(answer.files[0]?.stories.map(({ options }) => [options.kind, options.items.length])).toEqual([
+      ['array', 9999],
+      ['array', 9999],
+    ])
+  })
+})
+
+/**
+ * The element a fake render draws its story in.
+ */
+const canvas = { tagName: 'DIV', id: 'storybook-root' }
+
+/**
+ * Builds a stand-in for the render of `button--primary` in the `story` view mode that Storybook's preview keeps as
+ * `currentRender`. Its story's merged `parameters.visualCheck` is `options`, and its `storyContext()` gives the story's
+ * ID, parameters and args. `fields` replaces any of its fields, getters included.
+ */
+function storyRender(options: unknown, fields: Record<string, unknown> = {}): Record<string, unknown> {
+  const parameters = { visualCheck: options }
+  const render = {
+    id: 'button--primary',
+    viewMode: 'story',
+    story: { id: 'button--primary', parameters },
+    canvasElement: canvas,
+    storyContext: () => ({ id: 'button--primary', parameters, args: { label: 'Primary' } }),
+  }
+
+  // Copied by descriptor, so a getter in `fields` stays a getter.
+  return Object.defineProperties(render, Object.getOwnPropertyDescriptors(fields))
+}
+
+/**
+ * Gives the page a navigator with `clipboard`, as a browser has in a secure context, and gives the navigator back.
+ */
+function withClipboard(page: FakePage, clipboard: unknown = { readText: async () => '' }): { clipboard: unknown } {
+  const pageNavigator = { clipboard }
+
+  page.setGlobal('navigator', pageNavigator)
+
+  return pageNavigator
+}
+
+/**
+ * Replaces the navigator's clipboard with a stub, as `userEvent.setup()` does, and gives a user that names the
+ * clipboard it saw.
+ */
+function stubClipboard(pageNavigator: { clipboard: unknown }): { clipboard: string } {
+  Object.defineProperty(pageNavigator, 'clipboard', { configurable: true, get: () => 'stub' })
+
+  return { clipboard: String(pageNavigator.clipboard) }
+}
+
+/**
+ * Builds a fake page with the adapter's script, whose Storybook preview shows `render`.
+ */
+function pageShowing(render: unknown): FakePage {
+  const page = openPage()
+
+  page.setGlobal('__STORYBOOK_PREVIEW__', { currentRender: render })
+
+  return page
+}
+
+/**
+ * Runs the wait hook of `button--primary` in the page with a time limit of 1000 ms, as the driver does, and gives the
+ * page's answer.
+ */
+function runWaitHook(page: FakePage): Promise<unknown> {
+  return page.evaluate(waitHookExpression('button--primary', 1000))
+}
+
+describe("the story's wait hook", () => {
+  it.each([
+    ['a story without options', undefined],
+    ['options without a wait hook', {}],
+    ['a wait hook turned off with null', { wait: null }],
+    ['a wait hook that is not a function', { wait: 'soon' }],
+  ])('answers none for %s, without building its context', async (_what, options) => {
+    const storyContext = vi.fn(() => ({}))
+
+    expect(await runWaitHook(pageShowing(storyRender(options, { storyContext })))).toEqual({ outcome: 'none' })
+    expect(storyContext).not.toHaveBeenCalled()
+  })
+
+  it("runs the current render's story's wait hook once, with the story's context, view mode and canvas element", async () => {
+    const wait = vi.fn()
+
+    expect(await runWaitHook(pageShowing(storyRender({ wait })))).toEqual({ outcome: 'done' })
+    expect(wait.mock.calls).toEqual([
+      [
+        {
+          id: 'button--primary',
+          parameters: { visualCheck: { wait } },
+          args: { label: 'Primary' },
+          viewMode: 'story',
+          canvasElement: canvas,
+        },
+      ],
+    ])
+    expect(Object.keys(wait.mock.calls[0]?.[0])).toEqual(['id', 'parameters', 'args', 'viewMode', 'canvasElement'])
+    expect(wait.mock.calls[0]?.[0].canvasElement).toBe(canvas)
+  })
+
+  it("gives the wait hook canvas queries and a userEvent instance from Storybook's test module", async () => {
+    const queries = { getByRole: () => undefined }
+    const user = { click: async () => undefined }
+    const within = vi.fn(() => queries)
+    const wait = vi.fn()
+    const page = pageShowing(storyRender({ wait }))
+
+    withClipboard(page)
+    page.setGlobal('__STORYBOOK_MODULE_TEST__', { within, userEvent: { setup: () => user } })
+    expect(await runWaitHook(page)).toEqual({ outcome: 'done' })
+
+    const context = wait.mock.calls[0]?.[0]
+
+    expect(Object.keys(context)).toEqual([
+      'id',
+      'parameters',
+      'args',
+      'viewMode',
+      'canvasElement',
+      'canvas',
+      'userEvent',
+    ])
+    expect(context.canvas).toBe(queries)
+    expect(within.mock.calls).toEqual([[canvas]])
+    expect(context.userEvent).toBe(user)
+  })
+
+  it('sets userEvent up only when it is first read, and only once', async () => {
+    const setup = vi.fn(() => ({ click: async () => undefined }))
+    const wait = vi.fn()
+    const page = pageShowing(storyRender({ wait }))
+
+    withClipboard(page)
+    page.setGlobal('__STORYBOOK_MODULE_TEST__', { userEvent: { setup } })
+    expect(await runWaitHook(page)).toEqual({ outcome: 'done' })
+    expect(setup).not.toHaveBeenCalled()
+
+    const context = wait.mock.calls[0]?.[0]
+
+    expect(context.userEvent).toBe(context.userEvent)
+    expect(setup).toHaveBeenCalledOnce()
+  })
+
+  it("puts the page's own clipboard back once userEvent.setup() stubbed it", async () => {
+    const clipboard = { readText: async () => 'real' }
+    const users: unknown[] = []
+    const page = pageShowing(storyRender({ wait: (context: Record<string, unknown>) => users.push(context.userEvent) }))
+    const pageNavigator = withClipboard(page, clipboard)
+
+    page.setGlobal('__STORYBOOK_MODULE_TEST__', { userEvent: { setup: () => stubClipboard(pageNavigator) } })
+    expect(await runWaitHook(page)).toEqual({ outcome: 'done' })
+    expect(users).toEqual([{ clipboard: 'stub' }])
+    expect(pageNavigator.clipboard).toBe(clipboard)
+  })
+
+  it('lets a userEvent.setup() that throws throw inside the hook that reads userEvent, and puts the clipboard back', async () => {
+    const clipboard = { readText: async () => 'real' }
+    const wait = (context: Record<string, unknown>): unknown => context.userEvent
+    const page = pageShowing(storyRender({ wait }))
+    const pageNavigator = withClipboard(page, clipboard)
+    const setup = (): never => {
+      stubClipboard(pageNavigator)
+
+      throw new Error('No user.')
+    }
+
+    page.setGlobal('__STORYBOOK_MODULE_TEST__', { userEvent: { setup } })
+    expect(await runWaitHook(page)).toEqual({ outcome: 'threw', text: 'Error: No user.' })
+    expect(pageNavigator.clipboard).toBe(clipboard)
+  })
+
+  it.each([
+    ['without a navigator', undefined],
+    ['whose navigator has no clipboard', {}],
+  ])('leaves userEvent out on a page %s, as Storybook does', async (_what, pageNavigator) => {
+    const setup = vi.fn()
+    const wait = vi.fn()
+    const page = pageShowing(storyRender({ wait }))
+
+    page.setGlobal('navigator', pageNavigator)
+    page.setGlobal('__STORYBOOK_MODULE_TEST__', { within: () => ({}), userEvent: { setup } })
+    expect(await runWaitHook(page)).toEqual({ outcome: 'done' })
+    expect(Object.keys(wait.mock.calls[0]?.[0])).toEqual([
+      'id',
+      'parameters',
+      'args',
+      'viewMode',
+      'canvasElement',
+      'canvas',
+    ])
+    expect(setup).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['without within or userEvent', '{}'],
+    ['whose within and userEvent.setup are not functions', '{ within: 1, userEvent: { setup: 1 } }'],
+    ['without userEvent.setup', '{ userEvent: {} }'],
+    [
+      "whose helpers can't be read",
+      "{ get within() { throw new Error('hostile') }, get userEvent() { throw new Error('hostile') } }",
+    ],
+    ['that is not an object', "'storybook/test'"],
+  ])('leaves canvas and userEvent out with a test module %s', async (_what, testModule) => {
+    const wait = vi.fn()
+    const page = pageShowing(storyRender({ wait }))
+
+    withClipboard(page)
+    page.run(`globalThis.__STORYBOOK_MODULE_TEST__ = ${testModule}`)
+    expect(await runWaitHook(page)).toEqual({ outcome: 'done' })
+    expect(Object.keys(wait.mock.calls[0]?.[0])).toEqual(['id', 'parameters', 'args', 'viewMode', 'canvasElement'])
+  })
+
+  it("leaves canvas and userEvent out when the page can't read Storybook's test module", async () => {
+    const wait = vi.fn()
+    const page = pageShowing(storyRender({ wait }))
+
+    withClipboard(page)
+    page.run("Object.defineProperty(globalThis, '__STORYBOOK_MODULE_TEST__', { get() { throw new Error('hostile') } })")
+    expect(await runWaitHook(page)).toEqual({ outcome: 'done' })
+    expect(Object.keys(wait.mock.calls[0]?.[0])).toEqual(['id', 'parameters', 'args', 'viewMode', 'canvasElement'])
+  })
+
+  it("runs the wait hook of the latest preview's render", async () => {
+    const first = vi.fn()
+    const latest = vi.fn()
+    const page = pageShowing(storyRender({ wait: first }))
+
+    page.setGlobal('__STORYBOOK_PREVIEW__', { currentRender: storyRender({ wait: latest }) })
+    expect(await runWaitHook(page)).toEqual({ outcome: 'done' })
+    expect(first).not.toHaveBeenCalled()
+    expect(latest).toHaveBeenCalledOnce()
+  })
+
+  it('waits for a wait hook that returns a promise', async () => {
+    const wait = runWaitHook(pageShowing(storyRender({ wait: () => later(500, undefined) })))
+
+    await vi.advanceTimersByTimeAsync(400)
+    expect(await settledYet(wait)).toBe(false)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(await wait).toEqual({ outcome: 'done' })
+  })
+
+  it.each([
+    [
+      'throws',
+      () => {
+        throw new Error('The data never came.')
+      },
+    ],
+    ['rejects', async () => Promise.reject(new Error('The data never came.'))],
+  ])('says what a wait hook that %s threw', async (_how, wait) => {
+    expect(await runWaitHook(pageShowing(storyRender({ wait })))).toEqual({
+      outcome: 'threw',
+      text: 'Error: The data never came.',
+    })
+  })
+
+  it.each([
+    [
+      'an error on several lines, on one line',
+      new TypeError('x is undefined\n  at story'),
+      'TypeError: x is undefined at story',
+    ],
+    ['a long error, in 500 characters', new Error('x'.repeat(600)), `Error: ${'x'.repeat(493)}`],
+    ['a value that is not an error, as text', 'no data', 'no data'],
+  ])('describes what the wait hook threw: %s', async (_what, error, text) => {
+    const wait = async (): Promise<never> => Promise.reject(error)
+
+    expect(await runWaitHook(pageShowing(storyRender({ wait })))).toEqual({ outcome: 'threw', text })
+  })
+
+  it.each([
+    [
+      "the story's context",
+      {
+        storyContext: () => {
+          throw new Error('No context.')
+        },
+      },
+      'Error: No context.',
+    ],
+    [
+      "the story's parameters",
+      {
+        story: {
+          get parameters() {
+            throw new Error('No parameters.')
+          },
+        },
+      },
+      'Error: No parameters.',
+    ],
+    [
+      "the story's view mode",
+      {
+        get viewMode() {
+          throw new Error('No view mode.')
+        },
+      },
+      'Error: No view mode.',
+    ],
+  ])("says the wait hook's context failed, without running it, when %s can't be read", async (_what, fields, text) => {
+    const wait = vi.fn()
+
+    expect(await runWaitHook(pageShowing(storyRender({ wait }, fields)))).toEqual({ outcome: 'context-failed', text })
+    expect(wait).not.toHaveBeenCalled()
+  })
+
+  it("says the wait hook's context failed, without running it, when the test module's within throws", async () => {
+    const wait = vi.fn()
+    const page = pageShowing(storyRender({ wait }))
+
+    page.run("globalThis.__STORYBOOK_MODULE_TEST__ = { within: () => { throw new Error('No canvas.') } }")
+    expect(await runWaitHook(page)).toEqual({ outcome: 'context-failed', text: 'Error: No canvas.' })
+    expect(wait).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [
+      'whose then() throws, as threw',
+      "() => ({ then() { throw new Error('Bad thenable.') } })",
+      { outcome: 'threw', text: 'Error: Bad thenable.' },
+    ],
+    [
+      "whose then can't be read, as threw",
+      "() => ({ get then() { throw new Error('No then.') } })",
+      { outcome: 'threw', text: 'Error: No then.' },
+    ],
+    ['whose then() never calls back, as timed-out', '() => ({ then() {} })', { outcome: 'timed-out' }],
+  ])('reads a wait hook that gives a thenable %s', async (_what, hookSource, answer) => {
+    const page = openPage()
+
+    // The page builds the hook, so its thenable is the page's own.
+    page.setGlobal('__STORYBOOK_PREVIEW__', { currentRender: storyRender({ wait: page.run(hookSource) }) })
+
+    const run = runWaitHook(page)
+
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(await run).toEqual(answer)
+  })
+
+  it("times out on time with the browser's own timer when the page replaced setTimeout and clearTimeout", async () => {
+    const page = pageShowing(storyRender({ wait: never }))
+
+    page.run('globalThis.setTimeout = () => 0; globalThis.clearTimeout = () => undefined')
+
+    const wait = runWaitHook(page)
+
+    await vi.advanceTimersByTimeAsync(999)
+    expect(await settledYet(wait)).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await wait).toEqual({ outcome: 'timed-out' })
+  })
+
+  it("clears its time limit with the browser's own clearTimeout once the wait hook settles", async () => {
+    const page = pageShowing(storyRender({ wait: async () => undefined }))
+
+    page.run('globalThis.clearTimeout = () => undefined')
+    await runWaitHook(page)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('leaves no unhandled rejection when the wait hook rejects after the time limit', async () => {
+    const unhandled = vi.fn()
+
+    process.on('unhandledRejection', unhandled)
+
+    try {
+      const wait = runWaitHook(pageShowing(storyRender({ wait: () => laterRejection(1500, new Error('late')) })))
+
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(await wait).toEqual({ outcome: 'timed-out' })
+      await vi.advanceTimersByTimeAsync(500)
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(unhandled).not.toHaveBeenCalled()
+    } finally {
+      process.off('unhandledRejection', unhandled)
+    }
+  })
+
+  it.each([
+    ['Storybook never set the preview', undefined],
+    ['the preview has no current render', {}],
+    ['the current render is of another story', { currentRender: storyRender({}, { id: 'button--secondary' }) }],
+    ['the current render has no story yet', { currentRender: storyRender({}, { story: undefined }) }],
+    ['the current render has no storyContext()', { currentRender: storyRender({}, { storyContext: undefined }) }],
+  ])('answers no-render when %s', async (_what, preview) => {
+    const page = openPage()
+
+    page.setGlobal('__STORYBOOK_PREVIEW__', preview)
+    expect(await runWaitHook(page)).toEqual({ outcome: 'no-render' })
+  })
+
+  it("answers no-render when the preview's current render can't be read", async () => {
+    const page = openPage()
+
+    page.run("globalThis.__STORYBOOK_PREVIEW__ = { get currentRender() { throw new Error('hostile') } }")
+    expect(await runWaitHook(page)).toEqual({ outcome: 'no-render' })
+  })
+})
+
 describe("the adapter's script", () => {
   it("never reads the page's document until the story finished", async () => {
     const { page, channel } = openStorybookPage()
@@ -724,6 +1636,14 @@ describe("the adapter's script", () => {
     appendStyle(page, disableSheet)
     appendStyle(page, 'a { color: red }')
     await timedOutWait(page)
+    expect(page.documentReads()).toBe(0)
+  })
+
+  it("never reads the page's document while it reads options", async () => {
+    const page = openPage()
+
+    page.setGlobal('__STORYBOOK_PREVIEW__', new FakePreview())
+    await readOptions(page, [buttonFile])
     expect(page.documentReads()).toBe(0)
   })
 

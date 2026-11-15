@@ -3,11 +3,14 @@
   "extends": ["//"],
   "tasks": {
     "build-storybook": {
+      "dependsOn": ["^build"],
       "inputs": [
         ".storybook/**",
         "package.json",
         "tsconfig.json",
         "$TURBO_ROOT$/test-storybooks/storybook-10-react/.storybook/test-storybook-config.ts",
+        "$TURBO_ROOT$/test-storybooks/storybook-10-react/.storybook/shared-preview.ts",
+        "$TURBO_ROOT$/test-storybooks/storybook-10-react/.storybook/visual-check.ts",
         "$TURBO_ROOT$/test-storybooks/storybook-10-react/stories/**",
         "$TURBO_ROOT$/test-storybooks/storybook-10-react/tsconfig.json"
       ],

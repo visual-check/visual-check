@@ -52,6 +52,10 @@ _Avoid_: Frozen frame, final frame, paused animation
 A named set of globals and viewport, declared once per Storybook, that a story can be captured in besides its default capture, which has no mode.
 _Avoid_: Variant, configuration, breakpoint, extra shot
 
+**Per-story options**:
+What a project sets for a Storybook, a stories file or a story in `parameters.visualCheck`: modes, viewport, capture element, masks, tolerance, `wait` and `disable`. Storybook merges the levels, and visual-check reads the result before it captures.
+_Avoid_: Story config, story settings, visual-check parameters
+
 **Visual diff**:
 The pixel comparison of a snapshot against its baseline.
 _Avoid_: Diff (unqualified), image diff

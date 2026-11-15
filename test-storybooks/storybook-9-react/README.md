@@ -12,7 +12,7 @@ Until the browser image is published, every run names a locally built image thro
 TEST_STORYBOOK_IMAGE=visual-check-chromium:amd64 pnpm turbo run e2e --filter @visual-check/test-storybook-9-react
 ```
 
-Turbo builds the CLI and the Storybook first.
+Turbo builds the CLI, `@visual-check/storybook` and the Storybook first.
 
 ## Rewriting the baselines
 

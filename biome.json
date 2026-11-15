@@ -48,7 +48,10 @@
   },
   "overrides": [
     {
-      "includes": ["test-storybooks/*/visual-check.config.ts"],
+      "includes": [
+        "test-storybooks/*/visual-check.config.ts",
+        "test-storybooks/storybook-10-react/.storybook/visual-check.ts"
+      ],
       "linter": {
         "rules": {
           "correctness": { "noPrivateImports": "off" }

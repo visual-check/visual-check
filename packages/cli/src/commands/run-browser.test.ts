@@ -4,6 +4,7 @@ import type { BrowserPackage } from '../browser/read-browser-package.js'
 import type { StoryCapture, StoryToCapture } from '../capture/capture-session.js'
 import { BrowserExitedError, BrowserLaunchError, type Driver, type Page } from '../capture/driver/driver.js'
 import { answerEvaluate } from '../capture/fake-driver.fixture.js'
+import type { OptionsRequest, StorybookOptionsRead } from '../capture/read-options.js'
 import { type RunBrowser, runBrowserOf } from './run-browser.js'
 
 /**
@@ -220,6 +221,22 @@ function brokenBy(error: BrowserExitedError): StoryCapture {
       message: `The browser exited while visual-check captured this story: ${error.message}`,
     },
   }
+}
+
+/**
+ * The request the tests read the options of: one stories file of one story.
+ */
+const optionsRequest: OptionsRequest = {
+  storybookName: 'web',
+  previewUrl: 'http://127.0.0.1:6006/iframe.html?viewMode=story',
+  files: [{ importPath: './src/a.stories.ts', storyIds: ['a'] }],
+}
+
+/**
+ * Gives what reading the options of `optionsRequest` gives when the page finds it loaded with no options.
+ */
+const optionsRead: StorybookOptionsRead = {
+  files: [{ importPath: './src/a.stories.ts', outcome: 'loaded', stories: [{ id: 'a', options: undefined }] }],
 }
 
 /**
@@ -492,5 +509,72 @@ describe('runBrowserOf', () => {
     expect(second.openPages).toBe(0)
     expect(first.closes).toBe(1)
     expect(second.closes).toBe(1)
+  })
+
+  it('reads the options in the browser the captures share, launching it once', async () => {
+    const first = fakeBrowserOf()
+    const { browser, launches } = runBrowserWith(first)
+
+    expect(await browser.readOptions(optionsRequest)).toEqual(optionsRead)
+    expect(first.openPages).toBe(0)
+    expect(await browser.capture(0, storyOf('a'))).toEqual({ snapshot })
+    expect(await browser.readOptions(optionsRequest)).toEqual(optionsRead)
+    expect(launches()).toBe(1)
+    expect(first.captured).toEqual(['a'])
+  })
+
+  it('throws the launch error when the browser fails to launch for a read', async () => {
+    const error = new BrowserLaunchError('The browser exited with code 127 before it answered.', [], { exited: true })
+    const { browser } = runBrowserWith(error)
+
+    await expect(browser.readOptions(optionsRequest)).rejects.toBe(error)
+    await expect(browser.close()).resolves.toBeUndefined()
+  })
+
+  it('relaunches once and reads in the second browser when the first exits during a read', async () => {
+    const first = fakeBrowserOf()
+    const second = fakeBrowserOf()
+    const { browser, launches } = runBrowserWith(first, second)
+
+    await browser.readOptions(optionsRequest)
+
+    const exit = first.exit()
+
+    expect(await browser.readOptions(optionsRequest)).toEqual(optionsRead)
+    expect(launches()).toBe(2)
+    expect(browser.firstExit()).toEqual({ error: exit, relaunched: true })
+    expect(await browser.capture(0, storyOf('b'))).toEqual({ snapshot })
+    expect(second.captured).toEqual(['b'])
+    expect(launches()).toBe(2)
+  })
+
+  it('throws the exit when the relaunched browser exits during the read', async () => {
+    const first = fakeBrowserOf()
+    const second = fakeBrowserOf()
+    const { browser, launches } = runBrowserWith(first, second)
+
+    await browser.readOptions(optionsRequest)
+    first.exit()
+
+    const secondExit = second.exit()
+
+    await expect(browser.readOptions(optionsRequest)).rejects.toBe(secondExit)
+    expect(launches()).toBe(2)
+    await expect(browser.capture(0, storyOf('b'))).rejects.toBe(secondExit)
+  })
+
+  it("throws, relaunching nothing, when the first browser's exit during a read says the platform can't run", async () => {
+    const first = fakeBrowserOf()
+    const { browser, launches } = runBrowserWith(first, fakeBrowserOf())
+
+    await browser.readOptions(optionsRequest)
+
+    const exit = first.exit(true)
+
+    await expect(browser.readOptions(optionsRequest)).rejects.toBe(exit)
+    expect(launches()).toBe(1)
+    expect(browser.firstExit()).toBeUndefined()
+    await expect(browser.capture(0, storyOf('a'))).rejects.toBe(exit)
+    expect(launches()).toBe(1)
   })
 })

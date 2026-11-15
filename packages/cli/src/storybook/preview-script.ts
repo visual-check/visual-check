@@ -1,7 +1,9 @@
+import { optionsEncoderSource } from './options-encoding.js'
+
 /**
  * The non-enumerable global the adapter's page script keeps its state under, in every document of a page.
  */
-const stateGlobal = '__visualCheckStorybook'
+export const stateGlobal = '__visualCheckStorybook'
 
 /**
  * The global Storybook's preview sets its channel as.
@@ -12,6 +14,21 @@ const channelGlobal = '__STORYBOOK_ADDONS_CHANNEL__'
  * The global Storybook's preview sets itself as.
  */
 const previewGlobal = '__STORYBOOK_PREVIEW__'
+
+/**
+ * The global Storybook's preview keeps `storybook/test` under, in Storybook 9.1 and later.
+ */
+const testModuleGlobal = '__STORYBOOK_MODULE_TEST__'
+
+/**
+ * A function the adapter's script keeps in the page, for an expression to call.
+ */
+type StateFunction = 'waitForStory' | 'readOptions' | 'runWait'
+
+/**
+ * A value an expression embeds as JSON. It leaves out `undefined`, symbols and bigints, which JSON can't carry.
+ */
+type Embeddable = string | number | boolean | null | object
 
 /**
  * The class Storybook puts on the body of the story's page while it shows its error display.
@@ -128,17 +145,36 @@ const pauseSheetPattern = new RegExp(
  *   up to 500 characters. An error is described as `name: message`, or whichever of the two isn't empty, what the
  *   error display shows as `title: description` the same way, and a list of errors joined by `; `. Any other payload
  *   is described as text;
- * - hooks Storybook's preview when it sets `__STORYBOOK_PREVIEW__`, to note that the preview started, and calls its
- *   `ready()` just after, to note when it becomes ready. A preview that replaces another is waited for on its own;
+ * - hooks Storybook's preview when it sets `__STORYBOOK_PREVIEW__`, to keep it and note that it started, and calls its
+ *   `ready()` just after, to note when it becomes ready, or why it failed, on one line of up to 500 characters as an
+ *   error is described. A preview that replaces another is waited for on its own;
  * - wraps `Node.prototype.appendChild` to empty the text of a `<style>` element that matches Storybook 9.1 and 10's
  *   pause or disable stylesheet just before it's appended, so the story keeps running as in plain Storybook. It leaves
  *   every other node and style alone, and passes `this`, the arguments, the result and any error of the original
  *   through. Where the page has no `Node` or `HTMLStyleElement` it does nothing;
- * - gives `waitForStory`, which the story wait expression calls.
+ * - gives `waitForStory`, which the story wait expression calls;
+ * - gives `readOptions`, which the options read expression calls with stories files and a time limit. It waits for
+ *   the latest preview to become ready or fail, then calls its `loadStory` for every story of every file: all files at
+ *   once, each within its own time limit, counted from then. A file that fails or runs out of time never stops
+ *   another. It answers with each story's `parameters.visualCheck`, encoded by `optionsEncoderSource` so it crosses
+ *   as JSON, or with why each other file didn't load, on one line. It never calls `extract()`, never loads a docs
+ *   entry, and keeps nothing between reads;
+ * - gives `runWait`, which the wait hook expression calls with a story ID and a time limit. It takes the latest
+ *   preview's `currentRender`, and answers `no-render` unless that's a render of the story with its `story` and a
+ *   `storyContext()`. When the story's merged `parameters.visualCheck.wait` is a function, it calls it once with a
+ *   context of only: what the render's `storyContext()` gives, then the render's `viewMode` and `canvasElement`, then
+ *   `canvas` as `within(canvasElement)` when Storybook's `__STORYBOOK_MODULE_TEST__` has `within`, then `userEvent`
+ *   when it has `userEvent.setup` and the page has `navigator.clipboard`, as Storybook does for `play`. `userEvent` is
+ *   set up by `userEvent.setup()` when the hook first reads it, once, and the page's own `navigator.clipboard`, which
+ *   `setup()` stubs, is put back right after; a `setup()` that throws throws inside the hook. Unlike `play`, the hook
+ *   gets no `loaded`, `step`, `mount` or `abortSignal`. It waits until the hook settles or the time limit passes. A
+ *   throw or rejection of the hook, or of a thenable it gives, answers `threw`. A failure to read the hook or build
+ *   its context answers `context-failed`, without calling the hook. Each is described on one line of up to 500
+ *   characters, as an error is. It never throws or rejects, and a rejection after the time limit is handled too.
  *
  * It keeps the browser's own `setTimeout`, `clearTimeout` and `performance.now`, so a story that fakes or replaces
- * timers doesn't stall the wait. A value the page sets as the channel or the preview never makes Storybook's own
- * assignment throw, and the page reads back what it set.
+ * timers stalls none of the story wait, the options read and the wait hook. A value the page sets as the channel or
+ * the preview never makes Storybook's own assignment throw, and the page reads back what it set.
  *
  * @public
  */
@@ -157,6 +193,7 @@ export const storybookPageScript = `(() => {
   const completedTimes = new Map()
   const errors = []
   const waiters = new Set()
+  const previewWaiters = new Set()
   const channels = new WeakSet()
   const previews = new WeakMap()
   let latestPreview
@@ -197,6 +234,16 @@ export const storybookPageScript = `(() => {
     return describePair(value, 'name', 'message')
   }
 
+  const oneLine = (text) => text.replace(/\\s+/g, ' ').trim().slice(0, ${keptCharacters})
+
+  const describeError = (value) => {
+    try {
+      return oneLine(describePair(value, 'name', 'message'))
+    } catch {
+      return oneLine(textOf(value))
+    }
+  }
+
   // Recording what Storybook sends on its channel.
 
   const recordError = (event, value) => {
@@ -210,7 +257,7 @@ export const storybookPageScript = `(() => {
       } catch {
         text = textOf(value)
       }
-      errors.push({ event, text: text.replace(/\\s+/g, ' ').trim().slice(0, ${keptCharacters}) })
+      errors.push({ event, text: oneLine(text) })
     } catch {}
   }
 
@@ -263,32 +310,48 @@ export const storybookPageScript = `(() => {
     } catch {}
   }
 
+  const notePreview = () => {
+    try {
+      for (const waiter of [...previewWaiters]) {
+        waiter()
+      }
+    } catch {}
+  }
+
+  const trackPreview = (preview) => {
+    if ((typeof preview !== 'object' && typeof preview !== 'function') || preview === null) {
+      return
+    }
+    const known = previews.get(preview)
+    if (known !== undefined) {
+      latestPreview = known
+      return
+    }
+    const state = { preview, ready: true, failure: undefined }
+    previews.set(preview, state)
+    latestPreview = state
+    if (typeof preview.ready !== 'function') {
+      return
+    }
+    state.ready = false
+    Promise.resolve()
+      .then(() => preview.ready())
+      .then(
+        () => {
+          state.ready = true
+        },
+        (error) => {
+          state.failure = describeError(error)
+        },
+      )
+      .then(notePreview)
+  }
+
   const watchPreview = (preview) => {
     try {
-      if ((typeof preview !== 'object' && typeof preview !== 'function') || preview === null) {
-        return
-      }
-      const known = previews.get(preview)
-      if (known !== undefined) {
-        latestPreview = known
-        return
-      }
-      const state = { ready: true }
-      previews.set(preview, state)
-      latestPreview = state
-      if (typeof preview.ready !== 'function') {
-        return
-      }
-      state.ready = false
-      Promise.resolve()
-        .then(() => preview.ready())
-        .then(
-          () => {
-            state.ready = true
-          },
-          () => undefined,
-        )
+      trackPreview(preview)
     } catch {}
+    notePreview()
   }
 
   const hook = (name, watch) => {
@@ -383,7 +446,216 @@ export const storybookPageScript = `(() => {
     waiters.add(waiter)
   })
 
-  Object.defineProperty(globalThis, '${stateGlobal}', { value: Object.freeze({ waitForStory }) })
+  // The options read: each story's options, through the latest preview's loadStory, encoded so they cross as JSON.
+
+  const encodeValue = ${optionsEncoderSource}
+
+  const encodeOptions = (story) => {
+    let options
+    try {
+      options = story?.parameters?.visualCheck
+    } catch {
+      return { kind: 'instance', name: 'Unreadable' }
+    }
+    return encodeValue(options)
+  }
+
+  const settledAnswer = () => {
+    const latest = latestPreview
+    if (latest !== undefined && latest.failure !== undefined) {
+      return { outcome: 'preview-failed', message: latest.failure }
+    }
+    if (latest !== undefined && latest.ready) {
+      return { outcome: 'ready', preview: latest.preview }
+    }
+    return undefined
+  }
+
+  const settledPreview = (timeoutMs) => new Promise((resolve) => {
+    const settle = (answer) => {
+      previewWaiters.delete(waiter)
+      clearTimer(timer)
+      resolve(answer)
+    }
+    const waiter = () => {
+      const answer = settledAnswer()
+      if (answer !== undefined) {
+        settle(answer)
+      }
+    }
+    const timer = setTimer(() => {
+      settle({ outcome: 'timed-out', step: latestPreview === undefined ? 'preview-start' : 'preview-ready' })
+    }, timeoutMs)
+    previewWaiters.add(waiter)
+    waiter()
+  })
+
+  const canLoadStories = (preview) => {
+    try {
+      return typeof preview.loadStory === 'function'
+    } catch {
+      return false
+    }
+  }
+
+  const loadStories = (preview, storyIds) =>
+    Promise.all(
+      storyIds.map(
+        (storyId) =>
+          new Promise((resolve) => {
+            resolve(preview.loadStory({ storyId }))
+          }),
+      ),
+    )
+
+  const readFile = (preview, file, timeoutMs) => new Promise((resolve) => {
+    const { importPath, storyIds } = file
+    const timer = setTimer(() => {
+      resolve({ importPath, outcome: 'timed-out' })
+    }, timeoutMs)
+    loadStories(preview, storyIds).then(
+      (stories) => {
+        clearTimer(timer)
+        resolve({
+          importPath,
+          outcome: 'loaded',
+          stories: storyIds.map((id, index) => ({ id, options: encodeOptions(stories[index]) })),
+        })
+      },
+      (error) => {
+        clearTimer(timer)
+        resolve({ importPath, outcome: 'failed', message: describeError(error) })
+      },
+    )
+  })
+
+  const readOptions = async (files, timeoutMs) => {
+    const settled = await settledPreview(timeoutMs)
+    if (settled.outcome !== 'ready') {
+      return settled
+    }
+    if (!canLoadStories(settled.preview)) {
+      return { outcome: 'unsupported' }
+    }
+    return {
+      outcome: 'read',
+      files: await Promise.all(files.map((file) => readFile(settled.preview, file, timeoutMs))),
+    }
+  }
+
+  // The wait hook: the story's parameters.visualCheck.wait, run on the render on screen with the story's context.
+
+  const renderOf = (storyId) => {
+    try {
+      const render = latestPreview?.preview.currentRender
+      if (typeof render !== 'object' || render === null || render.id !== storyId) {
+        return undefined
+      }
+      const story = render.story
+      if (typeof story !== 'object' || story === null || typeof render.storyContext !== 'function') {
+        return undefined
+      }
+      return render
+    } catch {
+      return undefined
+    }
+  }
+
+  const runHook = (hook, context, timeoutMs) => new Promise((resolve) => {
+    const timer = setTimer(() => {
+      resolve({ outcome: 'timed-out' })
+    }, timeoutMs)
+    const settle = (answer) => {
+      clearTimer(timer)
+      resolve(answer)
+    }
+    new Promise((resolveHook) => {
+      resolveHook(hook(context))
+    }).then(
+      () => settle({ outcome: 'done' }),
+      (error) => settle({ outcome: 'threw', text: describeError(error) }),
+    )
+  })
+
+  const readSafely = (read) => {
+    try {
+      return read()
+    } catch {
+      return undefined
+    }
+  }
+
+  const testHelpers = () => {
+    const testModule = readSafely(() => globalThis.${testModuleGlobal})
+    const within = readSafely(() => testModule.within)
+    const userEvent = readSafely(() => testModule.userEvent)
+    return {
+      within: typeof within === 'function' ? within : undefined,
+      userEvent: readSafely(() => typeof userEvent.setup === 'function') === true ? userEvent : undefined,
+    }
+  }
+
+  // userEvent.setup() stubs navigator.clipboard. As Storybook does for play, the page sets userEvent up only where the
+  // page has a clipboard, and puts the real one back right after.
+  const setUpUser = (userEvent, pageNavigator, clipboard) => {
+    try {
+      return userEvent.setup()
+    } finally {
+      try {
+        Object.defineProperty(pageNavigator, 'clipboard', { configurable: true, get: () => clipboard })
+      } catch {}
+    }
+  }
+
+  const defineUserEvent = (context, userEvent) => {
+    const pageNavigator = readSafely(() => globalThis.navigator)
+    const clipboard = readSafely(() => pageNavigator.clipboard)
+    if (!clipboard) {
+      return
+    }
+    Object.defineProperty(context, 'userEvent', {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        const user = setUpUser(userEvent, pageNavigator, clipboard)
+        Object.defineProperty(context, 'userEvent', { configurable: true, enumerable: true, writable: true, value: user })
+        return user
+      },
+    })
+  }
+
+  const contextOf = (render) => {
+    const context = { ...render.storyContext(), viewMode: render.viewMode, canvasElement: render.canvasElement }
+    const { within, userEvent } = testHelpers()
+    if (within !== undefined) {
+      context.canvas = within(context.canvasElement)
+    }
+    if (userEvent !== undefined) {
+      defineUserEvent(context, userEvent)
+    }
+    return context
+  }
+
+  const runWait = async (storyId, timeoutMs) => {
+    const render = renderOf(storyId)
+    if (render === undefined) {
+      return { outcome: 'no-render' }
+    }
+    let hook
+    let context
+    try {
+      hook = render.story.parameters?.visualCheck?.wait
+      if (typeof hook !== 'function') {
+        return { outcome: 'none' }
+      }
+      context = contextOf(render)
+    } catch (error) {
+      return { outcome: 'context-failed', text: describeError(error) }
+    }
+    return await runHook(hook, context, timeoutMs)
+  }
+
+  Object.defineProperty(globalThis, '${stateGlobal}', { value: Object.freeze({ waitForStory, readOptions, runWait }) })
 })()`
 
 /**
@@ -493,18 +765,28 @@ export type StoryWait =
  * @public
  */
 export function storyWaitExpression(storyId: string, timeoutMs: number): string {
+  return stateCallExpression('waitForStory', [storyId], timeoutMs)
+}
+
+/**
+ * Builds the expression that calls one of the functions the adapter's script keeps in the page, with `args`, each
+ * embedded as JSON, and then `timeoutMs`, rounded up to whole ms. Its value is the function's answer, or
+ * `{ outcome: 'script-missing' }` when the adapter's script hadn't run in the page.
+ */
+export function stateCallExpression(method: StateFunction, args: readonly Embeddable[], timeoutMs: number): string {
   const limit = Math.max(0, Math.ceil(timeoutMs))
+  const embedded = [...args.map((arg) => JSON.stringify(arg)), limit].join(', ')
 
   return `(async () => {
   const state = globalThis.${stateGlobal}
-  return state === undefined ? { outcome: 'script-missing' } : state.waitForStory(${JSON.stringify(storyId)}, ${limit})
+  return state === undefined ? { outcome: 'script-missing' } : state.${method}(${embedded})
 })()`
 }
 
 /**
  * Joins the lead of a message and the detail, ending with one period. Without detail, it ends with `fallback`, if any.
  */
-function withDetail(lead: string, separator: string, detail: string, fallback?: string): string {
+export function withDetail(lead: string, separator: string, detail: string, fallback?: string): string {
   if (detail === '') {
     return fallback === undefined ? `${lead}.` : `${lead} ${fallback}.`
   }

@@ -14,7 +14,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "test:type": "tsc --noEmit"
+    "test:type": "tsc --noEmit",
+    "test:unit": "vitest run"
   },
   "peerDependencies": {
     "@angular/core": ">=18.0.0",
@@ -38,6 +39,8 @@
   },
   "devDependencies": {
     "@visual-check/typescript-config": "workspace:*",
-    "typescript": "7.0.2"
+    "storybook": "10.6.7",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
   }
 }

@@ -17,8 +17,9 @@ import type { BrowserPlace } from './browser-route.js'
 import { dockerProblemOf } from './docker-problem.js'
 import type { LaunchBrowser } from './launch-browser.js'
 import { missingLibraryOf } from './missing-library.js'
+import { type PlannedSnapshot, planSnapshots } from './plan-snapshots.js'
 import { platformProblemOf } from './platform-problem.js'
-import { type FirstBrowserExit, runBrowserOf } from './run-browser.js'
+import { type FirstBrowserExit, type RunBrowser, runBrowserOf } from './run-browser.js'
 
 /**
  * The stories a run covers in one Storybook, in the order they are taken and printed.
@@ -36,6 +37,10 @@ interface StorybookSelection {
    * Its selected stories.
    */
   stories: Story[]
+  /**
+   * Every story its `index.json` lists, whose options the run reads and checks whatever the selection.
+   */
+  allStories: Story[]
 }
 
 /**
@@ -67,7 +72,7 @@ interface SnapshotRun {
    */
   browserPackage: BrowserPackage
   /**
-   * The Storybooks in config order, each with its selected stories.
+   * The Storybooks in config order, each with its selected stories and every story it has.
    */
   selections: StorybookSelection[]
   /**
@@ -83,7 +88,8 @@ interface SnapshotRun {
    */
   environment: Record<string, string | undefined>
   /**
-   * Launches the browser, at the first story that needs a capture, and again at the first after the browser exits.
+   * Launches the browser, at the first options read, and again at the first read or story that needs it after the
+   * browser exits.
    */
   launchBrowser: LaunchBrowser
   /**
@@ -102,7 +108,8 @@ interface SnapshotRunResult {
   exitCode: number
   /**
    * The header, one line per snapshot and the counts, or, for a failure that stopped the run, the header and the lines
-   * of the snapshots that finished before it.
+   * of the snapshots that finished before it. Nothing when the run stopped before any capture, while it read the
+   * per-story options.
    */
   stdout: string
   /**
@@ -167,11 +174,27 @@ const baselineFixes: Record<BaselineError['action'], string> = {
 }
 
 /**
- * Builds the header: the CLI's version, the command, how many snapshots the run captures and how many workers it
- * runs.
+ * The snapshots a run takes, and what became of each so far.
  */
-function headerOf(run: SnapshotRun): string {
-  const count = run.selections.reduce((sum, selection) => sum + selection.stories.length, 0)
+interface PlannedSnapshots {
+  /**
+   * The header.
+   */
+  header: string
+  /**
+   * Each snapshot, in config order and then selection order.
+   */
+  items: PlannedSnapshot[]
+  /**
+   * What became of each snapshot, by its index in `items`, once it finished.
+   */
+  results: (SnapshotResult | undefined)[]
+}
+
+/**
+ * Builds the header: the CLI's version, the command, how many snapshots the run takes and how many workers it runs.
+ */
+function headerOf(run: SnapshotRun, count: number): string {
   const snapshots = `${count} ${count === 1 ? 'snapshot' : 'snapshots'}`
   const workers = `${run.workers} ${run.workers === 1 ? 'worker' : 'workers'}`
 
@@ -212,6 +235,24 @@ function displayPathOf(cwd: string, path: string): string {
  * browser is up, just before the capture.
  */
 type CaptureStory = (story: StoryToCapture, started?: () => void) => Promise<StoryCapture>
+
+/**
+ * Takes one snapshot as the command says. A story whose stories file didn't load is broken, with no capture and no
+ * baseline read.
+ */
+async function snapshotOf(
+  run: SnapshotRun,
+  item: PlannedSnapshot,
+  captureStory: CaptureStory,
+): Promise<SnapshotResult> {
+  if ('broken' in item) {
+    return { status: 'broken', detail: `broken: ${item.broken.message}` }
+  }
+
+  return run.command === 'test'
+    ? await testSnapshot(item.storybook, item.story, captureStory)
+    : await updateSnapshot(item.storybook, item.story, captureStory, run.cwd)
+}
 
 /**
  * Tests one story: a missing baseline is reported without a capture, and a snapshot passes only when it holds the
@@ -309,8 +350,8 @@ function browserOutputOf(output: readonly string[]): string {
 }
 
 /**
- * Says that the first browser exited mid-run: the exit, whether visual-check relaunches the browser for the stories
- * left, and the browser's last output. Gives nothing when the browser didn't exit.
+ * Says that the first browser exited mid-run: the exit, whether visual-check relaunches the browser for the rest of
+ * the run, and the browser's last output. Gives nothing when the browser didn't exit.
  */
 function exitNoticeOf(exit: FirstBrowserExit | undefined): string {
   if (exit === undefined) {
@@ -318,7 +359,7 @@ function exitNoticeOf(exit: FirstBrowserExit | undefined): string {
   }
 
   const relaunch = exit.relaunched
-    ? 'visual-check relaunches it once for the stories left.'
+    ? 'visual-check relaunches it once for the rest of the run.'
     : "No story left needed a capture, so visual-check didn't relaunch the browser."
 
   return `${exit.error.message}\n${relaunch}\n${browserOutputOf(exit.error.output)}`
@@ -469,14 +510,65 @@ function stopMessageOf(error: unknown, run: SnapshotRun, capturedAny: boolean): 
 }
 
 /**
- * Captures every selected story with a pool of `workers` that share one browser, and prints one line per snapshot after
- * the header, then the counts. The lines follow config order and then selection order, whatever order the captures
- * finish in. `test` compares each snapshot with its baseline byte for byte and never captures a missing baseline;
- * `update` writes each snapshot whose baseline is missing or differs. The browser is launched at the first story that
- * needs a capture, so a run with nothing to capture launches nothing.
+ * Gives the planned snapshots with the header that counts them, and no result yet.
+ */
+function plannedSnapshotsOf(run: SnapshotRun, items: PlannedSnapshot[]): PlannedSnapshots {
+  return { header: headerOf(run, items.length), items, results: items.map(() => undefined) }
+}
+
+/**
+ * Gives the line of each snapshot that has finished, in the snapshots' order.
+ */
+function linesOf({ items, results }: PlannedSnapshots): string[] {
+  return items.flatMap(({ storybook, story }, index) => {
+    const result = results[index]
+
+    return result === undefined ? [] : [`${marks[result.status]} ${storybook.name}  ${story.id}  ${result.detail}`]
+  })
+}
+
+/**
+ * Writes the header and the lines, each ending with a newline.
+ */
+function printedOf(snapshots: PlannedSnapshots, lines: string[]): string {
+  return [snapshots.header, ...lines].map((line) => `${line}\n`).join('')
+}
+
+/**
+ * Whether a snapshot has been captured, which a broken or missing one hasn't.
+ */
+function capturedAnyOf(snapshots: PlannedSnapshots | undefined): boolean {
+  return snapshots?.results.some((result) => result !== undefined && capturedStatuses.includes(result.status)) ?? false
+}
+
+/**
+ * Takes every snapshot with a pool of `workers` that share the run's browser.
+ */
+async function takeSnapshots(run: SnapshotRun, browser: RunBrowser, snapshots: PlannedSnapshots): Promise<void> {
+  await runWorkerPool(run.workers, snapshots.items, async (item, index, worker) => {
+    const captureStory: CaptureStory = (toCapture, started) => browser.capture(worker, toCapture, started)
+
+    snapshots.results[index] = await snapshotOf(run, item, captureStory)
+  })
+}
+
+/**
+ * Reads every Storybook's per-story options before any capture, then captures every selected story that isn't
+ * disabled with a pool of `workers` that share one browser, and prints one line per snapshot after the header, then
+ * the counts. The lines follow config order and then selection order, whatever order the captures finish in. `test`
+ * compares each snapshot with its baseline byte for byte and never captures a missing baseline; `update` writes each
+ * snapshot whose baseline is missing or differs.
+ *
+ * Each Storybook with stories gets one options read, in config order, on a page of its own, covering every story its
+ * `index.json` lists whatever the selection. So the browser is launched at the first read, even when no story then
+ * needs a capture, and a run launches nothing only when no Storybook has stories. A read problem, at the first
+ * Storybook that has one, or invalid options in any Storybook stop the run with exit 2 before any capture, printing
+ * nothing on stdout. A disabled story is left out: it isn't captured, printed or counted. Each story of a stories file
+ * that failed to load, or didn't load within readyTimeout, is broken, `load-failed`, with no capture and no baseline
+ * read.
  *
  * When the browser exits, every story in flight is broken, `browser-exited`, the browser is relaunched once at the
- * next story that needs a capture, and the run goes on; stderr then says so, with the browser's last output, whatever
+ * next read or story that needs it, and the run goes on; stderr then says so, with the browser's last output, whatever
  * the run exits with. A baseline that can't be read or written, a failed launch or relaunch, a version mismatch or the
  * relaunched browser's exit stops the run with exit 2, keeping the lines of the snapshots that finished. So does a
  * failed download. A browser that can't start its graphics process before the first capture says the machine can't
@@ -489,7 +581,6 @@ function stopMessageOf(error: unknown, run: SnapshotRun, capturedAny: boolean): 
  * @throws {Error} Any other error, after closing the sessions and the browsers.
  */
 export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult> {
-  const header = headerOf(run)
   const browser = runBrowserOf(run.launchBrowser, {
     browserPackage: run.browserPackage,
     configImage: run.config.image,
@@ -498,43 +589,36 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
     environment: run.environment,
     progress: run.progress,
   })
-  const items = run.selections.flatMap(({ storybook, stories }) => stories.map((story) => ({ storybook, story })))
-  const results: (SnapshotResult | undefined)[] = items.map(() => undefined)
-  const linesOf = (): string[] =>
-    items.flatMap(({ storybook, story }, index) => {
-      const result = results[index]
-
-      return result === undefined ? [] : [`${marks[result.status]} ${storybook.name}  ${story.id}  ${result.detail}`]
-    })
-  const printed = (lines: string[]): string => [header, ...lines].map((line) => `${line}\n`).join('')
+  let snapshots: PlannedSnapshots | undefined
 
   try {
-    await runWorkerPool(run.workers, items, async ({ storybook, story }, index, worker) => {
-      const captureStory: CaptureStory = (toCapture, started) => browser.capture(worker, toCapture, started)
+    const plan = await planSnapshots(run.selections, browser.readOptions, run.config.readyTimeout)
 
-      results[index] =
-        run.command === 'test'
-          ? await testSnapshot(storybook, story, captureStory)
-          : await updateSnapshot(storybook, story, captureStory, run.cwd)
-    })
+    if ('problem' in plan) {
+      return { exitCode: 2, stdout: '', stderr: `${exitNoticeOf(browser.firstExit())}${plan.problem}\n` }
+    }
+
+    snapshots = plannedSnapshotsOf(run, plan.snapshots)
+    await takeSnapshots(run, browser, snapshots)
   } catch (error) {
-    const capturedAny = results.some((result) => result !== undefined && capturedStatuses.includes(result.status))
-    const message = stopMessageOf(error, run, capturedAny)
+    const message = stopMessageOf(error, run, capturedAnyOf(snapshots))
 
     if (message === undefined) {
       throw error
     }
 
-    return { exitCode: 2, stdout: printed(linesOf()), stderr: `${exitNoticeOf(browser.firstExit())}${message}` }
+    const stdout = snapshots === undefined ? '' : printedOf(snapshots, linesOf(snapshots))
+
+    return { exitCode: 2, stdout, stderr: `${exitNoticeOf(browser.firstExit())}${message}` }
   } finally {
     await browser.close()
   }
 
-  const statuses = results.flatMap((result) => (result === undefined ? [] : [result.status]))
+  const statuses = snapshots.results.flatMap((result) => (result === undefined ? [] : [result.status]))
 
   return {
     exitCode: exitCodeOf(run.command, statuses),
-    stdout: printed([...linesOf(), countsLineOf(run.command, statuses)]),
-    stderr: `${exitNoticeOf(browser.firstExit())}${testPathWarningsOf(run.selections, items, results)}`,
+    stdout: printedOf(snapshots, [...linesOf(snapshots), countsLineOf(run.command, statuses)]),
+    stderr: `${exitNoticeOf(browser.firstExit())}${testPathWarningsOf(run.selections, snapshots.items, snapshots.results)}`,
   }
 }

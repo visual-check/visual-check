@@ -15,12 +15,17 @@ import type { StorybookConfig } from '@storybook/react-vite'
  * the project root, the test Storybook's package folder. `resolve.dedupe` resolves React and anything else from
  * `storybook` from there too, so stories that another package reads import nothing from this package's install.
  *
+ * Every test Storybook's preview also loads `storybook-10-react/.storybook/shared-preview.ts`, which sets the
+ * preview-level `parameters.visualCheck`. It isn't named `preview.ts`, so Storybook loads it only through
+ * `previewAnnotations`.
+ *
  * @public
  */
 export function testStorybookConfig(mainUrl: string): StorybookConfig {
   return {
     framework: dirname(createRequire(mainUrl).resolve('@storybook/react-vite/package.json')),
     stories: [{ directory: fileURLToPath(new URL('../stories', import.meta.url)), files: '*.stories.tsx' }],
+    previewAnnotations: (entries = []) => [...entries, fileURLToPath(new URL('./shared-preview.ts', import.meta.url))],
     core: { disableTelemetry: true },
     viteFinal: (viteConfig) => ({
       ...viteConfig,

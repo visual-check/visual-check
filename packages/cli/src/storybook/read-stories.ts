@@ -251,6 +251,17 @@ export function storyUrlOf(
 }
 
 /**
+ * Builds the URL of Storybook's preview without a story, `iframe.html?viewMode=story`, under the Storybook's URL as
+ * `index.json` is. Without an `id`, the preview starts and shows its "missing story" view, importing no stories file
+ * and no docs file, so the options read loads only the files it asks for.
+ *
+ * @public
+ */
+export function previewUrlOf(storybookUrl: string): string {
+  return new URL('iframe.html?viewMode=story', storybookBaseOf(storybookUrl)).href
+}
+
+/**
  * Builds the error for an index request that took longer than its timeout.
  */
 function timeoutErrorOf(name: string, indexUrl: string, timeoutMilliseconds: number): StorybookUnreachableError {
