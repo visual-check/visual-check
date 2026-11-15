@@ -50,10 +50,12 @@ Once per page:
 - **Font table** through `Page.setFontFamilies`. On Linux: standard and serif are Times New Roman, sans-serif is Arial, fixed is Monospace, cursive is Comic Sans MS, fantasy is Impact. On `host`, macOS and Windows each use their own list from the same source.
 - **User agent** ends in `StorybookTestRunner`, which puts Storybook on its test path.
 - **Emulation:** `timezone`, `locale` and `colorScheme` from the config, focus emulation, and `prefers-reduced-motion: no-preference`.
-- **A script at document start** that does only three things:
+- **A script at document start** that does these things:
+  - hooks Storybook's channel and preview to note when the story finished, and to collect its error events and render steps (the Storybook adapter's part);
   - empties the pause stylesheets Storybook 9.1 and 10 add on the test path;
   - wraps `attachShadow` to record every shadow root;
-  - collects console messages, uncaught errors and unhandled rejections.
+  - collects console messages, uncaught errors and unhandled rejections;
+  - provides the waits a capture calls: the story wait, and the wait for images and fonts.
 
   It changes no other styles.
 - Evaluations run with a user gesture, so `beforeunload` fires and can be handled.
