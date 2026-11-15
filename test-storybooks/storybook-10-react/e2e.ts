@@ -1,8 +1,9 @@
-// The end-to-end check of this test Storybook: it serves the static build, runs the built CLI against it and checks
-// what the CLI reports. Run it with `pnpm turbo run e2e --filter @visual-check/test-storybook-10-react`, which builds the
-// CLI and the Storybook first, with TEST_STORYBOOK_IMAGE naming the browser image. It prints one line per case, then
-// each of its problems, and exits 1 when any case fails. Turbo hands the arguments after `--` to this script, as in
-// `pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --host`.
+// The end-to-end check of a test Storybook: it serves the static build, runs the built CLI against it and checks
+// what the CLI reports. It works in the folder it starts in, so each test Storybook runs this same file from its own
+// folder, as `node ../storybook-10-react/e2e.ts`. Run it with `pnpm turbo run e2e --filter <package name>`, which builds
+// the CLI and the Storybook first, with TEST_STORYBOOK_IMAGE naming the browser image. It prints one line per case,
+// then each of its problems, and exits 1 when any case fails. Turbo hands the arguments after `--` to this script, as in
+// `pnpm turbo run e2e --filter <package name> -- --host`.
 //
 // With `--inside-image` it runs inside visual-check's amd64 browser image, where the CLI starts the browser itself: it
 // needs no TEST_STORYBOOK_IMAGE and no docker, and checks `platform: 'host'` and a platform mismatch in place of the
@@ -33,7 +34,6 @@ import { tmpdir } from 'node:os'
 import { delimiter, extname, join, resolve as resolvePath, sep } from 'node:path'
 import type { Readable } from 'node:stream'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { fileURLToPath } from 'node:url'
 
 /**
  * What became of one snapshot, as the CLI's line for it says: a `test` outcome, or an `update` one.
@@ -51,9 +51,9 @@ type Outcomes = Record<string, Outcome>
 type CliProcess = ChildProcessByStdio<null, Readable, Readable>
 
 /**
- * This package's folder, which the CLI runs in.
+ * The folder the check starts in, the test Storybook's package folder, which the CLI runs in.
  */
-const packageDir = fileURLToPath(new URL('.', import.meta.url))
+const packageDir = process.cwd()
 
 /**
  * The static Storybook build that `pnpm build-storybook` writes.
@@ -133,11 +133,29 @@ const noDockerTexts = [
 const image = process.env.TEST_STORYBOOK_IMAGE
 
 /**
- * How to run the check so that Turbo builds what it needs first.
+ * Reads the package name from the `package.json` in the folder the check starts in.
+ *
+ * @returns The name, or undefined when there's no `package.json` there, it isn't valid JSON, or it has no name.
  */
-const turboHint =
-  'run the check with pnpm turbo run e2e --filter @visual-check/test-storybook-10-react, which builds the CLI and ' +
-  'the Storybook first.'
+function readPackageName(): string | undefined {
+  try {
+    const { name } = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8')) as { name?: unknown }
+
+    return typeof name === 'string' && name !== '' ? name : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Says how to run the check so that Turbo builds what it needs first.
+ *
+ * @param packageName - The name of the package in the folder the check starts in.
+ * @returns The hint, which names the package.
+ */
+function turboHint(packageName: string): string {
+  return `run the check with pnpm turbo run e2e --filter ${packageName}, which builds the CLI and the Storybook first.`
+}
 
 /**
  * How long one CLI run may take before it is killed, in milliseconds.
@@ -425,16 +443,35 @@ interface Case {
 }
 
 /**
- * Lists what the check needs and doesn't have: the static build and the built CLI, arguments that go together, then
- * what its mode needs.
+ * Lists what the check needs and doesn't have: the package name, the static build and the built CLI, arguments that
+ * go together, then what its mode needs.
  */
 function findSetupProblems(): string[] {
+  return [...findBuildProblems(), ...findArgumentProblems(), ...findModeProblems()]
+}
+
+/**
+ * Lists what is missing from the folder the check starts in: a package name, the static build and the built CLI. Each
+ * missing build says how to make it, naming the package.
+ */
+function findBuildProblems(): string[] {
+  const packageName = readPackageName()
+  const hint = packageName === undefined ? 'run it from a test Storybook package folder.' : turboHint(packageName)
+
   return [
-    ...(existsSync(join(staticDir, 'index.json')) ? [] : [`storybook-static/ is missing: ${turboHint}`]),
-    ...(existsSync(cliBin) ? [] : [`The CLI is not built: ${turboHint}`]),
-    ...findArgumentProblems(),
-    ...findModeProblems(),
+    ...findPackageNameProblems(packageName),
+    ...(existsSync(join(staticDir, 'index.json')) ? [] : [`storybook-static/ is missing: ${hint}`]),
+    ...(existsSync(cliBin) ? [] : [`The CLI is not built: ${hint}`]),
   ]
+}
+
+/**
+ * Lists the problem with a missing package name: the folder the check starts in has no `package.json` with one.
+ *
+ * @param packageName - The name `readPackageName` read, if any.
+ */
+function findPackageNameProblems(packageName: string | undefined): string[] {
+  return packageName === undefined ? [`No package name: ${packageDir} has no package.json with a name.`] : []
 }
 
 /**

@@ -32,6 +32,8 @@ The deliberate change and the CLI kill run with the default `workers`, `'auto'`.
 
 ## Running the end-to-end check
 
+`e2e.ts` works in the folder it starts in, so another test Storybook runs the same file from its own folder.
+
 Until the browser image is published, every run names a locally built image through `TEST_STORYBOOK_IMAGE`. From the repo root:
 
 ```sh
