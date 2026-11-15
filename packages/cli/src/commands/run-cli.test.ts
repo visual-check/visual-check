@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto'
 import {
+  chmodSync,
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -835,6 +837,7 @@ Other options:
     const project = createProject({
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
       'button.stories.tsx': '',
+      '.visual-check/baselines/button--primary.png': defaultSnapshot,
     })
 
     expect(firstLineOf((await runCli(['test', '--all'], {}, project, fakeBrowser().options)).stdout)).toBe(
@@ -1092,6 +1095,18 @@ function storyIdsOf(urls: readonly string[]): string[] {
 }
 
 describe('runCli test', () => {
+  it("ignores a .png nothing calls for, even one that can't be decoded", async () => {
+    const { project, folder } = await createRun(['a'], {
+      a: defaultSnapshot,
+      gone: new TextEncoder().encode('not PNG'),
+    })
+    const result = await runCli(['test'], {}, project, fakeBrowser().options)
+
+    expect(result.exitCode).toBe(0)
+    expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 1), '✓ web  a  N ms', '1 passed'))
+    expect(readdirSync(folder).sort()).toEqual(['a.png', 'gone.png'])
+  })
+
   it("passes a snapshot that holds its baseline's bytes, captured from the story's own page", async () => {
     const { project, url } = await createRun(['button--primary'], { 'button--primary': defaultSnapshot })
     const { options, record } = fakeBrowser()
@@ -1400,6 +1415,8 @@ describe('runCli update', () => {
         '✓ web  c  written: differs: 100 differ, 20 allowed',
         '✓ web  d  written: missing',
         '2 written · 2 kept',
+        'written .visual-check/baselines/c.png',
+        'written .visual-check/baselines/d.png',
       ),
       stderr: '',
     })
@@ -1429,6 +1446,7 @@ describe('runCli update', () => {
         '✓ web  a  kept',
         '✓ web  b  written: differs: 100 differ, 80 allowed (20 at scale 2)',
         '1 written · 1 kept',
+        'written .visual-check/baselines/b.png',
       ),
     )
     expect(new Uint8Array(readFileSync(join(folder, 'a.png')))).toEqual(defaultSnapshot)
@@ -1445,14 +1463,16 @@ describe('runCli update', () => {
     expect(new Uint8Array(readFileSync(join(folder, 'a.png')))).toEqual(taller)
   })
 
-  it("stops with exit 2, naming the baseline, and keeps it when it can't be decoded", async () => {
+  it("stops with exit 2 before any capture, naming the baseline, and keeps it when it can't be decoded", async () => {
     const notPng = new TextEncoder().encode('not a PNG file')
     const { project, folder } = await createRun(['a'], { a: notPng })
-    const result = await runCli(['update'], {}, project, fakeBrowser().options)
+    const { options, record } = fakeBrowser()
+    const result = await runCli(['update'], {}, project, options)
 
+    expect(storyIdsOf(record.urls)).toEqual([])
     expect(result).toEqual({
       exitCode: 2,
-      stdout: printed(headerOf('update', 1)),
+      stdout: '',
       stderr:
         "visual-check couldn't decode the baseline .visual-check/baselines/a.png: Input buffer contains unsupported " +
         'image format. Delete it or restore it from git, then run visual-check again.\n',
@@ -1473,6 +1493,7 @@ describe('runCli update', () => {
         `! web  b  ${brokenDetail}`,
         '✓ web  c  written: missing',
         '1 written · 2 broken',
+        'written .visual-check/baselines/c.png',
       ),
       stderr: '',
     })
@@ -1491,6 +1512,292 @@ describe('runCli update', () => {
     expect(result.stdout).toContain('✓ web  a  written: missing\n')
     expect(existsSync(join(project, 'packages', 'web', '.visual-check', 'baselines', 'a.png'))).toBe(true)
   })
+
+  it('writes every missing baseline, deletes every orphan, rewrites failing ones only inside --filter', async () => {
+    const { project, folder } = await createRun(['a', 'b', 'c', 'd', 'e', 'f'], {
+      a: defaultSnapshot,
+      'a.dark': defaultSnapshot,
+      c: defaultSnapshot,
+      d: defaultSnapshot,
+      f: defaultSnapshot,
+      gone: defaultSnapshot,
+    })
+    const { options, record } = fakeBrowser({ a: { snapshot: otherSnapshot }, c: { snapshot: otherSnapshot } })
+    const result = await runCli(['update', '--filter', '^[abf]$'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 0,
+      stdout: printed(
+        headerOf('update', 4),
+        '✓ web  a  written: differs: 100 differ, 20 allowed',
+        '✓ web  b  written: missing',
+        '✓ web  e  written: missing',
+        '✓ web  f  kept',
+        '3 written · 2 deleted · 1 kept',
+        'written .visual-check/baselines/a.png',
+        'written .visual-check/baselines/b.png',
+        'written .visual-check/baselines/e.png',
+        'deleted .visual-check/baselines/a.dark.png',
+        'deleted .visual-check/baselines/gone.png',
+      ),
+      stderr: '',
+    })
+    expect(storyIdsOf(record.urls)).toEqual(['a', 'b', 'e', 'f'])
+    expect(readdirSync(folder).sort()).toEqual(['a.png', 'b.png', 'c.png', 'd.png', 'e.png', 'f.png'])
+    expect(new Uint8Array(readFileSync(join(folder, 'a.png')))).toEqual(otherSnapshot)
+    expect(new Uint8Array(readFileSync(join(folder, 'c.png')))).toEqual(defaultSnapshot)
+  })
+
+  it('deletes only orphans and exits 0 when every baseline is kept', async () => {
+    const { project, folder } = await createRun(['a'], { a: defaultSnapshot, gone: defaultSnapshot })
+    const result = await runCli(['update'], {}, project, fakeBrowser().options)
+
+    expect(result).toEqual({
+      exitCode: 0,
+      stdout: printed(
+        headerOf('update', 1),
+        '✓ web  a  kept',
+        '0 written · 1 deleted · 1 kept',
+        'deleted .visual-check/baselines/gone.png',
+      ),
+      stderr: '',
+    })
+    expect(readdirSync(folder)).toEqual(['a.png'])
+  })
+
+  it("deletes a disabled story's baseline as an orphan", async () => {
+    const { project, folder } = await createRun(['a', 'b'], { a: defaultSnapshot, b: defaultSnapshot })
+    const { options } = fakeBrowser({}, { read: { options: { b: { disable: true } } } })
+    const result = await runCli(['update'], {}, project, options)
+
+    expect(result.stdout).toBe(
+      printed(
+        headerOf('update', 1),
+        '✓ web  a  kept',
+        '0 written · 1 deleted · 1 kept',
+        'deleted .visual-check/baselines/b.png',
+      ),
+    )
+    expect(readdirSync(folder)).toEqual(['a.png'])
+  })
+
+  it('leaves files that are no PNG baseline alone', async () => {
+    const { project, folder } = await createRun(['a'], { a: defaultSnapshot })
+
+    writeFileSync(join(folder, 'notes.txt'), 'notes')
+    writeFileSync(join(folder, '.visual-check-0a1b2c.tmp'), 'left by a killed run')
+    mkdirSync(join(folder, 'old.png'))
+
+    const result = await runCli(['update'], {}, project, fakeBrowser().options)
+
+    expect(result).toEqual({
+      exitCode: 0,
+      stdout: printed(headerOf('update', 1), '✓ web  a  kept', '0 written · 1 kept'),
+      stderr: '',
+    })
+    expect(readdirSync(folder).sort()).toEqual(['.visual-check-0a1b2c.tmp', 'a.png', 'notes.txt', 'old.png'])
+  })
+
+  it('keeps every baseline a story whose stories file failed to load could own, and leaves the story out', async () => {
+    const longMode = `b.${'m'.repeat(300)}`
+    const { project, folder } = await createRun(
+      ['a', 'b'],
+      {
+        a: defaultSnapshot,
+        b: defaultSnapshot,
+        'b.dark': defaultSnapshot,
+        [shortenedStemOf(longMode)]: defaultSnapshot,
+        'b-group': defaultSnapshot,
+      },
+      '',
+      { a: './a.stories.tsx', b: './b.stories.tsx' },
+    )
+    const { options, record } = fakeBrowser({}, { read: { failed: { './b.stories.tsx': 'SyntaxError' } } })
+    const result = await runCli(['update', '--filter', '^a$'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 0,
+      stdout: printed(
+        headerOf('update', 1),
+        '✓ web  a  kept',
+        '0 written · 1 deleted · 1 kept',
+        'deleted .visual-check/baselines/b-group.png',
+      ),
+      stderr: '',
+    })
+    expect(storyIdsOf(record.urls)).toEqual(['a'])
+    expect(readdirSync(folder).sort()).toEqual(['a.png', 'b.dark.png', `${shortenedStemOf(longMode)}.png`, 'b.png'])
+  })
+
+  it('narrows writing and deleting to the Storybook --storybook names', async () => {
+    const web = await startStorybook(['a'])
+    const docs = await startStorybook(['d', 'e'])
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${web}' }, docs: { dir: 'docs', url: '${docs}' } } }\n`,
+      'web/button.stories.tsx': '',
+      'web/.visual-check/baselines/gone.png': defaultSnapshot,
+      'docs/button.stories.tsx': '',
+      'docs/.visual-check/baselines/e.png': otherSnapshot,
+      'docs/.visual-check/baselines/gone.png': defaultSnapshot,
+    })
+    const docsFolder = join(project, 'docs', '.visual-check', 'baselines')
+    const { options, record } = fakeBrowser()
+    const result = await runCli(['update', '--storybook', 'web'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 0,
+      stdout: printed(
+        headerOf('update', 1),
+        '✓ web  a  written: missing',
+        '1 written · 1 deleted',
+        'written web/.visual-check/baselines/a.png',
+        'deleted web/.visual-check/baselines/gone.png',
+      ),
+      stderr: '',
+    })
+    expect(storyIdsOf(record.urls)).toEqual(['a'])
+    expect(readdirSync(docsFolder).sort()).toEqual(['e.png', 'gone.png'])
+    expect(new Uint8Array(readFileSync(join(docsFolder, 'e.png')))).toEqual(otherSnapshot)
+  })
+
+  it('prints written and deleted paths relative to the folder it runs in, with /', async () => {
+    const url = await startStorybook(['a'])
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'packages/web', url: '${url}' } } }\n`,
+      'packages/web/button.stories.tsx': '',
+      'packages/web/.visual-check/baselines/gone.png': defaultSnapshot,
+    })
+    const result = await runCli(['update'], {}, join(project, 'packages'), fakeBrowser().options)
+
+    expect(result.stdout).toBe(
+      printed(
+        headerOf('update', 1),
+        '✓ web  a  written: missing',
+        '1 written · 1 deleted',
+        'written web/.visual-check/baselines/a.png',
+        'deleted web/.visual-check/baselines/gone.png',
+      ),
+    )
+  })
+
+  it("stops with exit 2 before any capture, writing and deleting nothing, when a .png can't be decoded", async () => {
+    const notPng = new TextEncoder().encode('not a PNG file')
+    const { project, folder } = await createRun(['a', 'b'], { a: otherSnapshot, gone: defaultSnapshot, zz: notPng })
+    const { options, record } = fakeBrowser()
+    const result = await runCli(['update'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr:
+        "visual-check couldn't decode the baseline .visual-check/baselines/zz.png: Input buffer contains unsupported " +
+        'image format. Delete it or restore it from git, then run visual-check again.\n',
+    })
+    expect(storyIdsOf(record.urls)).toEqual([])
+    expect(readdirSync(folder).sort()).toEqual(['a.png', 'gone.png', 'zz.png'])
+    expect(new Uint8Array(readFileSync(join(folder, 'a.png')))).toEqual(otherSnapshot)
+  })
+
+  it("names the first Storybook's undecodable baseline before the next one's folder that can't be listed", async () => {
+    const web = await startStorybook(['a'])
+    const docs = await startStorybook(['d'])
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${web}' }, docs: { dir: 'docs', url: '${docs}' } } }\n`,
+      'web/button.stories.tsx': '',
+      'web/.visual-check/baselines/b.png': new TextEncoder().encode('not a PNG file'),
+      'web/.visual-check/baselines/c.png': new TextEncoder().encode('not a PNG file either'),
+      'docs/button.stories.tsx': '',
+      'docs/.visual-check/baselines': '',
+    })
+    const { options, record } = fakeBrowser()
+    const result = await runCli(['update'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr:
+        "visual-check couldn't decode the baseline web/.visual-check/baselines/b.png: Input buffer contains " +
+        'unsupported image format. Delete it or restore it from git, then run visual-check again.\n',
+    })
+    expect(storyIdsOf(record.urls)).toEqual([])
+  })
+
+  it('keeps an orphan that is another name of an expected baseline', async () => {
+    const { project, folder } = await createRun(['a'], { a: defaultSnapshot })
+
+    linkSync(join(folder, 'a.png'), join(folder, 'other-name.png'))
+
+    const result = await runCli(['update'], {}, project, fakeBrowser().options)
+
+    expect(result.stdout).toBe(printed(headerOf('update', 1), '✓ web  a  kept', '0 written · 1 kept'))
+    expect(readdirSync(folder).sort()).toEqual(['a.png', 'other-name.png'])
+  })
+
+  it('takes only the missing mode of a story outside the filter whose default baseline is there', async () => {
+    const { project, folder } = await createRun(['a', 'b'], { a: defaultSnapshot, b: defaultSnapshot })
+    const { options, record } = fakeBrowser(
+      { b: darkStory },
+      { read: { options: { b: { modes: { dark: twoModes.modes.dark } } } } },
+    )
+    const result = await runCli(['update', '--filter', '^a$'], {}, project, options)
+
+    expect(result.stdout).toBe(
+      printed(
+        headerOf('update', 2),
+        '✓ web  a  kept',
+        '✓ web  b  dark  written: missing',
+        '1 written · 1 kept',
+        'written .visual-check/baselines/b.dark.png',
+      ),
+    )
+    expect(storyIdsOf(record.urls)).toEqual(['a', 'b'])
+    expect(new Uint8Array(readFileSync(join(folder, 'b.png')))).toEqual(defaultSnapshot)
+    expect(new Uint8Array(readFileSync(join(folder, 'b.dark.png')))).toEqual(darkSnapshot)
+  })
+
+  it("stops with exit 2 before any capture when the baselines folder can't be listed", async () => {
+    const { project, folder } = await createRun(['a'])
+
+    mkdirSync(dirname(folder), { recursive: true })
+    writeFileSync(folder, '')
+
+    const { options, record } = fakeBrowser()
+    const result = await runCli(['update'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr:
+        "visual-check couldn't list the baselines folder .visual-check/baselines: ENOTDIR: not a directory. Check " +
+        "that it's a folder visual-check can read.\n",
+    })
+    expect(storyIdsOf(record.urls)).toEqual([])
+  })
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    "stops with exit 2 after every snapshot is taken when an orphan can't be deleted",
+    async () => {
+      const { project, folder } = await createRun(['a'], { a: defaultSnapshot, gone: defaultSnapshot })
+
+      chmodSync(folder, 0o555)
+
+      try {
+        const result = await runCli(['update'], {}, project, fakeBrowser().options)
+
+        expect(result).toEqual({
+          exitCode: 2,
+          stdout: printed(headerOf('update', 1), '✓ web  a  kept'),
+          stderr:
+            "visual-check couldn't delete the baseline .visual-check/baselines/gone.png: EACCES: permission denied. " +
+            'Check that its folder is writable.\n',
+        })
+      } finally {
+        chmodSync(folder, 0o755)
+      }
+
+      expect(readdirSync(folder).sort()).toEqual(['a.png', 'gone.png'])
+    },
+  )
 })
 
 /**
@@ -1749,7 +2056,12 @@ describe('runCli per-story options', () => {
 
     expect(result).toEqual({
       exitCode: 0,
-      stdout: printed(headerOf('update', 1), '✓ web  a  written: missing', '1 written'),
+      stdout: printed(
+        headerOf('update', 1),
+        '✓ web  a  written: missing',
+        '1 written',
+        'written .visual-check/baselines/a.png',
+      ),
       stderr: '',
     })
     expect(existsSync(join(folder, 'b.png'))).toBe(false)
@@ -1960,6 +2272,9 @@ describe('runCli modes', () => {
         '✓ web  a  dark  written: missing',
         '✓ web  a  mobile  written: missing',
         '3 written',
+        'written .visual-check/baselines/a.png',
+        'written .visual-check/baselines/a.dark.png',
+        'written .visual-check/baselines/a.mobile.png',
       ),
       stderr: '',
     })
@@ -1969,17 +2284,27 @@ describe('runCli modes', () => {
   })
 
   it('takes every snapshot of a story --filter selects', async () => {
-    const { project } = await createRun(['a', 'b'])
+    const { project } = await createRun(['a', 'b'], {
+      a: otherSnapshot,
+      'a.dark': otherSnapshot,
+      'a.mobile': otherSnapshot,
+      b: otherSnapshot,
+      'b.dark': otherSnapshot,
+      'b.mobile': otherSnapshot,
+    })
     const { options } = fakeBrowser({}, { read: { options: { a: twoModes, b: twoModes } } })
     const result = await runCli(['update', '--filter', '^a$'], {}, project, options)
 
     expect(result.stdout).toBe(
       printed(
         headerOf('update', 3),
-        '✓ web  a  written: missing',
-        '✓ web  a  dark  written: missing',
-        '✓ web  a  mobile  written: missing',
+        '✓ web  a  written: differs: 100 differ, 20 allowed',
+        '✓ web  a  dark  written: differs: 100 differ, 20 allowed',
+        '✓ web  a  mobile  written: differs: 100 differ, 80 allowed (20 at scale 2)',
         '3 written',
+        'written .visual-check/baselines/a.png',
+        'written .visual-check/baselines/a.dark.png',
+        'written .visual-check/baselines/a.mobile.png',
       ),
     )
   })
@@ -2132,7 +2457,12 @@ describe('runCli baseline file names', () => {
 
     expect(result).toEqual({
       exitCode: 0,
-      stdout: printed(headerOf('update', 1), `✓ web  ${longId}  written: missing`, '1 written'),
+      stdout: printed(
+        headerOf('update', 1),
+        `✓ web  ${longId}  written: missing`,
+        '1 written',
+        `written .visual-check/baselines/${shortened}`,
+      ),
       stderr: '',
     })
     expect(readdirSync(folder)).toEqual([shortened])
@@ -2627,6 +2957,9 @@ describe('runCli launching the browser', () => {
         '✓ web  e  written: missing',
         '✓ web  f  written: missing',
         '3 written · 3 broken',
+        'written .visual-check/baselines/d.png',
+        'written .visual-check/baselines/e.png',
+        'written .visual-check/baselines/f.png',
       ),
     )
     expect(record.launches).toHaveLength(2)

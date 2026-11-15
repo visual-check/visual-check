@@ -117,6 +117,27 @@ describe('createVisualDiff', () => {
     await expect(comparison).rejects.toMatchObject({ image: 'baseline' })
   })
 
+  it('checks on its threads that a baseline decodes, giving the reason when it does not', async () => {
+    visualDiff = createVisualDiff()
+
+    const garbage = new TextEncoder().encode('not a PNG file')
+    const [decodable, undecodable] = await Promise.all([
+      visualDiff.undecodableReasonOf(await greyPng(4, 4, 128)),
+      visualDiff.undecodableReasonOf(garbage),
+    ])
+
+    expect(decodable).toBeUndefined()
+    expect(undecodable).toBe('Input buffer contains unsupported image format')
+    expect(new TextDecoder().decode(garbage)).toBe('not a PNG file')
+  })
+
+  it('rejects a decode check once closed', async () => {
+    visualDiff = createVisualDiff()
+    await visualDiff.close()
+
+    await expect(visualDiff.undecodableReasonOf(await greyPng(4, 4, 128))).rejects.toThrow('The visual diff is closed.')
+  })
+
   it('closes, and rejects any comparison after that, identical files included', async () => {
     visualDiff = createVisualDiff()
     await visualDiff.compare({

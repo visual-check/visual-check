@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { BaselineError } from './baseline-error.js'
 
@@ -21,12 +21,17 @@ const longestKeptKeyBytes = 240
 /**
  * How many bytes of a shortened key's start its baseline's file name keeps.
  */
-const shortenedPrefixBytes = 223
+export const shortenedPrefixBytes = 223
 
 /**
  * How many hex characters of the full key's SHA-256 a shortened key ends with.
  */
-const shortenedHashLength = 16
+export const shortenedHashLength = 16
+
+/**
+ * The end of every baseline's file name.
+ */
+const baselineExtension = '.png'
 
 /**
  * Gives the longest start of the text, in whole characters, that fits in `limit` UTF-8 bytes. A character is never
@@ -71,7 +76,23 @@ export function baselineStemOf(key: string): string {
  * Gives the file name of a snapshot's baseline: its stem, then `.png`. That's `<key>.png` for a key of up to 240 bytes.
  */
 export function baselineFileNameOf(key: string): string {
-  return `${baselineStemOf(key)}.png`
+  return `${baselineStemOf(key)}${baselineExtension}`
+}
+
+/**
+ * Folds a file name into the form two names share when a file system takes them for one file: Unicode NFC, then lower
+ * case. macOS ignores both how an accented letter is encoded and case, and baselines are committed and checked out on
+ * every OS.
+ */
+export function foldedFileNameOf(name: string): string {
+  return name.normalize('NFC').toLowerCase()
+}
+
+/**
+ * Gives a baseline's file name without its `.png`: the stem its snapshot's key gave it.
+ */
+export function stemOfFileName(fileName: string): string {
+  return fileName.slice(0, -baselineExtension.length)
 }
 
 /**
@@ -103,6 +124,113 @@ export async function readBaseline(path: string): Promise<Uint8Array | undefined
 
     throw new BaselineError('read', path, error)
   }
+}
+
+/**
+ * Gives the identity of the file at the path, its device and inode, which two names of one file share. Gives
+ * `undefined` when nothing is there.
+ *
+ * @throws {BaselineError} When the path can't be followed or looked at.
+ */
+async function fileIdentityOf(path: string): Promise<string | undefined> {
+  try {
+    const { dev, ino } = await stat(path, { bigint: true })
+
+    return `${dev}:${ino}`
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return undefined
+    }
+
+    throw new BaselineError('read', path, error)
+  }
+}
+
+/**
+ * Whether a baseline is at the path. The file system decides, so on macOS a file whose name differs only in case or in
+ * how an accented letter is encoded counts too. No baselines folder means no baseline.
+ *
+ * @throws {BaselineError} When the path can't be followed or looked at.
+ *
+ * @public
+ */
+export async function hasBaseline(path: string): Promise<boolean> {
+  return (await fileIdentityOf(path)) !== undefined
+}
+
+/**
+ * Lists the names of the baselines in a baselines folder, sorted by name: every regular file whose name ends in
+ * `.png`, as written. Other files, such as a temporary file a killed run left, and subfolders are left out. A missing
+ * folder holds no baselines.
+ *
+ * @throws {BaselineError} When the folder is there but can't be listed, such as a file in its place.
+ *
+ * @public
+ */
+export async function listBaselines(folder: string): Promise<string[]> {
+  try {
+    const entries = await readdir(folder, { withFileTypes: true })
+
+    return entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(baselineExtension))
+      .map((entry) => entry.name)
+      .sort()
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return []
+    }
+
+    throw new BaselineError('list', folder, error)
+  }
+}
+
+/**
+ * Deletes a baseline. One that is already gone counts as deleted.
+ *
+ * @throws {BaselineError} When it can't be deleted, such as when its folder isn't writable.
+ */
+async function deleteBaseline(path: string): Promise<void> {
+  try {
+    await unlink(path)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw new BaselineError('delete', path, error)
+    }
+  }
+}
+
+/**
+ * Deletes the orphans of one baselines folder, one at a time in the order given, and gives the paths deleted. An
+ * orphan the file system takes for one of the expected baselines, as macOS can for names that differ only in a way it
+ * folds, is the same file, so it stays and isn't given. `expectedPaths` are the paths of every baseline the
+ * Storybook's snapshots call for, there or not.
+ *
+ * @throws {BaselineError} When an expected baseline can't be looked at, or an orphan can't be deleted. The orphans
+ * after it stay.
+ *
+ * @public
+ */
+export async function deleteOrphans(
+  orphanPaths: readonly string[],
+  expectedPaths: readonly string[],
+): Promise<string[]> {
+  if (orphanPaths.length === 0) {
+    return []
+  }
+
+  const expected = new Set(await Promise.all(expectedPaths.map(fileIdentityOf)))
+  const deleted: string[] = []
+
+  for (const path of orphanPaths) {
+    const identity = await fileIdentityOf(path)
+
+    if (identity !== undefined && !expected.has(identity)) {
+      await deleteBaseline(path)
+      deleted.push(path)
+    }
+  }
+
+  return deleted
 }
 
 /**

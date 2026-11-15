@@ -1,4 +1,3 @@
-import { relative, sep } from 'node:path'
 import { BaselineError } from '../baselines/baseline-error.js'
 import { baselinePathOf, baselineStemOf, readBaseline, writeBaseline } from '../baselines/baseline-files.js'
 import { BrowserMismatchError, runImageOf } from '../browser/browser-version.js'
@@ -27,6 +26,8 @@ import { missingLibraryOf } from './missing-library.js'
 import { type PlannedSnapshot, planSnapshots, type SnapshotToCapture } from './plan-snapshots.js'
 import { platformProblemOf } from './platform-problem.js'
 import { type FirstBrowserExit, type RunBrowser, runBrowserOf } from './run-browser.js'
+import { countsLineOf, displayPathOf } from './run-output.js'
+import { deleteStorybookOrphans, planUpdate, type StorybookOrphans, updateEndLinesOf } from './update-baselines.js'
 
 /**
  * The stories a run covers in one Storybook, in the order they are taken and printed.
@@ -114,9 +115,10 @@ interface SnapshotRunResult {
    */
   exitCode: number
   /**
-   * The header, one line per snapshot and the counts, or, for a failure that stopped the run, the header and the lines
-   * of the snapshots that finished before it. Nothing when the run stopped before any capture, while it planned the
-   * snapshots.
+   * The header, one line per snapshot and the counts, then for `update` the path of each baseline written and each
+   * orphan deleted, or, for a failure that stopped the run, the header and the lines of the snapshots that finished
+   * before it. Nothing when the run stopped before any capture, while it planned the snapshots or, for `update`,
+   * checked the baselines folders.
    */
   stdout: string
   /**
@@ -165,11 +167,16 @@ const marks: Record<SnapshotStatus, string> = {
 }
 
 /**
- * Per command, the statuses the counts line names, in order, and the statuses that make the run exit 1.
+ * The statuses `test`'s counts line names, in order.
  */
-const statusesOf: Record<SnapshotRun['command'], { counted: SnapshotStatus[]; failing: SnapshotStatus[] }> = {
-  test: { counted: ['passed', 'differs', 'broken', 'missing'], failing: ['differs', 'broken', 'missing'] },
-  update: { counted: ['written', 'kept', 'broken'], failing: ['broken'] },
+const testCountedStatuses: readonly SnapshotStatus[] = ['passed', 'differs', 'broken', 'missing']
+
+/**
+ * Per command, the statuses that make the run exit 1.
+ */
+const failingStatuses: Record<SnapshotRun['command'], readonly SnapshotStatus[]> = {
+  test: ['differs', 'broken', 'missing'],
+  update: ['broken'],
 }
 
 /**
@@ -179,6 +186,8 @@ const baselineFixes: Record<BaselineError['action'], string> = {
   read: "Check that it's a file visual-check can read.",
   decode: 'Delete it or restore it from git, then run visual-check again.',
   write: 'Check that its folder is writable and the disk has room.',
+  delete: 'Check that its folder is writable.',
+  list: "Check that it's a folder visual-check can read.",
 }
 
 /**
@@ -229,7 +238,8 @@ interface PlannedSnapshots {
    */
   header: string
   /**
-   * Each snapshot, in config order and then selection order, then each story's default capture and its modes in order.
+   * Each snapshot, in config order and then `index.json` order, then each story's default capture and its modes in
+   * order.
    */
   items: PlannedSnapshot[]
   /**
@@ -265,13 +275,6 @@ function captureSettingsOf(config: ResolvedConfig): CaptureSettings {
  */
 function storyToCaptureOf({ storybook, story, globals, viewport }: SnapshotToCapture): StoryToCapture {
   return { id: story.id, url: storyUrlOf(storybook.url, story.id, globals), viewport }
-}
-
-/**
- * Writes a path relative to the folder the CLI runs in, with `/` on every OS.
- */
-function displayPathOf(cwd: string, path: string): string {
-  return relative(cwd, path).split(sep).join('/')
 }
 
 /**
@@ -426,23 +429,43 @@ async function updateSnapshot(
 }
 
 /**
- * Builds the counts line: each counted status with its count, leaving out zero counts except the first.
+ * Gives how many snapshots have the status.
  */
-function countsLineOf(command: SnapshotRun['command'], statuses: SnapshotStatus[]): string {
-  return statusesOf[command].counted
-    .flatMap((counted, index) => {
-      const count = statuses.filter((status) => status === counted).length
+function countOf(statuses: readonly SnapshotStatus[], counted: SnapshotStatus): number {
+  return statuses.filter((status) => status === counted).length
+}
 
-      return index === 0 || count > 0 ? [`${count} ${counted}`] : []
-    })
-    .join(' · ')
+/**
+ * Builds the lines that end a finished run's output: for `test`, the counts line, each counted status with its count,
+ * leaving out zero counts except the first; for `update`, the counts of written, deleted and kept baselines and broken
+ * snapshots, then the path of each baseline written, in the snapshots' order, and of each orphan deleted.
+ */
+function endLinesOf(run: SnapshotRun, snapshots: PlannedSnapshots, deleted: string[]): string[] {
+  const statuses = snapshots.results.flatMap((result) => (result === undefined ? [] : [result.status]))
+
+  if (run.command === 'test') {
+    return [countsLineOf(testCountedStatuses.map((status) => [status, countOf(statuses, status)]))]
+  }
+
+  const written = snapshots.items.flatMap((item, index) =>
+    snapshots.results[index]?.status === 'written' ? [baselinePathOf(item.storybook.baselines, item.key)] : [],
+  )
+
+  return updateEndLinesOf(run.cwd, {
+    written,
+    deleted,
+    kept: countOf(statuses, 'kept'),
+    broken: countOf(statuses, 'broken'),
+  })
 }
 
 /**
  * Gives the exit code: 1 when any snapshot has a failing status for the command, else 0.
  */
-function exitCodeOf(command: SnapshotRun['command'], statuses: SnapshotStatus[]): number {
-  return statuses.some((status) => statusesOf[command].failing.includes(status)) ? 1 : 0
+function exitCodeOf(command: SnapshotRun['command'], snapshots: PlannedSnapshots): number {
+  return snapshots.results.some((result) => result !== undefined && failingStatuses[command].includes(result.status))
+    ? 1
+    : 0
 }
 
 /**
@@ -582,20 +605,20 @@ function browserStopMessageOf(
 }
 
 /**
- * Gives what to print for an error that stops the run with exit 2: a baseline that can't be read, decoded or written, a
- * report folder that can't be cleared or written to, Docker's error, a failed download, a failed launch's or a browser
- * exit's with the next step and the browser's last output, or a version mismatch. A browser that fails or exits before
- * any capture, with output saying its graphics process can't start, gives the platform problem for its container's
- * platform, or the config's inside visual-check's image unless that is `host`, instead of the next step. A failed
- * launch on the host whose output names a missing library gives that library and both ways out. Any other error gives
- * `undefined`.
+ * Gives what to print for an error that stops the run with exit 2: a baseline that can't be read, decoded, written or
+ * deleted, a baselines folder that can't be listed, a report folder that can't be cleared or written to, Docker's
+ * error, a failed download, a failed launch's or a browser exit's with the next step and the browser's last output, or
+ * a version mismatch. A browser that fails or exits before any capture, with output saying its graphics process can't
+ * start, gives the platform problem for its container's platform, or the config's inside visual-check's image unless
+ * that is `host`, instead of the next step. A failed launch on the host whose output names a missing library gives that
+ * library and both ways out. Any other error gives `undefined`.
  *
  * `capturedAny` is whether a snapshot has been captured, which a broken or missing one hasn't.
  */
 function stopMessageOf(error: unknown, run: SnapshotRun, capturedAny: boolean): string | undefined {
   if (error instanceof BaselineError) {
     return (
-      `visual-check couldn't ${error.action} the baseline ${displayPathOf(run.cwd, error.path)}: ${error.reason}. ` +
+      `visual-check couldn't ${error.action} ${error.subject} ${displayPathOf(run.cwd, error.path)}: ${error.reason}. ` +
       `${baselineFixes[error.action]}\n`
     )
   }
@@ -683,15 +706,24 @@ async function takeSnapshots(
  * isn't disabled with a pool of `workers` that share one browser: its default capture, then one snapshot per mode it
  * lists, each at its own viewport and with its mode's globals in the story's URL. It prints one line per snapshot after
  * the header, which counts them, then the counts; a mode's line names the mode after the story ID. The lines follow
- * config order, then selection order, then the story's default capture and its modes in order, whatever order the
+ * config order, then `index.json` order, then the story's default capture and its modes in order, whatever order the
  * captures finish in. Each snapshot has its own baseline, `<story-id>.png` for the default capture and
  * `<story-id>.<mode>.png` for a mode, a key over 240 bytes shortened to its first 223 bytes, `-` and 16 hex characters
  * of its SHA-256. `test` compares each snapshot with its baseline by the story's tolerance, at the viewport's device
  * scale factor, and never captures a missing baseline. It clears the report folder, `.visual-check/report` beside the
  * config file, once the snapshots are planned, and writes the baseline, snapshot and visual diff of each snapshot that
- * differs there. `update` compares each snapshot with its baseline the same way, and writes it when the baseline is
- * missing or differs beyond tolerance or in size. A baseline within tolerance stays untouched, even when its bytes
- * differ. `update` never touches the report folder.
+ * differs there.
+ *
+ * `update` also takes every snapshot outside the selection that isn't broken and whose baseline is missing, so it
+ * writes every missing baseline of the Storybooks in the run. Before any capture, it lists each Storybook's baselines
+ * folder, where only `.png` files count, and decodes each of them; the first one that can't be listed or decoded, in
+ * config order then file name order, stops the run with exit 2, printing nothing on stdout. It compares each snapshot
+ * with its baseline as `test` does, and writes it when the baseline is missing or differs beyond tolerance or in size.
+ * A baseline within tolerance stays untouched, even when its bytes differ. Once every snapshot is taken, it deletes the
+ * orphans: the baselines that no planned snapshot calls for, selected or not, apart from any that could belong to a
+ * story whose stories file didn't load. An orphan the file system takes for an expected baseline is that baseline, so
+ * it stays. Its counts are of written, deleted and kept baselines and broken snapshots, followed by the path of each
+ * baseline written and each orphan deleted. `update` never touches the report folder.
  *
  * Each Storybook with stories gets one options read, in config order, on a page of its own, covering every story its
  * `index.json` lists whatever the selection. So the browser is launched at the first read, even when no story then
@@ -710,9 +742,9 @@ async function takeSnapshots(
  * read or story that needs it, and the run goes on; stderr then says so, with the browser's last output, whatever the
  * run exits with. A baseline that can't be read, decoded or written, a report folder that can't be cleared or written
  * to, a failed launch or relaunch, a version mismatch or the relaunched browser's exit stops the run with exit 2,
- * keeping the lines of the snapshots that finished. So does a failed download. A browser that can't start its graphics
- * process before the first capture says the machine can't run the platform. The workers' sessions and the browsers are
- * always closed.
+ * keeping the lines of the snapshots that finished and deleting no orphan. So does a failed download, and an orphan
+ * that can't be deleted. A browser that can't start its graphics process before the first capture says the machine
+ * can't run the platform. The workers' sessions and the browsers are always closed.
  *
  * A run that finishes ends stderr with a warning for each Storybook, in config order, whose captured snapshots'
  * `completing` render steps took a median of 50 ms or more: it seems to ignore the test path. The warnings never change
@@ -735,6 +767,8 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
       ? { command: 'test', visualDiff, reportFolder: reportFolderOf(run.config.path) }
       : { command: 'update', visualDiff }
   let snapshots: PlannedSnapshots | undefined
+  let orphans: StorybookOrphans[] = []
+  let deleted: string[] = []
 
   try {
     const plan = await planSnapshots(run.selections, browser.readOptions, run.config)
@@ -743,15 +777,21 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
       return { exitCode: 2, stdout: '', stderr: `${exitNoticeOf(browser.firstExit())}${plan.problem}\n` }
     }
 
+    let taken = plan.snapshots.filter(({ selected }) => selected)
+
     if (tools.command === 'test') {
       await clearReport(tools.reportFolder)
+    } else {
+      const storybooks = run.selections.map(({ storybook }) => storybook)
+      const update = await planUpdate(storybooks, plan.snapshots, tools.visualDiff, run.workers)
+
+      taken = update.snapshots
+      orphans = update.orphans
     }
 
-    snapshots = plannedSnapshotsOf(
-      run,
-      plan.snapshots.filter(({ selected }) => selected),
-    )
+    snapshots = plannedSnapshotsOf(run, taken)
     await takeSnapshots(run, browser, snapshots, tools)
+    deleted = await deleteStorybookOrphans(orphans)
   } catch (error) {
     const message = stopMessageOf(error, run, capturedAnyOf(snapshots))
 
@@ -770,11 +810,9 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
     }
   }
 
-  const statuses = snapshots.results.flatMap((result) => (result === undefined ? [] : [result.status]))
-
   return {
-    exitCode: exitCodeOf(run.command, statuses),
-    stdout: printedOf(snapshots, [...linesOf(snapshots), countsLineOf(run.command, statuses)]),
+    exitCode: exitCodeOf(run.command, snapshots),
+    stdout: printedOf(snapshots, [...linesOf(snapshots), ...endLinesOf(run, snapshots, deleted)]),
     stderr: `${exitNoticeOf(browser.firstExit())}${testPathWarningsOf(run.selections, snapshots.items, snapshots.results)}`,
   }
 }

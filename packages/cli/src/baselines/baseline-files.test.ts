@@ -1,5 +1,15 @@
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -8,6 +18,9 @@ import {
   baselineFileNameOf,
   baselinePathOf,
   baselineStemOf,
+  deleteOrphans,
+  hasBaseline,
+  listBaselines,
   readBaseline,
   snapshotKeyOf,
   writeBaseline,
@@ -268,5 +281,124 @@ describe('writeBaseline', () => {
 
     await expect(writeBaseline(path, snapshot)).rejects.toMatchObject({ action: 'write', path })
     expect(readdirSync(folder)).toEqual(['baselines'])
+  })
+})
+
+describe('hasBaseline', () => {
+  it('says a baseline is there', async () => {
+    const path = join(createFolder(), 'button--primary.png')
+
+    writeFileSync(path, snapshot)
+    expect(await hasBaseline(path)).toBe(true)
+  })
+
+  it('says a baseline is missing, with or without its folder', async () => {
+    const folder = createFolder()
+
+    expect(await hasBaseline(join(folder, 'button--primary.png'))).toBe(false)
+    expect(await hasBaseline(join(folder, 'baselines', 'button--primary.png'))).toBe(false)
+  })
+
+  it("throws a BaselineError when the path can't be followed", async () => {
+    const folder = createFolder()
+
+    writeFileSync(join(folder, 'baselines'), '')
+    await expect(hasBaseline(join(folder, 'baselines', 'button--primary.png'))).rejects.toMatchObject({
+      action: 'read',
+      reason: 'ENOTDIR: not a directory',
+    })
+  })
+})
+
+describe('listBaselines', () => {
+  it('lists the PNG files by name, leaving out other files, temporary files and subfolders', async () => {
+    const folder = createFolder()
+
+    for (const name of ['b.png', 'a.dark.png', 'notes.txt', '.visual-check-0a1b2c.tmp', 'upper.PNG', 'a.png']) {
+      writeFileSync(join(folder, name), snapshot)
+    }
+
+    mkdirSync(join(folder, 'folder.png'))
+    expect(await listBaselines(folder)).toEqual(['a.dark.png', 'a.png', 'b.png'])
+  })
+
+  it('gives no baselines for a missing folder', async () => {
+    expect(await listBaselines(join(createFolder(), 'baselines'))).toEqual([])
+  })
+
+  it("throws a BaselineError naming the folder when it can't be listed", async () => {
+    const folder = join(createFolder(), 'baselines')
+
+    writeFileSync(folder, '')
+
+    const error = await listBaselines(folder).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(BaselineError)
+    expect(error).toMatchObject({
+      action: 'list',
+      path: folder,
+      reason: 'ENOTDIR: not a directory',
+      message: `Couldn't list the baselines folder ${folder}: ENOTDIR: not a directory.`,
+    })
+  })
+})
+
+describe('deleteOrphans', () => {
+  it('deletes the orphans in the order given and nothing else, giving their paths', async () => {
+    const folder = createFolder()
+
+    for (const name of ['a.png', 'b.png', 'c.png']) {
+      writeFileSync(join(folder, name), snapshot)
+    }
+
+    const orphans = [join(folder, 'c.png'), join(folder, 'a.png')]
+
+    expect(await deleteOrphans(orphans, [join(folder, 'b.png'), join(folder, 'missing.png')])).toEqual(orphans)
+    expect(readdirSync(folder)).toEqual(['b.png'])
+  })
+
+  it('leaves out an orphan that is already gone', async () => {
+    const folder = createFolder()
+
+    expect(await deleteOrphans([join(folder, 'gone.png')], [])).toEqual([])
+  })
+
+  it('keeps an orphan that is another name of an expected baseline', async () => {
+    const folder = createFolder()
+
+    writeFileSync(join(folder, 'a.png'), snapshot)
+    linkSync(join(folder, 'a.png'), join(folder, 'other-name.png'))
+
+    expect(await deleteOrphans([join(folder, 'other-name.png')], [join(folder, 'a.png')])).toEqual([])
+    expect(readdirSync(folder).sort()).toEqual(['a.png', 'other-name.png'])
+  })
+
+  it.skipIf(process.platform !== 'darwin')(
+    "keeps an orphan the file system takes for an expected baseline, as macOS does for 'ς' and 'σ'",
+    async (context) => {
+      const folder = createFolder()
+
+      writeFileSync(join(folder, 'ς.png'), snapshot)
+
+      if (!existsSync(join(folder, 'σ.png'))) {
+        context.skip('This folder is on a file system that tells the two names apart.')
+      }
+
+      expect(await deleteOrphans([join(folder, 'ς.png')], [join(folder, 'σ.png')])).toEqual([])
+      expect(readdirSync(folder)).toEqual(['ς.png'])
+    },
+  )
+
+  it("throws a BaselineError with the path and the system's reason when an orphan can't be deleted", async () => {
+    const folder = createFolder()
+    const path = join(folder, 'folder.png')
+
+    mkdirSync(path)
+
+    const error = await deleteOrphans([path], []).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(BaselineError)
+    expect(error).toMatchObject({ action: 'delete', path })
+    expect(existsSync(path)).toBe(true)
   })
 })

@@ -1,4 +1,4 @@
-import { baselineFileNameOf } from './baseline-files.js'
+import { baselineFileNameOf, foldedFileNameOf } from './baseline-files.js'
 
 /**
  * Two snapshots whose baselines would be one file, and that file's name.
@@ -18,15 +18,6 @@ export interface BaselineClash<Snapshot> {
    * The first snapshot's baseline file name, shortened when its key is long.
    */
   fileName: string
-}
-
-/**
- * Folds a file name into the form two names share when a file system takes them for one file: Unicode NFC, then lower
- * case. macOS ignores both how an accented letter is encoded and case, and baselines are committed and checked out on
- * every OS.
- */
-function foldedFileNameOf(name: string): string {
-  return name.normalize('NFC').toLowerCase()
 }
 
 /**
