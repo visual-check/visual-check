@@ -57,7 +57,7 @@ What a project sets for a Storybook, a stories file or a story in `parameters.vi
 _Avoid_: Story config, story settings, visual-check parameters
 
 **Visual diff**:
-The pixel comparison of a snapshot against its baseline.
+The pixel comparison of a snapshot against its baseline, and the image it draws of where they differ.
 _Avoid_: Diff (unqualified), image diff
 
 **Tolerance**:

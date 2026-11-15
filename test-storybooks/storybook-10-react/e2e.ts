@@ -15,6 +15,10 @@
 // reuses it. They capture one story, against baselines `update` writes, since the committed ones need the image's
 // fonts. `--no-docker`, which needs `--host` and no docker on the PATH, adds a case: with the default platform, `test`
 // exits 2 with the no-Docker error.
+//
+// With `--arm64` it runs one case, with TEST_STORYBOOK_IMAGE naming an arm64 build of the browser image: `test` with
+// the platform `linux/arm64` and the default tolerance gives the expected outcomes against the committed baselines,
+// which are written on amd64.
 import { type ChildProcessByStdio, spawn, spawnSync } from 'node:child_process'
 import {
   accessSync,
@@ -90,6 +94,11 @@ const onHost = process.argv.includes('--host')
  * argument says.
  */
 const withoutDocker = process.argv.includes('--no-docker')
+
+/**
+ * Whether the check runs the committed baselines on the arm64 browser image, as the `--arm64` argument says.
+ */
+const onArm64Image = process.argv.includes('--arm64')
 
 /**
  * Where visual-check's browser image records the browser it holds.
@@ -190,6 +199,27 @@ const growingMask = {
   filter: /^masks--grows$/,
   script: '<script>globalThis.__visualCheckE2eGrow = true</script>',
 }
+
+/**
+ * The one-pixel change: the story it changes, by its ID and the pattern that matches only it, the stylesheet that
+ * changes it and the detail its line must hold with `pixels: 0`, `differs:` included so a larger count can't match.
+ * The stylesheet draws one black CSS pixel at (1000, 600) through a fixed `body::after`, which takes no space in the
+ * layout. The story is captured in the default 1280 × 720 viewport at scale 1, so that spot is inside the snapshot, on
+ * the white page far from the card, and exactly one pixel of the snapshot changes.
+ */
+const onePixelChange = {
+  storyId: 'card--default',
+  filter: /^card--default$/,
+  style:
+    '<style>body::after { content: ""; position: fixed; left: 1000px; top: 600px; width: 1px; height: 1px; ' +
+    'background: #000; }</style>',
+  says: 'differs: 1 differ, 0 allowed',
+}
+
+/**
+ * The images `test` writes to the report for a differing snapshot, `<key>.<kind>.png` each.
+ */
+const reportImageKinds = ['baseline', 'snapshot', 'diff'] as const
 
 /**
  * How many workers every case that captures in parallel uses, through `--workers` or the config it writes, so each
@@ -652,12 +682,13 @@ function findPackageNameProblems(packageName: string | undefined): string[] {
 }
 
 /**
- * Lists what is wrong with the arguments: `--inside-image` and `--host` are separate modes, and `--no-docker` needs
- * `--host`.
+ * Lists what is wrong with the arguments: `--inside-image`, `--host` and `--arm64` are separate modes, and
+ * `--no-docker` needs `--host`.
  */
 function findArgumentProblems(): string[] {
+  const modeCount = [insideImage, onHost, onArm64Image].filter(Boolean).length
   const conflicts: [boolean, string][] = [
-    [insideImage && onHost, '--inside-image and --host are separate modes: give one of them.'],
+    [modeCount > 1, '--inside-image, --host and --arm64 are separate modes: give one of them.'],
     [withoutDocker && !onHost, '--no-docker only runs with --host.'],
   ]
 
@@ -691,12 +722,12 @@ function findHostProblems(): string[] {
 }
 
 /**
- * Lists what the check needs outside the image: the name of the browser image.
+ * Lists what the check needs outside the image: the name of the browser image, the arm64 one with `--arm64`.
  */
 function findBrowserImageProblems(): string[] {
-  return image
-    ? []
-    : ['TEST_STORYBOOK_IMAGE is not set: set it to the browser image, such as visual-check-chromium:amd64.']
+  const example = onArm64Image ? 'visual-check-chromium:arm64' : 'visual-check-chromium:amd64'
+
+  return image ? [] : [`TEST_STORYBOOK_IMAGE is not set: set it to the browser image, such as ${example}.`]
 }
 
 /**
@@ -1168,11 +1199,17 @@ interface ConfigOptions {
    * How many more times a failing snapshot is captured before it fails. The config's default when not given.
    */
   retries?: number
+  /**
+   * The project's tolerance, which each story's own overrides key by key. The config's default when not given. It's
+   * the subset of the CLI's `Tolerance` this check writes: counts of pixels, not shares.
+   */
+  tolerance?: { color?: number; pixels?: number }
 }
 
 /**
  * Writes a config for this Storybook, served at the URL, with its baselines in the given folder, that captures with 2
- * workers, and the platform, `readyTimeout` and `retries` the options give. Gives its path.
+ * workers, and the platform, `readyTimeout`, `retries` and `tolerance` the options give. Gives its path. `test`'s report
+ * goes into `.visual-check/report` in that folder.
  */
 function writeConfig(folder: string, url: string, baselines: string, options: ConfigOptions = {}): string {
   const path = join(folder, 'visual-check.config.mjs')
@@ -1257,30 +1294,40 @@ async function waitUntil(condition: () => boolean, timeoutMilliseconds: number):
 }
 
 /**
- * `test` against the committed baselines, with 2 workers, gives exactly the expected outcomes. Each broken readiness,
- * per-story options and capture area story's line says why, and standard error has no test-path warning, since every
- * page is on Storybook's test path. The disabled stories, which `index.json` lists, have no line, and the header
- * counts exactly the snapshots with an expected outcome, the modes' included. The story that lists `dark` and `mobile`
- * has exactly 3 lines, and the story with its own list of modes has no line for the meta's `dark`. Outside the
- * Storybook 10 test Storybook, the committed animation baselines are byte-identical to its own.
+ * Runs `test --all` against the committed baselines with the package's config and 2 workers, and checks the run with
+ * `committedBaselinesProblems`.
  */
 async function checkCommittedBaselines(expected: Outcomes): Promise<string[]> {
-  return await withStorybookServer({}, async (server) => {
-    const run = await runCli(['test', '--all', '--url', server.url, '--workers', String(parallelWorkers)])
+  return await withStorybookServer({}, async (server) =>
+    committedBaselinesProblems(
+      await runCli(['test', '--all', '--url', server.url, '--workers', String(parallelWorkers)]),
+      expected,
+    ),
+  )
+}
 
-    return [
-      ...expectedRunProblems('test', run, expected),
-      ...[...readinessLines, ...perStoryOptionsLines, ...captureAreaLines].flatMap(([storyId, says]) =>
-        lineSaysProblems(run, storyId, says),
-      ),
-      ...noTestPathWarningProblems(run.stderr),
-      ...storybook10AnimationProblems(),
-      ...disabledStoryProblems(run),
-      ...headerCountProblems(run, Object.keys(expected).length),
-      ...lineCountProblems(run, modeLines.darkAndMobile.storyId, modeLines.darkAndMobile.count),
-      ...absentModeProblems(run, modeLines.ownModesOnly.storyId, modeLines.ownModesOnly.absentMode),
-    ]
-  })
+/**
+ * Lists what is wrong with a run of `test --all` against the committed baselines. It gives exactly the expected
+ * outcomes. Each broken readiness, per-story options and capture area story's line says why, and standard error has
+ * no test-path warning, since every page is on Storybook's test path. The disabled stories, which `index.json` lists,
+ * have no line, and the header counts exactly the snapshots with an expected outcome, the modes' included. The story
+ * that lists `dark` and `mobile` has exactly 3 lines, and the story with its own list of modes has no line for the
+ * meta's `dark`. Outside the Storybook 10 test Storybook, the committed animation baselines are byte-identical to its
+ * own.
+ */
+function committedBaselinesProblems(run: CliRun, expected: Outcomes): string[] {
+  return [
+    ...expectedRunProblems('test', run, expected),
+    ...[...readinessLines, ...perStoryOptionsLines, ...captureAreaLines].flatMap(([storyId, says]) =>
+      lineSaysProblems(run, storyId, says),
+    ),
+    ...noTestPathWarningProblems(run.stderr),
+    ...storybook10AnimationProblems(),
+    ...disabledStoryProblems(run),
+    ...headerCountProblems(run, Object.keys(expected).length),
+    ...lineCountProblems(run, modeLines.darkAndMobile.storyId, modeLines.darkAndMobile.count),
+    ...absentModeProblems(run, modeLines.ownModesOnly.storyId, modeLines.ownModesOnly.absentMode),
+  ]
 }
 
 /**
@@ -1310,7 +1357,7 @@ function absentModeProblems(run: CliRun, storyId: string, mode: string): string[
  * Lists how the committed animation baselines differ from the Storybook 10 test Storybook's, or none when this is that
  * Storybook. Both folders must hold the same `animations--*.png` files, byte for byte. `test` passes each animation
  * story here against its baseline, so on Storybook 11 this checks that its own pause of animations, then visual-check's
- * end state, gives Storybook 10's snapshots.
+ * end state, gives Storybook 10's snapshots within the tolerance.
  */
 function storybook10AnimationProblems(): string[] {
   if (committedBaselines === storybook10Baselines) {
@@ -1355,18 +1402,18 @@ function storybook10MatchProblems(name: string): string[] {
 
 /**
  * On one server, `test` runs the animation stories against the committed baselines 10 times, one run after the
- * other, with a config that sets 2 workers and `retries: 0`, and each run gives every one of them its expected outcome.
- * With no retries, and `test` comparing byte for byte, a run that passes captured each snapshot byte-identical to its
- * baseline. Every run's problems are kept, each led by its run's number, so a story whose snapshot changes shows how
- * often it did. A run that a signal ended, as the time limit does, stops the case: that's a broken setup, not a
- * snapshot that changed, and 10 of them would outlast CI's job.
+ * other, with a config that sets 2 workers, `retries: 0` and `tolerance: { pixels: 0 }`, and each run gives every one
+ * of them its expected outcome. With no retries and no pixel allowed to differ, a run that passes captured each snapshot
+ * with every pixel within the preview's color tolerance, 0.01, of its baseline. Every run's problems are kept, each led
+ * by its run's number, so a story whose snapshot changes shows how often it did. A run that a signal ended, as the time
+ * limit does, stops the case: that's a broken setup, not a snapshot that changed, and 10 of them would outlast CI's job.
  */
 async function checkEndStateRuns(expected: Outcomes): Promise<string[]> {
   const expectedAnimations = outcomesMatching(expected, animationFilter)
 
   return await withStorybookServer({}, (server) =>
     withTemporaryFolder(async (folder) => {
-      const config = writeConfig(folder, server.url, committedBaselines, { retries: 0 })
+      const config = writeConfig(folder, server.url, committedBaselines, { retries: 0, tolerance: { pixels: 0 } })
       const problems: string[] = []
 
       for (let runNumber = 1; runNumber <= endStateRuns; runNumber += 1) {
@@ -1588,6 +1635,51 @@ async function checkGrowingMask(): Promise<string[]> {
 }
 
 /**
+ * With one pixel of the card story changed, `test` on that story against the committed baselines fails with a config
+ * that sets `tolerance: { pixels: 0 }`: the story differs, its line says `1 differ, 0 allowed`, and the report beside
+ * the config holds its baseline, snapshot and diff. With the default tolerance, the same `test` gives the story its
+ * expected outcome, passed. Each problem starts with the tolerance its run had.
+ */
+async function checkOnePixelChange(expected: Outcomes): Promise<string[]> {
+  const { storyId, filter, style, says } = onePixelChange
+  const defaultExpected = outcomesMatching(expected, filter)
+
+  return await withStorybookServer({ injectIntoIframe: style }, (server) =>
+    withTemporaryFolder(async (folder) => {
+      const testArgs = ['test', '--filter', filter.source]
+      const noPixelsConfig = writeConfig(folder, server.url, committedBaselines, { tolerance: { pixels: 0 } })
+      const noPixelsRun = await runCli([...testArgs, '--config', noPixelsConfig])
+      // Every `test` clears the report first, so its images are checked before the default run.
+      const noPixelsProblems = [
+        ...expectedRunProblems('test', noPixelsRun, { [storyId]: 'differs' }),
+        ...lineSaysProblems(noPixelsRun, storyId, says),
+        ...reportImageProblems(folder, storyId),
+      ]
+      const defaultConfig = writeConfig(folder, server.url, committedBaselines)
+      const defaultRun = await runCli([...testArgs, '--config', defaultConfig])
+
+      return [
+        ...noPixelsProblems.map((problem) => `pixels: 0: ${problem}`),
+        ...expectedRunProblems('test', defaultRun, defaultExpected).map((problem) => `default tolerance: ${problem}`),
+      ]
+    }),
+  )
+}
+
+/**
+ * Lists each image of a snapshot that the report beside a config in this folder doesn't hold for the Storybook
+ * `react`, or none when it holds them all.
+ */
+function reportImageProblems(configFolder: string, key: string): string[] {
+  const imagesFolder = join(configFolder, '.visual-check', 'report', 'images', 'react')
+
+  return reportImageKinds
+    .map((kind) => join(imagesFolder, `${key}.${kind}.png`))
+    .filter((path) => !isFile(path))
+    .map((path) => `test wrote no ${path}`)
+}
+
+/**
  * With every `iframe.html`'s `navigator.userAgent` its own without `StorybookTestRunner`, Storybook takes the path it
  * takes off the test path, waiting about 100 ms as each story completes. `test` with 2 workers gives the button
  * stories their expected outcomes, so it exits 0, and standard error warns once that the Storybook seems to ignore the
@@ -1635,17 +1727,18 @@ function noTestPathWarningProblems(stderr: string): string[] {
 
 /**
  * Runs `test --all` against the committed baselines with a config that sets this platform, or none when it is
- * `undefined`, and hands the run and the server to `check`.
+ * `undefined`, and hands the run, the server and the config's folder, which is removed once `check` returns, to
+ * `check`.
  */
 async function testWithPlatform(
   platform: string | undefined,
-  check: (run: CliRun, server: StorybookServer) => string[],
+  check: (run: CliRun, server: StorybookServer, configFolder: string) => string[],
 ): Promise<string[]> {
   return await withStorybookServer({}, (server) =>
     withTemporaryFolder(async (folder) => {
       const config = writeConfig(folder, server.url, committedBaselines, { platform })
 
-      return check(await runCli(['test', '--all', '--config', config]), server)
+      return check(await runCli(['test', '--all', '--config', config]), server, folder)
     }),
   )
 }
@@ -1713,6 +1806,31 @@ async function checkPlatformMismatch(): Promise<string[]> {
     ...missingTextProblems(run.stderr, [`image for ${arch}`, `platform is ${platform}`]),
     ...capturedProblems(server),
   ])
+}
+
+/**
+ * On the arm64 image, with the platform `linux/arm64` and the default tolerance, `test` against the committed
+ * baselines, which are written on amd64, passes the checks of the committed baselines case. When it doesn't, `test`'s
+ * report, if it wrote one, with each differing snapshot's images, is copied to `arm64-report/` in the diagnostics
+ * folder.
+ */
+async function checkArm64Image(expected: Outcomes): Promise<string[]> {
+  rmSync(diagnosticsDir, { recursive: true, force: true })
+
+  return await testWithPlatform('linux/arm64', (run, _server, configFolder) => {
+    const problems = committedBaselinesProblems(run, expected)
+    const report = join(configFolder, '.visual-check', 'report')
+
+    if (problems.length === 0 || !existsSync(report)) {
+      return problems
+    }
+
+    const keptReport = join(diagnosticsDir, 'arm64-report')
+
+    cpSync(report, keptReport, { recursive: true })
+
+    return [...problems, `test's report is in ${keptReport}`]
+  })
 }
 
 /**
@@ -2049,6 +2167,25 @@ function insideImageCases(expected: Outcomes): Case[] {
 }
 
 /**
+ * The one case the arm64 image runs: the committed baselines, written on amd64, on `linux/arm64`.
+ */
+function arm64ImageCases(expected: Outcomes): Case[] {
+  return [
+    {
+      name: 'arm64 image: with platform linux/arm64 and the default tolerance, the committed baselines case holds against the baselines written on amd64',
+      run: () => checkArm64Image(expected),
+    },
+  ]
+}
+
+/**
+ * Reads each snapshot's expected outcome from `expected-outcomes.json`.
+ */
+function readExpectedOutcomes(): Outcomes {
+  return JSON.parse(readFileSync(join(packageDir, 'expected-outcomes.json'), 'utf8')) as Outcomes
+}
+
+/**
  * Runs every case, prints its result, and resolves with whether all of them passed.
  */
 async function runCases(cases: Case[]): Promise<boolean> {
@@ -2091,15 +2228,17 @@ if (setupProblems.length > 0) {
   process.exitCode = 1
 } else if (onHost) {
   process.exitCode = (await runHostCases()) ? 0 : 1
+} else if (onArm64Image) {
+  process.exitCode = (await runCases(arm64ImageCases(readExpectedOutcomes()))) ? 0 : 1
 } else {
-  const expected = JSON.parse(readFileSync(join(packageDir, 'expected-outcomes.json'), 'utf8')) as Outcomes
+  const expected = readExpectedOutcomes()
   const passed = await runCases([
     {
       name: "committed baselines: test gives the expected outcomes, each broken readiness, per-story options and capture area story's line says why, no line for a disabled story, the header counts the expected outcomes, a story listing two modes has 3 lines, a story's own modes leave out the meta's, no test-path warning, the animation baselines are byte-identical to storybook-10-react's",
       run: () => checkCommittedBaselines(expected),
     },
     {
-      name: `end state: ${endStateRuns} runs of test give every animation story its expected outcome, byte-identical to its baseline`,
+      name: `end state: ${endStateRuns} runs of test with pixels: 0 give every animation story its expected outcome`,
       run: () => checkEndStateRuns(expected),
     },
     {
@@ -2121,6 +2260,10 @@ if (setupProblems.length > 0) {
     {
       name: `a masked element that grows: test exits 1 and ${growingMask.storyId} differs`,
       run: checkGrowingMask,
+    },
+    {
+      name: `one-pixel change: with pixels: 0, test exits 1, ${onePixelChange.storyId} differs saying "1 differ, 0 allowed" and the report holds its images; with the default tolerance, test passes it`,
+      run: () => checkOnePixelChange(expected),
     },
     {
       name: "test path: a Storybook that ignores the test path's user agent triggers the warning once, and the run passes",

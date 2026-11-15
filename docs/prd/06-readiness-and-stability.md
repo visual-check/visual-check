@@ -51,7 +51,7 @@ Rules:
 
 - Readiness never waits for the network. Late content is the `wait` hook's job.
 - `test` has no loop that captures until two images match. What noise is left is tolerance's job.
-- One known case: a rounded `position: fixed` element over a translucent fixed layer, such as a modal dialog with rounded corners over its backdrop, can rasterize its antialiased corners one level differently between captures. The byte comparison fails on it, and tolerance absorbs it.
+- One known case: a rounded `position: fixed` element over a translucent fixed layer, such as a modal dialog with rounded corners over its backdrop, can rasterize its antialiased corners one level differently between captures. Tolerance absorbs it.
 - `readyTimeout` (10 s by default) is one limit for everything up to the capture, the end-state step included. Running out makes a broken story, and the message says which step it was in.
 
 ## The `wait` hook

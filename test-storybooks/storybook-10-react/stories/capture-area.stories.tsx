@@ -213,8 +213,8 @@ type Story = StoryObj<typeof meta>
  * `element: null` captures the full page: the viewport's width by the content's height, 1280 × 2000. `play` opens the
  * modal dialog, so the snapshot shows the hero 720 px tall, the fixed header once at the top, and the dialog over the
  * first viewport. A rounded fixed element over a translucent fixed layer rasterizes its antialiased corners ±1 level
- * differently between captures (measured: 17 px, about 1 run in 4), which tolerance absorbs once the visual diff
- * lands, so the dialog keeps square corners until then.
+ * differently between captures (measured: 17 px, about 1 run in 4). Tolerance absorbs that in `test`, but `update`
+ * would then write a baseline that isn't byte-identical to the committed one, so the dialog keeps square corners.
  */
 export const FullPage: Story = {
   parameters: { ...visualCheck({ element: null }) },
