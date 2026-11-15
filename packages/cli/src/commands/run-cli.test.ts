@@ -1876,7 +1876,11 @@ const invalidOptionsFix =
 const disableIssue = 'visualCheck.disable: must be true or false. Got 1.'
 
 describe('runCli warning about baseline paths over 260 characters', () => {
-  const deepFolder = `${'d'.repeat(100)}/${'e'.repeat(100)}`
+  /**
+   * Three folders of 100 characters each, so a baseline's path passes 260 characters whatever the temporary folder's
+   * length: a short `/tmp` on Linux as well as macOS's long one.
+   */
+  const deepFolder = `${'d'.repeat(100)}/${'e'.repeat(100)}/${'f'.repeat(100)}`
   const warningHead =
     "These baselines' paths are longer than 260 characters, which git on Windows checks out only with " +
     'core.longpaths set. Run git config core.longpaths true.'
