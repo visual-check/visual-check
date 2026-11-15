@@ -1,6 +1,6 @@
 # @visual-check/test-storybook-11-react
 
-One of this repo's own test Storybooks ([PRD 18](../../docs/prd/18-repo-ci.md#this-repos-own-test-storybooks)): a private React Storybook on Storybook 11, with its committed baselines in `.visual-check/baselines/` and the expected outcome of every story in `expected-outcomes.json`. Until Storybook 11 is stable, it's on the prerelease `11.0.0-beta.3`. Its build warns that TypeScript 7 lacks the compiler API Storybook reads component types with, and falls back to `react-docgen`; the snapshots don't depend on either.
+One of this repo's own test Storybooks ([PRD 18](../../docs/prd/18-repo-ci.md#this-repos-own-test-storybooks)): a private React Storybook on Storybook 11, with its committed baselines in `.visual-check/baselines/` and the expected outcome of every snapshot, modes included, in `expected-outcomes.json`. Until Storybook 11 is stable, it's on the prerelease `11.0.0-beta.3`. Its build warns that TypeScript 7 lacks the compiler API Storybook reads component types with, and falls back to `react-docgen`; the snapshots don't depend on either.
 
 It has no stories of its own. It reads the stories of the [Storybook 10 test Storybook](../storybook-10-react/README.md), takes its config from that package's `.storybook/test-storybook-config.ts`, and runs that package's `e2e.ts` from its own folder, so the check's cases are the ones that README lists.
 

@@ -32,6 +32,11 @@ export interface Requirement {
 }
 
 /**
+ * What a Storybook's or a mode's name may hold: lowercase letters, digits and -.
+ */
+export const lowercaseNamePattern = /^[a-z0-9-]+$/
+
+/**
  * The most characters a value takes in an issue before it's cut short.
  */
 const maxShownLength = 40
@@ -71,7 +76,7 @@ function renderObject(value: object): string {
 /**
  * Renders a value for an issue: a string as JSON, an object by `renderObject`, anything else as text.
  */
-function render(value: unknown): string {
+export function render(value: unknown): string {
   if (typeof value === 'object' && value !== null) {
     return renderObject(value)
   }

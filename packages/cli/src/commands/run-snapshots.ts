@@ -19,7 +19,7 @@ import type { BrowserPlace } from './browser-route.js'
 import { dockerProblemOf } from './docker-problem.js'
 import type { LaunchBrowser } from './launch-browser.js'
 import { missingLibraryOf } from './missing-library.js'
-import { type PlannedSnapshot, planSnapshots } from './plan-snapshots.js'
+import { type PlannedSnapshot, planSnapshots, type SnapshotToCapture } from './plan-snapshots.js'
 import { platformProblemOf } from './platform-problem.js'
 import { type FirstBrowserExit, type RunBrowser, runBrowserOf } from './run-browser.js'
 
@@ -184,7 +184,7 @@ interface PlannedSnapshots {
    */
   header: string
   /**
-   * Each snapshot, in config order and then selection order.
+   * Each snapshot, in config order and then selection order, then each story's default capture and its modes in order.
    */
   items: PlannedSnapshot[]
   /**
@@ -207,10 +207,7 @@ function headerOf(run: SnapshotRun, count: number): string {
  * Builds the session's settings from the config.
  */
 function captureSettingsOf(config: ResolvedConfig): CaptureSettings {
-  const { width, height, deviceScaleFactor } = config.viewport
-
   return {
-    viewport: { width, height, deviceScaleFactor },
     readyTimeoutMs: config.readyTimeout,
     timezone: config.timezone,
     locale: config.locale,
@@ -228,16 +225,18 @@ function masksOf(masks: StoryOptions['masks']): StoryMask[] {
 }
 
 /**
- * Gives the story's ID and the URL of its own page, with the element and the masks its options set. A story with no
- * element, or with `null`, is captured in full, and one with no masks is captured with none.
+ * Gives the story's ID, the URL of its own page with the snapshot's globals, the snapshot's viewport, and the element
+ * and the masks the story's options set. A story with no element, or with `null`, is captured in full, and one with no
+ * masks is captured with none.
  */
-function storyToCaptureOf(storybook: ResolvedStorybook, story: Story, options: StoryOptions): StoryToCapture {
+function storyToCaptureOf({ storybook, story, options, globals, viewport }: SnapshotToCapture): StoryToCapture {
   const { element } = options
   const masks = masksOf(options.masks)
 
   return {
     id: story.id,
-    url: storyUrlOf(storybook.url, story.id),
+    url: storyUrlOf(storybook.url, story.id, globals),
+    viewport,
     ...(typeof element === 'string' ? { element } : {}),
     ...(masks.length === 0 ? {} : { masks }),
   }
@@ -255,11 +254,6 @@ function displayPathOf(cwd: string, path: string): string {
  * browser is up, just before the capture.
  */
 type CaptureStory = (story: StoryToCapture, started?: () => void) => Promise<StoryCapture>
-
-/**
- * A planned snapshot whose stories file loaded, so it has its options.
- */
-type PlannedWithOptions = Extract<PlannedSnapshot, { options: StoryOptions }>
 
 /**
  * Takes one snapshot as the command says. A story whose stories file didn't load is broken, with no capture and no
@@ -280,20 +274,19 @@ async function snapshotOf(
 }
 
 /**
- * Tests one story: a missing baseline is reported without a capture, and a snapshot passes only when it holds the
+ * Tests one snapshot: a missing baseline is reported without a capture, and a snapshot passes only when it holds the
  * baseline's bytes. It asks for a capture only once it has read the baseline. A pass's time leaves out the browser's
  * launch.
  */
-async function testSnapshot(item: PlannedWithOptions, captureStory: CaptureStory): Promise<SnapshotResult> {
-  const { storybook, story, options } = item
-  const baseline = await readBaseline(baselinePathOf(storybook.baselines, story.id))
+async function testSnapshot(item: SnapshotToCapture, captureStory: CaptureStory): Promise<SnapshotResult> {
+  const baseline = await readBaseline(baselinePathOf(item.storybook.baselines, item.key))
 
   if (baseline === undefined) {
     return { status: 'missing', detail: 'missing: no baseline yet; run visual-check update to write it' }
   }
 
   let started = performance.now()
-  const capture = await captureStory(storyToCaptureOf(storybook, story, options), () => {
+  const capture = await captureStory(storyToCaptureOf(item), () => {
     started = performance.now()
   })
 
@@ -311,23 +304,22 @@ async function testSnapshot(item: PlannedWithOptions, captureStory: CaptureStory
 }
 
 /**
- * Updates one story's baseline: writes the snapshot when the baseline is missing or differs, and leaves an identical
+ * Updates one snapshot's baseline: writes the snapshot when the baseline is missing or differs, and leaves an identical
  * baseline untouched. A broken story writes nothing.
  */
 async function updateSnapshot(
-  item: PlannedWithOptions,
+  item: SnapshotToCapture,
   captureStory: CaptureStory,
   cwd: string,
 ): Promise<SnapshotResult> {
-  const { storybook, story, options } = item
-  const capture = await captureStory(storyToCaptureOf(storybook, story, options))
+  const capture = await captureStory(storyToCaptureOf(item))
 
   if ('broken' in capture) {
     return { status: 'broken', detail: `broken: ${capture.broken.message}` }
   }
 
   const { completingMs } = capture
-  const path = baselinePathOf(storybook.baselines, story.id)
+  const path = baselinePathOf(item.storybook.baselines, item.key)
   const baseline = await readBaseline(path)
 
   if (baseline !== undefined && isByteIdentical(capture.snapshot, baseline)) {
@@ -388,8 +380,8 @@ function exitNoticeOf(exit: FirstBrowserExit | undefined): string {
 }
 
 /**
- * Warns, one line each, for every Storybook in the run whose stories' `completing` render steps took a median of 50 ms
- * or more, in config order: it seems to ignore the test path. Gives nothing when none does.
+ * Warns, one line each, for every Storybook in the run whose snapshots' `completing` render steps took a median of 50
+ * ms or more, in config order: it seems to ignore the test path. Gives nothing when none does.
  */
 function testPathWarningsOf(
   selections: readonly StorybookSelection[],
@@ -539,13 +531,17 @@ function plannedSnapshotsOf(run: SnapshotRun, items: PlannedSnapshot[]): Planned
 }
 
 /**
- * Gives the line of each snapshot that has finished, in the snapshots' order.
+ * Gives the line of each snapshot that has finished, in the snapshots' order: its mark, Storybook, story ID, mode when
+ * it has one, and detail.
  */
 function linesOf({ items, results }: PlannedSnapshots): string[] {
-  return items.flatMap(({ storybook, story }, index) => {
+  return items.flatMap(({ storybook, story, mode }, index) => {
     const result = results[index]
+    const modeColumn = mode === undefined ? '' : `  ${mode}`
 
-    return result === undefined ? [] : [`${marks[result.status]} ${storybook.name}  ${story.id}  ${result.detail}`]
+    return result === undefined
+      ? []
+      : [`${marks[result.status]} ${storybook.name}  ${story.id}${modeColumn}  ${result.detail}`]
   })
 }
 
@@ -575,19 +571,23 @@ async function takeSnapshots(run: SnapshotRun, browser: RunBrowser, snapshots: P
 }
 
 /**
- * Reads every Storybook's per-story options before any capture, then captures every selected story that isn't
- * disabled with a pool of `workers` that share one browser, and prints one line per snapshot after the header, then
- * the counts. The lines follow config order and then selection order, whatever order the captures finish in. `test`
- * compares each snapshot with its baseline byte for byte and never captures a missing baseline; `update` writes each
- * snapshot whose baseline is missing or differs.
+ * Reads every Storybook's per-story options before any capture, then takes the snapshots of every selected story that
+ * isn't disabled with a pool of `workers` that share one browser: its default capture, then one snapshot per mode it
+ * lists, each at its own viewport and with its mode's globals in the story's URL. It prints one line per snapshot
+ * after the header, which counts them, then the counts; a mode's line names the mode after the story ID. The lines
+ * follow config order, then selection order, then the story's default capture and its modes in order, whatever order
+ * the captures finish in. Each snapshot has its own baseline, `<story-id>.png` for the default capture and
+ * `<story-id>.<mode>.png` for a mode. `test` compares each snapshot with its baseline byte for byte and never captures
+ * a missing baseline; `update` writes each snapshot whose baseline is missing or differs.
  *
  * Each Storybook with stories gets one options read, in config order, on a page of its own, covering every story its
  * `index.json` lists whatever the selection. So the browser is launched at the first read, even when no story then
  * needs a capture, and a run launches nothing only when no Storybook has stories. A read problem, at the first
  * Storybook that has one, or invalid options in any Storybook stop the run with exit 2 before any capture, printing
- * nothing on stdout. A disabled story is left out: it isn't captured, printed or counted. Each story of a stories file
- * that failed to load, or didn't load within readyTimeout, is broken, `load-failed`, with no capture and no baseline
- * read.
+ * nothing on stdout. Invalid options include a mode that breaks the mode rules, such as a bad name, a global the
+ * Storybook doesn't declare or one the story pins. A disabled story is left out: it isn't captured, printed or
+ * counted. Each story of a stories file that failed to load, or didn't load within readyTimeout, is one broken
+ * snapshot, `load-failed`, with no mode, no capture and no baseline read.
  *
  * When the browser exits, every story in flight is broken, `browser-exited`, the browser is relaunched once at the
  * next read or story that needs it, and the run goes on; stderr then says so, with the browser's last output, whatever
@@ -614,7 +614,7 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
   let snapshots: PlannedSnapshots | undefined
 
   try {
-    const plan = await planSnapshots(run.selections, browser.readOptions, run.config.readyTimeout)
+    const plan = await planSnapshots(run.selections, browser.readOptions, run.config)
 
     if ('problem' in plan) {
       return { exitCode: 2, stdout: '', stderr: `${exitNoticeOf(browser.firstExit())}${plan.problem}\n` }

@@ -229,6 +229,11 @@ async function hasSettled(promise: Promise<unknown>): Promise<boolean> {
   return settled
 }
 
+/**
+ * A phone-sized viewport with touch.
+ */
+const touchViewport = { width: 375, height: 667, deviceScaleFactor: 2, touch: true }
+
 afterEach(() => {
   vi.useRealTimers()
 })
@@ -531,7 +536,7 @@ describe('Page', () => {
   it('turns on no Network, Runtime, Log, lifecycle events or request interception through a whole capture', async () => {
     const { browser, page } = await openPage()
 
-    await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1 })
+    await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1, touch: false })
     await page.goto(storyUrl, 1000)
     await page.evaluate('document.title', 1000)
     await page.capture('full-page')
@@ -556,6 +561,7 @@ describe('Page', () => {
         'Emulation.setFocusEmulationEnabled',
         'Page.addScriptToEvaluateOnNewDocument',
         'Emulation.setDeviceMetricsOverride',
+        'Emulation.setTouchEmulationEnabled',
         'Page.navigate',
         'Runtime.evaluate',
         'Page.getLayoutMetrics',
@@ -578,7 +584,7 @@ describe('Page', () => {
       },
     })
 
-    await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1 })
+    await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1, touch: false })
     await page.goto(storyUrl, 1000)
     await expect(page.evaluate('fail()', 1000)).rejects.toThrow()
     await page.capture('full-page')
@@ -589,10 +595,10 @@ describe('Page', () => {
 })
 
 describe('Page.setViewport', () => {
-  it('overrides the device metrics with the viewport as the screen, not mobile', async () => {
+  it('overrides the device metrics with the viewport as the screen, not mobile, and turns touch off', async () => {
     const { browser, page } = await openPage()
 
-    await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 2 })
+    await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 2, touch: false })
     expect(sentOf(browser, 'Emulation.setDeviceMetricsOverride')).toEqual([
       {
         method: 'Emulation.setDeviceMetricsOverride',
@@ -600,6 +606,35 @@ describe('Page.setViewport', () => {
         sessionId,
       },
     ])
+    expect(sentOf(browser, 'Emulation.setTouchEmulationEnabled')).toEqual([
+      { method: 'Emulation.setTouchEmulationEnabled', params: { enabled: false }, sessionId },
+    ])
+  })
+
+  it('emulates a mobile device with touch for a touch viewport', async () => {
+    const { browser, page } = await openPage()
+
+    await page.setViewport(touchViewport)
+    expect(sentOf(browser, 'Emulation.setDeviceMetricsOverride')).toEqual([
+      {
+        method: 'Emulation.setDeviceMetricsOverride',
+        params: { width: 375, height: 667, deviceScaleFactor: 2, mobile: true, screenWidth: 375, screenHeight: 667 },
+        sessionId,
+      },
+    ])
+    expect(sentOf(browser, 'Emulation.setTouchEmulationEnabled')).toEqual([
+      { method: 'Emulation.setTouchEmulationEnabled', params: { enabled: true, maxTouchPoints: 5 }, sessionId },
+    ])
+  })
+
+  it('sends the device metrics and the touch emulation in parallel', async () => {
+    const { browser, page } = await openPage({
+      handlers: { 'Emulation.setDeviceMetricsOverride': () => undefined },
+    })
+    const setting = page.setViewport(touchViewport)
+
+    await flushUntil(() => browser.timesReceived('Emulation.setTouchEmulationEnabled') === 1)
+    expect(await hasSettled(setting)).toBe(false)
   })
 })
 
@@ -608,7 +643,13 @@ describe('the 30 s limit on a page call', () => {
     [
       'setViewport',
       'Emulation.setDeviceMetricsOverride',
-      (page: Page) => page.setViewport({ width: 1, height: 1, deviceScaleFactor: 1 }),
+      (page: Page) => page.setViewport({ width: 1, height: 1, deviceScaleFactor: 1, touch: false }),
+      "The page didn't set its viewport within 30 s.",
+    ],
+    [
+      'setViewport',
+      'Emulation.setTouchEmulationEnabled',
+      (page: Page) => page.setViewport(touchViewport),
       "The page didn't set its viewport within 30 s.",
     ],
     [
@@ -624,7 +665,7 @@ describe('the 30 s limit on a page call', () => {
       "The page didn't clear its storage within 30 s.",
     ],
   ])(
-    'fails %s with a PageTimeoutError when the browser stays silent for 30 s',
+    'fails %s with a PageTimeoutError when the browser stays silent on %s for 30 s',
     async (_call, silentMethod, call, message) => {
       const { browser, page } = await openPage({ handlers: { [silentMethod]: () => undefined } })
 
@@ -939,13 +980,13 @@ describe('Page.evaluate', () => {
 
 /**
  * Answers `Page.getLayoutMetrics` with a layout viewport this wide and content this tall, in CSS pixels. The content
- * is wider than the viewport, which a full-page capture leaves out.
+ * is 500 px wider than the viewport unless told otherwise, which a full-page capture leaves out.
  */
-function layoutOf(clientWidth: number, contentHeight: number): CommandHandler {
+function layoutOf(clientWidth: number, contentHeight: number, contentWidth = clientWidth + 500): CommandHandler {
   return (command: ReceivedCommand, fake: FakeBrowser) =>
     fake.reply(command, {
       cssLayoutViewport: { pageX: 0, pageY: 0, clientWidth, clientHeight: 720 },
-      cssContentSize: { x: 0, y: 0, width: clientWidth + 500, height: contentHeight },
+      cssContentSize: { x: 0, y: 0, width: contentWidth, height: contentHeight },
     })
 }
 
@@ -1000,6 +1041,213 @@ describe('Page.capture', () => {
 
     expect([...bytes]).toEqual([...Buffer.from(defaultCaptureData, 'base64')])
   })
+
+  it.each([
+    ['taller than', { width: 375, height: 3000 }],
+    ['wider than', { width: 375.5, height: 667 }],
+    ['the size of', { width: 375, height: 667 }],
+  ])(
+    'turns touch emulation back on behind the screenshot and after it when the content is %s a touch viewport',
+    async (_shape, content) => {
+      const { browser, page } = await openPage({
+        handlers: { 'Page.getLayoutMetrics': layoutOf(375, content.height, content.width) },
+      })
+
+      await page.setViewport(touchViewport)
+
+      const sentBefore = browser.received.length
+
+      await page.capture('full-page')
+      expect(sent(browser).slice(sentBefore)).toEqual([
+        { method: 'Page.getLayoutMetrics', params: {}, sessionId },
+        expect.objectContaining({ method: 'Page.captureScreenshot' }),
+        { method: 'Emulation.setTouchEmulationEnabled', params: { enabled: true, maxTouchPoints: 5 }, sessionId },
+        { method: 'Emulation.setTouchEmulationEnabled', params: { enabled: true, maxTouchPoints: 5 }, sessionId },
+      ])
+    },
+  )
+
+  it('turns touch emulation back on right behind the screenshot command, and again once it is answered', async () => {
+    const screenshots: ReceivedCommand[] = []
+    const { browser, page } = await openPage({
+      handlers: {
+        'Page.getLayoutMetrics': layoutOf(375, 3000),
+        'Page.captureScreenshot': (command: ReceivedCommand) => {
+          screenshots.push(command)
+        },
+      },
+    })
+
+    await page.setViewport(touchViewport)
+
+    const sentBefore = browser.received.length
+    const capturing = page.capture('full-page')
+
+    await flushUntil(() => browser.timesReceived('Emulation.setTouchEmulationEnabled') === 2)
+    await flush()
+    expect(await hasSettled(capturing)).toBe(false)
+    expect(
+      sent(browser)
+        .slice(sentBefore)
+        .map((command) => command.method),
+    ).toEqual(['Page.getLayoutMetrics', 'Page.captureScreenshot', 'Emulation.setTouchEmulationEnabled'])
+
+    browser.reply(screenshots[0] as ReceivedCommand, { data: defaultCaptureData })
+    await capturing
+    expect(browser.timesReceived('Emulation.setTouchEmulationEnabled')).toBe(3)
+  })
+
+  it('turns touch emulation on again only once the one sent behind the screenshot is answered too', async () => {
+    const held: ReceivedCommand[] = []
+    const { browser, page } = await openPage({
+      handlers: {
+        'Page.getLayoutMetrics': layoutOf(375, 3000),
+        'Emulation.setTouchEmulationEnabled': (command: ReceivedCommand, fake: FakeBrowser) => {
+          if (fake.timesReceived('Emulation.setTouchEmulationEnabled') === 2) {
+            held.push(command)
+          } else {
+            fake.reply(command, {})
+          }
+        },
+      },
+    })
+
+    await page.setViewport(touchViewport)
+
+    const capturing = page.capture('full-page')
+
+    await flushUntil(() => held.length === 1 && browser.timesReceived('Page.captureScreenshot') === 1)
+    await flush()
+    expect(browser.timesReceived('Emulation.setTouchEmulationEnabled')).toBe(2)
+    expect(await hasSettled(capturing)).toBe(false)
+
+    browser.reply(held[0] as ReceivedCommand, {})
+    await capturing
+    expect(browser.timesReceived('Emulation.setTouchEmulationEnabled')).toBe(3)
+  })
+
+  it("turns touch emulation back on around a box's capture too", async () => {
+    const { browser, page } = await openPage()
+
+    await page.setViewport(touchViewport)
+
+    const sentBefore = browser.received.length
+
+    await page.capture({ x: 0, y: 100, width: 320, height: 48 })
+    expect(sent(browser).slice(sentBefore)).toEqual([
+      captureCommand({ x: 0, y: 100, width: 320, height: 48 }),
+      { method: 'Emulation.setTouchEmulationEnabled', params: { enabled: true, maxTouchPoints: 5 }, sessionId },
+      { method: 'Emulation.setTouchEmulationEnabled', params: { enabled: true, maxTouchPoints: 5 }, sessionId },
+    ])
+  })
+
+  it("checks the size at a touch viewport's scale before sending anything for the capture", async () => {
+    const { browser, page } = await openPage({ handlers: { 'Page.getLayoutMetrics': layoutOf(375, 16_384) } })
+
+    await page.setViewport(touchViewport)
+
+    const sentBefore = browser.received.length
+
+    await expect(page.capture('full-page')).rejects.toMatchObject({
+      name: 'CaptureTooLargeError',
+      deviceWidth: 750,
+      deviceHeight: 32_768,
+    })
+    expect(sent(browser).slice(sentBefore)).toEqual([{ method: 'Page.getLayoutMetrics', params: {}, sessionId }])
+  })
+
+  it('sends nothing after the screenshot for a viewport without touch', async () => {
+    const { browser, page } = await openPage({
+      handlers: { 'Page.getLayoutMetrics': layoutOf(375, 3000) },
+    })
+
+    await page.setViewport({ width: 375, height: 667, deviceScaleFactor: 2, touch: false })
+
+    const sentBefore = browser.received.length
+
+    await page.capture('full-page')
+
+    const methods = sent(browser)
+      .slice(sentBefore)
+      .map((command) => command.method)
+
+    expect(methods).toEqual(['Page.getLayoutMetrics', 'Page.captureScreenshot'])
+  })
+
+  it('sends nothing after the screenshot once a viewport without touch replaced a touch one', async () => {
+    const { browser, page } = await openPage({
+      handlers: { 'Page.getLayoutMetrics': layoutOf(375, 3000) },
+    })
+
+    await page.setViewport(touchViewport)
+    await page.setViewport({ ...touchViewport, touch: false })
+
+    const sentBefore = browser.received.length
+
+    await page.capture('full-page')
+
+    const methods = sent(browser)
+      .slice(sentBefore)
+      .map((command) => command.method)
+
+    expect(methods).toEqual(['Page.getLayoutMetrics', 'Page.captureScreenshot'])
+  })
+
+  it('sends nothing after the screenshot before any viewport is set', async () => {
+    const { browser, page } = await openPage()
+
+    await page.capture('full-page')
+    expect(sentOf(browser, 'Emulation.setTouchEmulationEnabled')).toEqual([])
+  })
+
+  it.each([
+    ['behind the screenshot', 2],
+    ['after the screenshot', 3],
+  ])('fails when the browser fails to turn touch emulation back on %s', async (_when, failingTime) => {
+    const { page } = await openPage({
+      handlers: {
+        'Page.getLayoutMetrics': layoutOf(375, 3000),
+        'Emulation.setTouchEmulationEnabled': (command: ReceivedCommand, fake: FakeBrowser) =>
+          fake.timesReceived('Emulation.setTouchEmulationEnabled') === failingTime
+            ? fake.fail(command, -32602, 'Touch points must be between 1 and 16')
+            : fake.reply(command, {}),
+      },
+    })
+
+    await page.setViewport(touchViewport)
+    await expect(page.capture('full-page')).rejects.toThrow('Touch points must be between 1 and 16')
+  })
+
+  it.each([
+    ['behind the screenshot', 2],
+    ['after the screenshot', 3],
+  ])(
+    'fails with a PageTimeoutError when the browser stays silent on turning touch emulation back on %s',
+    async (_when, silentTime) => {
+      const { browser, page } = await openPage({
+        handlers: {
+          'Page.getLayoutMetrics': layoutOf(375, 3000),
+          'Emulation.setTouchEmulationEnabled': (command: ReceivedCommand, fake: FakeBrowser) => {
+            if (fake.timesReceived('Emulation.setTouchEmulationEnabled') !== silentTime) {
+              fake.reply(command, {})
+            }
+          },
+        },
+      })
+
+      await page.setViewport(touchViewport)
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+
+      const capturing = page.capture('full-page')
+      const failure = expect(capturing).rejects.toEqual(
+        new PageTimeoutError("The page wasn't captured within 30 s.", 30_000),
+      )
+
+      await flushUntil(() => browser.timesReceived('Emulation.setTouchEmulationEnabled') === silentTime)
+      await vi.advanceTimersByTimeAsync(30_000)
+      await failure
+    },
+  )
 
   it("fails when the browser's layout answer has no content size", async () => {
     const { page } = await openPage({
@@ -1060,7 +1308,7 @@ describe('Page.capture', () => {
   it('fails with a CaptureTooLargeError, sending no capture, when the full page is over 32,767 device pixels tall', async () => {
     const { browser, page } = await openPage({ handlers: { 'Page.getLayoutMetrics': layoutOf(1280, 16_384) } })
 
-    await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 2 })
+    await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 2, touch: false })
 
     const failure = await page.capture('full-page').catch((error: unknown) => error)
 
@@ -1076,7 +1324,7 @@ describe('Page.capture', () => {
   it("captures a full page up to 32,767 device pixels tall at the viewport's scale", async () => {
     const { browser, page } = await openPage({ handlers: { 'Page.getLayoutMetrics': layoutOf(1280, 16_383) } })
 
-    await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 2 })
+    await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 2, touch: false })
     await page.capture('full-page')
     expect(sentOf(browser, 'Page.captureScreenshot')).toEqual([
       captureCommand({ x: 0, y: 0, width: 1280, height: 16_383 }),
@@ -1100,7 +1348,7 @@ describe('Page.capture', () => {
   it('rounds the device pixels up at a fractional scale', async () => {
     const { page } = await openPage()
 
-    await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1.5 })
+    await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1.5, touch: false })
     await expect(page.capture({ x: 0, y: 0, width: 21_845, height: 1 })).rejects.toMatchObject({
       deviceWidth: 32_768,
       deviceHeight: 2,
@@ -1250,7 +1498,7 @@ describe('Page.clearStorage', () => {
 /**
  * The viewport the tests set.
  */
-const viewport = { width: 1280, height: 720, deviceScaleFactor: 1 }
+const viewport = { width: 1280, height: 720, deviceScaleFactor: 1, touch: false }
 
 /**
  * Each page call, with the method it is in flight on, as the tests run them after a goto.
@@ -1661,6 +1909,22 @@ describe('when the page crashes', () => {
     expect(sentOf(browser, 'Page.captureScreenshot')).toEqual([])
   })
 
+  it('fails a capture and sends no touch emulation after the screenshot when the page crashes on its answer', async () => {
+    const { browser, page } = await openPage({
+      handlers: {
+        'Page.captureScreenshot': (command: ReceivedCommand, fake: FakeBrowser) => {
+          fake.emit('Inspector.targetCrashed', {}, sessionId)
+          fake.reply(command, { data: defaultCaptureData })
+        },
+      },
+    })
+
+    await page.setViewport(touchViewport)
+    await expect(page.capture('full-page')).rejects.toMatchObject({ name: 'PageCrashedError' })
+    await flush()
+    expect(sentOf(browser, 'Emulation.setTouchEmulationEnabled')).toHaveLength(2)
+  })
+
   it('fails a goto in flight and every later call at once with a PageCrashedError', async () => {
     const { browser, page } = await openPage({
       handlers: {
@@ -1671,7 +1935,7 @@ describe('when the page crashes', () => {
 
     await expect(page.goto(storyUrl, 60_000)).rejects.toMatchObject({ name: 'PageCrashedError' })
     await expect(page.evaluate('1', 60_000)).rejects.toMatchObject({ name: 'PageCrashedError' })
-    await expect(page.setViewport({ width: 1, height: 1, deviceScaleFactor: 1 })).rejects.toMatchObject({
+    await expect(page.setViewport({ width: 1, height: 1, deviceScaleFactor: 1, touch: false })).rejects.toMatchObject({
       name: 'PageCrashedError',
     })
     await expect(page.capture('full-page')).rejects.toMatchObject({ name: 'PageCrashedError' })

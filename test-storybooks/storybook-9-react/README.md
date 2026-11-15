@@ -1,6 +1,6 @@
 # @visual-check/test-storybook-9-react
 
-One of this repo's own test Storybooks ([PRD 18](../../docs/prd/18-repo-ci.md#this-repos-own-test-storybooks)): a private React Storybook on Storybook 9.1, with its committed baselines in `.visual-check/baselines/` and the expected outcome of every story in `expected-outcomes.json`. It's on Vite 7, the newest Vite that Storybook 9.1 supports.
+One of this repo's own test Storybooks ([PRD 18](../../docs/prd/18-repo-ci.md#this-repos-own-test-storybooks)): a private React Storybook on Storybook 9.1, with its committed baselines in `.visual-check/baselines/` and the expected outcome of every snapshot, modes included, in `expected-outcomes.json`. It's on Vite 7, the newest Vite that Storybook 9.1 supports.
 
 It has no stories of its own. It reads the stories of the [Storybook 10 test Storybook](../storybook-10-react/README.md), takes its config from that package's `.storybook/test-storybook-config.ts`, and runs that package's `e2e.ts` from its own folder, so the check's cases are the ones that README lists.
 

@@ -4,13 +4,23 @@ import { basename, dirname, join } from 'node:path'
 import { BaselineError } from './baseline-error.js'
 
 /**
- * Gives the path of the baseline of a story's default capture: `<story-id>.png` in the Storybook's baselines folder.
- * The default capture's key is the story ID, with no mode part.
+ * Gives a snapshot's key, which names its baseline: `<story-id>` for a story's default capture, which has no mode
+ * part, and `<story-id>.<mode>` for one of its modes.
  *
  * @public
  */
-export function baselinePathOf(baselinesFolder: string, storyId: string): string {
-  return join(baselinesFolder, `${storyId}.png`)
+export function snapshotKeyOf(storyId: string, mode?: string): string {
+  return mode === undefined ? storyId : `${storyId}.${mode}`
+}
+
+/**
+ * Gives the path of a snapshot's baseline: `<key>.png` in the Storybook's baselines folder. The key is `<story-id>` for
+ * a story's default capture and `<story-id>.<mode>` for one of its modes.
+ *
+ * @public
+ */
+export function baselinePathOf(baselinesFolder: string, key: string): string {
+  return join(baselinesFolder, `${key}.png`)
 }
 
 /**

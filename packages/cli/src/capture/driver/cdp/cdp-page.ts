@@ -28,6 +28,11 @@ const commandTimeLimitMs = 30_000
 const disposeTimeLimitMs = 5_000
 
 /**
+ * How many touch points a touch viewport's page reports, as `navigator.maxTouchPoints`, like a phone.
+ */
+const maxTouchPoints = 5
+
+/**
  * Reads a string field the browser's answer must carry. Throws, naming the method and the field, when it's missing.
  */
 function readString(reply: Record<string, unknown>, field: string, method: string): string {
@@ -257,11 +262,6 @@ class CdpPage implements Page {
   private closing: Promise<void> | undefined
 
   /**
-   * The device scale factor of the viewport the last `setViewport` set, or 1 before any.
-   */
-  private deviceScaleFactor = 1
-
-  /**
    * The origin of the document the main frame last committed since the last `goto` started, such as
    * `http://127.0.0.1:6006`. Once that `goto` has loaded, it is the `goto`'s own document's, wherever a server redirect
    * took it: an earlier navigation's late commit, which the `goto` ignores, such as a failed navigation's error page,
@@ -285,6 +285,12 @@ class CdpPage implements Page {
    * as a failed navigation's error page that commits late.
    */
   private readonly loaderIds = new Set<string>()
+
+  /**
+   * The viewport the page last set successfully, or undefined before `setViewport` has set one. Unchanged when setting
+   * one fails, since the caller then replaces the page.
+   */
+  private viewport: PageViewport | undefined
 
   /**
    * Watches the page's session for a crash, a detach, its main frame's navigations and its dialogs, the browser for its
@@ -337,27 +343,32 @@ class CdpPage implements Page {
   }
 
   /**
-   * Overrides the device metrics with the viewport, which also serves as the screen size, and keeps its device scale
-   * factor once the browser has taken it, to size captures in device pixels.
+   * Overrides the device metrics with the viewport, which also serves as the screen size, and turns touch emulation on
+   * or off with it. A touch viewport is a mobile one too. The page is reused across captures, so both are set either
+   * way. The commands go in parallel. Keeps the viewport once the browser has taken it, so captures are sized in its
+   * device pixels and a touch viewport's emulation holds in them.
    */
   async setViewport(viewport: PageViewport): Promise<void> {
     this.throwIfFailed()
 
-    const { width, height, deviceScaleFactor } = viewport
+    const { width, height, deviceScaleFactor, touch } = viewport
 
     await this.guarded(
-      this.send('Emulation.setDeviceMetricsOverride', {
-        width,
-        height,
-        deviceScaleFactor,
-        mobile: false,
-        screenWidth: width,
-        screenHeight: height,
-      }),
+      Promise.all([
+        this.send('Emulation.setDeviceMetricsOverride', {
+          width,
+          height,
+          deviceScaleFactor,
+          mobile: touch,
+          screenWidth: width,
+          screenHeight: height,
+        }),
+        this.setTouchEmulation(touch),
+      ]),
       commandTimeLimitMs,
       `The page didn't set its viewport within ${commandTimeLimitMs / 1000} s.`,
     )
-    this.deviceScaleFactor = deviceScaleFactor
+    this.viewport = viewport
   }
 
   /**
@@ -413,8 +424,9 @@ class CdpPage implements Page {
 
   /**
    * Captures the area as PNG, beyond the viewport, and resolves with the bytes as the browser sent them. The full page
-   * is the layout viewport's width by the content's height. A capture over 32,767 device pixels on a side fails with a
-   * `CaptureTooLargeError` before the browser is asked for it.
+   * is the layout viewport's width by the content's height. A touch viewport's emulation holds in the capture and is
+   * still on afterwards. A capture over 32,767 device pixels on a side fails with a `CaptureTooLargeError` before the
+   * browser is asked for it.
    */
   async capture(area: CaptureArea): Promise<Uint8Array> {
     this.throwIfFailed()
@@ -546,21 +558,47 @@ class CdpPage implements Page {
 
   /**
    * Captures the area: a box as given, or, for the full page, the box the layout gives. Checks its size in device
-   * pixels before asking the browser for it.
+   * pixels, with the last viewport's device scale factor, or 1 before any, before sending anything for it.
+   *
+   * A capture beyond the viewport, even one whose content fits it, swaps the page's web preferences for its own while
+   * it runs, and puts them back once it's done. Each swap resets the hover and pointer media that touch emulation
+   * sets. So for a touch viewport, touch emulation goes on again twice. First right behind the screenshot command,
+   * without waiting for its answer: Chromium 157 takes that in before it paints the capture, so the capture has no
+   * hover and a coarse pointer. The protocol doesn't promise that order, so check it again on a Chromium bump: the
+   * hover box in the e2e Modes stories shows a regression, as a hover style in a touch mode's snapshot. Then again
+   * once the capture is done. The next `setViewport` would turn it on anyway, but this keeps the page's contract: a
+   * touch viewport's emulation is still on after a capture, for later calls on the same page.
    */
   private async captureBox(area: CaptureArea): Promise<Uint8Array> {
     const box = area === 'full-page' ? readFullPageBox(await this.send('Page.getLayoutMetrics')) : area
 
     this.throwIfFailed()
-    checkCaptureSize(box, this.deviceScaleFactor)
+    checkCaptureSize(box, this.viewport?.deviceScaleFactor ?? 1)
 
-    const reply = await this.send('Page.captureScreenshot', {
-      format: 'png',
-      captureBeyondViewport: true,
-      clip: { x: box.x, y: box.y, width: box.width, height: box.height, scale: 1 },
-    })
+    const touch = this.viewport?.touch === true
+    const [reply] = await Promise.all([
+      this.send('Page.captureScreenshot', {
+        format: 'png',
+        captureBeyondViewport: true,
+        clip: { x: box.x, y: box.y, width: box.width, height: box.height, scale: 1 },
+      }),
+      ...(touch ? [this.setTouchEmulation(true)] : []),
+    ])
+
+    if (touch) {
+      this.throwIfFailed()
+      await this.setTouchEmulation(true)
+    }
 
     return Buffer.from(readString(reply, 'data', 'Page.captureScreenshot'), 'base64')
+  }
+
+  /**
+   * Turns touch emulation on, with as many touch points as a phone, or off. Chromium takes no touch points below 1, so
+   * they go only with `enabled`.
+   */
+  private setTouchEmulation(enabled: boolean): Promise<Record<string, unknown>> {
+    return this.send('Emulation.setTouchEmulationEnabled', enabled ? { enabled, maxTouchPoints } : { enabled })
   }
 
   /**

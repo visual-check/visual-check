@@ -20,7 +20,6 @@ import { assetsReadyExpression, endStateExpression, pageInitScript, prepareCaptu
  * The settings every session in these tests captures with.
  */
 const settings: CaptureSettings = {
-  viewport: { width: 1280, height: 720, deviceScaleFactor: 2 },
   readyTimeoutMs: 10_000,
   timezone: 'Europe/Warsaw',
   locale: 'pl-PL',
@@ -31,7 +30,11 @@ const settings: CaptureSettings = {
 /**
  * The story most tests capture.
  */
-const primary = { id: 'button--primary', url: 'http://localhost:6006/iframe.html?id=button--primary&viewMode=story' }
+const primary = {
+  id: 'button--primary',
+  url: 'http://localhost:6006/iframe.html?id=button--primary&viewMode=story',
+  viewport: { width: 1280, height: 720, deviceScaleFactor: 2, touch: false },
+}
 
 /**
  * Another story, for tests that capture twice.
@@ -39,6 +42,7 @@ const primary = { id: 'button--primary', url: 'http://localhost:6006/iframe.html
 const secondary = {
   id: 'button--secondary',
   url: 'http://localhost:6006/iframe.html?id=button--secondary&viewMode=story',
+  viewport: { width: 375, height: 667, deviceScaleFactor: 3, touch: true },
 }
 
 /**
@@ -103,7 +107,7 @@ describe('a capture', () => {
 
     await openCaptureSession(driver, settings).capture(primary)
     expect(driver.calls).toEqual([
-      { page: 1, method: 'setViewport', args: [{ width: 1280, height: 720, deviceScaleFactor: 2 }] },
+      { page: 1, method: 'setViewport', args: [{ width: 1280, height: 720, deviceScaleFactor: 2, touch: false }] },
       { page: 1, method: 'goto', args: [primary.url, 10_000] },
       { page: 1, method: 'evaluate', args: [storyWaitExpression('button--primary', 10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
@@ -125,6 +129,18 @@ describe('a capture', () => {
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [plainPrepExpression(10_000), 11_000] },
       { page: 1, method: 'capture', args: ['full-page'] },
+    ])
+  })
+
+  it("sets each story's own viewport", async () => {
+    const driver = new FakeDriver()
+    const session = openCaptureSession(driver, settings)
+
+    await session.capture(primary)
+    await session.capture(secondary)
+    expect(driver.calls.filter(({ method }) => method === 'setViewport').map(({ args }) => args)).toEqual([
+      [{ width: 1280, height: 720, deviceScaleFactor: 2, touch: false }],
+      [{ width: 375, height: 667, deviceScaleFactor: 3, touch: true }],
     ])
   })
 

@@ -21,8 +21,10 @@ import type { Tolerance, Viewport } from './define-config.js'
 
 /**
  * A mode's definition: the globals and the viewport it sets.
+ *
+ * @public
  */
-interface ModeDefinition {
+export interface ModeDefinition {
   /**
    * The Storybook globals the mode sets.
    */

@@ -171,13 +171,15 @@ function indexUrlOf(url: string): URL {
 type GlobalValue = string | number | boolean
 
 /**
- * What Storybook keeps of a global's key or string value in the URL. It drops any other character, with a warning.
+ * What Storybook keeps of a global's key or string value in the URL. It drops any other character, with a warning. The
+ * `config` module's mode rules check a mode's globals with the same pattern, and this module can't import it.
  */
 const urlSafeGlobalPattern = /^[a-zA-Z0-9 _-]*$/
 
 /**
  * What Storybook reads back from the URL as a number: digits with an optional leading `-` and an optional fraction. It
- * reads an exponent, such as `1e+21` or `1e-7`, as a string.
+ * reads an exponent, such as `1e+21` or `1e-7`, as a string. The `config` module's mode rules check a mode's globals
+ * with the same pattern, and this module can't import it.
  */
 const plainDecimalPattern = /^-?\d+(\.\d+)?$/
 

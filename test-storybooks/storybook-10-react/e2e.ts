@@ -303,6 +303,38 @@ const invalidOptions = {
 }
 
 /**
+ * The invalid-modes case: the story it asks for invalid modes, and for each way it asks, the script it adds to every
+ * `iframe.html`, which runs before Storybook imports any stories file, and what `test`'s message must name besides the
+ * story. `undeclared` lists a mode whose global Storybook doesn't declare, which only the globals the real Storybook
+ * reports can catch. `pinned` lists `dark` on a story that pins `theme` in its own `globals`.
+ */
+const invalidModes = {
+  storyId: 'modes--invalid-mode-when-asked',
+  asks: [
+    {
+      name: 'undeclared',
+      script: "<script>globalThis.__visualCheckE2eInvalidModes = 'undeclared'</script>",
+      texts: ['visualCheck.modes.e2e-undeclared.globals.e2eNever'],
+    },
+    {
+      name: 'pinned',
+      script: "<script>globalThis.__visualCheckE2eInvalidModes = 'pinned'</script>",
+      texts: ['visualCheck.modes.dark.globals.theme', 'pins'],
+    },
+  ],
+}
+
+/**
+ * What the committed-baselines case checks of the modes stories beyond their outcomes: the story that lists `dark` and
+ * `mobile` has exactly 3 lines, its default capture and one per mode, and the story with its own list of modes has no
+ * line for the meta's `dark`.
+ */
+const modeLines = {
+  darkAndMobile: { storyId: 'modes--dark-and-mobile', count: 3 },
+  ownModesOnly: { storyId: 'modes--own-modes-only', absentMode: 'dark' },
+}
+
+/**
  * The header's count of the snapshots a run takes.
  */
 const headerCountPattern = /^visual-check \S+ · \S+ · (\d+) snapshots? · /m
@@ -347,9 +379,10 @@ const browserExits = {
 }
 
 /**
- * Each mark a snapshot line starts with, then the Storybook, the story ID and the detail, separated by two spaces.
+ * Each mark a snapshot line starts with, then the Storybook, the story ID, the mode for a mode's snapshot and the
+ * detail, separated by two spaces. A mode's name takes lowercase letters, digits and -.
  */
-const snapshotLinePattern = /^[✓✗!] \S+ {2}(\S+) {2}(.+)$/
+const snapshotLinePattern = /^[✓✗!] \S+ {2}(\S+)(?: {2}([a-z0-9-]+))? {2}(.+)$/
 
 /**
  * The detail each outcome's line ends with.
@@ -427,15 +460,23 @@ interface StorybookServer {
  */
 interface SnapshotLine {
   /**
+   * The snapshot's key: the story ID for the story's default capture, `<story-id>.<mode>` for a mode's snapshot.
+   */
+  key: string
+  /**
    * The story's ID.
    */
   storyId: string
+  /**
+   * The mode the snapshot is of, or `undefined` for the story's default capture.
+   */
+  mode: string | undefined
   /**
    * The outcome the line gives.
    */
   outcome: Outcome
   /**
-   * What the line says after the story ID, such as `120 ms` or `broken: ` and why.
+   * What the line says after the story ID and the mode, such as `120 ms` or `broken: ` and why.
    */
   detail: string
 }
@@ -469,7 +510,7 @@ interface CliRun {
    */
   snapshots: SnapshotLine[]
   /**
-   * Each snapshot line's outcome, by story ID.
+   * Each snapshot line's outcome, by snapshot key.
    */
   outcomes: Outcomes
 }
@@ -909,7 +950,7 @@ function parseSnapshots(stdout: string): SnapshotLine[] {
 }
 
 /**
- * Reads a snapshot line's story ID, outcome and detail. Any other line gives nothing.
+ * Reads a snapshot line's key, story ID, mode, outcome and detail. Any other line gives nothing.
  *
  * @throws {Error} When a snapshot line ends in a detail no outcome has.
  */
@@ -920,14 +961,22 @@ function snapshotOf(line: string): SnapshotLine[] {
     return []
   }
 
-  const [, storyId = '', detail = ''] = match
+  const [, storyId = '', mode, detail = ''] = match
   const outcome = outcomeDetails.find(([, pattern]) => pattern.test(detail))?.[0]
 
   if (outcome === undefined) {
     throw new Error(`The CLI printed a snapshot line with no known outcome: ${line}`)
   }
 
-  return [{ storyId, outcome, detail }]
+  return [{ key: snapshotKeyOf(storyId, mode), storyId, mode, outcome, detail }]
+}
+
+/**
+ * The key of a story's snapshot: the story ID for its default capture, `<story-id>.<mode>` for a mode's snapshot. It
+ * mirrors the CLI's key (docs/prd/10-baselines-and-update.md › File names), which the e2e can't import.
+ */
+function snapshotKeyOf(storyId: string, mode: string | undefined): string {
+  return mode === undefined ? storyId : `${storyId}.${mode}`
 }
 
 /**
@@ -944,7 +993,7 @@ async function runCli(args: string[], env: NodeJS.ProcessEnv = process.env): Pro
  */
 function cliRunOf(stdout: string, ended: Omit<CliRun, 'stdout' | 'snapshots' | 'outcomes'>): CliRun {
   const snapshots = parseSnapshots(stdout)
-  const outcomes = Object.fromEntries(snapshots.map((snapshot) => [snapshot.storyId, snapshot.outcome]))
+  const outcomes = Object.fromEntries(snapshots.map((snapshot) => [snapshot.key, snapshot.outcome]))
 
   return { ...ended, stdout, snapshots, outcomes }
 }
@@ -1016,16 +1065,16 @@ function outputOf(stderr: string): string {
 }
 
 /**
- * Lists every story whose outcome isn't the expected one, including stories only one side has.
+ * Lists every snapshot whose outcome isn't the expected one, by key, including snapshots only one side has.
  */
 function outcomeProblems(command: string, actual: Outcomes, expected: Outcomes): string[] {
-  const storyIds = [...new Set([...Object.keys(expected), ...Object.keys(actual)])].sort()
+  const keys = [...new Set([...Object.keys(expected), ...Object.keys(actual)])].sort()
 
-  return storyIds
-    .filter((storyId) => actual[storyId] !== expected[storyId])
+  return keys
+    .filter((key) => actual[key] !== expected[key])
     .map(
-      (storyId) =>
-        `${command}: ${storyId} is ${actual[storyId] ?? 'not in the run'}, expected ${expected[storyId] ?? 'no such story'}`,
+      (key) =>
+        `${command}: ${key} is ${actual[key] ?? 'not in the run'}, expected ${expected[key] ?? 'no such snapshot'}`,
     )
 }
 
@@ -1037,10 +1086,10 @@ function exitCodeOf(outcomes: Outcomes): number {
 }
 
 /**
- * Changes each story's outcome with `change`, which gets the outcome and the story's ID.
+ * Changes each snapshot's outcome with `change`, which gets the outcome and the snapshot's key.
  */
-function mapOutcomes(outcomes: Outcomes, change: (outcome: Outcome, storyId: string) => Outcome): Outcomes {
-  return Object.fromEntries(Object.entries(outcomes).map(([storyId, outcome]) => [storyId, change(outcome, storyId)]))
+function mapOutcomes(outcomes: Outcomes, change: (outcome: Outcome, key: string) => Outcome): Outcomes {
+  return Object.fromEntries(Object.entries(outcomes).map(([key, outcome]) => [key, change(outcome, key)]))
 }
 
 /**
@@ -1056,12 +1105,12 @@ function updateOutcomeOf(outcome: Outcome): Outcome {
  * story has no baseline, so it's missing, because `test` never captures a story without one, and any other passes.
  * The stories of the stories file that fails to load stay broken, since they're broken before any baseline is read.
  */
-function retestOutcomeOf(outcome: Outcome, storyId: string): Outcome {
+function retestOutcomeOf(outcome: Outcome, key: string): Outcome {
   if (outcome !== 'broken') {
     return 'passed'
   }
 
-  return loadFailsFilter.test(storyId) ? 'broken' : 'missing'
+  return loadFailsFilter.test(key) ? 'broken' : 'missing'
 }
 
 /**
@@ -1072,12 +1121,12 @@ function isSameFile(path: string, otherPath: string): boolean {
 }
 
 /**
- * Lists the written baselines of these stories that aren't byte-identical to the committed ones. When there are any, it
- * copies every written baseline to the diagnostics folder and names it.
+ * Lists the written baselines of these snapshots, by key, that aren't byte-identical to the committed ones. When there
+ * are any, it copies every written baseline to the diagnostics folder and names it.
  */
-function baselineProblems(written: string, storyIds: string[]): string[] {
-  const differing = storyIds
-    .map((storyId) => `${storyId}.png`)
+function baselineProblems(written: string, keys: string[]): string[] {
+  const differing = keys
+    .map((key) => `${key}.png`)
     .filter((name) => !isSameFile(join(written, name), join(committedBaselines, name)))
 
   if (differing.length === 0) {
@@ -1211,8 +1260,9 @@ async function waitUntil(condition: () => boolean, timeoutMilliseconds: number):
  * `test` against the committed baselines, with 2 workers, gives exactly the expected outcomes. Each broken readiness,
  * per-story options and capture area story's line says why, and standard error has no test-path warning, since every
  * page is on Storybook's test path. The disabled stories, which `index.json` lists, have no line, and the header
- * counts exactly the stories with an expected outcome. Outside the Storybook 10 test Storybook, the committed
- * animation baselines are byte-identical to its own.
+ * counts exactly the snapshots with an expected outcome, the modes' included. The story that lists `dark` and `mobile`
+ * has exactly 3 lines, and the story with its own list of modes has no line for the meta's `dark`. Outside the
+ * Storybook 10 test Storybook, the committed animation baselines are byte-identical to its own.
  */
 async function checkCommittedBaselines(expected: Outcomes): Promise<string[]> {
   return await withStorybookServer({}, async (server) => {
@@ -1227,8 +1277,33 @@ async function checkCommittedBaselines(expected: Outcomes): Promise<string[]> {
       ...storybook10AnimationProblems(),
       ...disabledStoryProblems(run),
       ...headerCountProblems(run, Object.keys(expected).length),
+      ...lineCountProblems(run, modeLines.darkAndMobile.storyId, modeLines.darkAndMobile.count),
+      ...absentModeProblems(run, modeLines.ownModesOnly.storyId, modeLines.ownModesOnly.absentMode),
     ]
   })
+}
+
+/**
+ * Gives the problem when a story doesn't have this many snapshot lines, its default capture's and its modes', or none
+ * when it does.
+ */
+function lineCountProblems(run: CliRun, storyId: string, count: number): string[] {
+  const lines = run.snapshots.filter((snapshot) => snapshot.storyId === storyId)
+
+  return lines.length === count
+    ? []
+    : [
+        `test printed ${lines.length} lines for ${storyId}, expected ${count}: ${lines.map(({ key }) => key).join(', ')}`,
+      ]
+}
+
+/**
+ * Gives the problem when a story has a snapshot line for this mode, or none when it hasn't.
+ */
+function absentModeProblems(run: CliRun, storyId: string, mode: string): string[] {
+  return run.snapshots.some((snapshot) => snapshot.storyId === storyId && snapshot.mode === mode)
+    ? [`test printed a line for ${snapshotKeyOf(storyId, mode)}, which the story's own modes leave out`]
+    : []
 }
 
 /**
@@ -1365,7 +1440,7 @@ async function checkUpdateThenTest(expected: Outcomes): Promise<string[]> {
         return updateProblems
       }
 
-      const passing = Object.keys(expected).filter((storyId) => expected[storyId] === 'passed')
+      const passing = Object.keys(expected).filter((key) => expected[key] === 'passed')
 
       return [
         ...baselineProblems(baselines, passing),
@@ -1405,18 +1480,18 @@ async function checkStorageClearing(expected: Outcomes): Promise<string[]> {
 }
 
 /**
- * Keeps the expected outcomes of the stories whose ID matches the pattern.
+ * Keeps the expected outcomes of the snapshots whose key matches the pattern.
  */
 function outcomesMatching(expected: Outcomes, pattern: RegExp): Outcomes {
-  return Object.fromEntries(Object.entries(expected).filter(([storyId]) => pattern.test(storyId)))
+  return Object.fromEntries(Object.entries(expected).filter(([key]) => pattern.test(key)))
 }
 
 /**
- * Gives the problem with a story's snapshot line when it doesn't say `text`, or none when it does or the run has no
- * line for the story, which the outcome check reports.
+ * Gives the problem with the snapshot line of a story's default capture when it doesn't say `text`, or none when it
+ * does or the run has no line for it, which the outcome check reports.
  */
 function lineSaysProblems(run: CliRun, storyId: string, text: string): string[] {
-  const line = run.snapshots.find((snapshot) => snapshot.storyId === storyId)
+  const line = run.snapshots.find((snapshot) => snapshot.key === storyId)
 
   return line === undefined || line.detail.includes(text)
     ? []
@@ -1442,7 +1517,7 @@ function navigatedAwayProblems(run: CliRun, server: StorybookServer): string[] {
  * passed or the run has no line for the story, which the outcome check reports.
  */
 function followedByPassProblems(run: CliRun, storyId: string): string[] {
-  const index = run.snapshots.findIndex((snapshot) => snapshot.storyId === storyId)
+  const index = run.snapshots.findIndex((snapshot) => snapshot.key === storyId)
 
   return index === -1 ? [] : passedAfterProblems(storyId, run.snapshots[index + 1])
 }
@@ -1458,7 +1533,7 @@ function passedAfterProblems(storyId: string, next: SnapshotLine | undefined): s
 
   return next.outcome === 'passed'
     ? []
-    : [`test: ${next.storyId}, the story after ${storyId}, is ${next.outcome}, expected passed`]
+    : [`test: ${next.key}, the snapshot after ${storyId}, is ${next.outcome}, expected passed`]
 }
 
 /**
@@ -1580,12 +1655,37 @@ async function testWithPlatform(
  * before any capture, its message naming the story and the key, and prints nothing on standard output.
  */
 async function checkInvalidOptions(): Promise<string[]> {
-  return await withStorybookServer({ injectIntoIframe: invalidOptions.script }, async (server) => {
+  return await checkRejectedBeforeCapture(invalidOptions.script, [invalidOptions.storyId, invalidOptions.key])
+}
+
+/**
+ * For each way the invalid-modes case asks `InvalidModeWhenAsked` for invalid modes, in turn, `test` exits 2 before
+ * any capture, its message naming the story and the key, and prints nothing on standard output, so no snapshot line.
+ * Each problem starts with the way it asked.
+ */
+async function checkInvalidModes(): Promise<string[]> {
+  const problems: string[] = []
+
+  for (const { name, script, texts } of invalidModes.asks) {
+    const asked = await checkRejectedBeforeCapture(script, [invalidModes.storyId, ...texts])
+
+    problems.push(...asked.map((problem) => `${name}: ${problem}`))
+  }
+
+  return problems
+}
+
+/**
+ * With this markup in every page of the Storybook, `test` exits 2 before any capture, its message holding each of the
+ * texts, and prints nothing on standard output.
+ */
+async function checkRejectedBeforeCapture(markup: string, texts: string[]): Promise<string[]> {
+  return await withStorybookServer({ injectIntoIframe: markup }, async (server) => {
     const run = await runCli(['test', '--all', '--url', server.url])
 
     return [
       ...exitCodeProblems('test', run, 2),
-      ...missingTextProblems(run.stderr, [invalidOptions.storyId, invalidOptions.key]),
+      ...missingTextProblems(run.stderr, texts),
       ...(run.stdout === '' ? [] : [`test printed on standard output: ${run.stdout.trim()}`]),
       ...capturedProblems(server),
     ]
@@ -1995,7 +2095,7 @@ if (setupProblems.length > 0) {
   const expected = JSON.parse(readFileSync(join(packageDir, 'expected-outcomes.json'), 'utf8')) as Outcomes
   const passed = await runCases([
     {
-      name: "committed baselines: test gives the expected outcomes, each broken readiness, per-story options and capture area story's line says why, no line for a disabled story, the header counts the expected outcomes, no test-path warning, the animation baselines are byte-identical to storybook-10-react's",
+      name: "committed baselines: test gives the expected outcomes, each broken readiness, per-story options and capture area story's line says why, no line for a disabled story, the header counts the expected outcomes, a story listing two modes has 3 lines, a story's own modes leave out the meta's, no test-path warning, the animation baselines are byte-identical to storybook-10-react's",
       run: () => checkCommittedBaselines(expected),
     },
     {
@@ -2029,6 +2129,10 @@ if (setupProblems.length > 0) {
     {
       name: 'invalid per-story options: test exits 2 naming the story and the key, before any capture',
       run: checkInvalidOptions,
+    },
+    {
+      name: 'invalid modes: test exits 2 naming the story and the key, for an undeclared global and a pinned one, before any capture',
+      run: checkInvalidModes,
     },
     ...(insideImage ? insideImageCases(expected) : outsideImageCases(expected)),
   ])
