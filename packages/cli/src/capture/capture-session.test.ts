@@ -18,7 +18,7 @@ import { assetsReadyExpression, pageInitScript } from './page-script.js'
  * The settings every session in these tests captures with.
  */
 const settings: CaptureSettings = {
-  viewport: { width: 1280, height: 720, deviceScaleFactor: 2 },
+  viewport: { width: 1280, height: 720, deviceScaleFactor: 2, touch: false },
   readyTimeoutMs: 10_000,
   timezone: 'Europe/Warsaw',
   locale: 'pl-PL',
@@ -93,7 +93,7 @@ describe('a capture', () => {
 
     await openCaptureSession(driver, settings).capture(primary)
     expect(driver.calls).toEqual([
-      { page: 1, method: 'setViewport', args: [{ width: 1280, height: 720, deviceScaleFactor: 2 }] },
+      { page: 1, method: 'setViewport', args: [{ width: 1280, height: 720, deviceScaleFactor: 2, touch: false }] },
       { page: 1, method: 'goto', args: [primary.url, 10_000] },
       { page: 1, method: 'evaluate', args: [storyWaitExpression('button--primary', 10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },

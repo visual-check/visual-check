@@ -191,7 +191,7 @@ function runBrowserWith(...browsers: (FakeBrowser | Promise<FakeBrowser> | Error
       place: { in: 'image' },
       environment: {},
       settings: {
-        viewport: { width: 1280, height: 720, deviceScaleFactor: 1 },
+        viewport: { width: 1280, height: 720, deviceScaleFactor: 1, touch: false },
         readyTimeoutMs: 15_000,
         timezone: 'UTC',
         locale: 'en-US',

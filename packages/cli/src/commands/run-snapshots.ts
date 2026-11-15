@@ -205,10 +205,8 @@ function headerOf(run: SnapshotRun, count: number): string {
  * Builds the session's settings from the config.
  */
 function captureSettingsOf(config: ResolvedConfig): CaptureSettings {
-  const { width, height, deviceScaleFactor } = config.viewport
-
   return {
-    viewport: { width, height, deviceScaleFactor },
+    viewport: config.viewport,
     readyTimeoutMs: config.readyTimeout,
     timezone: config.timezone,
     locale: config.locale,

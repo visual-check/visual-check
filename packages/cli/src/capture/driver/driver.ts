@@ -141,6 +141,11 @@ export interface PageViewport {
    * How many device pixels make one CSS pixel.
    */
   deviceScaleFactor: number
+  /**
+   * Turns on touch and mobile emulation together: the page's viewport meta tag applies, no hover, a coarse pointer and
+   * overlay scrollbars.
+   */
+  touch: boolean
 }
 
 /**
@@ -179,8 +184,8 @@ export interface PageViewport {
  */
 export interface Page {
   /**
-   * Sets the size the page lays out and renders at. Fails with a `PageTimeoutError` when the browser doesn't answer
-   * within the driver's own fixed limit.
+   * Sets the size the page lays out and renders at, and turns touch and mobile emulation on or off as the viewport
+   * says. Fails with a `PageTimeoutError` when the browser doesn't answer within the driver's own fixed limit.
    */
   setViewport: (viewport: PageViewport) => Promise<void>
   /**
@@ -199,7 +204,8 @@ export interface Page {
   evaluate: (expression: string, timeoutMs: number) => Promise<unknown>
   /**
    * Captures the whole page, beyond the viewport too, without resizing the viewport. Resolves with the PNG bytes exactly
-   * as the browser made them. Fails with a `PageTimeoutError` when the browser doesn't answer within the driver's own
+   * as the browser made them. A touch viewport's emulation holds in the capture, with no hover and a coarse pointer,
+   * and is still on afterwards. Fails with a `PageTimeoutError` when the browser doesn't answer within the driver's own
    * fixed limit.
    */
   captureFullPage: () => Promise<Uint8Array>

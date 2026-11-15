@@ -11,7 +11,7 @@ import { type OptionsRequest, readStoryOptions } from './read-options.js'
  * The settings every read runs with.
  */
 const settings: CaptureSettings = {
-  viewport: { width: 1280, height: 720, deviceScaleFactor: 1 },
+  viewport: { width: 1280, height: 720, deviceScaleFactor: 1, touch: false },
   readyTimeoutMs: 15_000,
   timezone: 'Europe/Warsaw',
   locale: 'pl-PL',

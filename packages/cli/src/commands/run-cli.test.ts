@@ -1848,13 +1848,13 @@ describe('runCli launching the browser', () => {
     const { project } = await createRun(
       ['a'],
       {},
-      "viewport: { width: 800, height: 600, deviceScaleFactor: 2 }, timezone: 'Europe/Warsaw', locale: 'pl-PL', colorScheme: 'dark'",
+      "viewport: { width: 800, height: 600, deviceScaleFactor: 2, touch: true }, timezone: 'Europe/Warsaw', locale: 'pl-PL', colorScheme: 'dark'",
     )
     const { options, record } = fakeBrowser()
 
     await runCli(['update'], {}, project, options)
 
-    expect(record.viewports).toEqual([{ width: 800, height: 600, deviceScaleFactor: 2 }])
+    expect(record.viewports).toEqual([{ width: 800, height: 600, deviceScaleFactor: 2, touch: true }])
     expect(record.setups).toMatchObject([
       { timezone: 'Europe/Warsaw', locale: 'pl-PL', colorScheme: 'dark' },
       { timezone: 'Europe/Warsaw', locale: 'pl-PL', colorScheme: 'dark' },
