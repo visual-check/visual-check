@@ -134,7 +134,7 @@ A broken story counts toward exit 1, and the run goes on. Errors and timeouts ar
 - Remote content is what a story shows from another origin:
   - images: `<img>`, `<picture>` and `srcset`, SVG `<image>`, video posters, and CSS images (`background-image`, `mask-image`, `border-image`, `content: url()`), pseudo-elements included;
   - cross-origin iframes, as their whole rectangle.
-- Same-origin iframes are searched too, and their boxes are clipped to the frame. A cross-origin iframe counts as its whole box, by the host of its `src`. `data:` and `blob:` URLs, responses a service worker mocked, and fonts don't count.
+- Every shadow root is searched, closed ones included. Same-origin iframes are searched too, their closed shadow roots included, and their boxes are clipped to the frame. A cross-origin iframe counts as its whole box, by the host of its `src`. `data:` and `blob:` URLs, responses a service worker mocked, and fonts don't count.
 - What the search counts:
   - an element whose `visibility` isn't `visible` shows no remote content;
   - `list-style-image` counts as a CSS image;
@@ -143,7 +143,7 @@ A broken story counts toward exit 1, and the run goes on. Errors and timeouts ar
   - an ancestor's `overflow` doesn't clip what the search finds.
 - **Service worker mocks:** they're told apart only in a document a service worker controls, by whether the image would taint a canvas. A response the worker built itself doesn't, so it isn't remote. A passthrough of a cross-origin image does, so it is. A check that fails counts as remote.
 - **Not covered:** remote `<video src>`, `<object>` and `<embed>`, sandboxed `srcdoc` frames without `allow-same-origin`, and transformed frames.
-- **Cost:** on a page of about 10,400 elements with 300 remote images, the search took about 23 ms natively and about 90 ms on its first call in the amd64 image under emulation. Only stories with a host mask pay it.
+- **Cost:** on a page of about 10,400 elements with 300 remote images, the search takes about 23 ms natively and 50–60 ms in the amd64 image under emulation. Only stories with a host mask pay it.
 - One in-page search finds it. Host masks and the hint below share it, and it costs nothing unless one of them needs it.
 - **The hint:** when every differing pixel of a failing snapshot lies inside remote content, give or take 1 px for anti-aliased edges, the failure carries a hint. It names the hosts, shows the mask line and links the docs page.
   - Example: "Differs only inside remote content from images.unsplash.com. A CDN can serve different bytes to different machines.", then the mask line `{ host: 'images.unsplash.com' }`.

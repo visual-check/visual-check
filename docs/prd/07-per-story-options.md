@@ -81,7 +81,7 @@ Every story's merged options are checked before any capture. Each of these exits
 - **Full page** is the default. The whole document is captured at the viewport's width, beyond the viewport's height, without resizing it.
   - `100vh` stays the viewport's height, and fixed elements are painted once.
   - Dialogs and drawers portaled outside the story are included.
-- **`element: '<selector>'`** captures that element's box. `element: null` returns to the full page.
+- **`element: '<selector>'`** captures that element's box, cut at the page's edge. `element: null` returns to the full page.
   - Anything portaled outside the box is lost, and anything overlapping it is included.
   - It's matched in the top document only, not in shadow roots or frames. The first match is captured.
   - No match, or a box of zero size, makes a broken story (`element-missing`).
@@ -103,8 +103,9 @@ Every story's merged options are checked before any capture. Each of these exits
   - a remote CSS background masks its whole element, text included.
 - **Painting:** an opaque box in `maskColor`, painted in the page just before capture, after the end-state step and its check of images and fonts. The caret is hidden at the same time.
   - All masks are in one top-layer popover sized to the document, so they cover dialogs too and a mask never makes the page bigger.
-  - An element clipped by an ancestor is masked only within the page.
+  - An element clipped by an ancestor is masked by its whole box, cut only at the page's edge.
   - Showing the masks fires the popover's toggle events and reaches MutationObservers. Nothing checks the page again after that.
+  - Masks that can't be painted make a broken story (`error`), so a capture never shows what they cover.
 - Baselines and snapshots both carry the box. So the visual diff needs no mask data, and the byte comparison still works.
 - If a masked element grows, shrinks or moves, its box does too, and those pixels count.
 - Changing `maskColor` changes every baseline that has a mask.
