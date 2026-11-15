@@ -219,6 +219,14 @@ const stepTimeouts: Partial<Record<Step, string>> = {
 }
 
 /**
+ * What bringing the story to its end state was still doing when readyTimeout ran out, by the step it was in.
+ */
+const endStateTimeouts: Record<Extract<EndState, { outcome: 'timed-out' }>['step'], string> = {
+  animations: 'visual-check was still finishing its animations',
+  media: 'visual-check was still putting its media on their first frame',
+}
+
+/**
  * Says the story wasn't ready within readyTimeout, and what it was doing.
  */
 function notReady(readyTimeoutMs: number, doing: string): string {
@@ -346,7 +354,7 @@ function describeEndState(endState: Exclude<EndState, { outcome: 'settled' }>, r
     }
   }
 
-  return { reason: 'timeout', message: notReady(readyTimeoutMs, 'visual-check was still finishing its animations') }
+  return { reason: 'timeout', message: notReady(readyTimeoutMs, endStateTimeouts[endState.step]) }
 }
 
 /**

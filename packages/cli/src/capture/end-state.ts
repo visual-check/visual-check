@@ -25,16 +25,38 @@ const taskFrameMs = 16
  * 3. Pins what Chromium might paint stale: every animation step 2 parked, every one Storybook 11 parked, and every
  *    finished one whose fill mode still holds its end. It writes each into the element's inline style with
  *    `commitStyles()`, then cancels it. A pseudo-element can't take an inline style, so its animation stays as it is.
- * 4. Lets two more frames pass when it changed anything, as a change made just before capture can still be rastering
+ * 4. Freezes media:
+ *    - It pauses every video and stops it playing on its own, so one still loading doesn't start later. It seeks one
+ *      that was moving (playing, away from 0 or seeking) and has loaded anything to 0, and when a seek starts, it
+ *      waits for its `seeked` event, which comes once the frame is decoded. A video without a seekable range, such as
+ *      a live stream or a MediaStream in `srcObject` (a webcam or call preview), starts no seek, and counts as a
+ *      change only when it was playing. A paused video at 0 isn't seeked, so it keeps its poster.
+ *    - It pauses the animations of every outermost inline SVG at 0. Every SVG has a running clock, so only one holding
+ *      SMIL animation elements counts as a change: SMIL reached only through `<use>` is paused but doesn't count.
+ *    - It replaces every GIF in an `<img>`, by a `data:image/gif` URL or a URL whose path ends in `.gif`, with its
+ *      first frame. `drawImage()` draws an animated image's default frame, its first, as the HTML spec says. So it
+ *      loads a fresh copy, with the image's `crossorigin` and referrer policy, for the GIF's pixel size without any
+ *      `srcset` density, and draws it on a canvas. The canvas's data URL becomes the image's only `srcset` candidate,
+ *      at the density that keeps the image's size, the image loses its `src`, and it's decoded. It counts once the
+ *      image shows the frame. A GIF whose copy fails to load is left as it is, and so is a cross-origin one without
+ *      CORS, as it taints the canvas.
+ * 5. Lets two more frames pass when it changed anything, as a change made just before capture can still be rastering
  *    on a busy machine.
  *
  * A frame is two `requestFrame` callbacks, then a task, or two tasks of 16 ms in a page without it. Only animations
  * on the document's timeline are touched: scroll-driven and view-driven ones, and those with no timeline, are left
  * alone, and so are those the page paused itself, Storybook 11's aside.
  *
- * It answers `{ outcome: 'settled', changed }`, where `changed` says whether it finished, parked or pinned anything.
- * When the time limit passes while it waits for a frame, it answers `{ outcome: 'timed-out', step: 'animations' }`.
- * It never throws: every call into the page is guarded.
+ * Left to the project, through a mask or a `wait` hook: SVG in `<img>`, GIFs as CSS backgrounds or cross-origin
+ * without CORS, APNG, animated WebP, canvas, Lottie and other script-driven motion, and a video that hasn't loaded
+ * anything. An `<img>` inside `<picture>` keeps showing what its `<source>` picks.
+ *
+ * It answers `{ outcome: 'settled', changed }`, where `changed` says whether it changed anything that was moving: it
+ * finished, parked or pinned an animation, paused a playing video or seeked a moving one, paused an SVG holding SMIL
+ * animation elements, or replaced a GIF the image then shows. When the time limit passes while it settles the
+ * animations, it answers `{ outcome: 'timed-out', step: 'animations' }`. While it waits for media, or for the last
+ * frames after media changed, it answers `{ outcome: 'timed-out', step: 'media' }`, and during the last frames after
+ * only animations changed, `step: 'animations'`. It never throws: every call into the page is guarded.
  */
 export const endStateFunction = `(context) => {
   const { shadowRoots, setTimer, clearTimer, requestFrame, parkedByStorybook } = context
@@ -42,9 +64,9 @@ export const endStateFunction = `(context) => {
 
   // Collecting the animations: every root, then every animation on the document's timeline in them, each once.
 
-  const elementsOf = (root) => {
+  const elementsOf = (root, selector) => {
     try {
-      return Array.from(root.querySelectorAll('*'))
+      return Array.from(root.querySelectorAll(selector))
     } catch {
       return []
     }
@@ -63,7 +85,7 @@ export const endStateFunction = `(context) => {
     const roots = new Set([document, ...shadowRoots])
     // A Set's iteration visits the roots added during it, so the open roots inside open roots are walked too.
     for (const root of roots) {
-      for (const element of elementsOf(root)) {
+      for (const element of elementsOf(root, '*')) {
         const openRoot = openShadowRootOf(element)
         if (openRoot !== undefined) {
           roots.add(openRoot)
@@ -166,6 +188,180 @@ export const endStateFunction = `(context) => {
     return pinned
   }
 
+  // Freezing media. Each kind gives, or promises, whether it changed something that was moving, and never throws or
+  // rejects.
+
+  const hasLoadedAnything = (video) => {
+    try {
+      return video.readyState > 0
+    } catch {
+      return false
+    }
+  }
+
+  // Whether a video is playing, and whether it's moving: playing, away from 0 or seeking.
+  const motionOf = (video) => {
+    try {
+      const playing = !video.paused
+      return { playing, moving: playing || video.currentTime !== 0 || video.seeking === true }
+    } catch {
+      return { playing: false, moving: false }
+    }
+  }
+
+  const isSeeking = (video) => {
+    try {
+      return video.seeking === true
+    } catch {
+      return false
+    }
+  }
+
+  // Pauses a video and stops it playing on its own, so one still loading doesn't start later. Seeks one that was
+  // moving and has loaded anything to 0, and waits for its seeked event, which comes once the frame is decoded. A
+  // paused video at 0 isn't seeked, as that would replace its poster with the frame. Chromium sets seeking at once
+  // when a seek starts, and a video without a seekable range, such as a live stream or a MediaStream in srcObject (a
+  // webcam or call preview), starts none: it changed only when it was playing.
+  const freezeVideo = (video) => {
+    const { playing, moving } = motionOf(video)
+    try {
+      video.pause()
+    } catch {
+      return false
+    }
+    try {
+      video.autoplay = false
+    } catch {}
+    if (!moving || !hasLoadedAnything(video)) {
+      return playing
+    }
+    try {
+      // Caught now: when the listener can't be added and the seek then throws, nothing else would handle it.
+      const seeked = new Promise((resolve) => {
+        video.addEventListener('seeked', () => resolve(true), { once: true })
+      }).catch(() => true)
+      video.currentTime = 0
+      return isSeeking(video) ? seeked : playing
+    } catch {
+      return playing
+    }
+  }
+
+  // Pauses the animations of an outermost inline SVG at 0: an SVG nested in another shares the outermost one's. Every
+  // SVG has a running clock, so only one holding SMIL animation elements counts as a change.
+  const freezeSvg = (svg) => {
+    try {
+      if (svg.ownerSVGElement !== null || typeof svg.pauseAnimations !== 'function') {
+        return false
+      }
+      svg.pauseAnimations()
+    } catch {
+      return false
+    }
+    try {
+      svg.setCurrentTime(0)
+    } catch {}
+    try {
+      return svg.querySelector('animate, animateMotion, animateTransform, set') !== null
+    } catch {
+      return false
+    }
+  }
+
+  // The source of an image showing a GIF: a data:image/gif URL, or a URL whose path ends in .gif.
+  const gifSourceOf = (image) => {
+    try {
+      const source = image.currentSrc || image.src
+      if (typeof source !== 'string' || source === '') {
+        return undefined
+      }
+      const url = new URL(source, document.baseURI)
+      const isGif =
+        url.protocol === 'data:'
+          ? url.pathname.split(/[;,]/)[0].trim().toLowerCase() === 'image/gif'
+          : url.pathname.toLowerCase().endsWith('.gif')
+      return isGif ? source : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  // Draws a loaded image on a canvas at its pixel size, and gives the canvas's data URL with that width. drawImage()
+  // draws an animated image's default frame, its first, as the HTML spec says. A cross-origin image without CORS
+  // taints the canvas, so toDataURL() throws.
+  const drawn = (image) => {
+    try {
+      const canvas = document.createElement('canvas')
+      canvas.width = image.naturalWidth
+      canvas.height = image.naturalHeight
+      canvas.getContext('2d').drawImage(image, 0, 0)
+      return { url: canvas.toDataURL(), width: image.naturalWidth }
+    } catch {
+      return undefined
+    }
+  }
+
+  // Loads a fresh copy of a GIF, with the image's crossorigin and referrer policy, and draws it. The copy has the GIF's
+  // pixel size, as no srcset or density applies to it. Gives undefined when it can't.
+  const firstFrameOf = (image, source) =>
+    new Promise((resolve) => {
+      try {
+        const copy = document.createElement('img')
+        const { crossOrigin, referrerPolicy } = image
+        if (typeof crossOrigin === 'string') {
+          copy.crossOrigin = crossOrigin
+        }
+        if (typeof referrerPolicy === 'string') {
+          copy.referrerPolicy = referrerPolicy
+        }
+        copy.addEventListener('load', () => resolve(drawn(copy)), { once: true })
+        copy.addEventListener('error', () => resolve(undefined), { once: true })
+        copy.src = source
+      } catch {
+        resolve(undefined)
+      }
+    })
+
+  // Replaces a GIF in an image with its first frame, as the only candidate of its srcset, at the density that keeps
+  // its size: an image's naturalWidth is in CSS pixels, at the density of the candidate it picked. Counts it only once
+  // the image shows the frame: one in a <picture> whose <source> picks what it shows keeps showing the GIF.
+  const freezeGif = async (image) => {
+    const source = gifSourceOf(image)
+    if (source === undefined) {
+      return false
+    }
+    const frame = await firstFrameOf(image, source)
+    if (frame === undefined) {
+      return false
+    }
+    try {
+      const shownWidth = image.naturalWidth
+      const density = shownWidth > 0 ? frame.width / shownWidth : 1
+      image.srcset = frame.url + ' ' + density + 'x'
+      image.removeAttribute('src')
+    } catch {
+      return false
+    }
+    try {
+      await image.decode()
+    } catch {}
+    try {
+      return image.currentSrc === frame.url
+    } catch {
+      return false
+    }
+  }
+
+  // Freezes every video, inline SVG and GIF in an image in the roots.
+  const freezeMedia = (roots) => {
+    const elements = (selector) => Array.from(roots).flatMap((root) => elementsOf(root, selector))
+    return [
+      ...elements('video').map(freezeVideo),
+      ...elements('svg').map(freezeSvg),
+      ...elements('img').map(freezeGif),
+    ]
+  }
+
   // A frame: two animation frames, then a task.
 
   const frame = () =>
@@ -228,9 +424,14 @@ export const endStateFunction = `(context) => {
       }
       const parked = park(animationsOf(rootsOf()))
       const pinned = pin(animationsOf(rootsOf()), parked)
-      const changed = finished > 0 || parked.size > 0 || pinned > 0
+      const frozen = await Promise.race([Promise.all(freezeMedia(rootsOf())), deadline])
+      if (frozen === timedOut) {
+        return { outcome: 'timed-out', step: 'media' }
+      }
+      const mediaChanged = frozen.includes(true)
+      const changed = finished > 0 || parked.size > 0 || pinned > 0 || mediaChanged
       if (changed && !(await framesPassed(2))) {
-        return { outcome: 'timed-out', step: 'animations' }
+        return { outcome: 'timed-out', step: mediaChanged ? 'media' : 'animations' }
       }
       return { outcome: 'settled', changed }
     } finally {
@@ -249,19 +450,21 @@ export type EndState =
        */
       outcome: 'settled'
       /**
-       * Whether it finished, parked or pinned any animation, so images that came into view may need loading.
+       * Whether it changed anything that was moving: an animation, a video, an SVG's SMIL animation or a GIF. Images
+       * that came into view then may need loading; a replaced GIF is already decoded.
        */
       changed: boolean
     }
   | {
       /**
-       * The time limit passed while it waited for a frame.
+       * The time limit passed while it waited for a frame or for media.
        */
       outcome: 'timed-out'
       /**
-       * It was finishing the page's animations.
+       * What it was doing: finishing the page's animations, or putting its media on their first frame. The last frames
+       * count toward media when media changed, else toward animations.
        */
-      step: 'animations'
+      step: 'animations' | 'media'
     }
   | {
       /**
@@ -280,8 +483,8 @@ export function readEndState(value: unknown): EndState {
     return { outcome: 'settled', changed: answer.changed }
   }
 
-  if (answer.outcome === 'timed-out' && answer.step === 'animations') {
-    return { outcome: 'timed-out', step: 'animations' }
+  if (answer.outcome === 'timed-out' && (answer.step === 'animations' || answer.step === 'media')) {
+    return { outcome: 'timed-out', step: answer.step }
   }
 
   if (answer.outcome === 'script-missing') {

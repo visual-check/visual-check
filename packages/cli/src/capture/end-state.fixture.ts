@@ -1,5 +1,6 @@
 import { vi } from 'vitest'
 import { animationClasses, type FakeAnimation } from '../storybook/preview-script.fixture.js'
+import { type FakeImageFile, type FakeMedia, fakeCreateElement } from './media.fixture.js'
 
 /**
  * What a fake root holds.
@@ -13,6 +14,20 @@ interface FakeRootParts {
    * The open shadow roots of elements in the root.
    */
   openShadowRoots?: FakeRoot[]
+  /**
+   * The videos, inline SVGs and images in the root.
+   */
+  media?: FakeMedia[]
+}
+
+/**
+ * What a fake document holds.
+ */
+interface FakeDocumentParts extends FakeRootParts {
+  /**
+   * How the server gives each image file, by URL. A file not listed loads from the page's own origin, at 40 × 30.
+   */
+  files?: Record<string, FakeImageFile>
 }
 
 /**
@@ -36,27 +51,36 @@ export interface FakeDocument extends FakeRoot {
 }
 
 /**
- * Builds a fake shadow root holding these animations and open shadow roots. It lists its animations, leaving out
- * cancelled ones as the browser does, and, for `*`, its elements: one hosting each open shadow root, and one hosting
- * none.
+ * Builds a fake shadow root holding these animations, open shadow roots and media. It lists its animations, leaving
+ * out cancelled ones as the browser does. For `*`, it lists its elements: one hosting each open shadow root, one
+ * hosting none, and its media. For a tag name, it lists its media of that name.
  */
-export function fakeRoot({ animations = [], openShadowRoots = [] }: FakeRootParts = {}): FakeRoot {
-  const elements = [...openShadowRoots.map((shadowRoot) => ({ shadowRoot })), { shadowRoot: null }]
+export function fakeRoot({ animations = [], openShadowRoots = [], media = [] }: FakeRootParts = {}): FakeRoot {
+  const elements = [...openShadowRoots.map((shadowRoot) => ({ shadowRoot })), { shadowRoot: null }, ...media]
   const root = {
     animations,
     getAnimations: () => animations.filter((animation) => animation.playState !== 'idle'),
-    querySelectorAll: (selector: string) => (selector === '*' ? elements : []),
+    querySelectorAll: (selector: string) =>
+      selector === '*' ? elements : media.filter((element) => element.localName === selector),
   }
 
   return root
 }
 
 /**
- * Builds a fake document holding these animations and open shadow roots, as `fakeRoot` does, with the document's
- * timeline.
+ * Builds a fake document holding these animations, open shadow roots and media, as `fakeRoot` does, with the
+ * document's timeline, Storybook's preview URL as its base URL, and `createElement` for the images and canvases
+ * scripts create. The images it creates load files as `files` says.
  */
-export function fakeDocument(parts: FakeRootParts = {}): FakeDocument {
-  return { ...fakeRoot(parts), timeline: new animationClasses.DocumentTimeline() }
+export function fakeDocument({ files = {}, ...parts }: FakeDocumentParts = {}): FakeDocument {
+  const document = {
+    ...fakeRoot(parts),
+    timeline: new animationClasses.DocumentTimeline(),
+    baseURI: 'http://localhost:6006/iframe.html',
+    createElement: fakeCreateElement(files),
+  }
+
+  return document
 }
 
 /**
@@ -107,4 +131,12 @@ export function settledAnswer(changed: unknown = false): Record<string, unknown>
  */
 export function animationsTimedOutAnswer(): Record<string, unknown> {
   return { outcome: 'timed-out', step: 'animations' }
+}
+
+/**
+ * Builds what the end state in the page answers when its time limit passed while it put media on their first frame,
+ * or in the last frames after media changed.
+ */
+export function mediaTimedOutAnswer(): Record<string, unknown> {
+  return { outcome: 'timed-out', step: 'media' }
 }

@@ -9,7 +9,7 @@ import {
   PageNavigatedAwayError,
   PageTimeoutError,
 } from './driver/driver.js'
-import { animationsTimedOutAnswer, settledAnswer } from './end-state.fixture.js'
+import { animationsTimedOutAnswer, mediaTimedOutAnswer, settledAnswer } from './end-state.fixture.js'
 import { defaultSnapshot, FakeDriver, type FakePageBehaviour } from './fake-driver.fixture.js'
 import { fontsTimedOutAnswer, imagesTimedOutAnswer, readyAnswer } from './page-script.fixture.js'
 import { assetsReadyExpression, endStateExpression, pageInitScript } from './page-script.js'
@@ -463,6 +463,19 @@ describe('a broken story', () => {
         reason: 'timeout',
         message:
           "The story wasn't ready within readyTimeout (10000 ms): visual-check was still finishing its animations.",
+      },
+    })
+    expect(driver.methods()).not.toContain('1:captureFullPage')
+  })
+
+  it('is a timeout when visual-check was still putting its media on their first frame at the time limit, saying so', async () => {
+    const driver = new FakeDriver({ pages: [{ endStateWait: async () => mediaTimedOutAnswer() }] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'timeout',
+        message:
+          "The story wasn't ready within readyTimeout (10000 ms): visual-check was still putting its media on their first frame.",
       },
     })
     expect(driver.methods()).not.toContain('1:captureFullPage')

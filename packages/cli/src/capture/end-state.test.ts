@@ -7,15 +7,23 @@ import {
   fakeAnimation,
 } from '../storybook/preview-script.fixture.js'
 import { parkedByStorybookSource } from '../storybook/preview-script.js'
-import { animationsTimedOutAnswer, FakeFrames, fakeDocument, fakeRoot, settledAnswer } from './end-state.fixture.js'
+import {
+  animationsTimedOutAnswer,
+  FakeFrames,
+  fakeDocument,
+  fakeRoot,
+  mediaTimedOutAnswer,
+  settledAnswer,
+} from './end-state.fixture.js'
 import { endStateFunction, readEndState } from './end-state.js'
+import { type FakeMedia, fakeImage, fakeSvg, fakeVideo, firstFrameUrl } from './media.fixture.js'
 
 /**
  * What a fake page for the end state has.
  */
 interface EndStatePageParts {
   /**
-   * The page's document: one holding `animations` by default.
+   * The page's document: one holding `animations` and `media` by default.
    */
   document?: object
   /**
@@ -23,11 +31,15 @@ interface EndStatePageParts {
    */
   animations?: FakeAnimation[]
   /**
+   * The videos, inline SVGs and images in the page's document, when `document` isn't given: none by default.
+   */
+  media?: FakeMedia[]
+  /**
    * The shadow roots the page script recorded: none by default.
    */
   shadowRoots?: object[]
   /**
-   * The page's globals besides `document`: the fake Web Animations classes by default.
+   * The page's globals besides `document` and `URL`: the fake Web Animations classes by default.
    */
   globals?: Record<string, unknown>
   /**
@@ -82,11 +94,11 @@ interface EndStatePage {
  * parked animations.
  */
 function openEndState(parts: EndStatePageParts = {}): EndStatePage {
-  const { animations = [], shadowRoots = [], globals = animationClasses } = parts
-  const document = parts.document ?? fakeDocument({ animations })
+  const { animations = [], media = [], shadowRoots = [], globals = animationClasses } = parts
+  const document = parts.document ?? fakeDocument({ animations, media })
   const frames = new FakeFrames()
   const requestFrame = 'requestFrame' in parts ? parts.requestFrame : frames.requestFrame
-  const context = createContext({ ...globals, document })
+  const context = createContext({ URL, ...globals, document })
   const run = (code: string): unknown => runInContext(code, context)
   const setTimer = vi.fn((callback: () => void, ms: number): unknown => setTimeout(callback, ms))
   const clearTimer = vi.fn((timer: unknown): void => {
@@ -417,6 +429,327 @@ describe('the time limit', () => {
   })
 })
 
+describe('media', () => {
+  /**
+   * A GIF on Storybook's own origin.
+   */
+  const spinner = 'http://localhost:6006/spinner.gif'
+
+  /**
+   * What the end state does to an image to replace its GIF with the first frame at `url`, at `density`: 1 by default.
+   */
+  function replacedWith(url: string, density = 1): string[] {
+    return [`srcset = ${url} ${density}x`, 'removeAttribute src', 'decode']
+  }
+
+  describe('a video', () => {
+    it('that plays is paused, stops playing on its own and is seeked to 0, then the last frames pass', async () => {
+      const video = fakeVideo({ seekMs: 200 })
+      const page = openEndState({ media: [video] })
+      const run = page.bringToEndState(1000)
+
+      await vi.advanceTimersByTimeAsync(199)
+      expect(page.frames.requestFrame).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(page.frames.requestFrame).toHaveBeenCalledOnce()
+      await vi.runAllTimersAsync()
+      expect(await run.answer).toEqual(settledAnswer(true))
+      expect(video.actions).toEqual(['pause', 'autoplay = false', 'currentTime = 0'])
+      expect(page.frames.requestFrame).toHaveBeenCalledTimes(4)
+    })
+
+    it.each([
+      ['paused away from 0', { paused: true }],
+      ['paused at 0 while seeking', { paused: true, currentTime: 0, seeking: true }],
+    ])('%s is seeked to 0', async (_what, options) => {
+      const video = fakeVideo(options)
+
+      expect(await endStateOf({ media: [video] })).toEqual(settledAnswer(true))
+      expect(video.actions).toEqual(['pause', 'autoplay = false', 'currentTime = 0'])
+    })
+
+    it('paused at 0 keeps its poster: it only stops playing on its own, changing nothing', async () => {
+      const video = fakeVideo({ paused: true, currentTime: 0 })
+      const page = openEndState({ media: [video] })
+      const run = page.bringToEndState(1000)
+
+      await vi.runAllTimersAsync()
+      expect(await run.answer).toEqual(settledAnswer(false))
+      expect(video.actions).toEqual(['pause', 'autoplay = false'])
+      expect(page.frames.requestFrame).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ['playing, is a change', {}, true],
+      ['paused, is no change', { paused: true, currentTime: 0 }, false],
+    ])("that hasn't loaded anything isn't seeked, and pausing it, %s", async (_what, options, changed) => {
+      const video = fakeVideo({ readyState: 0, seekMs: null, ...options })
+
+      expect(await endStateOf({ media: [video] })).toEqual(settledAnswer(changed))
+      expect(video.actions).toEqual(['pause', 'autoplay = false'])
+    })
+
+    it("without a seekable range, such as a live stream, starts no seek, so it isn't waited for", async () => {
+      const video = fakeVideo({ seekable: false })
+
+      expect(await endStateOf({ media: [video] })).toEqual(settledAnswer(true))
+      expect(video.actions).toEqual(['pause', 'autoplay = false', 'currentTime = 0'])
+    })
+
+    it('paused away from 0 without a seekable range starts no seek, changing nothing', async () => {
+      const video = fakeVideo({ paused: true, seekable: false })
+      const page = openEndState({ media: [video] })
+      const run = page.bringToEndState(1000)
+
+      await vi.runAllTimersAsync()
+      expect(await run.answer).toEqual(settledAnswer(false))
+      expect(video.actions).toEqual(['pause', 'autoplay = false', 'currentTime = 0'])
+      expect(page.frames.requestFrame).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('an inline SVG', () => {
+    it.each(['animate', 'animateMotion', 'animateTransform', 'set'])(
+      'holding an %s element, outermost, is paused at 0, and one nested in it is left alone',
+      async (holds) => {
+        const outermost = fakeSvg({ holds })
+        const nested = fakeSvg({ nestedIn: outermost })
+
+        expect(await endStateOf({ media: [outermost, nested] })).toEqual(settledAnswer(true))
+        expect(outermost.actions).toEqual(['pauseAnimations', 'setCurrentTime 0'])
+        expect(nested.actions).toEqual([])
+      },
+    )
+
+    it("that's static is paused at 0 too, changing nothing", async () => {
+      const icon = fakeSvg({ holds: null })
+      const page = openEndState({ media: [icon] })
+      const run = page.bringToEndState(1000)
+
+      await vi.runAllTimersAsync()
+      expect(await run.answer).toEqual(settledAnswer(false))
+      expect(icon.actions).toEqual(['pauseAnimations', 'setCurrentTime 0'])
+      expect(page.frames.requestFrame).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('a GIF in an image', () => {
+    it.each([
+      ['a path ending in .gif', spinner],
+      ['a path ending in .GIF', 'http://localhost:6006/SPINNER.GIF'],
+      ['a query after .gif', 'http://localhost:6006/spinner.gif?v=1'],
+      ['a hash after .gif', 'http://localhost:6006/spinner.gif#loop'],
+      ['a data:image/gif URL', 'data:image/gif;base64,R0lGODlhAQABAAAAACw='],
+      ['a data:IMAGE/GIF URL', 'data:IMAGE/GIF;base64,R0lGODlhAQABAAAAACw='],
+    ])('by %s is replaced with its first frame, drawn from a fresh copy', async (_what, source) => {
+      const image = fakeImage({ src: source })
+
+      expect(await endStateOf({ media: [image] })).toEqual(settledAnswer(true))
+      expect(image.actions).toEqual(replacedWith(firstFrameUrl(source)))
+    })
+
+    it.each([
+      ['without a srcset', 1, 1],
+      ['picked from its srcset at 0.25x', 4, 0.25],
+      ['picked from its srcset by width, as 1w at a size of 8px', 8, 0.125],
+    ])("%s keeps its size, the first frame drawn at the GIF's pixel size", async (_what, naturalWidth, density) => {
+      const image = fakeImage({ src: spinner, naturalWidth })
+      const document = fakeDocument({ media: [image], files: { [spinner]: { width: 1, height: 1 } } })
+
+      expect(await endStateOf({ document })).toEqual(settledAnswer(true))
+      expect(image.actions).toEqual(replacedWith(firstFrameUrl(spinner, 1, 1), density))
+    })
+
+    it('picked from its srcset, or not picked yet, is replaced', async () => {
+      const picked = fakeImage({ src: 'http://localhost:6006/still.png', currentSrc: spinner })
+      const notPicked = fakeImage({ src: spinner, currentSrc: '', naturalWidth: 0 })
+
+      expect(await endStateOf({ media: [picked, notPicked] })).toEqual(settledAnswer(true))
+      expect(picked.actions).toEqual(replacedWith(firstFrameUrl(spinner)))
+      expect(notPicked.actions).toEqual(replacedWith(firstFrameUrl(spinner)))
+    })
+
+    it("in a <picture> whose <source> picks what it shows keeps showing the GIF, so it's no change", async () => {
+      const image = fakeImage({ src: spinner, pickedBySource: true })
+
+      expect(await endStateOf({ media: [image] })).toEqual(settledAnswer(false))
+      expect(image.actions).toEqual(replacedWith(firstFrameUrl(spinner)))
+    })
+
+    it('from another origin, served with CORS, is replaced, its copy loaded with the same crossorigin', async () => {
+      const source = 'https://cdn.example.com/spinner.gif'
+      const image = fakeImage({ src: source, crossOrigin: 'anonymous' })
+      const document = fakeDocument({ media: [image], files: { [source]: { origin: 'cross-origin-with-cors' } } })
+
+      expect(await endStateOf({ document })).toEqual(settledAnswer(true))
+      expect(image.actions).toEqual(replacedWith(firstFrameUrl(source)))
+    })
+
+    it('behind hotlink protection is replaced, its copy loaded with the same referrer policy', async () => {
+      const image = fakeImage({ src: spinner, referrerPolicy: 'no-referrer' })
+      const document = fakeDocument({ media: [image], files: { [spinner]: { hotlinkProtected: true } } })
+
+      expect(await endStateOf({ document })).toEqual(settledAnswer(true))
+      expect(image.actions).toEqual(replacedWith(firstFrameUrl(spinner)))
+    })
+
+    it.each([
+      ['from another origin without CORS, as drawing it taints the canvas', { origin: 'cross-origin-without-cors' }],
+      ['whose copy fails to load', { arrival: 'fails' }],
+    ] as const)('%s is left as it was', async (_what, file) => {
+      const image = fakeImage({ src: spinner })
+      const document = fakeDocument({ media: [image], files: { [spinner]: file } })
+
+      expect(await endStateOf({ document })).toEqual(settledAnswer(false))
+      expect(image.actions).toEqual([])
+    })
+
+    it("is left as it was when the document can't create its copy", async () => {
+      const image = fakeImage({ src: spinner })
+      const document = fakeDocument({ media: [image] })
+
+      Object.assign(document, {
+        createElement: () => {
+          throw new Error('unreadable')
+        },
+      })
+      expect(await endStateOf({ document })).toEqual(settledAnswer(false))
+      expect(image.actions).toEqual([])
+    })
+  })
+
+  it.each([
+    'http://localhost:6006/photo.png',
+    'http://localhost:6006/photo.png?name=.gif',
+    'http://localhost:6006/gif',
+    'data:image/png;base64,iVBORw0KGgo=',
+    '',
+  ])('leaves an image of %j alone', async (source) => {
+    const image = fakeImage({ src: source })
+
+    expect(await endStateOf({ media: [image] })).toEqual(settledAnswer(false))
+    expect(image.actions).toEqual([])
+  })
+
+  it('are frozen in a recorded closed shadow root', async () => {
+    const video = fakeVideo()
+    const svg = fakeSvg()
+    const image = fakeImage({ src: spinner })
+    const closed = fakeRoot({ media: [video, svg, image] })
+
+    expect(await endStateOf({ shadowRoots: [closed] })).toEqual(settledAnswer(true))
+    expect(video.actions).toEqual(['pause', 'autoplay = false', 'currentTime = 0'])
+    expect(svg.actions).toEqual(['pauseAnimations', 'setCurrentTime 0'])
+    expect(image.actions).toEqual(replacedWith(firstFrameUrl(spinner)))
+  })
+
+  it('are frozen right after the animations, then one wait of two frames covers both', async () => {
+    const animation = fakeAnimation({ endTime: Number.POSITIVE_INFINITY })
+    const video = fakeVideo()
+    const page = openEndState({ animations: [animation], media: [video] })
+    const run = page.bringToEndState(1000)
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(animation.actions).toEqual(['pause', 'currentTime = 0', 'commitStyles', 'cancel'])
+    expect(video.actions).toEqual(['pause', 'autoplay = false', 'currentTime = 0'])
+    expect(page.frames.requestFrame).not.toHaveBeenCalled()
+    // The frames start once the video seeked, 20 ms later.
+    await vi.advanceTimersByTimeAsync(19)
+    expect(page.frames.requestFrame).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(page.frames.requestFrame).toHaveBeenCalledOnce()
+    await vi.runAllTimersAsync()
+    expect(await run.answer).toEqual(settledAnswer(true))
+    expect(page.frames.requestFrame).toHaveBeenCalledTimes(4)
+  })
+
+  it('that throw are coped with', async () => {
+    const fail = (): never => {
+      throw new Error('unreadable')
+    }
+    const unpausable = Object.assign(fakeVideo(), { pause: fail })
+    const unseekable = fakeVideo()
+    const deaf = Object.assign(fakeVideo(), { addEventListener: fail })
+    const withoutAnimations = Object.assign(fakeSvg(), { pauseAnimations: undefined })
+    const unpausableSvg = Object.assign(fakeSvg(), { pauseAnimations: fail })
+    const unsearchable = Object.assign(fakeSvg(), { querySelector: fail })
+    const unreadable = fakeImage({ src: spinner })
+    const undecodable = Object.assign(fakeImage({ src: spinner }), {
+      decode: () => Promise.reject(new Error('EncodingError: the image cannot be decoded.')),
+    })
+    const media = [
+      unpausable,
+      unseekable,
+      deaf,
+      withoutAnimations,
+      unpausableSvg,
+      unsearchable,
+      unreadable,
+      undecodable,
+    ]
+
+    Object.defineProperty(unseekable, 'currentTime', { set: fail })
+    Object.defineProperty(unreadable, 'currentSrc', { get: fail })
+    expect(await endStateOf({ media })).toEqual(settledAnswer(true))
+    expect(unpausable.actions).toEqual([])
+    expect(unseekable.actions).toEqual(['pause', 'autoplay = false'])
+    expect(deaf.actions).toEqual(['pause', 'autoplay = false', 'currentTime = 0'])
+    expect(unsearchable.actions).toEqual(['pauseAnimations', 'setCurrentTime 0'])
+    expect(unreadable.actions).toEqual([])
+    expect(undecodable.actions).toEqual(replacedWith(firstFrameUrl(spinner)).slice(0, 2))
+  })
+
+  it('leave no rejection unhandled when a video takes neither the seeked listener nor a seek', async () => {
+    const unhandled = vi.fn()
+    const video = Object.assign(fakeVideo(), {
+      addEventListener: () => {
+        throw new Error('unreadable')
+      },
+    })
+
+    Object.defineProperty(video, 'currentTime', {
+      set: () => {
+        throw new Error('unreadable')
+      },
+    })
+    process.on('unhandledRejection', unhandled)
+
+    try {
+      expect(await endStateOf({ media: [video] })).toEqual(settledAnswer(true))
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(unhandled).not.toHaveBeenCalled()
+    } finally {
+      process.off('unhandledRejection', unhandled)
+    }
+  })
+
+  it('passing while a video seeks gives a timeout naming the media', async () => {
+    const run = openEndState({ media: [fakeVideo({ seekMs: null })] }).bringToEndState(1000)
+
+    await vi.advanceTimersByTimeAsync(999)
+    expect(run.settled()).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await run.answer).toEqual(mediaTimedOutAnswer())
+  })
+
+  it("passing while a GIF's copy loads gives a timeout naming the media", async () => {
+    const document = fakeDocument({ media: [fakeImage({ src: spinner })], files: { [spinner]: { arrival: 'stalls' } } })
+    const run = openEndState({ document }).bringToEndState(1000)
+
+    await vi.advanceTimersByTimeAsync(999)
+    expect(run.settled()).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await run.answer).toEqual(mediaTimedOutAnswer())
+  })
+
+  it('passing while the last frames pass after media changed gives a timeout naming the media', async () => {
+    const run = openEndState({ media: [fakeVideo()] }).bringToEndState(50)
+
+    await vi.advanceTimersByTimeAsync(50)
+    expect(await run.answer).toEqual(mediaTimedOutAnswer())
+  })
+})
+
 describe('readEndState', () => {
   it.each([true, false])('reads an end state that settled, with changed %s', (changed) => {
     expect(readEndState(settledAnswer(changed))).toEqual({ outcome: 'settled', changed })
@@ -424,6 +757,10 @@ describe('readEndState', () => {
 
   it('reads a timeout while animations finished', () => {
     expect(readEndState(animationsTimedOutAnswer())).toEqual({ outcome: 'timed-out', step: 'animations' })
+  })
+
+  it('reads a timeout while media were put on their first frame', () => {
+    expect(readEndState(mediaTimedOutAnswer())).toEqual({ outcome: 'timed-out', step: 'media' })
   })
 
   it('reads a missing page script', () => {
@@ -436,7 +773,7 @@ describe('readEndState', () => {
     ['a settled end state without changed', { outcome: 'settled' }],
     ['changed other than true or false', settledAnswer('yes')],
     ['a timeout without a step', { outcome: 'timed-out' }],
-    ['a timeout in another step', { outcome: 'timed-out', step: 'media' }],
+    ['a timeout in another step', { outcome: 'timed-out', step: 'fonts' }],
   ])('throws on %s, quoting it', (_what, value) => {
     expect(() => readEndState(value)).toThrow(
       `The end state in the page gave an answer visual-check doesn't know: ${JSON.stringify(value)}.`,
