@@ -8,7 +8,6 @@ import {
   baselineFileNameOf,
   baselinePathOf,
   baselineStemOf,
-  isByteIdentical,
   readBaseline,
   snapshotKeyOf,
   writeBaseline,
@@ -269,32 +268,5 @@ describe('writeBaseline', () => {
 
     await expect(writeBaseline(path, snapshot)).rejects.toMatchObject({ action: 'write', path })
     expect(readdirSync(folder)).toEqual(['baselines'])
-  })
-})
-
-describe('isByteIdentical', () => {
-  it('is true for the same bytes', () => {
-    expect(isByteIdentical(snapshot, new Uint8Array(snapshot))).toBe(true)
-  })
-
-  it('is true for two empty images', () => {
-    expect(isByteIdentical(new Uint8Array(), new Uint8Array())).toBe(true)
-  })
-
-  it('is false when one byte differs', () => {
-    const changed = new Uint8Array(snapshot)
-
-    changed[9] = 0xfe
-
-    expect(isByteIdentical(snapshot, changed)).toBe(false)
-  })
-
-  it('is false when one is a prefix of the other', () => {
-    expect(isByteIdentical(snapshot, snapshot.subarray(0, 9))).toBe(false)
-    expect(isByteIdentical(snapshot.subarray(0, 9), snapshot)).toBe(false)
-  })
-
-  it('compares only the bytes of a view, not the rest of its buffer', () => {
-    expect(isByteIdentical(snapshot.subarray(2, 6), new Uint8Array([0x4e, 0x47, 0x0d, 0x0a]))).toBe(true)
   })
 })

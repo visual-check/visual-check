@@ -1343,8 +1343,8 @@ describe('runCli visual diff', () => {
       exitCode: 2,
       stdout: printed(headerOf('test', 1)),
       stderr:
-        "visual-check couldn't read the baseline .visual-check/baselines/a.png: Input buffer contains unsupported " +
-        "image format. Check that it's a file visual-check can read.\n",
+        "visual-check couldn't decode the baseline .visual-check/baselines/a.png: Input buffer contains unsupported " +
+        'image format. Delete it or restore it from git, then run visual-check again.\n',
     })
   })
 
@@ -1371,31 +1371,93 @@ describe('runCli visual diff', () => {
 })
 
 describe('runCli update', () => {
-  it('writes missing and differing baselines exactly as captured, and leaves an identical one untouched', async () => {
-    const { project, folder } = await createRun(['a', 'b', 'c'], { a: defaultSnapshot, b: otherSnapshot })
+  it('writes missing baselines and ones beyond tolerance exactly as captured, and keeps the rest untouched', async () => {
+    const { project, folder } = await createRun(['a', 'b', 'c', 'd'], {
+      a: defaultSnapshot,
+      b: defaultSnapshot,
+      c: defaultSnapshot,
+    })
     const past = new Date('2001-01-01T00:00:00Z')
 
     utimesSync(join(folder, 'a.png'), past, past)
+    utimesSync(join(folder, 'b.png'), past, past)
 
-    const newB = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 3])
-    const newC = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 4])
-    const { options } = fakeBrowser({ b: { snapshot: newB }, c: { snapshot: newC } })
+    const threeWhite = new Uint8Array(await greyPng(10, 10, 0, whitePixels(3, 10)))
+    const newD = new Uint8Array(await greyPng(10, 10, 128))
+    const { options } = fakeBrowser({
+      b: { snapshot: threeWhite },
+      c: { snapshot: otherSnapshot },
+      d: { snapshot: newD },
+    })
     const result = await runCli(['update'], {}, project, options)
 
     expect(result).toEqual({
       exitCode: 0,
       stdout: printed(
-        headerOf('update', 3),
+        headerOf('update', 4),
         '✓ web  a  kept',
-        '✓ web  b  written .visual-check/baselines/b.png',
-        '✓ web  c  written .visual-check/baselines/c.png',
-        '2 written · 1 kept',
+        '✓ web  b  kept',
+        '✓ web  c  written: differs: 100 differ, 20 allowed',
+        '✓ web  d  written: missing',
+        '2 written · 2 kept',
       ),
       stderr: '',
     })
-    expect(new Uint8Array(readFileSync(join(folder, 'b.png')))).toEqual(newB)
-    expect(new Uint8Array(readFileSync(join(folder, 'c.png')))).toEqual(newC)
+    expect(new Uint8Array(readFileSync(join(folder, 'a.png')))).toEqual(defaultSnapshot)
+    expect(new Uint8Array(readFileSync(join(folder, 'b.png')))).toEqual(defaultSnapshot)
+    expect(new Uint8Array(readFileSync(join(folder, 'c.png')))).toEqual(otherSnapshot)
+    expect(new Uint8Array(readFileSync(join(folder, 'd.png')))).toEqual(newD)
     expect(statSync(join(folder, 'a.png')).mtimeMs).toBe(past.getTime())
+    expect(statSync(join(folder, 'b.png')).mtimeMs).toBe(past.getTime())
+  })
+
+  it("compares by the story's tolerance, at the viewport's device scale factor", async () => {
+    const { project, folder } = await createRun(['a', 'b'], { a: defaultSnapshot, b: defaultSnapshot })
+    const { options } = fakeBrowser(
+      { a: { snapshot: otherSnapshot }, b: { snapshot: otherSnapshot } },
+      {
+        read: {
+          options: { a: { tolerance: { pixels: 100 } }, b: { viewport: { deviceScaleFactor: 2 } } },
+        },
+      },
+    )
+    const result = await runCli(['update'], {}, project, options)
+
+    expect(result.stdout).toBe(
+      printed(
+        headerOf('update', 2),
+        '✓ web  a  kept',
+        '✓ web  b  written: differs: 100 differ, 80 allowed (20 at scale 2)',
+        '1 written · 1 kept',
+      ),
+    )
+    expect(new Uint8Array(readFileSync(join(folder, 'a.png')))).toEqual(defaultSnapshot)
+    expect(new Uint8Array(readFileSync(join(folder, 'b.png')))).toEqual(otherSnapshot)
+  })
+
+  it('writes a baseline whose size changed, naming both sizes', async () => {
+    const { project, folder } = await createRun(['a'], { a: defaultSnapshot })
+    const taller = new Uint8Array(await greyPng(10, 12, 0))
+    const result = await runCli(['update'], {}, project, fakeBrowser({ a: { snapshot: taller } }).options)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain('✓ web  a  written: differs: size changed: 10×10 → 10×12\n')
+    expect(new Uint8Array(readFileSync(join(folder, 'a.png')))).toEqual(taller)
+  })
+
+  it("stops with exit 2, naming the baseline, and keeps it when it can't be decoded", async () => {
+    const notPng = new TextEncoder().encode('not a PNG file')
+    const { project, folder } = await createRun(['a'], { a: notPng })
+    const result = await runCli(['update'], {}, project, fakeBrowser().options)
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: printed(headerOf('update', 1)),
+      stderr:
+        "visual-check couldn't decode the baseline .visual-check/baselines/a.png: Input buffer contains unsupported " +
+        'image format. Delete it or restore it from git, then run visual-check again.\n',
+    })
+    expect(new Uint8Array(readFileSync(join(folder, 'a.png')))).toEqual(notPng)
   })
 
   it('writes nothing for a broken story, keeps its old baseline, and exits 1', async () => {
@@ -1409,7 +1471,7 @@ describe('runCli update', () => {
         headerOf('update', 3),
         `! web  a  ${brokenDetail}`,
         `! web  b  ${brokenDetail}`,
-        '✓ web  c  written .visual-check/baselines/c.png',
+        '✓ web  c  written: missing',
         '1 written · 2 broken',
       ),
       stderr: '',
@@ -1418,7 +1480,7 @@ describe('runCli update', () => {
     expect(existsSync(join(folder, 'b.png'))).toBe(false)
   })
 
-  it('prints written paths relative to the folder it runs in, with /', async () => {
+  it("writes a missing baseline into its Storybook's folder, whatever folder it runs in", async () => {
     const url = await startStorybook(['a'])
     const project = createProject({
       'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'packages/web', url: '${url}' } } }\n`,
@@ -1426,7 +1488,7 @@ describe('runCli update', () => {
     })
     const result = await runCli(['update'], {}, join(project, 'packages'), fakeBrowser().options)
 
-    expect(result.stdout).toContain('✓ web  a  written web/.visual-check/baselines/a.png\n')
+    expect(result.stdout).toContain('✓ web  a  written: missing\n')
     expect(existsSync(join(project, 'packages', 'web', '.visual-check', 'baselines', 'a.png'))).toBe(true)
   })
 })
@@ -1687,7 +1749,7 @@ describe('runCli per-story options', () => {
 
     expect(result).toEqual({
       exitCode: 0,
-      stdout: printed(headerOf('update', 1), '✓ web  a  written .visual-check/baselines/a.png', '1 written'),
+      stdout: printed(headerOf('update', 1), '✓ web  a  written: missing', '1 written'),
       stderr: '',
     })
     expect(existsSync(join(folder, 'b.png'))).toBe(false)
@@ -1894,9 +1956,9 @@ describe('runCli modes', () => {
       exitCode: 0,
       stdout: printed(
         headerOf('update', 3),
-        '✓ web  a  written .visual-check/baselines/a.png',
-        '✓ web  a  dark  written .visual-check/baselines/a.dark.png',
-        '✓ web  a  mobile  written .visual-check/baselines/a.mobile.png',
+        '✓ web  a  written: missing',
+        '✓ web  a  dark  written: missing',
+        '✓ web  a  mobile  written: missing',
         '3 written',
       ),
       stderr: '',
@@ -1914,9 +1976,9 @@ describe('runCli modes', () => {
     expect(result.stdout).toBe(
       printed(
         headerOf('update', 3),
-        '✓ web  a  written .visual-check/baselines/a.png',
-        '✓ web  a  dark  written .visual-check/baselines/a.dark.png',
-        '✓ web  a  mobile  written .visual-check/baselines/a.mobile.png',
+        '✓ web  a  written: missing',
+        '✓ web  a  dark  written: missing',
+        '✓ web  a  mobile  written: missing',
         '3 written',
       ),
     )
@@ -2070,11 +2132,7 @@ describe('runCli baseline file names', () => {
 
     expect(result).toEqual({
       exitCode: 0,
-      stdout: printed(
-        headerOf('update', 1),
-        `✓ web  ${longId}  written .visual-check/baselines/${shortened}`,
-        '1 written',
-      ),
+      stdout: printed(headerOf('update', 1), `✓ web  ${longId}  written: missing`, '1 written'),
       stderr: '',
     })
     expect(readdirSync(folder)).toEqual([shortened])
@@ -2565,9 +2623,9 @@ describe('runCli launching the browser', () => {
         `! web  a  ${browserExitedDetail}`,
         `! web  b  ${browserExitedDetail}`,
         `! web  c  ${browserExitedDetail}`,
-        '✓ web  d  written .visual-check/baselines/d.png',
-        '✓ web  e  written .visual-check/baselines/e.png',
-        '✓ web  f  written .visual-check/baselines/f.png',
+        '✓ web  d  written: missing',
+        '✓ web  e  written: missing',
+        '✓ web  f  written: missing',
         '3 written · 3 broken',
       ),
     )

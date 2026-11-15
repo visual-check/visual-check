@@ -1,18 +1,12 @@
 import { relative, sep } from 'node:path'
 import { BaselineError } from '../baselines/baseline-error.js'
-import {
-  baselinePathOf,
-  baselineStemOf,
-  isByteIdentical,
-  readBaseline,
-  writeBaseline,
-} from '../baselines/baseline-files.js'
+import { baselinePathOf, baselineStemOf, readBaseline, writeBaseline } from '../baselines/baseline-files.js'
 import { BrowserMismatchError, runImageOf } from '../browser/browser-version.js'
 import type { ChromeForTestingPlatform } from '../browser/chrome-for-testing-platform.js'
 import type { BrowserPackage } from '../browser/read-browser-package.js'
 import { BrowserDownloadError } from '../browser-download/browser-download-error.js'
 import { headlessShellPathsOf } from '../browser-download/install-headless-shell.js'
-import type { CaptureSettings, StoryCapture, StoryToCapture } from '../capture/capture-session.js'
+import type { BrokenStory, CaptureSettings, StoryCapture, StoryToCapture } from '../capture/capture-session.js'
 import { BrowserExitedError, BrowserLaunchError } from '../capture/driver/driver.js'
 import { runWorkerPool } from '../capture/worker-pool.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
@@ -183,6 +177,7 @@ const statusesOf: Record<SnapshotRun['command'], { counted: SnapshotStatus[]; fa
  */
 const baselineFixes: Record<BaselineError['action'], string> = {
   read: "Check that it's a file visual-check can read.",
+  decode: 'Delete it or restore it from git, then run visual-check again.',
   write: 'Check that its folder is writable and the disk has room.',
 }
 
@@ -195,19 +190,35 @@ const reportFixes: Record<ReportError['action'], string> = {
 }
 
 /**
- * What `test` needs besides the run: the visual diff it compares snapshots with, and the report folder it writes the
- * images of each differing snapshot to.
+ * What each snapshot of a run is taken with, by command: the visual diff both commands compare snapshots with and, for
+ * `test` alone, the report folder it writes the images of each differing snapshot to.
  */
-interface TestTools {
-  /**
-   * The run's visual diff.
-   */
-  visualDiff: VisualDiff
-  /**
-   * The report folder.
-   */
-  reportFolder: string
-}
+type SnapshotTools =
+  | {
+      /**
+       * The command, `test`, which compares each snapshot and reports the ones that differ.
+       */
+      command: 'test'
+      /**
+       * The run's visual diff.
+       */
+      visualDiff: VisualDiff
+      /**
+       * The report folder.
+       */
+      reportFolder: string
+    }
+  | {
+      /**
+       * The command, `update`, which compares each snapshot and writes the baselines that are missing or differ. It
+       * never touches the report folder.
+       */
+      command: 'update'
+      /**
+       * The run's visual diff.
+       */
+      visualDiff: VisualDiff
+    }
 
 /**
  * The snapshots a run takes, and what became of each so far.
@@ -270,22 +281,28 @@ function displayPathOf(cwd: string, path: string): string {
 type CaptureStory = (story: StoryToCapture, started?: () => void) => Promise<StoryCapture>
 
 /**
- * Takes one snapshot: tests it when `test` gives its tools, else updates its baseline. A story whose stories file
- * didn't load is broken, with no capture and no baseline read.
+ * Gives a broken snapshot's result, whose detail is the broken story's message.
+ */
+function brokenResultOf(broken: BrokenStory): SnapshotResult {
+  return { status: 'broken', detail: `broken: ${broken.message}` }
+}
+
+/**
+ * Takes one snapshot: tests it for `test`, else updates its baseline. A story whose stories file didn't load is
+ * broken, with no capture and no baseline read.
  */
 async function snapshotOf(
-  run: SnapshotRun,
   item: PlannedSnapshot,
   captureStory: CaptureStory,
-  testTools: TestTools | undefined,
+  tools: SnapshotTools,
 ): Promise<SnapshotResult> {
   if ('broken' in item) {
-    return { status: 'broken', detail: `broken: ${item.broken.message}` }
+    return brokenResultOf(item.broken)
   }
 
-  return testTools === undefined
-    ? await updateSnapshot(item, captureStory, run.cwd)
-    : await testSnapshot(item, captureStory, testTools)
+  return tools.command === 'test'
+    ? await testSnapshot(item, captureStory, tools.visualDiff, tools.reportFolder)
+    : await updateSnapshot(item, captureStory, tools.visualDiff)
 }
 
 /**
@@ -310,7 +327,7 @@ async function compareWithBaseline(
   } catch (error) {
     if (error instanceof ImageDecodeError && error.image === 'baseline') {
       // The bare decoder reason, since the printed line already names the baseline.
-      throw new BaselineError('read', path, new Error(error.reason, { cause: error }))
+      throw new BaselineError('decode', path, new Error(error.reason, { cause: error }))
     }
 
     throw error
@@ -331,7 +348,8 @@ async function compareWithBaseline(
 async function testSnapshot(
   item: SnapshotToCapture,
   captureStory: CaptureStory,
-  { visualDiff, reportFolder }: TestTools,
+  visualDiff: VisualDiff,
+  reportFolder: string,
 ): Promise<SnapshotResult> {
   const path = baselinePathOf(item.storybook.baselines, item.key)
   const baseline = await readBaseline(path)
@@ -346,7 +364,7 @@ async function testSnapshot(
   })
 
   if ('broken' in capture) {
-    return { status: 'broken', detail: `broken: ${capture.broken.message}` }
+    return brokenResultOf(capture.broken)
   }
 
   const elapsedMs = Math.round(performance.now() - started)
@@ -367,31 +385,44 @@ async function testSnapshot(
 }
 
 /**
- * Updates one snapshot's baseline: writes the snapshot when the baseline is missing or differs, and leaves an identical
- * baseline untouched. A broken story writes nothing.
+ * Updates one snapshot's baseline: writes the snapshot when the baseline is missing, or differs from it beyond the
+ * story's tolerance or in size, and leaves a baseline within tolerance untouched. The detail says why a baseline was
+ * written: `written: missing`, or `written: differs: ` and what `test` would say. A broken story writes nothing.
+ *
+ * @throws {BaselineError} When the baseline can't be read, decoded or written.
+ * @throws {ImageDecodeError} When the snapshot can't be decoded, which the browser's PNG files rule out.
+ * @throws {Error} When a visual diff thread stops mid-comparison.
  */
 async function updateSnapshot(
   item: SnapshotToCapture,
   captureStory: CaptureStory,
-  cwd: string,
+  visualDiff: VisualDiff,
 ): Promise<SnapshotResult> {
   const capture = await captureStory(storyToCaptureOf(item))
 
   if ('broken' in capture) {
-    return { status: 'broken', detail: `broken: ${capture.broken.message}` }
+    return brokenResultOf(capture.broken)
   }
 
-  const { completingMs } = capture
+  const { snapshot, completingMs } = capture
   const path = baselinePathOf(item.storybook.baselines, item.key)
   const baseline = await readBaseline(path)
 
-  if (baseline !== undefined && isByteIdentical(capture.snapshot, baseline)) {
-    return { status: 'kept', detail: 'kept', completingMs }
+  if (baseline === undefined) {
+    await writeBaseline(path, snapshot)
+
+    return { status: 'written', detail: 'written: missing', completingMs }
   }
 
-  await writeBaseline(path, capture.snapshot)
+  const result = await compareWithBaseline(visualDiff, item, baseline, snapshot, path)
 
-  return { status: 'written', detail: `written ${displayPathOf(cwd, path)}`, completingMs }
+  if (result.outcome === 'differs') {
+    await writeBaseline(path, snapshot)
+
+    return { status: 'written', detail: `written: differs: ${result.message}`, completingMs }
+  }
+
+  return { status: 'kept', detail: 'kept', completingMs }
 }
 
 /**
@@ -631,19 +662,19 @@ function capturedAnyOf(snapshots: PlannedSnapshots | undefined): boolean {
 }
 
 /**
- * Takes every snapshot with a pool of `workers` that share the run's browser, testing each when `test` gives its
- * tools.
+ * Takes every snapshot with a pool of `workers` that share the run's browser, testing each for `test` and updating its
+ * baseline for `update`.
  */
 async function takeSnapshots(
   run: SnapshotRun,
   browser: RunBrowser,
   snapshots: PlannedSnapshots,
-  testTools: TestTools | undefined,
+  tools: SnapshotTools,
 ): Promise<void> {
   await runWorkerPool(run.workers, snapshots.items, async (item, index, worker) => {
     const captureStory: CaptureStory = (toCapture, started) => browser.capture(worker, toCapture, started)
 
-    snapshots.results[index] = await snapshotOf(run, item, captureStory, testTools)
+    snapshots.results[index] = await snapshotOf(item, captureStory, tools)
   })
 }
 
@@ -658,8 +689,9 @@ async function takeSnapshots(
  * of its SHA-256. `test` compares each snapshot with its baseline by the story's tolerance, at the viewport's device
  * scale factor, and never captures a missing baseline. It clears the report folder, `.visual-check/report` beside the
  * config file, once the snapshots are planned, and writes the baseline, snapshot and visual diff of each snapshot that
- * differs there. `update` writes each snapshot whose baseline is missing or isn't byte-identical to it, and never
- * touches the report folder.
+ * differs there. `update` compares each snapshot with its baseline the same way, and writes it when the baseline is
+ * missing or differs beyond tolerance or in size. A baseline within tolerance stays untouched, even when its bytes
+ * differ. `update` never touches the report folder.
  *
  * Each Storybook with stories gets one options read, in config order, on a page of its own, covering every story its
  * `index.json` lists whatever the selection. So the browser is launched at the first read, even when no story then
@@ -697,10 +729,11 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
     environment: run.environment,
     progress: run.progress,
   })
-  const testTools: TestTools | undefined =
+  const visualDiff = createVisualDiff()
+  const tools: SnapshotTools =
     run.command === 'test'
-      ? { visualDiff: createVisualDiff(), reportFolder: reportFolderOf(run.config.path) }
-      : undefined
+      ? { command: 'test', visualDiff, reportFolder: reportFolderOf(run.config.path) }
+      : { command: 'update', visualDiff }
   let snapshots: PlannedSnapshots | undefined
 
   try {
@@ -710,15 +743,15 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
       return { exitCode: 2, stdout: '', stderr: `${exitNoticeOf(browser.firstExit())}${plan.problem}\n` }
     }
 
-    if (testTools !== undefined) {
-      await clearReport(testTools.reportFolder)
+    if (tools.command === 'test') {
+      await clearReport(tools.reportFolder)
     }
 
     snapshots = plannedSnapshotsOf(
       run,
       plan.snapshots.filter(({ selected }) => selected),
     )
-    await takeSnapshots(run, browser, snapshots, testTools)
+    await takeSnapshots(run, browser, snapshots, tools)
   } catch (error) {
     const message = stopMessageOf(error, run, capturedAnyOf(snapshots))
 
@@ -733,7 +766,7 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
     try {
       await browser.close()
     } finally {
-      await testTools?.visualDiff.close()
+      await tools.visualDiff.close()
     }
   }
 

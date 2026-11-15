@@ -400,7 +400,7 @@ const outcomeDetails: [Outcome, RegExp][] = [
   ['differs', /^differs: /],
   ['broken', /^broken: /],
   ['missing', /^missing: /],
-  ['written', /^written /],
+  ['written', /^written: /],
   ['kept', /^kept$/],
 ]
 

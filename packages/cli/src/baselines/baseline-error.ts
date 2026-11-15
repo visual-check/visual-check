@@ -1,8 +1,8 @@
 import { systemReasonOf } from '../system-error/system-reason.js'
 
 /**
- * A baseline that is there couldn't be read, or a baseline couldn't be written, such as for a folder that isn't
- * writable or a full disk.
+ * A baseline that is there couldn't be read or decoded, or a baseline couldn't be written, such as for a folder that
+ * isn't writable or a full disk.
  *
  * @public
  */
@@ -13,9 +13,9 @@ export class BaselineError extends Error {
   override name = 'BaselineError'
 
   /**
-   * What failed: reading the baseline or writing it.
+   * What failed: reading the baseline, decoding it as a PNG file or writing it.
    */
-  readonly action: 'read' | 'write'
+  readonly action: 'read' | 'decode' | 'write'
 
   /**
    * The baseline's path.
@@ -23,14 +23,14 @@ export class BaselineError extends Error {
   readonly path: string
 
   /**
-   * The operating system's reason, such as `EACCES: permission denied`.
+   * The operating system's reason, such as `EACCES: permission denied`, or the decoder's.
    */
   readonly reason: string
 
   /**
    * Keeps what failed, the baseline's path and the reason the error that caused it gives.
    */
-  constructor(action: 'read' | 'write', path: string, cause: unknown) {
+  constructor(action: 'read' | 'decode' | 'write', path: string, cause: unknown) {
     const reason = systemReasonOf(cause)
 
     super(`Couldn't ${action} the baseline ${path}: ${reason}.`, { cause })

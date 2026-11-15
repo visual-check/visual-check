@@ -129,12 +129,3 @@ export async function writeBaseline(path: string, bytes: Uint8Array): Promise<vo
     throw new BaselineError('write', path, error)
   }
 }
-
-/**
- * Tells whether a snapshot and a baseline hold the same bytes.
- *
- * @public
- */
-export function isByteIdentical(snapshot: Uint8Array, baseline: Uint8Array): boolean {
-  return Buffer.from(snapshot.buffer, snapshot.byteOffset, snapshot.byteLength).equals(baseline)
-}
