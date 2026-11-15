@@ -94,6 +94,10 @@ export interface FakeAnimation {
    */
   onFinish: (() => void) | undefined
   /**
+   * Jumps to the end, then runs `onFinish`, through the `finish` of the page's `Animation` class, as the page does.
+   */
+  finish: () => void
+  /**
    * Pauses where the animation is.
    */
   pause: () => void
@@ -240,14 +244,31 @@ const animationClassOf: Record<AnimationKind, new (options: FakeAnimationOptions
 
 /**
  * The page's Web Animations classes, as fakes, to set as the page's globals: those the predicate for the animations
- * Storybook 11 parked reads, and the end state.
+ * Storybook 11 parked reads, and the end state. Every fake animation finishes through `Animation.prototype.finish`,
+ * which the end state wraps, so a test that creates the end state calls `restoreFinish` once it's done.
  *
  * @public
  */
 export const animationClasses = {
+  Animation: ScriptAnimation,
   CSSAnimation: CssAnimation,
   CSSTransition: CssTransition,
   DocumentTimeline: FakeDocumentTimeline,
+}
+
+/**
+ * The fake `Animation` class's own `finish`, before any end state wrapped it.
+ */
+const ownFinish = ScriptAnimation.prototype.finish
+
+/**
+ * Puts the fake `Animation` class's own `finish` back. Every fake page shares the class, so the wrapper an end state
+ * put on it would otherwise stay for the next test.
+ *
+ * @public
+ */
+export function restoreFinish(): void {
+  ScriptAnimation.prototype.finish = ownFinish
 }
 
 /**

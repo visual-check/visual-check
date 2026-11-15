@@ -16,9 +16,21 @@ const taskFrameMs = 16
  * brings the page to its end state, in the document and in every shadow root: the recorded ones, and every open one
  * found by walking each root's elements, again at every check.
  *
+ * When it's created, at document start, it wraps `Animation.prototype.finish`, where the page has it, to note each
+ * call that doesn't throw. The browser dispatches the end events of an animation finished by a call only at the next
+ * rendering update, and Storybook 11 finishes every CSS animation and transition right before `storyFinished`, and
+ * every one that starts later. Pinning such an animation before then would cancel it, so its `animationend` would
+ * become `animationcancel`, and page logic waiting for it, such as a chained animation's next step or an exit that
+ * unmounts, would never run. A call's end events count as pending until two animation frames passed since the latest
+ * call, or two tasks of 16 ms in a page without `requestAnimationFrame`: a call made in an event listener during a
+ * rendering update has them in the next update, while a callback asked for during the first update's events still
+ * runs in that update. The wrapper passes `this`, the arguments, the result and any error through, so it changes
+ * nothing the page sees. The end state's own `finish()` calls go through it too.
+ *
  * 1. Settles: calls `finish()` on every running finite animation, lets a frame pass so end events run page logic, and
- *    checks again, until two checks a frame apart find nothing finite running, for at most 20 rounds. A story with
- *    nothing running waits no frame. An animation whose `finish()` throws isn't tried again.
+ *    checks again. A check that finds end events pending from a `finish()` call lets a frame pass too. It goes on
+ *    until two checks a frame apart find neither, for at most 20 rounds, each a check that found either. A story with
+ *    nothing running and nothing pending waits no frame. An animation whose `finish()` throws isn't tried again.
  * 2. Puts every animation still running on its first keyframe, with `pause()` then `currentTime = 0`, as Storybook 11
  *    does: infinite ones, finite ones whose `finish()` threw, and finite ones still starting after 20 rounds. One that
  *    paused counts as parked even when it can't be seeked to 0.
@@ -53,14 +65,62 @@ const taskFrameMs = 16
  *
  * It answers `{ outcome: 'settled', changed }`, where `changed` says whether it changed anything that was moving: it
  * finished, parked or pinned an animation, paused a playing video or seeked a moving one, paused an SVG holding SMIL
- * animation elements, or replaced a GIF the image then shows. When the time limit passes while it settles the
- * animations, it answers `{ outcome: 'timed-out', step: 'animations' }`. While it waits for media, or for the last
- * frames after media changed, it answers `{ outcome: 'timed-out', step: 'media' }`, and during the last frames after
- * only animations changed, `step: 'animations'`. It never throws: every call into the page is guarded.
+ * animation elements, or replaced a GIF the image then shows. Waiting for end events pending from a `finish()` call
+ * counts too, as page logic ran on them: an exit may unmount, a mount may bring images. When the time limit passes
+ * while it settles the animations, it answers `{ outcome: 'timed-out', step: 'animations' }`. While it waits for
+ * media, or for the last frames after media changed, it answers `{ outcome: 'timed-out', step: 'media' }`, and during
+ * the last frames after only animations changed, `step: 'animations'`. It never throws: every call into the page is
+ * guarded.
  */
 export const endStateFunction = `(context) => {
   const { shadowRoots, setTimer, clearTimer, requestFrame, parkedByStorybook } = context
   const timedOut = Symbol('timed out')
+
+  // Noting finish() calls: their end events are pending until two animation frames passed since the latest call.
+
+  let finishCalls = 0
+  let endEventsPending = false
+
+  const noteFinishCall = () => {
+    try {
+      const call = finishCalls + 1
+      const clearIfLatest = () => {
+        if (call === finishCalls) {
+          endEventsPending = false
+        }
+      }
+      const nextStep = (callback) => {
+        if (requestFrame === undefined) {
+          setTimer(callback, ${taskFrameMs})
+        } else {
+          requestFrame(callback)
+        }
+      }
+      // The second step clears at once when it can't be scheduled, so a failure never leaves them pending.
+      nextStep(() => {
+        try {
+          nextStep(clearIfLatest)
+        } catch {
+          clearIfLatest()
+        }
+      })
+      // Noted only once the clearing is on its way, so a call that can't schedule it never leaves them pending.
+      finishCalls = call
+      endEventsPending = true
+    } catch {}
+  }
+
+  try {
+    if (typeof Animation === 'function' && typeof Animation.prototype.finish === 'function') {
+      const apply = Reflect.apply
+      const originalFinish = Animation.prototype.finish
+      Animation.prototype.finish = function finish() {
+        const result = apply(originalFinish, this, arguments)
+        noteFinishCall()
+        return result
+      }
+    }
+  } catch {}
 
   // Collecting the animations: every root, then every animation on the document's timeline in them, each once.
 
@@ -393,20 +453,25 @@ export const endStateFunction = `(context) => {
       let finished = 0
       let rounds = 0
       let quietChecks = 0
+      let waitedForEndEvents = false
       for (;;) {
         const running = animationsOf(rootsOf()).filter(
           (animation) =>
             !unfinishable.has(animation) && playStateOf(animation) === 'running' && isFiniteAnimation(animation),
         )
-        if (running.length === 0) {
+        if (running.length === 0 && !endEventsPending) {
           quietChecks += 1
-          if (finished === 0 || quietChecks === 2) {
+          // Nothing finished and no end events waited for: no page logic ran that could start another animation.
+          if (quietChecks === 2 || (finished === 0 && !waitedForEndEvents)) {
             break
           }
         } else {
           quietChecks = 0
           if (rounds === ${maxRounds}) {
             break
+          }
+          if (endEventsPending) {
+            waitedForEndEvents = true
           }
           for (const animation of running) {
             try {
@@ -429,7 +494,7 @@ export const endStateFunction = `(context) => {
         return { outcome: 'timed-out', step: 'media' }
       }
       const mediaChanged = frozen.includes(true)
-      const changed = finished > 0 || parked.size > 0 || pinned > 0 || mediaChanged
+      const changed = finished > 0 || waitedForEndEvents || parked.size > 0 || pinned > 0 || mediaChanged
       if (changed && !(await framesPassed(2))) {
         return { outcome: 'timed-out', step: mediaChanged ? 'media' : 'animations' }
       }
@@ -450,8 +515,9 @@ export type EndState =
        */
       outcome: 'settled'
       /**
-       * Whether it changed anything that was moving: an animation, a video, an SVG's SMIL animation or a GIF. Images
-       * that came into view then may need loading; a replaced GIF is already decoded.
+       * Whether it changed anything that was moving: an animation, a video, an SVG's SMIL animation or a GIF. Waiting
+       * for the end events of animations the page finished counts too, as page logic ran on them. Images that came
+       * into view then may need loading; a replaced GIF is already decoded.
        */
       changed: boolean
     }

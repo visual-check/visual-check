@@ -24,6 +24,8 @@ const keptCharacters = 500
  *
  * - wraps `Element.prototype.attachShadow` to record every shadow root it creates, closed ones included, in
  *   `shadowRoots`;
+ * - wraps `Animation.prototype.finish`, through the end state, to note when the end events of an animation finished
+ *   by a call are still to come, passing everything through;
  * - records console messages of every level, uncaught errors and unhandled rejections in `messages`, each as `kind`
  *   and `text`: the last 50, each cut to 500 characters. An error is described by its stack. Any other object is
  *   sketched like JSON from its own enumerable data fields, three levels deep, stopping at 500 characters: an array

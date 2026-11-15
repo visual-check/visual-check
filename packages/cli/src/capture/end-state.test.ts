@@ -5,6 +5,7 @@ import {
   type FakeAnimation,
   FakeScrollTimeline,
   fakeAnimation,
+  restoreFinish,
 } from '../storybook/preview-script.fixture.js'
 import { parkedByStorybookSource } from '../storybook/preview-script.js'
 import {
@@ -143,12 +144,28 @@ async function endStateOf(parts: EndStatePageParts): Promise<unknown> {
   return await run.answer
 }
 
+/**
+ * Has page logic listen for the end of `animation`, as an `animationend` listener does. The browser dispatches the end
+ * events of an animation finished by a call at the next animation frame, before its callbacks. When the animation was
+ * cancelled meanwhile, it dispatches `animationcancel` instead, so the listener doesn't run.
+ */
+function listenForEnd(frames: FakeFrames, animation: FakeAnimation, listener: () => void): void {
+  animation.onFinish = () => {
+    frames.react(1, () => {
+      if (animation.playState !== 'idle') {
+        listener()
+      }
+    })
+  }
+}
+
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
 })
 
 afterEach(() => {
   vi.useRealTimers()
+  restoreFinish()
 })
 
 describe('settling', () => {
@@ -174,7 +191,9 @@ describe('settling', () => {
     await vi.runAllTimersAsync()
     expect(await run.answer).toEqual(settledAnswer(true))
     expect(animation.actions).toEqual(['finish'])
-    expect(page.frames.requestFrame).toHaveBeenCalledTimes(8)
+    // Four frames of two callbacks, and the two callbacks after which its finish() call's end events no longer count
+    // as pending. Those run in the first frame's animation frames, so the second check finds nothing pending.
+    expect(page.frames.requestFrame).toHaveBeenCalledTimes(10)
     expect(vi.getTimerCount()).toBe(0)
   })
 
@@ -263,6 +282,266 @@ describe('settling', () => {
 
     expect(await endStateOf({ document, shadowRoots: [open] })).toEqual(settledAnswer(true))
     expect(shared.actions).toEqual(['finish'])
+  })
+})
+
+describe('end events of animations the page finished', () => {
+  it("run before the animations are pinned, as Storybook 11's finish() leaves them, and reach a chain's next step", async () => {
+    const first = fakeAnimation({ kind: 'css-animation', holdsEnd: true })
+    const next = fakeAnimation({ kind: 'css-animation', holdsEnd: true })
+    const document = fakeDocument({ animations: [first] })
+    const page = openEndState({ document })
+    const actionsAtEnd: string[][] = []
+
+    listenForEnd(page.frames, first, () => {
+      actionsAtEnd.push([...first.actions])
+      // The chain's next step starts, and Storybook's animationstart listener finishes it at once.
+      document.animations.push(next)
+      next.finish()
+    })
+    listenForEnd(page.frames, next, () => {
+      actionsAtEnd.push([...next.actions])
+    })
+    // Storybook 11, right before it reports the story finished.
+    first.finish()
+
+    const run = page.bringToEndState(10_000)
+
+    await vi.runAllTimersAsync()
+    expect(await run.answer).toEqual(settledAnswer(true))
+    expect(actionsAtEnd).toEqual([['finish'], ['finish']])
+    expect(first.actions).toEqual(['finish', 'commitStyles', 'cancel'])
+    expect(next.actions).toEqual(['finish', 'commitStyles', 'cancel'])
+  })
+
+  it('are waited for when no root lists the animation, as its fill mode holds nothing, which counts as a change', async () => {
+    const exit = fakeAnimation({ kind: 'css-animation' })
+    const document = fakeDocument({ animations: [exit] })
+    const page = openEndState({ document })
+    let unmounted = false
+
+    listenForEnd(page.frames, exit, () => {
+      unmounted = true
+    })
+    exit.finish()
+    document.animations.splice(0)
+
+    const run = page.bringToEndState(10_000)
+
+    await vi.advanceTimersByTimeAsync(16)
+    expect(run.settled()).toBe(false)
+    expect(unmounted).toBe(true)
+    // Two checks a frame apart, then the two last frames, as page logic ran: each frame is two animation frames of
+    // 16 ms, then a task.
+    await vi.advanceTimersByTimeAsync(111)
+    expect(run.settled()).toBe(false)
+    await vi.runAllTimersAsync()
+    expect(await run.answer).toEqual(settledAnswer(true))
+    expect(exit.actions).toEqual(['finish'])
+  })
+
+  /**
+   * How the end events of a call stop counting as pending: after two animation frames of 16 ms, or two tasks of 16 ms
+   * in a page without `requestAnimationFrame`.
+   */
+  const clearingSteps: [string, EndStatePageParts][] = [
+    ['counting animation frames', {}],
+    ['counting 16 ms tasks in a page without requestAnimationFrame', { requestFrame: undefined }],
+  ]
+
+  it.each(clearingSteps)(
+    'are still waited for 16 ms after the call, %s, as one made during a frame has them at the next',
+    async (_steps, parts) => {
+      const done = fakeAnimation({ kind: 'css-animation' })
+      const page = openEndState({ animations: [done], ...parts })
+
+      done.finish()
+      await vi.advanceTimersByTimeAsync(16)
+
+      const run = page.bringToEndState(10_000)
+
+      await vi.advanceTimersByTimeAsync(0)
+      expect(run.settled()).toBe(false)
+      await vi.runAllTimersAsync()
+      expect(await run.answer).toEqual(settledAnswer(true))
+    },
+  )
+
+  it.each(clearingSteps)('are no longer waited for 32 ms after the call, %s', async (_steps, parts) => {
+    const done = fakeAnimation({ kind: 'css-animation' })
+    const page = openEndState({ animations: [done], ...parts })
+
+    done.finish()
+    await vi.advanceTimersByTimeAsync(32)
+
+    const frameCalls = page.frames.requestFrame.mock.calls.length
+    const timerCalls = page.setTimer.mock.calls.length
+
+    expect(await page.bringToEndState(1000).answer).toEqual(settledAnswer(false))
+    expect(page.frames.requestFrame).toHaveBeenCalledTimes(frameCalls)
+    // Only the time limit's timer.
+    expect(page.setTimer).toHaveBeenCalledTimes(timerCalls + 1)
+  })
+
+  it('stop counting as pending when the second animation frame of a call cannot be asked for', async () => {
+    const done = fakeAnimation({ kind: 'css-animation' })
+    let inCallback = false
+    const requestFrame = vi.fn((callback: () => void): void => {
+      if (inCallback) {
+        throw new Error('NotSupportedError: no animation frame from inside one.')
+      }
+
+      setTimeout(() => {
+        inCallback = true
+
+        try {
+          callback()
+        } finally {
+          inCallback = false
+        }
+      }, 16)
+    })
+    const page = openEndState({ animations: [done], requestFrame })
+
+    done.finish()
+    await vi.advanceTimersByTimeAsync(16)
+    expect(await page.bringToEndState(1000).answer).toEqual(settledAnswer(false))
+    expect(requestFrame).toHaveBeenCalledTimes(2)
+  })
+
+  it('of every animation the page finished at once run before the end state answers', async () => {
+    const exits = [fakeAnimation({ kind: 'css-animation' }), fakeAnimation({ kind: 'css-animation' })]
+    const page = openEndState({ animations: exits })
+    const unmounted: FakeAnimation[] = []
+
+    for (const exit of exits) {
+      listenForEnd(page.frames, exit, () => {
+        unmounted.push(exit)
+      })
+      exit.finish()
+    }
+
+    const run = page.bringToEndState(10_000)
+
+    await vi.runAllTimersAsync()
+    expect(await run.answer).toEqual(settledAnswer(true))
+    expect(unmounted).toEqual(exits)
+  })
+
+  it('count toward the 20 rounds when page logic finishes an animation at every end event', async () => {
+    const looping = fakeAnimation({ kind: 'css-animation', holdsEnd: true })
+    const page = openEndState({ animations: [looping] })
+
+    listenForEnd(page.frames, looping, () => looping.finish())
+    looping.finish()
+
+    const run = page.bringToEndState(10_000)
+
+    // 20 rounds of a frame each, then the two last frames: each frame is two animation frames of 16 ms, then a task.
+    await vi.advanceTimersByTimeAsync(703)
+    expect(run.settled()).toBe(false)
+    await vi.runAllTimersAsync()
+    expect(await run.answer).toEqual(settledAnswer(true))
+    // The page finished it once more at each of the 40 animation frames of the 20 rounds, then it was pinned.
+    expect(looping.actions).toEqual([...Array<string>(41).fill('finish'), 'commitStyles', 'cancel'])
+  })
+
+  it('give a timeout when the time limit passes while they are waited for', async () => {
+    const looping = fakeAnimation({ kind: 'css-animation', holdsEnd: true })
+    const page = openEndState({ animations: [looping] })
+
+    listenForEnd(page.frames, looping, () => looping.finish())
+    looping.finish()
+
+    const run = page.bringToEndState(100)
+
+    await vi.advanceTimersByTimeAsync(99)
+    expect(run.settled()).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await run.answer).toEqual(animationsTimedOutAnswer())
+  })
+})
+
+describe("the page's finish()", () => {
+  /**
+   * A page's `Animation` class whose own `finish` records each call, and throws when given `throw`.
+   */
+  class RecordingAnimation {
+    /**
+     * Each call to the class's own `finish`: what `this` was, and the arguments.
+     */
+    static readonly calls: { animation: unknown; values: unknown[] }[] = []
+
+    /**
+     * What the class's own `finish` throws when given `throw`.
+     */
+    static readonly error = new Error('InvalidStateError: the playback rate is 0.')
+
+    /**
+     * Records the call, then gives `finished`, or throws when given `throw`.
+     */
+    finish(...values: unknown[]): string {
+      RecordingAnimation.calls.push({ animation: this, values })
+
+      if (values[0] === 'throw') {
+        throw RecordingAnimation.error
+      }
+
+      return 'finished'
+    }
+  }
+
+  /**
+   * The class's own `finish`.
+   */
+  const ownFinish = RecordingAnimation.prototype.finish
+
+  afterEach(() => {
+    RecordingAnimation.prototype.finish = ownFinish
+    RecordingAnimation.calls.length = 0
+  })
+
+  it('is wrapped once, passing this, the arguments and the result through', async () => {
+    const page = openEndState({ globals: { ...animationClasses, Animation: RecordingAnimation } })
+    const wrapped = RecordingAnimation.prototype.finish
+    const animation = new RecordingAnimation()
+
+    expect(wrapped).not.toBe(ownFinish)
+    expect(animation.finish('a', 2)).toBe('finished')
+    expect(RecordingAnimation.calls).toEqual([{ animation, values: ['a', 2] }])
+    expect(RecordingAnimation.calls[0]?.animation).toBe(animation)
+
+    const run = page.bringToEndState(1000)
+
+    await vi.runAllTimersAsync()
+    expect(await run.answer).toEqual(settledAnswer(true))
+    expect(RecordingAnimation.prototype.finish).toBe(wrapped)
+  })
+
+  it('passes an error through, leaving no end events to wait for', async () => {
+    const page = openEndState({ globals: { ...animationClasses, Animation: RecordingAnimation } })
+    let thrown: unknown
+
+    try {
+      new RecordingAnimation().finish('throw')
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBe(RecordingAnimation.error)
+    expect(await page.bringToEndState(1000).answer).toEqual(settledAnswer(false))
+    expect(page.frames.requestFrame).not.toHaveBeenCalled()
+  })
+
+  it("is left alone in a page whose Animation class has none, and a page without one isn't troubled", async () => {
+    const { CSSAnimation, CSSTransition, DocumentTimeline } = animationClasses
+    const withoutFinish = class Animation {}
+
+    openEndState({ globals: { ...animationClasses, Animation: withoutFinish } })
+    expect('finish' in withoutFinish.prototype).toBe(false)
+    expect(
+      await endStateOf({ animations: [fakeAnimation()], globals: { CSSAnimation, CSSTransition, DocumentTimeline } }),
+    ).toEqual(settledAnswer(true))
   })
 })
 

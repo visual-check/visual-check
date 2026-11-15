@@ -84,19 +84,22 @@ export function fakeDocument({ files = {}, ...parts }: FakeDocumentParts = {}): 
 }
 
 /**
- * The page's animation frames, on the test's clock: one every 16 ms while a callback waits for it. An animation frame
- * is one `requestAnimationFrame` callback, not the end state's frame of two callbacks and a task.
+ * The page's animation frames, on the test's clock: one 16 ms after a callback asks for it. As in the browser, an
+ * animation frame first runs the page logic that reacts then, as the end events the browser dispatches do, then every
+ * callback asked for until then. A callback asked for during the callbacks waits for the next animation frame. An
+ * animation frame is one step of the end state's frame of two callbacks and a task.
  */
 export class FakeFrames {
   /**
-   * The page's `requestAnimationFrame`: runs the callback at the next animation frame, 16 ms later.
+   * The page's `requestAnimationFrame`: runs the callback at the next animation frame.
    */
   readonly requestFrame = vi.fn((callback: () => void): void => {
-    setTimeout(() => {
-      this.count += 1
-      this.reactions.get(this.count)?.()
-      callback()
-    }, 16)
+    this.callbacks.push(callback)
+
+    if (!this.frameAhead) {
+      this.frameAhead = true
+      setTimeout(() => this.runFrame(), 16)
+    }
   })
 
   /**
@@ -105,16 +108,49 @@ export class FakeFrames {
   private count = 0
 
   /**
-   * What page logic does at the start of an animation frame, by the animation frame's number.
+   * The callbacks waiting for the next animation frame.
    */
-  private readonly reactions = new Map<number, () => void>()
+  private callbacks: (() => void)[] = []
 
   /**
-   * Runs `reaction` at the start of the animation frame `animationFramesFromNow` animation frames from now, as page
-   * logic that reacts then.
+   * Whether the next animation frame is on the clock.
+   */
+  private frameAhead = false
+
+  /**
+   * What page logic does at the start of an animation frame, in order, by the animation frame's number.
+   */
+  private readonly reactions = new Map<number, (() => void)[]>()
+
+  /**
+   * Runs `reaction` at the start of the animation frame `animationFramesFromNow` animation frames from now, after the
+   * reactions already set for it and before its callbacks, as page logic that reacts then.
    */
   react(animationFramesFromNow: number, reaction: () => void): void {
-    this.reactions.set(this.count + animationFramesFromNow, reaction)
+    const frame = this.count + animationFramesFromNow
+
+    this.reactions.set(frame, [...(this.reactions.get(frame) ?? []), reaction])
+  }
+
+  /**
+   * Runs an animation frame: the page logic that reacts then, then the callbacks waiting for it, those the page logic
+   * asked for included.
+   */
+  private runFrame(): void {
+    this.count += 1
+
+    for (const reaction of this.reactions.get(this.count) ?? []) {
+      reaction()
+    }
+
+    const callbacks = this.callbacks
+
+    this.callbacks = []
+    this.frameAhead = false
+
+    for (const callback of callbacks) {
+      callback()
+    }
   }
 }
 

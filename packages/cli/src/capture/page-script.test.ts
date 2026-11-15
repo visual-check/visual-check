@@ -1,6 +1,6 @@
 import { type Context, createContext, runInContext } from 'node:vm'
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest'
-import { animationClasses, fakeAnimation } from '../storybook/preview-script.fixture.js'
+import { animationClasses, fakeAnimation, restoreFinish } from '../storybook/preview-script.fixture.js'
 import { readStoryWait, storyWaitExpression } from '../storybook/preview-script.js'
 import {
   animationsTimedOutAnswer,
@@ -319,6 +319,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers()
+  restoreFinish()
 })
 
 describe('the shadow root record', () => {
@@ -495,15 +496,19 @@ describe('the message record', () => {
 
 describe('the page script', () => {
   it("never reads the page's document while the story runs, so it changes no styles", async () => {
-    const page = openPage()
+    const { Animation } = animationClasses
+    const ownFinish = Animation.prototype.finish
+    const page = openPage({ Animation })
 
     page.run("console.log('a line')")
     new page.Element().attachShadow({ mode: 'open' })
+    fakeAnimation().finish()
 
     const wait = page.evaluate(storyWaitExpression('button--primary', 1000))
 
     await vi.advanceTimersByTimeAsync(1000)
     await wait
+    expect(Animation.prototype.finish).not.toBe(ownFinish)
     expect(page.documentReads()).toBe(0)
   })
 
