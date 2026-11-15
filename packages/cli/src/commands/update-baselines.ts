@@ -66,7 +66,11 @@ interface UpdateSummary {
  *
  * @throws {BaselineError} When a baseline can't be read, or can't be decoded, for the first such one.
  */
-async function checkDecodable(paths: readonly string[], visualDiff: VisualDiff, concurrency: number): Promise<void> {
+async function checkBaselinesDecode(
+  paths: readonly string[],
+  visualDiff: VisualDiff,
+  concurrency: number,
+): Promise<void> {
   const problems: (BaselineError | undefined)[] = paths.map(() => undefined)
 
   await runWorkerPool(concurrency, paths, async (path, index) => {
@@ -107,7 +111,7 @@ async function checkFolder(
 ): Promise<StorybookOrphans> {
   const fileNames = await listBaselines(storybook.baselines)
 
-  await checkDecodable(
+  await checkBaselinesDecode(
     fileNames.map((name) => join(storybook.baselines, name)),
     visualDiff,
     concurrency,

@@ -293,6 +293,23 @@ function comparisonOf(result: ThreadResult): VisualDiffResult {
 }
 
 /**
+ * Gives a decode check's result from what its thread gave: the decoder's reason, or `undefined` when the file decodes.
+ *
+ * @throws {Error} When the thread gave a comparison's result, which a decode check rules out.
+ */
+function decodeCheckOf(result: ThreadResult): string | undefined {
+  if (result.outcome === 'undecodable') {
+    return result.reason
+  }
+
+  if (result.outcome !== 'decodable') {
+    throw new Error("A visual diff thread gave a comparison's result for a decode check.")
+  }
+
+  return undefined
+}
+
+/**
  * Gives `error` as an `Error`, wrapping any other thrown value.
  */
 function asError(error: unknown): Error {
@@ -459,9 +476,7 @@ export function createThreadPool(script: URL, threadLimit: number, load: () => P
       throw new Error('The visual diff is closed.')
     }
 
-    const result = await runTask({ kind: 'decode', file })
-
-    return result.outcome === 'undecodable' ? result.reason : undefined
+    return decodeCheckOf(await runTask({ kind: 'decode', file }))
   }
 
   /**
