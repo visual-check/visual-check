@@ -12,6 +12,7 @@
   "animations--shadow-roots": "passed",
   "animations--transitions-in-play": "passed",
   "animations--video": "passed",
+  "animations--video-player-controls": "passed",
   "button--primary": "passed",
   "button--secondary": "passed",
   "card--default": "passed",

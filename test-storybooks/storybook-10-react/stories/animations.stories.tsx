@@ -675,6 +675,65 @@ async function awaitVideoPlaying({ canvasElement }: PlayContext): Promise<void> 
 }
 
 /**
+ * A small player around the muted clip, playing on its own in a loop, whose state follows the video's `play` and
+ * `pause` events. While the video is paused, its controls cover it, a Play button and the label `paused` over a dark
+ * shade, and the bar under it is blue. While it plays, the controls are hidden and the bar is green. The controls fade
+ * through a 300 ms `opacity` transition, and the bar changes colour through a 300 ms `background-color` transition.
+ */
+function VideoPlayer() {
+  const video = useRef<HTMLVideoElement>(null)
+  const [paused, setPaused] = useState(true)
+
+  return (
+    <Stage title="Video player whose controls fade in when it pauses">
+      <div style={{ position: 'relative', width: 320, height: 240 }}>
+        <video
+          autoPlay
+          loop
+          muted
+          playsInline
+          ref={video}
+          src={clipUrl}
+          width={320}
+          height={240}
+          style={{ display: 'block' }}
+          onPlay={() => setPaused(false)}
+          onPause={() => setPaused(true)}
+        />
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: 'rgba(24, 24, 27, 0.6)',
+            color: '#ffffff',
+            opacity: paused ? 1 : 0,
+            transition: 'opacity 300ms ease',
+          }}
+        >
+          <button type="button" onClick={() => void video.current?.play()}>
+            Play
+          </button>
+          <div>{paused ? 'paused' : 'playing'}</div>
+        </div>
+      </div>
+      <div
+        style={{
+          width: 320,
+          height: 16,
+          backgroundColor: paused ? '#2563eb' : '#16a34a',
+          transition: 'background-color 300ms ease',
+        }}
+      />
+    </Stage>
+  )
+}
+
+/**
  * An inline SVG with SMIL animations: a red rect moving right over 2 s, forever, and a blue circle moving right once
  * over 600 ms, which then keeps its end with `fill="freeze"`.
  */
@@ -848,6 +907,20 @@ export const LeftAlone: Story = {
  */
 export const Video: Story = {
   render: () => <AutoplayVideo />,
+  play: awaitVideoPlaying,
+}
+
+/**
+ * The clip in a small player whose state follows the video's `play` and `pause` events: when the video pauses, its
+ * controls, a Play button and the label `paused`, fade in over 300 ms, and the bar under it turns blue over 300 ms,
+ * both through CSS transitions, which run the other way when it plays. `play` waits until the video plays. On 9.1 and
+ * 10, the controls' fade-out and the bar's change to green have only just started then, and the end state's first pass
+ * finishes them; Storybook 11 finishes them itself. visual-check pauses the video once the animations are finished, so
+ * its `pause` event starts both transitions back then, and visual-check finishes them too. The snapshot shows the
+ * video's first frame under the controls, fully faded in, with `paused`, and the bar blue.
+ */
+export const VideoPlayerControls: Story = {
+  render: () => <VideoPlayer />,
   play: awaitVideoPlaying,
 }
 
