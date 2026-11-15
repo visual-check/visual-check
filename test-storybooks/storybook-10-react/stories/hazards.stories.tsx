@@ -117,13 +117,17 @@ function MemoryHog() {
 }
 
 /**
- * Keeps arrays of 10 million numbers, each about 80 MB, until the page runs out of memory and its renderer crashes.
+ * Keeps arrays of 50,000 numbers, each about 400 KB, until the page runs out of memory and its renderer crashes. Each
+ * array stays under the 100,000 elements above which V8 stores an array created at its length as a dictionary: those
+ * are mostly pointers, so every garbage collection near the heap limit has to scan them, and on a machine with a high
+ * limit the page can outlast `readyTimeout` before it crashes. An array of plain numbers gives garbage collection
+ * nothing to scan.
  */
 function allocateForever(): never {
   const kept: number[][] = []
 
   for (;;) {
-    kept.push(new Array(10_000_000).fill(Math.random()))
+    kept.push(new Array(50_000).fill(Math.random()))
   }
 }
 
