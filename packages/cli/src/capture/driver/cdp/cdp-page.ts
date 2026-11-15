@@ -14,6 +14,7 @@ import { type CdpConnection, type CdpEvent, isRecord } from './cdp-connection.js
 import { fontFamiliesOf } from './font-families.js'
 import { LoadedDocument } from './loaded-document.js'
 import { MainFrameNavigation } from './main-frame-navigation.js'
+import { RequestWatch } from './request-watch.js'
 import { settlesWithin, startTimeLimit, type TimeLimit, withinTimeLimit } from './time-limit.js'
 
 /**
@@ -226,6 +227,10 @@ interface PageIds {
  * It follows the document each `goto` loads, and fails with a `PageNavigatedAwayError` once its main frame commits a
  * new document. A call the browser fails as that document comes, while a navigation of the main frame to a new
  * document is pending, such as a link the page follows or its `history.back()`, fails with one too.
+ *
+ * When its setup asks it to watch requests, it also turns the Network domain on in its session and attaches to the
+ * service workers of its browser context, as `RequestWatch` describes, and listens to their sessions too. Otherwise it
+ * sends no `Network` command and attaches to no service worker.
  */
 class CdpPage implements Page {
   /**
@@ -239,6 +244,11 @@ class CdpPage implements Page {
   private readonly ids: PageIds
 
   /**
+   * Watches the real network requests the page makes, or undefined when its setup doesn't ask for that.
+   */
+  private readonly requestWatch: RequestWatch | undefined
+
+  /**
    * Aborted, with the reason, once the page can no longer be used: it crashed, the browser closed it or went, it
    * navigated away from the document its last `goto` loaded, or it was closed. Each call listens for the abort while it
    * runs, and stops listening when it settles, so a page that lives long keeps nothing of its calls.
@@ -246,8 +256,8 @@ class CdpPage implements Page {
   private readonly usable = new AbortController()
 
   /**
-   * Stops watching the page's session for a crash, a detach, its main frame's navigations and its dialogs, and the
-   * browser for its popups.
+   * Stops watching the page's session for a crash, a detach, its main frame's navigations, its dialogs and, when it
+   * watches requests, its requests and service workers, the browser for its popups, and its service workers' sessions.
    */
   private readonly stopWatching: () => void
 
@@ -294,11 +304,13 @@ class CdpPage implements Page {
 
   /**
    * Watches the page's session for a crash, a detach, its main frame's navigations and its dialogs, the browser for its
-   * popups, and the connection for its close.
+   * popups, and the connection for its close. Watches the page's requests and service workers too when `watchRequests`
+   * says so.
    */
-  constructor(connection: CdpConnection, ids: PageIds) {
+  constructor(connection: CdpConnection, ids: PageIds, watchRequests: boolean) {
     this.connection = connection
     this.ids = ids
+    this.requestWatch = watchRequests ? new RequestWatch(connection, ids.browserContextId, ids.sessionId) : undefined
     this.stopWatching = connection.onEvent((event: CdpEvent) => this.watch(event))
     this.stopListeningForClose = connection.onClose((error: Error) => this.fail(error))
   }
@@ -306,7 +318,8 @@ class CdpPage implements Page {
   /**
    * Sets the page up once: the font table of the browser's OS, the user agent, the emulated time zone, locale, colour
    * scheme, motion and focus, and the init script, and denies downloads and every permission in the page's browser
-   * context. The commands go in parallel.
+   * context. When the page watches requests, it also turns the Network domain on in its session and has the session
+   * report service workers. A failed discovery never fails the setup. The commands go in parallel.
    */
   async setUp(browserUserAgent: string, system: BrowserSystem, setup: PageSetup): Promise<void> {
     await this.unlessFailed(
@@ -338,6 +351,7 @@ class CdpPage implements Page {
           permissions: [],
           browserContextId: this.ids.browserContextId,
         }),
+        ...(this.requestWatch?.setUp() ?? []),
       ]),
     )
   }
@@ -381,6 +395,7 @@ class CdpPage implements Page {
     this.throwIfFailed()
     this.loadedDocument = undefined
     this.gotoOrigin = undefined
+    this.requestWatch?.reset()
 
     const navigation = new MainFrameNavigation(url, this.ids.targetId, this.loaderIds, (later: readonly CdpEvent[]) =>
       this.followLoadedDocument(url, later),
@@ -460,6 +475,15 @@ class CdpPage implements Page {
   }
 
   /**
+   * Gives the hosts of the real network requests the page made since its main frame committed a document, each once,
+   * in the order first sent, as `RequestWatch` decides them now, against the origin of that document. Always empty when
+   * the page doesn't watch requests.
+   */
+  requestHosts(): string[] {
+    return this.requestWatch?.hosts(this.gotoOrigin) ?? []
+  }
+
+  /**
    * Closes the page: fails every call in flight and every later one, stops listening, and disposes the page's browser
    * context. Resolves once the browser has answered, either way, or after 5 s. Calling it again returns the same
    * promise.
@@ -486,7 +510,7 @@ class CdpPage implements Page {
 
   /**
    * Fails the page when an event says it can no longer be used or that it navigated away from the document its last
-   * `goto` loaded, and handles its dialogs and popups.
+   * `goto` loaded, handles its dialogs and popups, and, when it watches requests, tells the watch about the event.
    */
   private watch(event: CdpEvent): void {
     const failure = pageFailureOf(event, this.ids.sessionId)
@@ -500,6 +524,7 @@ class CdpPage implements Page {
     }
 
     this.handleHazards(event)
+    this.requestWatch?.observe(event)
   }
 
   /**
@@ -514,14 +539,15 @@ class CdpPage implements Page {
   }
 
   /**
-   * Keeps the origin of each document the main frame commits, and tells the document the last `goto` loaded about an
-   * event of the page's session.
+   * Keeps the origin of each document the main frame commits and forgets the requests the document before it sent.
+   * Tells the document the last `goto` loaded about an event of the page's session.
    */
   private followMainFrame(event: CdpEvent): void {
     const frame = mainFrameCommitOf(event, this.ids.targetId)
 
     if (frame !== undefined) {
       this.gotoOrigin = tupleOriginOf(frame.securityOrigin)
+      this.requestWatch?.reset()
     }
 
     this.tellLoadedDocument(event)
@@ -719,7 +745,7 @@ async function openInContext(
     const attachReply = await limit.race(connection.send('Target.attachToTarget', { targetId, flatten: true }))
     const sessionId = readString(attachReply, 'sessionId', 'Target.attachToTarget')
 
-    page = new CdpPage(connection, { browserContextId, targetId, sessionId })
+    page = new CdpPage(connection, { browserContextId, targetId, sessionId }, setup.watchRequests)
     await limit.race(page.setUp(browserUserAgent, system, setup))
 
     return page
@@ -756,8 +782,8 @@ async function createContext(connection: CdpConnection, limit: TimeLimit): Promi
 /**
  * Opens a page over CDP: creates a target in a fresh browser context, attaches to it in a flat session, and sets it up
  * once. It gets the font table of `system`, the OS the browser runs on, and the browser's own user agent with the
- * setup's suffix. From then on the page handles its hazards itself. When a step fails, or the page isn't open within
- * 30 s, it disposes the context and rethrows.
+ * setup's suffix, and watches its requests when the setup says so. From then on the page handles its hazards itself.
+ * When a step fails, or the page isn't open within 30 s, it disposes the context and rethrows.
  */
 export async function openCdpPage(
   connection: CdpConnection,

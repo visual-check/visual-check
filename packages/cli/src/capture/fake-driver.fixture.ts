@@ -101,6 +101,10 @@ export interface FakePageBehaviour extends FakeEvaluation {
    * Answers `close`.
    */
   close?: () => Promise<void>
+  /**
+   * Answers `requestHosts`. The page made no real network request when it is left out.
+   */
+  requestHosts?: () => string[]
 }
 
 /**
@@ -217,6 +221,7 @@ export class FakeDriver implements Driver {
         record('close', [])
         await answers.close?.()
       },
+      requestHosts: () => answers.requestHosts?.() ?? [],
     }
   }
 

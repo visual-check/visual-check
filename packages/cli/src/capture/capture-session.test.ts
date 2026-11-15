@@ -75,7 +75,7 @@ describe('openCaptureSession', () => {
     expect(driver.setups).toEqual([])
   })
 
-  it("opens its page with the settings, Storybook's test-runner user agent and the page script", async () => {
+  it("opens its page with the settings, Storybook's test-runner user agent and the page script, watching no requests", async () => {
     const driver = new FakeDriver()
 
     await openCaptureSession(driver, settings).capture(primary)
@@ -86,6 +86,7 @@ describe('openCaptureSession', () => {
         locale: 'pl-PL',
         colorScheme: 'dark',
         initScript: pageInitScript,
+        watchRequests: false,
       },
     ])
   })

@@ -102,6 +102,7 @@ function fakeBrowserOf(version: string = browserPackage.chromium): FakeBrowser {
       close: async () => {
         fake.openPages -= 1
       },
+      requestHosts: () => [],
     }
   }
   const fake: FakeBrowser = {

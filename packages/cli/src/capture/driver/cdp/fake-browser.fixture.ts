@@ -86,6 +86,7 @@ export const pageSetup: PageSetup = {
   locale: 'pl-PL',
   colorScheme: 'dark',
   initScript: 'window.__visualCheck = true',
+  watchRequests: false,
 }
 
 /**
@@ -225,6 +226,7 @@ const defaultHandlers: Record<string, CommandHandler> = {
   'Browser.setDownloadBehavior': answerEmpty,
   'Browser.grantPermissions': answerEmpty,
   'Page.enable': answerEmpty,
+  'Network.enable': answerEmpty,
   'Page.handleJavaScriptDialog': answerEmpty,
   'Inspector.enable': answerEmpty,
   'Page.setFontFamilies': answerEmpty,

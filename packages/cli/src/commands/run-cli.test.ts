@@ -529,6 +529,7 @@ function fakeDriverOf({
           record.pageCloses += 1
           record.events.push(`close page on ${browser}`)
         },
+        requestHosts: () => [],
       }
     },
     close: async () => {

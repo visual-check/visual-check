@@ -121,6 +121,12 @@ export interface PageSetup {
    * A script that runs at the start of every document of the page, before the page's own scripts.
    */
   initScript: string
+  /**
+   * Whether the page watches the real network requests it makes, for `requestHosts`. Only `update` turns it on, since
+   * watching has a cost: the browser reports every request, and the page attaches to the service workers of its
+   * browser context. A page that doesn't watch turns on no request reporting and attaches to no service worker.
+   */
+  watchRequests: boolean
 }
 
 /**
@@ -212,6 +218,13 @@ export type CaptureArea = 'full-page' | CaptureBox
  * can fail because of that. So the caller closes a page once a call on it fails, and opens a fresh page for its next
  * capture.
  *
+ * A page whose setup has `watchRequests` on watches the real network requests it makes, which `requestHosts` names by
+ * host. A real network request is a `fetch`, XHR, EventSource or WebSocket request to an origin other than that of the
+ * document the last `goto` loaded, which either went over the network, a response from the HTTP cache included, or
+ * was passed on there by a service worker of the page's browser context. A response a service worker built itself, as
+ * MSW's mocks are, doesn't count, and fonts, stylesheets, images and scripts never do. A page that doesn't watch turns
+ * on no request reporting and attaches to no service worker, so it costs nothing.
+ *
  * @public
  */
 export interface Page {
@@ -256,6 +269,15 @@ export interface Page {
    * within the driver's own fixed limit.
    */
   clearStorage: () => Promise<void>
+  /**
+   * Gives the hosts of the real network requests the page made since its main frame committed the document the last
+   * `goto` loaded, such as `api.example.com` or `127.0.0.1:6007`: each once, in the order first sent, lower case, with
+   * the port when it isn't the scheme's default. Requests the document before it sent don't count. Decides what counts
+   * when called, so a request still pending or failed counts only while no service worker of the page's browser context
+   * is watched. Requests a dedicated worker or an out-of-process iframe sends aren't watched. Always empty when the
+   * page's setup has `watchRequests` off. Never fails.
+   */
+  requestHosts: () => string[]
   /**
    * Closes the page and its browser context. Every call in flight and every later call fails. Calling it again returns
    * the same promise.

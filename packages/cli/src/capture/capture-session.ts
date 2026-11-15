@@ -685,7 +685,8 @@ function navigatedAway(capture: StoryCapture): boolean {
 
 /**
  * Gives how a page is set up for the settings: a user agent ending in `StorybookTestRunner`, the settings' time zone,
- * locale and colour scheme, and the page script. A capture page and a page that reads options are set up the same way.
+ * locale and colour scheme, the page script, and no watching of requests. A capture page and a page that reads options
+ * are set up the same way.
  */
 export function pageSetupOf(settings: CaptureSettings): PageSetup {
   return {
@@ -694,6 +695,7 @@ export function pageSetupOf(settings: CaptureSettings): PageSetup {
     locale: settings.locale,
     colorScheme: settings.colorScheme,
     initScript: pageInitScript,
+    watchRequests: false,
   }
 }
 
