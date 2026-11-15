@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import {
   existsSync,
   mkdirSync,
@@ -1919,6 +1920,165 @@ describe('runCli modes', () => {
         '3 written',
       ),
     )
+  })
+})
+
+/**
+ * A story ID with `é` as one code point, as NFC encodes it.
+ */
+const composedId = 'café--primary'.normalize('NFC')
+
+/**
+ * The same story ID with `é` as `e` and a combining acute accent, as NFD encodes it. macOS takes both for one file.
+ */
+const decomposedId = composedId.normalize('NFD')
+
+/**
+ * A story ID over 240 bytes, whose baseline's name is shortened.
+ */
+const longId = `components-${'very-long-'.repeat(25)}story`
+
+/**
+ * Gives the shortened stem of an ASCII key over 240 bytes: its first 223 characters, `-` and the first 16 hex
+ * characters of its SHA-256.
+ */
+function shortenedStemOf(key: string): string {
+  return `${key.slice(0, 223)}-${createHash('sha256').update(key).digest('hex').slice(0, 16)}`
+}
+
+/**
+ * Builds the line a run prints for two snapshots of the Storybook whose baselines would be the file.
+ */
+function clashLineOf(storybook: string, file: string, first: string, second: string): string {
+  return `Storybook ${storybook} has two snapshots whose baselines would be one file, ${file}: ${first} and ${second}.`
+}
+
+/**
+ * The note after a clash's line when the two keys differ only once folded.
+ */
+const foldedNamesNote = 'Their names differ only in letter case or in how an accented letter is encoded.'
+
+/**
+ * The fix the problem for clashing baselines ends with.
+ */
+const clashFix = 'Rename one of the stories or modes, then run visual-check again.'
+
+describe('runCli baseline file names', () => {
+  it('exits 2 in test, before any capture or clearing the report, for two story IDs that differ only in encoding', async () => {
+    const { project, folder } = await createRun([composedId, decomposedId])
+    const image = writeStaleReport(project)
+    const { options, record } = fakeBrowser()
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr: printed(clashLineOf('web', `${composedId}.png`, composedId, decomposedId), foldedNamesNote, clashFix),
+    })
+    expect(storyIdsOf(record.urls)).toEqual([])
+    expect(existsSync(image)).toBe(true)
+    expect(existsSync(folder)).toBe(false)
+  })
+
+  it('exits 2 in update, writing no baseline, for two story IDs that differ only in encoding', async () => {
+    const { project, folder } = await createRun([composedId, decomposedId])
+    const { options, record } = fakeBrowser()
+    const result = await runCli(['update'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr: printed(clashLineOf('web', `${composedId}.png`, composedId, decomposedId), foldedNamesNote, clashFix),
+    })
+    expect(storyIdsOf(record.urls)).toEqual([])
+    expect(existsSync(folder)).toBe(false)
+  })
+
+  it("exits 2 when a mode's baseline would be another story's, naming the mode, whatever the selection", async () => {
+    const { project } = await createRun(['a', 'b', 'a.dark'])
+    const { options, record } = fakeBrowser({}, { read: { options: { a: { modes: { dark: {} } } } } })
+    const result = await runCli(['update', '--filter', '^b$'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr: printed(clashLineOf('web', 'a.dark.png', 'a in mode dark', 'a.dark'), clashFix),
+    })
+    expect(storyIdsOf(record.urls)).toEqual([])
+  })
+
+  it("exits 2 when the key of a story whose stories file didn't load clashes with another story's", async () => {
+    const { project } = await createRun(['a', 'A'], {}, '', { a: './a.stories.tsx' })
+    const { options, record } = fakeBrowser({}, { read: { failed: { './a.stories.tsx': 'Boom' } } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr: printed(clashLineOf('web', 'a.png', 'a', 'A'), foldedNamesNote, clashFix),
+    })
+    expect(storyIdsOf(record.urls)).toEqual([])
+  })
+
+  it("names each Storybook's first clash in config order, after saying the browser relaunched", async () => {
+    const web = await startStorybook(['a', 'A', 'b', 'B'])
+    const docs = await startStorybook([composedId, decomposedId])
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${web}' }, docs: { dir: 'docs', url: '${docs}' } } }\n`,
+      'web/button.stories.tsx': '',
+      'docs/button.stories.tsx': '',
+    })
+    const { options } = fakeBrowser({}, { read: { exitingBrowsers: [1] } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr:
+        relaunchNotice +
+        printed(
+          clashLineOf('web', 'a.png', 'a', 'A'),
+          foldedNamesNote,
+          clashLineOf('docs', `${composedId}.png`, composedId, decomposedId),
+          foldedNamesNote,
+          clashFix,
+        ),
+    })
+  })
+
+  it('names the report images of a long-ID story that differs after its shortened stem in test', async () => {
+    const stem = shortenedStemOf(longId)
+    const { project } = await createRun([longId], { [stem]: otherSnapshot })
+    const result = await runCli(['test'], {}, project, fakeBrowser().options)
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: printed(headerOf('test', 1), `✗ web  ${longId}  differs: 100 differ, 20 allowed`, '0 passed · 1 differs'),
+      stderr: '',
+    })
+    expect(readdirSync(join(reportFolderIn(project), 'images', 'web')).sort()).toEqual([
+      `${stem}.baseline.png`,
+      `${stem}.diff.png`,
+      `${stem}.snapshot.png`,
+    ])
+  })
+
+  it('writes the baseline of a story with a long ID under its shortened name in update', async () => {
+    const shortened = `${shortenedStemOf(longId)}.png`
+    const { project, folder } = await createRun([longId])
+    const result = await runCli(['update'], {}, project, fakeBrowser().options)
+
+    expect(result).toEqual({
+      exitCode: 0,
+      stdout: printed(
+        headerOf('update', 1),
+        `✓ web  ${longId}  written .visual-check/baselines/${shortened}`,
+        '1 written',
+      ),
+      stderr: '',
+    })
+    expect(readdirSync(folder)).toEqual([shortened])
+    expect(new Uint8Array(readFileSync(join(folder, shortened)))).toEqual(defaultSnapshot)
   })
 })
 

@@ -1,6 +1,12 @@
 import { relative, sep } from 'node:path'
 import { BaselineError } from '../baselines/baseline-error.js'
-import { baselinePathOf, isByteIdentical, readBaseline, writeBaseline } from '../baselines/baseline-files.js'
+import {
+  baselinePathOf,
+  baselineStemOf,
+  isByteIdentical,
+  readBaseline,
+  writeBaseline,
+} from '../baselines/baseline-files.js'
 import { BrowserMismatchError, runImageOf } from '../browser/browser-version.js'
 import type { ChromeForTestingPlatform } from '../browser/chrome-for-testing-platform.js'
 import type { BrowserPackage } from '../browser/read-browser-package.js'
@@ -115,8 +121,8 @@ interface SnapshotRunResult {
   exitCode: number
   /**
    * The header, one line per snapshot and the counts, or, for a failure that stopped the run, the header and the lines
-   * of the snapshots that finished before it. Nothing when the run stopped before any capture, while it read the
-   * per-story options.
+   * of the snapshots that finished before it. Nothing when the run stopped before any capture, while it planned the
+   * snapshots.
    */
   stdout: string
   /**
@@ -312,10 +318,10 @@ async function compareWithBaseline(
 }
 
 /**
- * Tests one snapshot: a missing baseline is reported without a capture, and a snapshot passes when it differs from
- * its baseline by no more than the story's tolerance. One that differs beyond it, or in size, leaves its baseline,
- * snapshot and visual diff in the report folder. It asks for a capture only once it has read the baseline. A pass's
- * time is the capture's alone: it leaves out the browser's launch and the comparison.
+ * Tests one snapshot: a missing baseline is reported without a capture, and a snapshot passes when it differs from its
+ * baseline by no more than the story's tolerance. One that differs beyond it, or in size, leaves its baseline, snapshot
+ * and visual diff in the report folder, named after its baseline's stem. It asks for a capture only once it has read
+ * the baseline. A pass's time is the capture's alone: it leaves out the browser's launch and the comparison.
  *
  * @throws {BaselineError} When the baseline can't be read or decoded.
  * @throws {ReportError} When an image can't be written to the report folder.
@@ -348,7 +354,11 @@ async function testSnapshot(
   const result = await compareWithBaseline(visualDiff, item, baseline, snapshot, path)
 
   if (result.outcome === 'differs') {
-    await writeFailureImages(reportFolder, item.storybook.name, item.key, { baseline, snapshot, diff: result.diff })
+    await writeFailureImages(reportFolder, item.storybook.name, baselineStemOf(item.key), {
+      baseline,
+      snapshot,
+      diff: result.diff,
+    })
 
     return { status: 'differs', detail: `differs: ${result.message}`, completingMs }
   }
@@ -640,24 +650,29 @@ async function takeSnapshots(
 /**
  * Reads every Storybook's per-story options before any capture, then takes the snapshots of every selected story that
  * isn't disabled with a pool of `workers` that share one browser: its default capture, then one snapshot per mode it
- * lists, each at its own viewport and with its mode's globals in the story's URL. It prints one line per snapshot
- * after the header, which counts them, then the counts; a mode's line names the mode after the story ID. The lines
- * follow config order, then selection order, then the story's default capture and its modes in order, whatever order
- * the captures finish in. Each snapshot has its own baseline, `<story-id>.png` for the default capture and
- * `<story-id>.<mode>.png` for a mode. `test` compares each snapshot with its baseline by the story's tolerance, at the
- * viewport's device scale factor, and never captures a missing baseline. It clears the report folder,
- * `.visual-check/report` beside the config file, once the snapshots are planned, and writes the baseline, snapshot and
- * visual diff of each snapshot that differs there. `update` writes each snapshot whose baseline is missing or isn't
- * byte-identical to it, and never touches the report folder.
+ * lists, each at its own viewport and with its mode's globals in the story's URL. It prints one line per snapshot after
+ * the header, which counts them, then the counts; a mode's line names the mode after the story ID. The lines follow
+ * config order, then selection order, then the story's default capture and its modes in order, whatever order the
+ * captures finish in. Each snapshot has its own baseline, `<story-id>.png` for the default capture and
+ * `<story-id>.<mode>.png` for a mode, a key over 240 bytes shortened to its first 223 bytes, `-` and 16 hex characters
+ * of its SHA-256. `test` compares each snapshot with its baseline by the story's tolerance, at the viewport's device
+ * scale factor, and never captures a missing baseline. It clears the report folder, `.visual-check/report` beside the
+ * config file, once the snapshots are planned, and writes the baseline, snapshot and visual diff of each snapshot that
+ * differs there. `update` writes each snapshot whose baseline is missing or isn't byte-identical to it, and never
+ * touches the report folder.
  *
  * Each Storybook with stories gets one options read, in config order, on a page of its own, covering every story its
  * `index.json` lists whatever the selection. So the browser is launched at the first read, even when no story then
  * needs a capture, and a run launches nothing only when no Storybook has stories. A read problem, at the first
  * Storybook that has one, or invalid options in any Storybook stop the run with exit 2 before any capture, printing
  * nothing on stdout. Invalid options include a mode that breaks the mode rules, such as a bad name, a global the
- * Storybook doesn't declare or one the story pins. A disabled story is left out: it isn't captured, printed or
- * counted. Each story of a stories file that failed to load, or didn't load within readyTimeout, is one broken
- * snapshot, `load-failed`, with no mode, no capture and no baseline read.
+ * Storybook doesn't declare or one the story pins. A disabled story is left out: it isn't captured, printed or counted.
+ * Each story of a stories file that failed to load, or didn't load within readyTimeout, is one broken snapshot,
+ * `load-failed`, with no mode, no capture and no baseline read.
+ *
+ * Planning also stops the run with exit 2, before the report folder is cleared or anything is captured, on two
+ * snapshots of one Storybook whose baselines would be one file, selected or not. Stderr names the first such pair in
+ * each Storybook, in config order.
  *
  * When the browser exits, every story in flight is broken, `browser-exited`, the browser is relaunched once at the next
  * read or story that needs it, and the run goes on; stderr then says so, with the browser's last output, whatever the
@@ -668,8 +683,8 @@ async function takeSnapshots(
  * always closed.
  *
  * A run that finishes ends stderr with a warning for each Storybook, in config order, whose captured snapshots'
- * `completing` render steps took a median of 50 ms or more: it seems to ignore the test path. The warnings never
- * change the exit code.
+ * `completing` render steps took a median of 50 ms or more: it seems to ignore the test path. The warnings never change
+ * the exit code.
  *
  * @throws {Error} Any other error, after closing the sessions and the browsers.
  */

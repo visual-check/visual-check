@@ -1,9 +1,18 @@
+import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { BaselineError } from './baseline-error.js'
-import { baselinePathOf, isByteIdentical, readBaseline, snapshotKeyOf, writeBaseline } from './baseline-files.js'
+import {
+  baselineFileNameOf,
+  baselinePathOf,
+  baselineStemOf,
+  isByteIdentical,
+  readBaseline,
+  snapshotKeyOf,
+  writeBaseline,
+} from './baseline-files.js'
 
 /**
  * The temporary folders the tests made, removed after each test.
@@ -42,6 +51,96 @@ describe('snapshotKeyOf', () => {
   })
 })
 
+/**
+ * Gives the first 16 hex characters of the key's SHA-256, over its UTF-8 bytes, which a shortened name ends with.
+ */
+function hashOf(key: string): string {
+  return createHash('sha256').update(key, 'utf8').digest('hex').slice(0, 16)
+}
+
+/**
+ * Gives the length of the text in UTF-8 bytes.
+ */
+function bytesOf(text: string): number {
+  return Buffer.byteLength(text, 'utf8')
+}
+
+describe('baselineStemOf', () => {
+  it('keeps a key of up to 240 bytes as it is', () => {
+    expect(baselineStemOf('components-button--primary.dark')).toBe('components-button--primary.dark')
+    expect(baselineStemOf('a'.repeat(240))).toBe('a'.repeat(240))
+  })
+
+  it("shortens a longer key to its first 223 bytes, -, and 16 hex characters of the full key's SHA-256", () => {
+    const key = 'a'.repeat(241)
+
+    expect(baselineStemOf(key)).toBe(`${'a'.repeat(223)}-${hashOf(key)}`)
+    expect(bytesOf(baselineStemOf(key))).toBe(240)
+  })
+})
+
+describe('baselineFileNameOf', () => {
+  it('names a short key <key>.png', () => {
+    expect(baselineFileNameOf('components-button--primary.dark')).toBe('components-button--primary.dark.png')
+  })
+
+  it('keeps a key of exactly 240 bytes as it is', () => {
+    const key = 'a'.repeat(240)
+
+    expect(baselineFileNameOf(key)).toBe(`${key}.png`)
+  })
+
+  it("shortens a key of 241 bytes to its first 223 bytes, -, and 16 hex characters of the full key's SHA-256", () => {
+    const key = `${'a'.repeat(223)}${'b'.repeat(18)}`
+
+    expect(baselineFileNameOf(key)).toBe(`${'a'.repeat(223)}-${hashOf(key)}.png`)
+    expect(baselineFileNameOf(key)).toMatch(/^a{223}-[0-9a-f]{16}\.png$/)
+  })
+
+  it('never splits a character of two bytes', () => {
+    const key = '\u00e9'.repeat(121)
+    const name = baselineFileNameOf(key)
+
+    expect(name).toBe(`${'\u00e9'.repeat(111)}-${hashOf(key)}.png`)
+    expect(bytesOf('\u00e9'.repeat(111))).toBe(222)
+  })
+
+  it('never splits a surrogate pair', () => {
+    const key = '\u{1f600}'.repeat(61)
+
+    expect(baselineFileNameOf(key)).toBe(`${'\u{1f600}'.repeat(55)}-${hashOf(key)}.png`)
+  })
+
+  it('keeps a character that ends exactly at 223 bytes', () => {
+    const key = `a${'\u00e9'.repeat(120)}`
+
+    expect(baselineFileNameOf(key)).toBe(`a${'\u00e9'.repeat(111)}-${hashOf(key)}.png`)
+  })
+
+  it("keeps every name, with the report's longest image suffix, within 255 bytes", () => {
+    const keys = [
+      'a'.repeat(241),
+      'a'.repeat(1000),
+      '\u00e9'.repeat(500),
+      '\u{1f600}'.repeat(300),
+      `a${'\u00e9'.repeat(120)}`,
+    ]
+
+    for (const key of keys) {
+      const name = baselineFileNameOf(key)
+
+      expect(bytesOf(name)).toBeLessThanOrEqual(255)
+      expect(bytesOf(`${baselineStemOf(key)}.snapshot.png`)).toBeLessThanOrEqual(255)
+    }
+  })
+
+  it('gives two long keys that share their first 223 bytes names of their own', () => {
+    const start = 'a'.repeat(223)
+
+    expect(baselineFileNameOf(`${start}${'b'.repeat(30)}`)).not.toBe(baselineFileNameOf(`${start}${'c'.repeat(30)}`))
+  })
+})
+
 describe('baselinePathOf', () => {
   it("names the default capture's baseline after its key, the story ID, in the baselines folder", () => {
     expect(baselinePathOf('/project/.visual-check/baselines', 'components-button--primary')).toBe(
@@ -52,6 +151,13 @@ describe('baselinePathOf', () => {
   it("names a mode's baseline after its key, in the baselines folder", () => {
     expect(baselinePathOf('/project/.visual-check/baselines', 'components-button--primary.dark')).toBe(
       join('/project/.visual-check/baselines', 'components-button--primary.dark.png'),
+    )
+  })
+  it("names a long key's baseline by its shortened name", () => {
+    const key = 'a'.repeat(300)
+
+    expect(baselinePathOf('/project/.visual-check/baselines', key)).toBe(
+      join('/project/.visual-check/baselines', `${'a'.repeat(223)}-${hashOf(key)}.png`),
     )
   })
 })
@@ -121,6 +227,15 @@ describe('writeBaseline', () => {
 
     expect(new Uint8Array(readFileSync(path))).toEqual(snapshot)
     expect(readdirSync(folder)).toEqual(['button--primary.png'])
+  })
+
+  it('writes a baseline whose name is near the 255 bytes a file name can take', async () => {
+    const folder = createFolder()
+    const name = baselineFileNameOf('a'.repeat(300))
+
+    await writeBaseline(join(folder, name), snapshot)
+
+    expect(readdirSync(folder)).toEqual([name])
   })
 
   it('writes only the bytes of a view, not the rest of its buffer', async () => {

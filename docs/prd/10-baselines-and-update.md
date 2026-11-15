@@ -27,7 +27,7 @@ Baselines are PNG files in one folder per Storybook. Only `update`, run locally 
 All names are known before anything is captured, so these are checked first:
 
 - **A key over 240 bytes is shortened.** It keeps its first 223 bytes, then `-`, then the first 16 hex characters of the full key's SHA-256. The limit leaves room for the report's longest image suffix inside a 255-byte file name.
-- **Two snapshots that map to one file exit 2,** naming both stories. That can happen on macOS when two story names differ only in how an accented letter is encoded.
+- **Two snapshots that map to one file exit 2,** naming both stories. That can happen on macOS when two story names differ only in letter case, or in how an accented letter is encoded.
 - **On Windows, `update` warns** when a path it writes passes 260 characters, and names the git setting that allows it (`core.longpaths`).
 
 ## Who writes

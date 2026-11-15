@@ -1,3 +1,4 @@
+import { type BaselineClash, findBaselineClash } from '../baselines/baseline-clash.js'
 import { snapshotKeyOf } from '../baselines/baseline-files.js'
 import { type BrokenStory, failureReasonOf } from '../capture/capture-session.js'
 import type { OptionsRequest, StorybookOptions, StorybookOptionsRead } from '../capture/read-options.js'
@@ -183,6 +184,21 @@ interface StorybookIssues {
    * Each invalid option, as `<story-id>: <issue>`.
    */
   issues: string[]
+}
+
+/**
+ * A Storybook's name and its first two snapshots whose baselines would be one file, as the problem for clashing
+ * baselines names them.
+ */
+interface StorybookClash {
+  /**
+   * The Storybook's name in the config.
+   */
+  name: string
+  /**
+   * The two snapshots and their file's name.
+   */
+  clash: BaselineClash<PlannedSnapshot>
 }
 
 /**
@@ -447,6 +463,44 @@ function invalidOptionsProblemOf(storybooks: readonly StorybookIssues[]): string
 }
 
 /**
+ * Names a snapshot in a message: its story ID, then its mode when it has one.
+ */
+function snapshotNameOf({ story, mode }: PlannedSnapshot): string {
+  return mode === undefined ? story.id : `${story.id} in mode ${mode}`
+}
+
+/**
+ * What a Storybook's block in the problem for clashing baselines adds when the two keys aren't the same text, so their
+ * names may print alike.
+ */
+const foldedNamesNote = 'Their names differ only in letter case or in how an accented letter is encoded.\n'
+
+/**
+ * Builds one Storybook's block in the problem for clashing baselines: a line naming its two snapshots and their file,
+ * then a note when their keys differ only once folded.
+ */
+function clashBlockOf({ name, clash: { first, second, fileName } }: StorybookClash): string {
+  const note = first.key === second.key ? '' : foldedNamesNote
+
+  return (
+    `Storybook ${name} has two snapshots whose baselines would be one file, ${fileName}: ` +
+    `${snapshotNameOf(first)} and ${snapshotNameOf(second)}.\n${note}`
+  )
+}
+
+/**
+ * Builds the problem for two snapshots whose baselines would be one file: a block for each Storybook with a clash, in
+ * the order given, then the fix, with no trailing newline. Gives `undefined` when no Storybook has a clash.
+ */
+function baselineClashProblemOf(clashes: readonly StorybookClash[]): string | undefined {
+  if (clashes.length === 0) {
+    return undefined
+  }
+
+  return `${clashes.map(clashBlockOf).join('')}Rename one of the stories or modes, then run visual-check again.`
+}
+
+/**
  * Plans the snapshots of a run from each Storybook's per-story options, which it reads with `readOptions`, one read per
  * Storybook with stories, in the order given. A read covers every story the Storybook's `index.json` lists whatever the
  * selection, and every story's options are checked. Gives the snapshots of every story, selected or not, in the order
@@ -457,7 +511,10 @@ function invalidOptionsProblemOf(storybooks: readonly StorybookIssues[]): string
  * mode. A read's problem stops the planning at once, and the Storybooks after it aren't read. Invalid options stop it
  * once every Storybook is read, with one block of issues per Storybook: each story's type issues, then the mode rules'
  * issues of the stories whose options are valid, checked against the globals the Storybook declares and the globals
- * each story pins. Either way, it gives the problem, with no trailing newline.
+ * each story pins. With valid options, two snapshots of one Storybook whose baselines would be one file stop it, with
+ * one block per Storybook that has them, naming its first two. Every planned snapshot counts, selected or not, broken
+ * ones too, and file names that differ only in Unicode normalisation or letter case are one file, as macOS takes them.
+ * Either way, it gives the problem, with no trailing newline.
  *
  * @throws {Error} What `readOptions` throws, when a read leaves out a stories file or a story it was asked for, and
  * when the selection holds a story `index.json` doesn't list.
@@ -469,6 +526,7 @@ export async function planSnapshots(
 ): Promise<{ snapshots: PlannedSnapshot[] } | { problem: string }> {
   const snapshots: PlannedSnapshot[] = []
   const invalid: StorybookIssues[] = []
+  const clashes: StorybookClash[] = []
 
   for (const selection of selections) {
     const read = await readStorybookOptions(readOptions, selection)
@@ -478,12 +536,17 @@ export async function planSnapshots(
     }
 
     const planned = planStorybook(selection, read, config)
+    const clash = findBaselineClash(planned.snapshots)
 
     snapshots.push(...planned.snapshots)
     invalid.push({ name: selection.storybook.name, issues: planned.issues })
+
+    if (clash !== undefined) {
+      clashes.push({ name: selection.storybook.name, clash })
+    }
   }
 
-  const problem = invalidOptionsProblemOf(invalid)
+  const problem = invalidOptionsProblemOf(invalid) ?? baselineClashProblemOf(clashes)
 
   return problem === undefined ? { snapshots } : { problem }
 }

@@ -383,6 +383,40 @@ describe('planSnapshots', () => {
     expect('problem' in plan && plan.problem).not.toContain('more.')
   })
 
+  it('gives a block for each Storybook with two snapshots whose baselines would be one file, selected or not', async () => {
+    const reader = readerOf({ a: { modes: { dark: {} } } })
+    const plan = await planSnapshots(
+      [
+        { storybook: web, stories: [storyOf('b')], allStories: [storyOf('a'), storyOf('b'), storyOf('a.dark')] },
+        allSelected(storybookOf('quick'), [storyOf('c')]),
+        allSelected(docs, [storyOf('d'), storyOf('D')]),
+      ],
+      reader.read,
+      config,
+    )
+
+    expect(plan).toEqual({
+      problem:
+        'Storybook web has two snapshots whose baselines would be one file, a.dark.png: a in mode dark and a.dark.\n' +
+        'Storybook docs has two snapshots whose baselines would be one file, d.png: d and D.\n' +
+        'Their names differ only in letter case or in how an accented letter is encoded.\n' +
+        'Rename one of the stories or modes, then run visual-check again.',
+    })
+  })
+
+  it('gives invalid options before two snapshots whose baselines would be one file', async () => {
+    const reader = readerOf({ c: { disable: 1 } })
+    const plan = await planSnapshots(
+      [allSelected(web, [storyOf('a'), storyOf('A'), storyOf('c')])],
+      reader.read,
+      config,
+    )
+
+    expect(plan).toEqual({
+      problem: `Storybook web has invalid per-story options:\n  - c: ${disableIssue}\n${fixLine}`,
+    })
+  })
+
   it("gives a read's problem as it is, without reading the Storybooks after it", async () => {
     const reader = readerOf({ c: { disable: 1 } }, { docs: { problem: "Storybook docs's preview never started." } })
 
