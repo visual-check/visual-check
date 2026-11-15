@@ -117,11 +117,10 @@ function MemoryHog() {
 }
 
 /**
- * Keeps arrays of 50,000 numbers, each about 400 KB, until the page runs out of memory and its renderer crashes. Each
- * array stays under the 100,000 elements above which V8 stores an array created at its length as a dictionary: those
- * are mostly pointers, so every garbage collection near the heap limit has to scan them, and on a machine with a high
- * limit the page can outlast `readyTimeout` before it crashes. An array of plain numbers gives garbage collection
- * nothing to scan.
+ * Keeps arrays of 50,000 numbers, each about 400 KB, until the page reaches V8's heap limit, about 3.8 GB, and its
+ * renderer crashes. That takes 1 to 4 s on a Mac but 14 to 19 s on CI's runners, so the end-to-end check gives the
+ * hazards case a longer `readyTimeout`. Arrays of plain numbers fill the heap a little faster than larger ones V8 keeps
+ * as dictionaries.
  */
 function allocateForever(): never {
   const kept: number[][] = []

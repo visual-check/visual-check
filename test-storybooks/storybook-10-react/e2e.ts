@@ -179,9 +179,13 @@ const storageFilter = /^storage--/
  * The hazard stories, by the pattern their IDs match, and what the hazards case checks beyond their outcomes: where
  * the one that navigates away goes and how many times its page loads, once and then on each of its 2 retries, what the
  * one that crashes says, and the stories whose next story must pass, because they leave their page held or crashed.
+ *
+ * The case runs with a `readyTimeout` of 60 s, in ms. The story that crashes fills V8's heap, about 3.8 GB, before its
+ * renderer crashes: 1 to 4 s on a Mac, but 14 to 19 s on CI's runners, past the default 10 s.
  */
 const hazards = {
   filter: /^hazards--/,
+  readyTimeout: 60_000,
   navigatesAway: { storyId: 'hazards--navigates-away', says: 'navigated away to /categories/burgers', loads: 3 },
   crashes: { storyId: 'hazards--crashes', says: 'The page crashed' },
   followedByPass: ['hazards--before-unload', 'hazards--crashes'],
@@ -899,16 +903,30 @@ function localEnvironment(): NodeJS.ProcessEnv {
 }
 
 /**
- * Writes a config for this Storybook, served at the URL, with its baselines in the given folder and, when given, its
- * platform, that captures with 2 workers. Gives its path.
+ * What a written config sets besides the Storybook, its baselines, the image and 2 workers.
  */
-function writeConfig(folder: string, url: string, baselines: string, platform?: string): string {
+interface ConfigOptions {
+  /**
+   * The platform the browser runs on. The config's default when not given.
+   */
+  platform?: string | undefined
+  /**
+   * The `readyTimeout`, in ms. The config's default when not given.
+   */
+  readyTimeout?: number
+}
+
+/**
+ * Writes a config for this Storybook, served at the URL, with its baselines in the given folder, that captures with 2
+ * workers, and the platform and `readyTimeout` the options give. Gives its path.
+ */
+function writeConfig(folder: string, url: string, baselines: string, options: ConfigOptions = {}): string {
   const path = join(folder, 'visual-check.config.mjs')
   const config = {
     storybooks: { react: { url, dir: packageDir, baselines } },
     image,
     workers: parallelWorkers,
-    ...(platform === undefined ? {} : { platform }),
+    ...options,
   }
 
   writeFileSync(path, `export default ${JSON.stringify(config, null, 2)}\n`)
@@ -1116,16 +1134,19 @@ function passedAfterProblems(storyId: string, next: SnapshotLine | undefined): s
  * `Crashes` pass, so a page that a `beforeunload` dialog holds, or a crashed page that isn't replaced, shows.
  */
 async function checkHazards(expected: Outcomes): Promise<string[]> {
-  return await withStorybookServer({}, async (server) => {
-    const run = await runCli(['test', '--filter', hazards.filter.source, '--workers', '1', '--url', server.url])
+  return await withStorybookServer({}, (server) =>
+    withTemporaryFolder(async (folder) => {
+      const config = writeConfig(folder, server.url, committedBaselines, { readyTimeout: hazards.readyTimeout })
+      const run = await runCli(['test', '--filter', hazards.filter.source, '--workers', '1', '--config', config])
 
-    return [
-      ...expectedRunProblems('test', run, outcomesMatching(expected, hazards.filter)),
-      ...navigatedAwayProblems(run, server),
-      ...lineSaysProblems(run, hazards.crashes.storyId, hazards.crashes.says),
-      ...hazards.followedByPass.flatMap((storyId) => followedByPassProblems(run, storyId)),
-    ]
-  })
+      return [
+        ...expectedRunProblems('test', run, outcomesMatching(expected, hazards.filter)),
+        ...navigatedAwayProblems(run, server),
+        ...lineSaysProblems(run, hazards.crashes.storyId, hazards.crashes.says),
+        ...hazards.followedByPass.flatMap((storyId) => followedByPassProblems(run, storyId)),
+      ]
+    }),
+  )
 }
 
 /**
@@ -1152,7 +1173,7 @@ async function testWithPlatform(
 ): Promise<string[]> {
   return await withStorybookServer({}, (server) =>
     withTemporaryFolder(async (folder) => {
-      const config = writeConfig(folder, server.url, committedBaselines, platform)
+      const config = writeConfig(folder, server.url, committedBaselines, { platform })
 
       return check(await runCli(['test', '--all', '--config', config]), server)
     }),
@@ -1240,7 +1261,7 @@ function hostRunOf(folder: string, url: string): HostRun {
   const cacheDir = cacheSetting ? resolvePath(packageDir, cacheSetting) : join(folder, 'cache')
 
   return {
-    config: writeConfig(folder, url, join(folder, 'baselines'), 'host'),
+    config: writeConfig(folder, url, join(folder, 'baselines'), { platform: 'host' }),
     cacheDir,
     environment: { ...localEnvironment(), VISUAL_CHECK_CACHE_DIR: cacheDir },
   }
