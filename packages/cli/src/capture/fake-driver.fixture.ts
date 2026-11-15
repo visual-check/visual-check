@@ -1,10 +1,12 @@
+import { answerOptionsReadExpression } from '../storybook/options-read.fixture.js'
 import { finishedAnswer } from '../storybook/preview-script.fixture.js'
 import type { BrowserExitedError, Driver, Page, PageSetup, PageViewport } from './driver/driver.js'
 import { readyAnswer } from './page-script.fixture.js'
 
 /**
- * How a fake page answers the waits evaluated in it. A wait left out answers as on a story that's ready: the story
- * wait gives `finishedAnswer()`, and the wait for images and fonts gives `readyAnswer()`.
+ * How a fake page answers the waits and the options read evaluated in it. One left out answers as on a story that's
+ * ready: the story wait gives `finishedAnswer()`, the wait for images and fonts gives `readyAnswer()`, and the options
+ * read finds every file loaded and no story with options.
  */
 interface FakeEvaluation {
   /**
@@ -15,12 +17,17 @@ interface FakeEvaluation {
    * Answers the wait for images and fonts, given the driver's time limit for it.
    */
   assetsWait?: (timeoutMs: number) => Promise<unknown>
+  /**
+   * Answers the options read, given the driver's time limit for it.
+   */
+  optionsRead?: (timeoutMs: number) => Promise<unknown>
 }
 
 /**
  * Answers an expression evaluated in a fake page as `evaluation` says. It tells the waits apart by the function each
- * calls in the page: `waitForStory` for the story wait, `waitForAssets` for the wait for images and fonts. Throws on
- * any other expression, so one the fake doesn't know, such as a wait whose function was renamed, fails clearly.
+ * calls in the page: `waitForStory` for the story wait, `waitForAssets` for the wait for images and fonts and
+ * `readOptions` for the options read. Throws on any other expression, so one the fake doesn't know, such as a wait
+ * whose function was renamed, fails clearly.
  *
  * @public
  */
@@ -35,6 +42,12 @@ export async function answerEvaluate(
 
   if (expression.includes('.waitForAssets(')) {
     return evaluation.assetsWait === undefined ? readyAnswer() : await evaluation.assetsWait(timeoutMs)
+  }
+
+  if (expression.includes('.readOptions(')) {
+    return evaluation.optionsRead === undefined
+      ? await answerOptionsReadExpression(expression)
+      : await evaluation.optionsRead(timeoutMs)
   }
 
   throw new Error(`The fake page doesn't know this expression: ${expression}`)

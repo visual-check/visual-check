@@ -1,5 +1,7 @@
-import { runInThisContext } from 'node:vm'
+import { runInNewContext, runInThisContext } from 'node:vm'
 import { optionsEncoderSource } from './options-encoding.js'
+import type { StoriesFile } from './options-read.js'
+import { stateGlobal } from './preview-script.js'
 
 /**
  * The page's own encoder, run in this realm, so the plain objects a test builds count as plain, as the page's own do
@@ -68,4 +70,24 @@ export function optionsReadAnswer(files: readonly FileRead[]): Record<string, un
       ),
     }),
   )
+}
+
+/**
+ * Answers an options read expression as the page would where every file loads and no story has options, by running
+ * the real expression against a page script that reads the files it asks for.
+ *
+ * @public
+ */
+export async function answerOptionsReadExpression(expression: string): Promise<unknown> {
+  const state = {
+    readOptions: async (files: StoriesFile[]) =>
+      optionsReadAnswer(
+        files.map(({ importPath, storyIds }) => ({
+          importPath,
+          stories: storyIds.map((id) => ({ id, options: undefined })),
+        })),
+      ),
+  }
+
+  return await runInNewContext(expression, { [stateGlobal]: state })
 }

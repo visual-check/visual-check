@@ -16,7 +16,7 @@ import { type AssetsReadiness, assetsReadyExpression, pageInitScript, readAssets
  * How much longer than a wait in the page the driver waits for its answer, in ms. The wait in the page gives up first
  * and says why; this catches a page that stopped answering.
  */
-const waitMarginMs = 1_000
+export const waitMarginMs = 1_000
 
 /**
  * How a session captures every story.
@@ -218,7 +218,7 @@ function notReady(readyTimeoutMs: number, doing: string): string {
 /**
  * Gives an error's message, or the thrown value as text, ending with a period.
  */
-function reasonOf(error: unknown): string {
+export function failureReasonOf(error: unknown): string {
   const reason = error instanceof Error ? error.message : String(error)
 
   return reason.endsWith('.') ? reason : `${reason}.`
@@ -353,7 +353,10 @@ function describeFailure(error: unknown, step: Step, story: StoryToCapture, read
 
   const name = stepNames[step]
 
-  return { reason: 'error', message: `${name.charAt(0).toUpperCase()}${name.slice(1)} failed: ${reasonOf(error)}` }
+  return {
+    reason: 'error',
+    message: `${name.charAt(0).toUpperCase()}${name.slice(1)} failed: ${failureReasonOf(error)}`,
+  }
 }
 
 /**
@@ -423,6 +426,20 @@ function navigatedAway(capture: StoryCapture): boolean {
 }
 
 /**
+ * Gives how a page is set up for the settings: a user agent ending in `StorybookTestRunner`, the settings' time zone,
+ * locale and colour scheme, and the page script. A capture page and a page that reads options are set up the same way.
+ */
+export function pageSetupOf(settings: CaptureSettings): PageSetup {
+  return {
+    userAgentSuffix: testPathUserAgentSuffix,
+    timezone: settings.timezone,
+    locale: settings.locale,
+    colorScheme: settings.colorScheme,
+    initScript: pageInitScript,
+  }
+}
+
+/**
  * Starts a session that captures stories on `driver`, one at a time, on one page. It opens the page at its first
  * capture, set up with the settings, a user agent ending in `StorybookTestRunner` and the page script. After a broken
  * story, it closes the page and opens a fresh one, in a fresh browser context, for the next story.
@@ -441,13 +458,7 @@ function navigatedAway(capture: StoryCapture): boolean {
  * @public
  */
 export function openCaptureSession(driver: Driver, settings: CaptureSettings): CaptureSession {
-  const setup: PageSetup = {
-    userAgentSuffix: testPathUserAgentSuffix,
-    timezone: settings.timezone,
-    locale: settings.locale,
-    colorScheme: settings.colorScheme,
-    initScript: pageInitScript,
-  }
+  const setup = pageSetupOf(settings)
   let page: Page | undefined
 
   const closePage = async (): Promise<void> => {
@@ -490,7 +501,10 @@ export function openCaptureSession(driver: Driver, settings: CaptureSettings): C
       }
 
       return {
-        broken: { reason: 'error', message: `visual-check couldn't open a page for the story: ${reasonOf(error)}` },
+        broken: {
+          reason: 'error',
+          message: `visual-check couldn't open a page for the story: ${failureReasonOf(error)}`,
+        },
       }
     }
 

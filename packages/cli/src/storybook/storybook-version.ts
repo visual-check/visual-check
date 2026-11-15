@@ -14,13 +14,17 @@ const minimumVersion = { major: 9, minor: 1 }
 
 /**
  * The newest supported major version.
+ *
+ * @public
  */
-const newestSupportedMajor = 11
+export const newestSupportedMajor = 11
 
 /**
  * The oldest supported release line as text, such as `9.1`.
+ *
+ * @public
  */
-const minimumText = `${minimumVersion.major}.${minimumVersion.minor}`
+export const minimumText = `${minimumVersion.major}.${minimumVersion.minor}`
 
 /**
  * Compares a version's major.minor with the supported range, from the minimum release line to the newest supported
