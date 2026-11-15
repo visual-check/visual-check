@@ -73,7 +73,9 @@ Rules:
 - `touch: true` turns on touch and mobile emulation together. Chromium resets hover and pointer media after a capture that goes beyond the viewport, so the driver turns touch emulation back on after each one.
 - The full page is captured beyond the viewport without resizing it.
 - The PNG is stored exactly as the browser returned it. The byte comparison in [Visual diff](09-visual-diff.md) depends on that.
-- A capture over 32,767 device pixels on either side makes a broken story.
+- The full page is the viewport's width and the content's height. Content wider than the viewport is cut at the viewport's width.
+- An element capture is the element's border box, rounded out to whole CSS pixels.
+- A capture over 32,767 device pixels on either side makes a broken story. The size is checked before the browser is asked, so nothing is captured. With `element` set, the message says to capture a smaller element instead.
 
 ## Page hazards
 
