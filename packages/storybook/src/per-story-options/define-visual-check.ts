@@ -95,6 +95,10 @@ export interface VisualCheckDeclaration<ModeName extends string> {
 /**
  * A hook that runs after a story renders and before it is captured. The capture waits until it settles.
  *
+ * It gets only the story's context as Storybook builds it, its `viewMode` and `canvasElement`, and, when the Storybook
+ * has `storybook/test`, `canvas` and `userEvent` as `play` gets them. Its type is Storybook's `StoryContext`, which
+ * names more than that.
+ *
  * @public
  */
 export type WaitHook = (context: StoryContext) => void | Promise<void>

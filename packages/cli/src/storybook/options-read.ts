@@ -1,5 +1,5 @@
 import type { Encoded } from './options-encoding.js'
-import { stateGlobal } from './preview-script.js'
+import { stateCallExpression } from './preview-script.js'
 
 /**
  * The most characters of an answer visual-check doesn't know an error message quotes.
@@ -151,12 +151,7 @@ export type OptionsRead =
  * @public
  */
 export function optionsReadExpression(files: readonly StoriesFile[], timeoutMs: number): string {
-  const limit = Math.max(0, Math.ceil(timeoutMs))
-
-  return `(async () => {
-  const state = globalThis.${stateGlobal}
-  return state === undefined ? { outcome: 'script-missing' } : state.readOptions(${JSON.stringify(files)}, ${limit})
-})()`
+  return stateCallExpression('readOptions', [files], timeoutMs)
 }
 
 /**

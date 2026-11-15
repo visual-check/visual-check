@@ -1,5 +1,6 @@
 import { readStoryWait, type StoryWait, storyWaitExpression } from '../storybook/preview-script.js'
 import { testPathUserAgentSuffix } from '../storybook/test-path.js'
+import { readWaitHookRun, type WaitHookRun, waitHookExpression } from '../storybook/wait-hook.js'
 import {
   BrowserExitedError,
   type Driver,
@@ -31,9 +32,10 @@ export interface CaptureSettings {
   /**
    * The config's `readyTimeout`, in ms, per attempt: a story that navigates away is captured again, up to 2 more times,
    * each with the whole of it. It's counted from just before the viewport is set. Loading the story (`goto`), waiting
-   * for Storybook to report it finished and waiting for its images and fonts share it, each getting what's left, in
-   * whole ms rounded up. Each wait in the page gives up when it runs out, and the driver allows up to 1 s more for the
-   * page's answer. Setting the viewport and the capture are bound by the driver's own fixed limits instead.
+   * for Storybook to report it finished, waiting for its images and fonts, running its wait hook and checking its
+   * images and fonts again after the hook share it, each getting what's left, in whole ms rounded up. Each wait in the
+   * page gives up when it runs out, and the driver allows up to 1 s more for the page's answer. Setting the viewport
+   * and the capture are bound by the driver's own fixed limits instead.
    */
   readyTimeoutMs: number
   /**
@@ -72,10 +74,11 @@ export interface StoryToCapture {
  * - `load-failed`: its stories file failed to load, or didn't load within readyTimeout, so every story of that file is
  *   broken. The run's options read gives it, before any capture; a capture session never does.
  * - `error`: the story, Storybook or the browser failed it: Storybook reported an error or showed its error display,
- *   the story threw, the page script didn't run, or a step of the capture failed.
+ *   the story threw, the page script didn't run, the story's wait hook couldn't run, or a step of the capture failed.
  * - `play-threw`: the story's `play` function threw or left unhandled errors.
  * - `timeout`: the story wasn't ready within readyTimeout.
  * - `fonts-not-loaded`: a font face the story's page uses was still loading when readyTimeout ran out.
+ * - `wait-threw`: the story's `wait` hook threw or rejected.
  * - `navigated-away`: the story's page went to another document.
  * - `crashed`: the page crashed, usually from running out of memory.
  * - `browser-exited`: the browser exited while the story was in flight. The run's browser gives it; a capture session
@@ -89,6 +92,7 @@ export type BrokenReason =
   | 'play-threw'
   | 'timeout'
   | 'fonts-not-loaded'
+  | 'wait-threw'
   | 'navigated-away'
   | 'crashed'
   | 'browser-exited'
@@ -191,7 +195,12 @@ export interface CaptureSession {
 /**
  * A step of one capture.
  */
-type Step = 'viewport' | 'load' | 'story' | 'assets' | 'capture'
+type Step = 'viewport' | 'load' | 'story' | 'assets' | 'wait' | 'assets-after-wait' | 'capture'
+
+/**
+ * A check of the story's images and fonts: the one once the story finished, or the one after its wait hook ran.
+ */
+type AssetsStep = Extract<Step, 'assets' | 'assets-after-wait'>
 
 /**
  * What each step does, as a phrase that follows "while".
@@ -201,6 +210,8 @@ const stepNames: Record<Step, string> = {
   load: 'loading the story',
   story: 'waiting for the story to finish',
   assets: 'waiting for images and fonts',
+  wait: "running the story's wait hook",
+  'assets-after-wait': 'waiting for images and fonts after its wait hook',
   capture: 'capturing the snapshot',
 }
 
@@ -211,6 +222,17 @@ const stepTimeouts: Partial<Record<Step, string>> = {
   load: 'its page was still loading',
   story: 'its page stopped answering while visual-check waited for the story to finish',
   assets: 'its page stopped answering while visual-check waited for its images and fonts',
+  wait: 'its page stopped answering while its wait hook ran',
+  'assets-after-wait':
+    'its page stopped answering while visual-check waited for its images and fonts after its wait hook',
+}
+
+/**
+ * What each check of images and fonts adds to what a message says the story was doing, so the message names the check.
+ */
+const assetsCheckSuffixes: Record<AssetsStep, string> = {
+  assets: '',
+  'assets-after-wait': ' after its wait hook',
 }
 
 /**
@@ -301,34 +323,62 @@ function imagesStillLoading(pending: number): string {
 }
 
 /**
- * Says why a story isn't ready to capture, from what the wait for its images and fonts found.
+ * Says why a story isn't ready to capture, from what a check of its images and fonts found. `suffix` follows what the
+ * message says the story was doing, so it names the check.
  */
 function describeAssetsWait(
   assets: Exclude<AssetsReadiness, { outcome: 'ready' }>,
   readyTimeoutMs: number,
+  suffix: string,
 ): BrokenStory {
   if (assets.outcome === 'script-missing') {
     return {
       reason: 'error',
-      message:
-        "visual-check's page script didn't run in the story's page, so it couldn't wait for its images and fonts.",
+      message: `visual-check's page script didn't run in the story's page, so it couldn't wait for its images and fonts${suffix}.`,
     }
   }
 
   if (assets.step === 'images') {
-    return { reason: 'timeout', message: notReady(readyTimeoutMs, imagesStillLoading(assets.pending)) }
+    return { reason: 'timeout', message: notReady(readyTimeoutMs, `${imagesStillLoading(assets.pending)}${suffix}`) }
   }
 
   const faces = assets.pendingFaces
 
   if (faces.length === 0) {
-    return { reason: 'timeout', message: notReady(readyTimeoutMs, "document.fonts.ready hadn't resolved") }
+    return { reason: 'timeout', message: notReady(readyTimeoutMs, `document.fonts.ready hadn't resolved${suffix}`) }
   }
 
   return {
     reason: 'fonts-not-loaded',
-    message: `The story's fonts hadn't loaded within readyTimeout (${readyTimeoutMs} ms). Still loading: ${faces.join(', ')}.`,
+    message: `The story's fonts hadn't loaded within readyTimeout (${readyTimeoutMs} ms)${suffix}. Still loading: ${faces.join(', ')}.`,
     faces,
+  }
+}
+
+/**
+ * Says why a story isn't ready to capture, from what running its wait hook found.
+ */
+function describeWaitHookRun(
+  run: Exclude<WaitHookRun, { outcome: 'none' | 'done' }>,
+  readyTimeoutMs: number,
+): BrokenStory {
+  switch (run.outcome) {
+    case 'threw':
+      return { reason: 'wait-threw', message: run.message }
+    case 'context-failed':
+      return { reason: 'error', message: run.message }
+    case 'timed-out':
+      return { reason: 'timeout', message: notReady(readyTimeoutMs, "its wait hook hadn't finished") }
+    case 'no-render':
+      return {
+        reason: 'error',
+        message: "Storybook's preview had no render of the story to run its wait hook with.",
+      }
+    case 'script-missing':
+      return {
+        reason: 'error',
+        message: "visual-check's page script didn't run in the story's page, so it couldn't run its wait hook.",
+      }
   }
 }
 
@@ -368,9 +418,10 @@ function describeFailure(error: unknown, step: Step, story: StoryToCapture, read
 
 /**
  * Captures a story on an open page: sets the viewport, loads the story, waits until Storybook reports it finished with
- * nothing gone wrong, waits for its images and fonts and captures the full page. Loading and both waits share
- * readyTimeout, each getting only what's left of it. A story that can't be captured comes back as a broken story.
- * Rejects only with a `BrowserExitedError`.
+ * nothing gone wrong, waits for its images and fonts, runs its wait hook and captures the full page. When the story
+ * has a wait hook, its images and fonts are checked again after it. Loading, the waits, the hook and that second check
+ * share readyTimeout, each getting only what's left of it. A story that can't be captured comes back as a broken
+ * story. Rejects only with a `BrowserExitedError`.
  */
 async function captureOnPage(page: Page, story: StoryToCapture, settings: CaptureSettings): Promise<StoryCapture> {
   const deadline = performance.now() + settings.readyTimeoutMs
@@ -387,6 +438,40 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
     return await page.evaluate(expressionFor(limit), limit + waitMarginMs)
   }
 
+  /**
+   * Waits for the story's images and fonts, as the check `assetsStep` names. Gives why the story isn't ready when they
+   * didn't load in time, or nothing when they did.
+   */
+  const checkAssets = async (assetsStep: AssetsStep): Promise<BrokenStory | undefined> => {
+    step = assetsStep
+
+    const assets = readAssetsReadiness(await waitInPage(assetsReadyExpression))
+
+    if (assets.outcome === 'ready') {
+      return undefined
+    }
+
+    return describeAssetsWait(assets, settings.readyTimeoutMs, assetsCheckSuffixes[assetsStep])
+  }
+
+  /**
+   * Runs the story's wait hook, if it has one, and checks its images and fonts again once it ran. Gives why the story
+   * isn't ready, or nothing when it is.
+   */
+  const runWaitHook = async (): Promise<BrokenStory | undefined> => {
+    step = 'wait'
+
+    const run = readWaitHookRun(await waitInPage((limit) => waitHookExpression(story.id, limit)))
+
+    if (run.outcome === 'none') {
+      return undefined
+    }
+
+    return run.outcome === 'done'
+      ? await checkAssets('assets-after-wait')
+      : describeWaitHookRun(run, settings.readyTimeoutMs)
+  }
+
   try {
     await page.setViewport(settings.viewport)
     step = 'load'
@@ -399,12 +484,10 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
       return { broken: describeStoryWait(wait, settings.readyTimeoutMs) }
     }
 
-    step = 'assets'
+    const broken = (await checkAssets('assets')) ?? (await runWaitHook())
 
-    const assets = readAssetsReadiness(await waitInPage(assetsReadyExpression))
-
-    if (assets.outcome !== 'ready') {
-      return { broken: describeAssetsWait(assets, settings.readyTimeoutMs) }
+    if (broken !== undefined) {
+      return { broken }
     }
 
     step = 'capture'

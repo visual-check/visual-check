@@ -4,6 +4,7 @@ import { optionsReadAnswer } from './options-read.fixture.js'
 import { optionsReadExpression, type StoriesFile } from './options-read.js'
 import { finishedAnswer, timedOutAnswer } from './preview-script.fixture.js'
 import { readStoryWait, storybookPageScript, storyWaitExpression } from './preview-script.js'
+import { waitHookExpression } from './wait-hook.js'
 
 /**
  * A stand-in for Storybook's channel: it keeps the listeners `on` adds and calls them on `emit`.
@@ -1225,6 +1226,403 @@ describe("each story's options", () => {
       ['array', 9999],
       ['array', 9999],
     ])
+  })
+})
+
+/**
+ * The element a fake render draws its story in.
+ */
+const canvas = { tagName: 'DIV', id: 'storybook-root' }
+
+/**
+ * Builds a stand-in for the render of `button--primary` in the `story` view mode that Storybook's preview keeps as
+ * `currentRender`. Its story's merged `parameters.visualCheck` is `options`, and its `storyContext()` gives the story's
+ * ID, parameters and args. `fields` replaces any of its fields, getters included.
+ */
+function storyRender(options: unknown, fields: Record<string, unknown> = {}): Record<string, unknown> {
+  const parameters = { visualCheck: options }
+  const render = {
+    id: 'button--primary',
+    viewMode: 'story',
+    story: { id: 'button--primary', parameters },
+    canvasElement: canvas,
+    storyContext: () => ({ id: 'button--primary', parameters, args: { label: 'Primary' } }),
+  }
+
+  // Copied by descriptor, so a getter in `fields` stays a getter.
+  return Object.defineProperties(render, Object.getOwnPropertyDescriptors(fields))
+}
+
+/**
+ * Gives the page a navigator with `clipboard`, as a browser has in a secure context, and gives the navigator back.
+ */
+function withClipboard(page: FakePage, clipboard: unknown = { readText: async () => '' }): { clipboard: unknown } {
+  const pageNavigator = { clipboard }
+
+  page.setGlobal('navigator', pageNavigator)
+
+  return pageNavigator
+}
+
+/**
+ * Replaces the navigator's clipboard with a stub, as `userEvent.setup()` does, and gives a user that names the
+ * clipboard it saw.
+ */
+function stubClipboard(pageNavigator: { clipboard: unknown }): { clipboard: string } {
+  Object.defineProperty(pageNavigator, 'clipboard', { configurable: true, get: () => 'stub' })
+
+  return { clipboard: String(pageNavigator.clipboard) }
+}
+
+/**
+ * Builds a fake page with the adapter's script, whose Storybook preview shows `render`.
+ */
+function pageShowing(render: unknown): FakePage {
+  const page = openPage()
+
+  page.setGlobal('__STORYBOOK_PREVIEW__', { currentRender: render })
+
+  return page
+}
+
+/**
+ * Runs the wait hook of `button--primary` in the page with a time limit of 1000 ms, as the driver does, and gives the
+ * page's answer.
+ */
+function runWaitHook(page: FakePage): Promise<unknown> {
+  return page.evaluate(waitHookExpression('button--primary', 1000))
+}
+
+describe("the story's wait hook", () => {
+  it.each([
+    ['a story without options', undefined],
+    ['options without a wait hook', {}],
+    ['a wait hook turned off with null', { wait: null }],
+    ['a wait hook that is not a function', { wait: 'soon' }],
+  ])('answers none for %s, without building its context', async (_what, options) => {
+    const storyContext = vi.fn(() => ({}))
+
+    expect(await runWaitHook(pageShowing(storyRender(options, { storyContext })))).toEqual({ outcome: 'none' })
+    expect(storyContext).not.toHaveBeenCalled()
+  })
+
+  it("runs the current render's story's wait hook once, with the story's context, view mode and canvas element", async () => {
+    const wait = vi.fn()
+
+    expect(await runWaitHook(pageShowing(storyRender({ wait })))).toEqual({ outcome: 'done' })
+    expect(wait.mock.calls).toEqual([
+      [
+        {
+          id: 'button--primary',
+          parameters: { visualCheck: { wait } },
+          args: { label: 'Primary' },
+          viewMode: 'story',
+          canvasElement: canvas,
+        },
+      ],
+    ])
+    expect(Object.keys(wait.mock.calls[0]?.[0])).toEqual(['id', 'parameters', 'args', 'viewMode', 'canvasElement'])
+    expect(wait.mock.calls[0]?.[0].canvasElement).toBe(canvas)
+  })
+
+  it("gives the wait hook canvas queries and a userEvent instance from Storybook's test module", async () => {
+    const queries = { getByRole: () => undefined }
+    const user = { click: async () => undefined }
+    const within = vi.fn(() => queries)
+    const wait = vi.fn()
+    const page = pageShowing(storyRender({ wait }))
+
+    withClipboard(page)
+    page.setGlobal('__STORYBOOK_MODULE_TEST__', { within, userEvent: { setup: () => user } })
+    expect(await runWaitHook(page)).toEqual({ outcome: 'done' })
+
+    const context = wait.mock.calls[0]?.[0]
+
+    expect(Object.keys(context)).toEqual([
+      'id',
+      'parameters',
+      'args',
+      'viewMode',
+      'canvasElement',
+      'canvas',
+      'userEvent',
+    ])
+    expect(context.canvas).toBe(queries)
+    expect(within.mock.calls).toEqual([[canvas]])
+    expect(context.userEvent).toBe(user)
+  })
+
+  it('sets userEvent up only when it is first read, and only once', async () => {
+    const setup = vi.fn(() => ({ click: async () => undefined }))
+    const wait = vi.fn()
+    const page = pageShowing(storyRender({ wait }))
+
+    withClipboard(page)
+    page.setGlobal('__STORYBOOK_MODULE_TEST__', { userEvent: { setup } })
+    expect(await runWaitHook(page)).toEqual({ outcome: 'done' })
+    expect(setup).not.toHaveBeenCalled()
+
+    const context = wait.mock.calls[0]?.[0]
+
+    expect(context.userEvent).toBe(context.userEvent)
+    expect(setup).toHaveBeenCalledOnce()
+  })
+
+  it("puts the page's own clipboard back once userEvent.setup() stubbed it", async () => {
+    const clipboard = { readText: async () => 'real' }
+    const users: unknown[] = []
+    const page = pageShowing(storyRender({ wait: (context: Record<string, unknown>) => users.push(context.userEvent) }))
+    const pageNavigator = withClipboard(page, clipboard)
+
+    page.setGlobal('__STORYBOOK_MODULE_TEST__', { userEvent: { setup: () => stubClipboard(pageNavigator) } })
+    expect(await runWaitHook(page)).toEqual({ outcome: 'done' })
+    expect(users).toEqual([{ clipboard: 'stub' }])
+    expect(pageNavigator.clipboard).toBe(clipboard)
+  })
+
+  it('lets a userEvent.setup() that throws throw inside the hook that reads userEvent, and puts the clipboard back', async () => {
+    const clipboard = { readText: async () => 'real' }
+    const wait = (context: Record<string, unknown>): unknown => context.userEvent
+    const page = pageShowing(storyRender({ wait }))
+    const pageNavigator = withClipboard(page, clipboard)
+    const setup = (): never => {
+      stubClipboard(pageNavigator)
+
+      throw new Error('No user.')
+    }
+
+    page.setGlobal('__STORYBOOK_MODULE_TEST__', { userEvent: { setup } })
+    expect(await runWaitHook(page)).toEqual({ outcome: 'threw', text: 'Error: No user.' })
+    expect(pageNavigator.clipboard).toBe(clipboard)
+  })
+
+  it.each([
+    ['without a navigator', undefined],
+    ['whose navigator has no clipboard', {}],
+  ])('leaves userEvent out on a page %s, as Storybook does', async (_what, pageNavigator) => {
+    const setup = vi.fn()
+    const wait = vi.fn()
+    const page = pageShowing(storyRender({ wait }))
+
+    page.setGlobal('navigator', pageNavigator)
+    page.setGlobal('__STORYBOOK_MODULE_TEST__', { within: () => ({}), userEvent: { setup } })
+    expect(await runWaitHook(page)).toEqual({ outcome: 'done' })
+    expect(Object.keys(wait.mock.calls[0]?.[0])).toEqual([
+      'id',
+      'parameters',
+      'args',
+      'viewMode',
+      'canvasElement',
+      'canvas',
+    ])
+    expect(setup).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['without within or userEvent', '{}'],
+    ['whose within and userEvent.setup are not functions', '{ within: 1, userEvent: { setup: 1 } }'],
+    ['without userEvent.setup', '{ userEvent: {} }'],
+    [
+      "whose helpers can't be read",
+      "{ get within() { throw new Error('hostile') }, get userEvent() { throw new Error('hostile') } }",
+    ],
+    ['that is not an object', "'storybook/test'"],
+  ])('leaves canvas and userEvent out with a test module %s', async (_what, testModule) => {
+    const wait = vi.fn()
+    const page = pageShowing(storyRender({ wait }))
+
+    withClipboard(page)
+    page.run(`globalThis.__STORYBOOK_MODULE_TEST__ = ${testModule}`)
+    expect(await runWaitHook(page)).toEqual({ outcome: 'done' })
+    expect(Object.keys(wait.mock.calls[0]?.[0])).toEqual(['id', 'parameters', 'args', 'viewMode', 'canvasElement'])
+  })
+
+  it("leaves canvas and userEvent out when the page can't read Storybook's test module", async () => {
+    const wait = vi.fn()
+    const page = pageShowing(storyRender({ wait }))
+
+    withClipboard(page)
+    page.run("Object.defineProperty(globalThis, '__STORYBOOK_MODULE_TEST__', { get() { throw new Error('hostile') } })")
+    expect(await runWaitHook(page)).toEqual({ outcome: 'done' })
+    expect(Object.keys(wait.mock.calls[0]?.[0])).toEqual(['id', 'parameters', 'args', 'viewMode', 'canvasElement'])
+  })
+
+  it("runs the wait hook of the latest preview's render", async () => {
+    const first = vi.fn()
+    const latest = vi.fn()
+    const page = pageShowing(storyRender({ wait: first }))
+
+    page.setGlobal('__STORYBOOK_PREVIEW__', { currentRender: storyRender({ wait: latest }) })
+    expect(await runWaitHook(page)).toEqual({ outcome: 'done' })
+    expect(first).not.toHaveBeenCalled()
+    expect(latest).toHaveBeenCalledOnce()
+  })
+
+  it('waits for a wait hook that returns a promise', async () => {
+    const wait = runWaitHook(pageShowing(storyRender({ wait: () => later(500, undefined) })))
+
+    await vi.advanceTimersByTimeAsync(400)
+    expect(await settledYet(wait)).toBe(false)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(await wait).toEqual({ outcome: 'done' })
+  })
+
+  it.each([
+    [
+      'throws',
+      () => {
+        throw new Error('The data never came.')
+      },
+    ],
+    ['rejects', async () => Promise.reject(new Error('The data never came.'))],
+  ])('says what a wait hook that %s threw', async (_how, wait) => {
+    expect(await runWaitHook(pageShowing(storyRender({ wait })))).toEqual({
+      outcome: 'threw',
+      text: 'Error: The data never came.',
+    })
+  })
+
+  it.each([
+    [
+      'an error on several lines, on one line',
+      new TypeError('x is undefined\n  at story'),
+      'TypeError: x is undefined at story',
+    ],
+    ['a long error, in 500 characters', new Error('x'.repeat(600)), `Error: ${'x'.repeat(493)}`],
+    ['a value that is not an error, as text', 'no data', 'no data'],
+  ])('describes what the wait hook threw: %s', async (_what, error, text) => {
+    const wait = async (): Promise<never> => Promise.reject(error)
+
+    expect(await runWaitHook(pageShowing(storyRender({ wait })))).toEqual({ outcome: 'threw', text })
+  })
+
+  it.each([
+    [
+      "the story's context",
+      {
+        storyContext: () => {
+          throw new Error('No context.')
+        },
+      },
+      'Error: No context.',
+    ],
+    [
+      "the story's parameters",
+      {
+        story: {
+          get parameters() {
+            throw new Error('No parameters.')
+          },
+        },
+      },
+      'Error: No parameters.',
+    ],
+    [
+      "the story's view mode",
+      {
+        get viewMode() {
+          throw new Error('No view mode.')
+        },
+      },
+      'Error: No view mode.',
+    ],
+  ])("says the wait hook's context failed, without running it, when %s can't be read", async (_what, fields, text) => {
+    const wait = vi.fn()
+
+    expect(await runWaitHook(pageShowing(storyRender({ wait }, fields)))).toEqual({ outcome: 'context-failed', text })
+    expect(wait).not.toHaveBeenCalled()
+  })
+
+  it("says the wait hook's context failed, without running it, when the test module's within throws", async () => {
+    const wait = vi.fn()
+    const page = pageShowing(storyRender({ wait }))
+
+    page.run("globalThis.__STORYBOOK_MODULE_TEST__ = { within: () => { throw new Error('No canvas.') } }")
+    expect(await runWaitHook(page)).toEqual({ outcome: 'context-failed', text: 'Error: No canvas.' })
+    expect(wait).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [
+      'whose then() throws, as threw',
+      "() => ({ then() { throw new Error('Bad thenable.') } })",
+      { outcome: 'threw', text: 'Error: Bad thenable.' },
+    ],
+    [
+      "whose then can't be read, as threw",
+      "() => ({ get then() { throw new Error('No then.') } })",
+      { outcome: 'threw', text: 'Error: No then.' },
+    ],
+    ['whose then() never calls back, as timed-out', '() => ({ then() {} })', { outcome: 'timed-out' }],
+  ])('reads a wait hook that gives a thenable %s', async (_what, hookSource, answer) => {
+    const page = openPage()
+
+    // The page builds the hook, so its thenable is the page's own.
+    page.setGlobal('__STORYBOOK_PREVIEW__', { currentRender: storyRender({ wait: page.run(hookSource) }) })
+
+    const run = runWaitHook(page)
+
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(await run).toEqual(answer)
+  })
+
+  it("times out on time with the browser's own timer when the page replaced setTimeout and clearTimeout", async () => {
+    const page = pageShowing(storyRender({ wait: never }))
+
+    page.run('globalThis.setTimeout = () => 0; globalThis.clearTimeout = () => undefined')
+
+    const wait = runWaitHook(page)
+
+    await vi.advanceTimersByTimeAsync(999)
+    expect(await settledYet(wait)).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await wait).toEqual({ outcome: 'timed-out' })
+  })
+
+  it("clears its time limit with the browser's own clearTimeout once the wait hook settles", async () => {
+    const page = pageShowing(storyRender({ wait: async () => undefined }))
+
+    page.run('globalThis.clearTimeout = () => undefined')
+    await runWaitHook(page)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('leaves no unhandled rejection when the wait hook rejects after the time limit', async () => {
+    const unhandled = vi.fn()
+
+    process.on('unhandledRejection', unhandled)
+
+    try {
+      const wait = runWaitHook(pageShowing(storyRender({ wait: () => laterRejection(1500, new Error('late')) })))
+
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(await wait).toEqual({ outcome: 'timed-out' })
+      await vi.advanceTimersByTimeAsync(500)
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(unhandled).not.toHaveBeenCalled()
+    } finally {
+      process.off('unhandledRejection', unhandled)
+    }
+  })
+
+  it.each([
+    ['Storybook never set the preview', undefined],
+    ['the preview has no current render', {}],
+    ['the current render is of another story', { currentRender: storyRender({}, { id: 'button--secondary' }) }],
+    ['the current render has no story yet', { currentRender: storyRender({}, { story: undefined }) }],
+    ['the current render has no storyContext()', { currentRender: storyRender({}, { storyContext: undefined }) }],
+  ])('answers no-render when %s', async (_what, preview) => {
+    const page = openPage()
+
+    page.setGlobal('__STORYBOOK_PREVIEW__', preview)
+    expect(await runWaitHook(page)).toEqual({ outcome: 'no-render' })
+  })
+
+  it("answers no-render when the preview's current render can't be read", async () => {
+    const page = openPage()
+
+    page.run("globalThis.__STORYBOOK_PREVIEW__ = { get currentRender() { throw new Error('hostile') } }")
+    expect(await runWaitHook(page)).toEqual({ outcome: 'no-render' })
   })
 })
 
