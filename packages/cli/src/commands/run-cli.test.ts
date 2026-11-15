@@ -165,6 +165,15 @@ interface FakeStory {
    */
   completingMs?: number
   /**
+   * The hosts its page reports real network requests to. None when not given.
+   */
+  requestHosts?: string[]
+  /**
+   * The hosts of the remote content the page's capture preparation finds, which it lists only when the preparation
+   * asks for them. None when not given.
+   */
+  remoteHosts?: string[]
+  /**
    * Whether the browser exits while capturing it.
    */
   browserExits?: boolean
@@ -482,17 +491,24 @@ function fakeDriverOf({
 
           const status = story.broken === true ? 'error' : 'success'
           const completingMs = story.completingMs ?? null
+          let listRemoteHosts = false
           const request = /\.prepareCapture\((.*), \d+\)\n\}\)\(\)$/s.exec(expression)?.[1]
 
           if (request !== undefined) {
-            const { element, masks } = JSON.parse(request) as { element: unknown; masks: unknown }
+            const parsed = JSON.parse(request) as { element: unknown; masks: unknown; listRemoteHosts: boolean }
 
-            record.preparations.push({ id, element, masks })
+            record.preparations.push({ id, element: parsed.element, masks: parsed.masks })
+            listRemoteHosts = parsed.listRemoteHosts
           }
 
           return await answerEvaluate(
             {
               storyWait: async () => finishedAnswer({ status, completingMs }),
+              capturePrep: async () => ({
+                outcome: 'ready',
+                box: null,
+                ...(listRemoteHosts ? { remoteHosts: story.remoteHosts ?? [] } : {}),
+              }),
               optionsRead: async () => await answerOptionsReadExpression(expression, answerRead),
             },
             expression,
@@ -529,7 +545,7 @@ function fakeDriverOf({
           record.pageCloses += 1
           record.events.push(`close page on ${browser}`)
         },
-        requestHosts: () => [],
+        requestHosts: () => (setup.watchRequests ? (story.requestHosts ?? []) : []),
       }
     },
     close: async () => {
@@ -1956,6 +1972,119 @@ describe('runCli warning about baseline paths over 260 characters', () => {
     const result = await runCli(['test'], {}, project, { ...fakeBrowser().options, os: 'win32' })
 
     expect(result.stderr).toBe('')
+  })
+})
+
+describe('runCli warning about real network requests and remote content', () => {
+  const requestWarning = (host: string, ids: string): string =>
+    `${host}: ${ids}. ${ids.includes(',') ? 'These stories make' : 'This story makes'} ` +
+    'real network requests and may be unreliable.\n'
+  const remoteWarning = (host: string, ids: string): string =>
+    `${host}: ${ids} ${ids.includes(',') ? 'show' : 'shows'} remote content. ` +
+    'A CDN can serve it differently on another machine, so CI may fail.\n'
+
+  it('lists in update the hosts whose stories make real requests, and no line for a story that makes none', async () => {
+    const { project } = await createRun(['a', 'b', 'c'])
+    const { options } = fakeBrowser({
+      a: { requestHosts: ['api.example.com'] },
+      b: { requestHosts: [] },
+      c: { requestHosts: ['api.example.com', 'other.example.com:8443'] },
+    })
+    const result = await runCli(['update'], {}, project, options)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe(
+      requestWarning('api.example.com', '2 stories (a, c)') + requestWarning('other.example.com:8443', '1 story (c)'),
+    )
+  })
+
+  it('lists in update the hosts of the remote content, and no line for a story that shows none', async () => {
+    const { project } = await createRun(['a', 'b'])
+    const { options } = fakeBrowser({
+      a: { remoteHosts: ['images.example.com'] },
+      b: { remoteHosts: [] },
+    })
+    const result = await runCli(['update'], {}, project, options)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe(remoteWarning('images.example.com', '1 story (a)'))
+  })
+
+  it('puts the request lines before the remote content lines, after the other warnings', async () => {
+    const { project } = await createRun(['a'])
+    const { options } = fakeBrowser({
+      a: { requestHosts: ['api.example.com'], remoteHosts: ['a.example.com'], completingMs: 80 },
+    })
+    const result = await runCli(['update'], {}, project, options)
+
+    expect(result.stderr).toMatch(/^Warning: Storybook web /)
+    expect(
+      result.stderr.endsWith(
+        requestWarning('api.example.com', '1 story (a)') + remoteWarning('a.example.com', '1 story (a)'),
+      ),
+    ).toBe(true)
+  })
+
+  it('lists a host a kept baseline reaches too', async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot })
+    const { options } = fakeBrowser({ a: { requestHosts: ['api.example.com'] } })
+    const result = await runCli(['update'], {}, project, options)
+
+    expect(result.stdout).toContain('1 kept')
+    expect(result.stderr).toBe(requestWarning('api.example.com', '1 story (a)'))
+  })
+
+  it('is silenced for an exact host and for a wildcard, in both kinds', async () => {
+    const stories = {
+      a: { requestHosts: ['api.example.com'], remoteHosts: ['images.example.com'] },
+      b: { requestHosts: ['kept.test'], remoteHosts: ['kept.test'] },
+    }
+    const exact = await createRun(['a', 'b'], {}, "silenceHosts: ['api.example.com', 'images.example.com'],")
+    const wildcard = await createRun(['a', 'b'], {}, "silenceHosts: ['*.example.com'],")
+    const kept = requestWarning('kept.test', '1 story (b)') + remoteWarning('kept.test', '1 story (b)')
+
+    expect((await runCli(['update'], {}, exact.project, fakeBrowser(stories).options)).stderr).toBe(kept)
+    expect((await runCli(['update'], {}, wildcard.project, fakeBrowser(stories).options)).stderr).toBe(kept)
+  })
+
+  it('never changes the exit code', async () => {
+    const { project } = await createRun(['a'])
+    const { options } = fakeBrowser({ a: { requestHosts: ['api.example.com'] } })
+    const result = await runCli(['update'], {}, project, options)
+
+    expect(result.stderr).not.toBe('')
+    expect(result.exitCode).toBe(0)
+  })
+
+  it('counts a broken story for nothing', async () => {
+    const { project } = await createRun(['a'])
+    const { options } = fakeBrowser({ a: { broken: true, requestHosts: ['api.example.com'], remoteHosts: ['x.test'] } })
+    const result = await runCli(['update'], {}, project, options)
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toBe('')
+  })
+
+  it('never lists hosts in test, and sets up every page without watching requests', async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot })
+    const { options, record } = fakeBrowser({ a: { requestHosts: ['api.example.com'], remoteHosts: ['x.test'] } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe('')
+    expect(record.setups.length).toBeGreaterThan(0)
+    expect(record.setups.map((setup) => setup.watchRequests)).toEqual(record.setups.map(() => false))
+  })
+
+  it('watches requests in update on the capture pages and not on the options read page', async () => {
+    const { project } = await createRun(['a'])
+    const { options, record } = fakeBrowser()
+
+    await runCli(['update'], {}, project, options)
+
+    expect(record.setups[0]?.watchRequests).toBe(false)
+    expect(record.setups.slice(1).length).toBeGreaterThan(0)
+    expect(record.setups.slice(1).every((setup) => setup.watchRequests)).toBe(true)
   })
 })
 
