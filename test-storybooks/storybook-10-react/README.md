@@ -4,7 +4,7 @@ One of this repo's own test Storybooks ([PRD 18](../../docs/prd/18-repo-ci.md#th
 
 The React test Storybooks on Storybook 9.1 ([`storybook-9-react`](../storybook-9-react/README.md)) and 11 ([`storybook-11-react`](../storybook-11-react/README.md)) read these stories, take their config from `.storybook/test-storybook-config.ts` as this one does, and run this `e2e.ts` from their own folders.
 
-`e2e.ts` is its end-to-end check. It serves the static build on `127.0.0.1`, runs the built CLI against it and checks thirteen cases. Inside visual-check's image the last three are replaced, and on the host other cases run; see below.
+`e2e.ts` is its end-to-end check. It serves the static build on `127.0.0.1`, runs the built CLI against it and checks thirteen cases. Inside visual-check's image the last three are replaced, on the host other cases run, and on the arm64 image only the first; see below.
 
 - `test` against the committed baselines, with 2 workers, gives exactly the expected outcomes. The line of each broken readiness story says why: what it threw, that Storybook never sent `storyFinished`, or the font face `Never Loads`. So does the line of each broken per-story options story: what its `wait` hook threw, or that its stories file failed to load and what the file threw. The two disabled stories have no line, though `index.json` lists them, and the header counts exactly the snapshots in `expected-outcomes.json`, the modes' included. `modes--dark-and-mobile` has exactly three lines, and `modes--own-modes-only` has none for `dark`. Its stderr has no test-path warning. In the 9.1 and 11 test Storybooks, every committed `animations--*.png` is byte-identical to this Storybook's, and both folders hold the same ones, so on 11, Storybook's own pause of animations followed by visual-check's end state gives snapshots that pass against 10's baselines within the tolerance.
 - `test` runs the animation stories against the committed baselines 10 times, one run after the other on one server, with a config that sets 2 workers, `retries: 0` and `tolerance: { pixels: 0 }`, and every run passes them all. With no retries and no pixel allowed to differ, every pixel of each snapshot is within the preview's color tolerance, 0.01, of its baseline on every run. The case reports every run's problems, each led by its run's number, so a story whose snapshot changes shows how often it did. A run that times out or that a signal ends stops the case, since that's a broken setup rather than a snapshot that changed.
@@ -157,6 +157,17 @@ pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --host --no
 ```
 
 CI's "Ubuntu host" job runs `--host` where Chromium's sandbox can't start, so the CLI relaunches without it. "macOS without Docker" runs `--host --no-docker`.
+
+## Running it on the arm64 image
+
+`--arm64` runs only the first case above, with a config that sets `platform: 'linux/arm64'` and the default tolerance, against the committed baselines, which are written on amd64. It shows the default tolerance absorbs arm64's differences from amd64. When the case fails, `test`'s report, with the baseline, snapshot and diff of each snapshot that differs, is copied to `e2e-output/arm64-report/`. It needs `TEST_STORYBOOK_IMAGE` to name an arm64 build of the browser image. From the repo root:
+
+```sh
+packages/chromium/image/build.sh arm64 --output type=docker,name=visual-check-chromium:arm64
+TEST_STORYBOOK_IMAGE=visual-check-chromium:arm64 pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --arm64
+```
+
+CI's "arm64 image" job does this on a Linux arm64 runner.
 
 ## Rewriting the baselines
 

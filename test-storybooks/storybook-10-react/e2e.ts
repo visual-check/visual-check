@@ -15,6 +15,10 @@
 // reuses it. They capture one story, against baselines `update` writes, since the committed ones need the image's
 // fonts. `--no-docker`, which needs `--host` and no docker on the PATH, adds a case: with the default platform, `test`
 // exits 2 with the no-Docker error.
+//
+// With `--arm64` it runs one case, with TEST_STORYBOOK_IMAGE naming an arm64 build of the browser image: `test` with
+// the platform `linux/arm64` and the default tolerance gives the expected outcomes against the committed baselines,
+// which are written on amd64.
 import { type ChildProcessByStdio, spawn, spawnSync } from 'node:child_process'
 import {
   accessSync,
@@ -90,6 +94,11 @@ const onHost = process.argv.includes('--host')
  * argument says.
  */
 const withoutDocker = process.argv.includes('--no-docker')
+
+/**
+ * Whether the check runs the committed baselines on the arm64 browser image, as the `--arm64` argument says.
+ */
+const onArm64Image = process.argv.includes('--arm64')
 
 /**
  * Where visual-check's browser image records the browser it holds.
@@ -651,12 +660,13 @@ function findPackageNameProblems(packageName: string | undefined): string[] {
 }
 
 /**
- * Lists what is wrong with the arguments: `--inside-image` and `--host` are separate modes, and `--no-docker` needs
- * `--host`.
+ * Lists what is wrong with the arguments: `--inside-image`, `--host` and `--arm64` are separate modes, and
+ * `--no-docker` needs `--host`.
  */
 function findArgumentProblems(): string[] {
+  const modeCount = [insideImage, onHost, onArm64Image].filter(Boolean).length
   const conflicts: [boolean, string][] = [
-    [insideImage && onHost, '--inside-image and --host are separate modes: give one of them.'],
+    [modeCount > 1, '--inside-image, --host and --arm64 are separate modes: give one of them.'],
     [withoutDocker && !onHost, '--no-docker only runs with --host.'],
   ]
 
@@ -690,12 +700,12 @@ function findHostProblems(): string[] {
 }
 
 /**
- * Lists what the check needs outside the image: the name of the browser image.
+ * Lists what the check needs outside the image: the name of the browser image, the arm64 one with `--arm64`.
  */
 function findBrowserImageProblems(): string[] {
-  return image
-    ? []
-    : ['TEST_STORYBOOK_IMAGE is not set: set it to the browser image, such as visual-check-chromium:amd64.']
+  const example = onArm64Image ? 'visual-check-chromium:arm64' : 'visual-check-chromium:amd64'
+
+  return image ? [] : [`TEST_STORYBOOK_IMAGE is not set: set it to the browser image, such as ${example}.`]
 }
 
 /**
@@ -1262,30 +1272,37 @@ async function waitUntil(condition: () => boolean, timeoutMilliseconds: number):
 }
 
 /**
- * `test` against the committed baselines, with 2 workers, gives exactly the expected outcomes. Each broken readiness
- * and per-story options story's line says why, and standard error has no test-path warning, since every page is on
- * Storybook's test path. The disabled stories, which `index.json` lists, have no line, and the header counts exactly
- * the snapshots with an expected outcome, the modes' included. The story that lists `dark` and `mobile` has exactly 3
- * lines, and the story with its own list of modes has no line for the meta's `dark`. Outside the Storybook 10 test
- * Storybook, the committed animation baselines are byte-identical to its own.
+ * Runs `test --all` against the committed baselines with the package's config and 2 workers, and checks the run with
+ * `committedBaselinesProblems`.
  */
 async function checkCommittedBaselines(expected: Outcomes): Promise<string[]> {
-  return await withStorybookServer({}, async (server) => {
-    const run = await runCli(['test', '--all', '--url', server.url, '--workers', String(parallelWorkers)])
+  return await withStorybookServer({}, async (server) =>
+    committedBaselinesProblems(
+      await runCli(['test', '--all', '--url', server.url, '--workers', String(parallelWorkers)]),
+      expected,
+    ),
+  )
+}
 
-    return [
-      ...expectedRunProblems('test', run, expected),
-      ...[...readinessLines, ...perStoryOptionsLines].flatMap(([storyId, says]) =>
-        lineSaysProblems(run, storyId, says),
-      ),
-      ...noTestPathWarningProblems(run.stderr),
-      ...storybook10AnimationProblems(),
-      ...disabledStoryProblems(run),
-      ...headerCountProblems(run, Object.keys(expected).length),
-      ...lineCountProblems(run, modeLines.darkAndMobile.storyId, modeLines.darkAndMobile.count),
-      ...absentModeProblems(run, modeLines.ownModesOnly.storyId, modeLines.ownModesOnly.absentMode),
-    ]
-  })
+/**
+ * Lists what is wrong with a run of `test --all` against the committed baselines. It gives exactly the expected
+ * outcomes. Each broken readiness and per-story options story's line says why, and standard error has no test-path
+ * warning, since every page is on Storybook's test path. The disabled stories, which `index.json` lists, have no line,
+ * and the header counts exactly the snapshots with an expected outcome, the modes' included. The story that lists
+ * `dark` and `mobile` has exactly 3 lines, and the story with its own list of modes has no line for the meta's `dark`.
+ * Outside the Storybook 10 test Storybook, the committed animation baselines are byte-identical to its own.
+ */
+function committedBaselinesProblems(run: CliRun, expected: Outcomes): string[] {
+  return [
+    ...expectedRunProblems('test', run, expected),
+    ...[...readinessLines, ...perStoryOptionsLines].flatMap(([storyId, says]) => lineSaysProblems(run, storyId, says)),
+    ...noTestPathWarningProblems(run.stderr),
+    ...storybook10AnimationProblems(),
+    ...disabledStoryProblems(run),
+    ...headerCountProblems(run, Object.keys(expected).length),
+    ...lineCountProblems(run, modeLines.darkAndMobile.storyId, modeLines.darkAndMobile.count),
+    ...absentModeProblems(run, modeLines.ownModesOnly.storyId, modeLines.ownModesOnly.absentMode),
+  ]
 }
 
 /**
@@ -1670,17 +1687,18 @@ function noTestPathWarningProblems(stderr: string): string[] {
 
 /**
  * Runs `test --all` against the committed baselines with a config that sets this platform, or none when it is
- * `undefined`, and hands the run and the server to `check`.
+ * `undefined`, and hands the run, the server and the config's folder, which is removed once `check` returns, to
+ * `check`.
  */
 async function testWithPlatform(
   platform: string | undefined,
-  check: (run: CliRun, server: StorybookServer) => string[],
+  check: (run: CliRun, server: StorybookServer, configFolder: string) => string[],
 ): Promise<string[]> {
   return await withStorybookServer({}, (server) =>
     withTemporaryFolder(async (folder) => {
       const config = writeConfig(folder, server.url, committedBaselines, { platform })
 
-      return check(await runCli(['test', '--all', '--config', config]), server)
+      return check(await runCli(['test', '--all', '--config', config]), server, folder)
     }),
   )
 }
@@ -1748,6 +1766,31 @@ async function checkPlatformMismatch(): Promise<string[]> {
     ...missingTextProblems(run.stderr, [`image for ${arch}`, `platform is ${platform}`]),
     ...capturedProblems(server),
   ])
+}
+
+/**
+ * On the arm64 image, with the platform `linux/arm64` and the default tolerance, `test` against the committed
+ * baselines, which are written on amd64, passes the checks of the committed baselines case. When it doesn't, `test`'s
+ * report, if it wrote one, with each differing snapshot's images, is copied to `arm64-report/` in the diagnostics
+ * folder.
+ */
+async function checkArm64Image(expected: Outcomes): Promise<string[]> {
+  rmSync(diagnosticsDir, { recursive: true, force: true })
+
+  return await testWithPlatform('linux/arm64', (run, _server, configFolder) => {
+    const problems = committedBaselinesProblems(run, expected)
+    const report = join(configFolder, '.visual-check', 'report')
+
+    if (problems.length === 0 || !existsSync(report)) {
+      return problems
+    }
+
+    const keptReport = join(diagnosticsDir, 'arm64-report')
+
+    cpSync(report, keptReport, { recursive: true })
+
+    return [...problems, `test's report is in ${keptReport}`]
+  })
 }
 
 /**
@@ -2084,6 +2127,25 @@ function insideImageCases(expected: Outcomes): Case[] {
 }
 
 /**
+ * The one case the arm64 image runs: the committed baselines, written on amd64, on `linux/arm64`.
+ */
+function arm64ImageCases(expected: Outcomes): Case[] {
+  return [
+    {
+      name: 'arm64 image: with platform linux/arm64 and the default tolerance, the committed baselines case holds against the baselines written on amd64',
+      run: () => checkArm64Image(expected),
+    },
+  ]
+}
+
+/**
+ * Reads each snapshot's expected outcome from `expected-outcomes.json`.
+ */
+function readExpectedOutcomes(): Outcomes {
+  return JSON.parse(readFileSync(join(packageDir, 'expected-outcomes.json'), 'utf8')) as Outcomes
+}
+
+/**
  * Runs every case, prints its result, and resolves with whether all of them passed.
  */
 async function runCases(cases: Case[]): Promise<boolean> {
@@ -2126,8 +2188,10 @@ if (setupProblems.length > 0) {
   process.exitCode = 1
 } else if (onHost) {
   process.exitCode = (await runHostCases()) ? 0 : 1
+} else if (onArm64Image) {
+  process.exitCode = (await runCases(arm64ImageCases(readExpectedOutcomes()))) ? 0 : 1
 } else {
-  const expected = JSON.parse(readFileSync(join(packageDir, 'expected-outcomes.json'), 'utf8')) as Outcomes
+  const expected = readExpectedOutcomes()
   const passed = await runCases([
     {
       name: "committed baselines: test gives the expected outcomes, each broken readiness and per-story options story's line says why, no line for a disabled story, the header counts the expected outcomes, a story listing two modes has 3 lines, a story's own modes leave out the meta's, no test-path warning, the animation baselines are byte-identical to storybook-10-react's",
