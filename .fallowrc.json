@@ -30,7 +30,10 @@
       { "name": "cli/browser-download", "patterns": ["packages/cli/src/browser-download/**"] },
       { "name": "cli/commands", "patterns": ["packages/cli/src/commands/**"] },
       { "name": "cli/config", "patterns": ["packages/cli/src/config/**"] },
+      { "name": "cli/report", "patterns": ["packages/cli/src/report/**"] },
       { "name": "cli/storybook", "patterns": ["packages/cli/src/storybook/**"] },
+      { "name": "cli/system-error", "patterns": ["packages/cli/src/system-error/**"] },
+      { "name": "cli/visual-diff", "patterns": ["packages/cli/src/visual-diff/**"] },
       { "name": "storybook/per-story-options", "patterns": ["packages/storybook/src/per-story-options/**"] },
       { "name": "repo-checks/workspace", "patterns": ["packages/repo-checks/src/workspace/**"] },
       { "name": "repo-checks/lockstep", "patterns": ["packages/repo-checks/src/lockstep/**"] },
@@ -44,7 +47,7 @@
       { "from": "cli/capture", "allow": ["cli/capture/driver", "cli/storybook"] },
       { "from": "cli/container", "allow": ["cli/capture/driver"] },
       { "from": "cli/browser-process", "allow": ["cli/capture/driver"] },
-      { "from": "cli/baselines", "allow": [] },
+      { "from": "cli/baselines", "allow": ["cli/system-error"] },
       { "from": "cli/browser", "allow": ["cli/config"] },
       { "from": "cli/browser-download", "allow": [] },
       {
@@ -59,11 +62,16 @@
           "cli/capture/driver/cdp",
           "cli/config",
           "cli/container",
-          "cli/storybook"
+          "cli/report",
+          "cli/storybook",
+          "cli/visual-diff"
         ]
       },
       { "from": "cli/config", "allow": [] },
+      { "from": "cli/report", "allow": ["cli/system-error"] },
       { "from": "cli/storybook", "allow": [] },
+      { "from": "cli/system-error", "allow": [] },
+      { "from": "cli/visual-diff", "allow": ["cli/config"] },
       { "from": "storybook/per-story-options", "allow": [] },
       { "from": "repo-checks/workspace", "allow": [] },
       { "from": "repo-checks/lockstep", "allow": ["repo-checks/workspace"] },

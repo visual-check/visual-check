@@ -35,7 +35,11 @@
         "noRestrictedImports": {
           "level": "error",
           "options": {
-            "paths": { "yauzl": "Only packages/cli/src/browser-download/ unzips, through yauzl." }
+            "paths": {
+              "pixelmatch": "Only packages/cli/src/visual-diff/ compares images, through pixelmatch.",
+              "sharp": "Only packages/cli/src/visual-diff/ decodes and encodes images, through sharp.",
+              "yauzl": "Only packages/cli/src/browser-download/ unzips, through yauzl."
+            }
           }
         },
         "useBlockStatements": "error",
@@ -62,7 +66,32 @@
       "includes": ["packages/cli/src/browser-download/**"],
       "linter": {
         "rules": {
-          "style": { "noRestrictedImports": "off" }
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "pixelmatch": "Only packages/cli/src/visual-diff/ compares images, through pixelmatch.",
+                  "sharp": "Only packages/cli/src/visual-diff/ decodes and encodes images, through sharp."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/cli/src/visual-diff/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": { "yauzl": "Only packages/cli/src/browser-download/ unzips, through yauzl." }
+              }
+            }
+          }
         }
       }
     }

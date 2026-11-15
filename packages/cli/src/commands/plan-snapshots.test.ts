@@ -103,16 +103,17 @@ const fixLine =
 const disableIssue = 'visualCheck.disable: must be true or false. Got 1.'
 
 /**
- * The config most cases plan with: its readyTimeout and its viewport.
+ * The config most cases plan with: its readyTimeout, its viewport and its tolerance.
  */
 const config = {
   readyTimeout: 5_000,
   viewport: { width: 1280, height: 720, deviceScaleFactor: 1, touch: false },
+  tolerance: { color: 0.01, pixels: 20 },
 }
 
 /**
- * Builds the planned default capture of a story with the given options, at the config's viewport unless `viewport`
- * replaces it.
+ * Builds the planned default capture of a story with the given options, at the config's tolerance under the story's,
+ * and at the config's viewport unless `viewport` replaces it.
  */
 function defaultCaptureOf(
   storybook: ResolvedStorybook,
@@ -124,7 +125,9 @@ function defaultCaptureOf(
     throw new Error('The test asks for a story it has none of.')
   }
 
-  return { storybook, story, mode: undefined, key: story.id, options, viewport, globals: {} }
+  const tolerance = { ...config.tolerance, ...options.tolerance }
+
+  return { storybook, story, mode: undefined, key: story.id, options, tolerance, viewport, globals: {} }
 }
 
 /**
@@ -567,6 +570,7 @@ describe('planSnapshots modes', () => {
         mode: 'dark',
         key: 'a.dark',
         options,
+        tolerance: config.tolerance,
         viewport: config.viewport,
         globals: { theme: 'dark', density: 2, animated: false },
       },
@@ -576,6 +580,7 @@ describe('planSnapshots modes', () => {
         mode: 'mobile',
         key: 'a.mobile',
         options,
+        tolerance: config.tolerance,
         viewport: { width: 375, height: 667, deviceScaleFactor: 2, touch: true },
         globals: {},
       },
@@ -621,6 +626,22 @@ describe('planSnapshots modes', () => {
       ['a.dark', { width: 1024, height: 720, deviceScaleFactor: 2, touch: false }],
       ['a.narrow', { width: 320, height: 720, deviceScaleFactor: 2, touch: true }],
     ])
+  })
+
+  it("gives each snapshot the config's tolerance under the story's, key by key, a mode sharing the story's", async () => {
+    const snapshots = await snapshotsOf([storyOf('a'), storyOf('b'), storyOf('c')], {
+      a: { tolerance: { pixels: 0 }, modes: { dark } },
+      b: { tolerance: { color: 0.2, pixels: '1%' } },
+    })
+
+    expect(snapshots.map(({ key, ...snapshot }) => [key, 'tolerance' in snapshot ? snapshot.tolerance : null])).toEqual(
+      [
+        ['a', { color: 0.01, pixels: 0 }],
+        ['a.dark', { color: 0.01, pixels: 0 }],
+        ['b', { color: 0.2, pixels: '1%' }],
+        ['c', { color: 0.01, pixels: 20 }],
+      ],
+    )
   })
 
   it('plans no snapshot of a disabled story, whatever modes it lists', async () => {

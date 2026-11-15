@@ -29,6 +29,7 @@ import { ContainerError } from '../container/container-error.js'
 import { answerOptionsReadExpression, optionsReadAnswer } from '../storybook/options-read.fixture.js'
 import type { StoriesFile } from '../storybook/options-read.js'
 import { finishedAnswer } from '../storybook/preview-script.fixture.js'
+import { greyPng, whitePixels } from '../visual-diff/images.fixture.js'
 import type { ContainerRoute } from './browser-route.js'
 import type { BrowserLaunch, LaunchBrowser } from './launch-browser.js'
 import { type RunCliOptions, runCli } from './run-cli.js'
@@ -260,9 +261,15 @@ function fileReadOf({ importPath, storyIds }: StoriesFile, read: FakeRead) {
 }
 
 /**
- * The snapshot a fake story captures when it gives none.
+ * The snapshot a fake story captures when it gives none: a black PNG file of 10 × 10 pixels.
  */
-const defaultSnapshot = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1])
+const defaultSnapshot = new Uint8Array(await greyPng(10, 10, 0))
+
+/**
+ * A white PNG file of the same size, whose 100 pixels all differ from `defaultSnapshot`'s, beyond the default
+ * tolerance at scale 1 and at scale 2.
+ */
+const otherSnapshot = new Uint8Array(await greyPng(10, 10, 255))
 
 /**
  * What the fake browser saw.
@@ -450,6 +457,7 @@ function fakeDriverOf({
           failIfGone()
           pageUrl = url
           record.urls.push(url)
+
           const { searchParams } = new URL(url)
           const globals = searchParams.get('globals')
 
@@ -1082,11 +1090,6 @@ function storyIdsOf(urls: readonly string[]): string[] {
   return urls.flatMap((url) => new URL(url).searchParams.get('id') ?? [])
 }
 
-/**
- * Bytes that differ from `defaultSnapshot`.
- */
-const otherSnapshot = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 2])
-
 describe('runCli test', () => {
   it("passes a snapshot that holds its baseline's bytes, captured from the story's own page", async () => {
     const { project, url } = await createRun(['button--primary'], { 'button--primary': defaultSnapshot })
@@ -1120,7 +1123,7 @@ describe('runCli test', () => {
       printed(
         headerOf('test', 5),
         '✓ web  a  N ms',
-        "✗ web  b  differs: the snapshot isn't byte-identical to its baseline",
+        '✗ web  b  differs: 100 differ, 20 allowed',
         missingLineOf('web', 'c'),
         `! web  d  ${brokenDetail}`,
         '✓ web  e  N ms',
@@ -1208,6 +1211,161 @@ describe('runCli test', () => {
       stdout: printed(headerOf('test', 0), '0 passed'),
       stderr: '',
     })
+  })
+})
+
+/**
+ * Gives the report folder of a project whose config file is in `project`.
+ */
+function reportFolderIn(project: string): string {
+  return join(project, '.visual-check', 'report')
+}
+
+/**
+ * Leaves a report from an earlier run in the project's report folder. Returns the path of its one image.
+ */
+function writeStaleReport(project: string): string {
+  const image = join(reportFolderIn(project), 'images', 'web', 'old.diff.png')
+
+  mkdirSync(dirname(image), { recursive: true })
+  writeFileSync(image, defaultSnapshot)
+
+  return image
+}
+
+describe('runCli visual diff', () => {
+  it("leaves a differing snapshot's baseline, snapshot and visual diff in the report folder beside the config file", async () => {
+    const url = await startStorybook(['a', 'b'])
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'packages/web', url: '${url}' } } }\n`,
+      'packages/web/button.stories.tsx': '',
+      'packages/web/.visual-check/baselines/a.png': defaultSnapshot,
+      'packages/web/.visual-check/baselines/b.png': defaultSnapshot,
+    })
+    const { options } = fakeBrowser({ b: { snapshot: otherSnapshot } })
+    const result = await runCli(['test'], {}, join(project, 'packages'), options)
+    const images = join(reportFolderIn(project), 'images', 'web')
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toBe('')
+    expect(withoutTimes(result.stdout)).toBe(
+      printed(
+        headerOf('test', 2),
+        '✓ web  a  N ms',
+        '✗ web  b  differs: 100 differ, 20 allowed',
+        '1 passed · 1 differs',
+      ),
+    )
+    expect(readdirSync(images).sort()).toEqual(['b.baseline.png', 'b.diff.png', 'b.snapshot.png'])
+    expect(new Uint8Array(readFileSync(join(images, 'b.baseline.png')))).toEqual(defaultSnapshot)
+    expect(new Uint8Array(readFileSync(join(images, 'b.snapshot.png')))).toEqual(otherSnapshot)
+    expect([...readFileSync(join(images, 'b.diff.png')).subarray(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47])
+    expect(existsSync(join(project, 'packages', 'web', '.visual-check', 'report'))).toBe(false)
+  })
+
+  it("names a mode's images by its key", async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot, 'a.dark': defaultSnapshot })
+    const { options } = fakeBrowser(
+      { a: darkStory },
+      { read: { options: { a: { modes: { dark: twoModes.modes.dark } } } } },
+    )
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(1)
+    expect(readdirSync(join(reportFolderIn(project), 'images', 'web')).sort()).toEqual([
+      'a.dark.baseline.png',
+      'a.dark.diff.png',
+      'a.dark.snapshot.png',
+    ])
+  })
+
+  it('removes a stale report folder, and writes no image when every snapshot passes', async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot })
+
+    writeStaleReport(project)
+
+    const result = await runCli(['test'], {}, project, fakeBrowser().options)
+
+    expect(result.exitCode).toBe(0)
+    expect(existsSync(reportFolderIn(project))).toBe(false)
+  })
+
+  it('leaves the report folder alone in update', async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot })
+    const image = writeStaleReport(project)
+    const result = await runCli(['update'], {}, project, fakeBrowser({ a: { snapshot: otherSnapshot } }).options)
+
+    expect(result.exitCode).toBe(0)
+    expect(readdirSync(join(reportFolderIn(project), 'images', 'web'))).toEqual(['old.diff.png'])
+    expect(new Uint8Array(readFileSync(image))).toEqual(defaultSnapshot)
+  })
+
+  it("compares by the story's tolerance over the config's", async () => {
+    const { project } = await createRun(['a', 'b'], { a: defaultSnapshot, b: defaultSnapshot })
+    const threeWhite = new Uint8Array(await greyPng(10, 10, 0, whitePixels(3, 10)))
+    const { options } = fakeBrowser(
+      { a: { snapshot: threeWhite }, b: { snapshot: threeWhite } },
+      { read: { options: { b: { tolerance: { pixels: 0 } } } } },
+    )
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(withoutTimes(result.stdout)).toBe(
+      printed(headerOf('test', 2), '✓ web  a  N ms', '✗ web  b  differs: 3 differ, 0 allowed', '1 passed · 1 differs'),
+    )
+  })
+
+  it("scales a count of pixels with the viewport's device scale factor, and says so", async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot })
+    const { options } = fakeBrowser(
+      { a: { snapshot: otherSnapshot } },
+      { read: { options: { a: { viewport: { deviceScaleFactor: 2 } } } } },
+    )
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.stdout).toContain('✗ web  a  differs: 100 differ, 80 allowed (20 at scale 2)\n')
+  })
+
+  it('fails a snapshot whose size differs from its baseline, naming both sizes', async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot })
+    const taller = new Uint8Array(await greyPng(10, 12, 0))
+    const result = await runCli(['test'], {}, project, fakeBrowser({ a: { snapshot: taller } }).options)
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toContain('✗ web  a  differs: size changed: 10×10 → 10×12\n')
+  })
+
+  it("stops with exit 2, naming the baseline, when a differing baseline can't be decoded", async () => {
+    const { project } = await createRun(['a'], { a: new TextEncoder().encode('not a PNG file') })
+    const result = await runCli(['test'], {}, project, fakeBrowser().options)
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: printed(headerOf('test', 1)),
+      stderr:
+        "visual-check couldn't read the baseline .visual-check/baselines/a.png: Input buffer contains unsupported " +
+        "image format. Check that it's a file visual-check can read.\n",
+    })
+  })
+
+  it("stops with exit 2 before any capture when the report folder can't be cleared", async () => {
+    const url = await startStorybook(['a'])
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${url}' } } }\n`,
+      'web/button.stories.tsx': '',
+      'web/.visual-check/baselines/a.png': defaultSnapshot,
+      '.visual-check': '',
+    })
+    const { options, record } = fakeBrowser()
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr:
+        "visual-check couldn't clear .visual-check/report: ENOTDIR: not a directory. " +
+        'Check that visual-check can remove it.\n',
+    })
+    expect(storyIdsOf(record.urls)).toEqual([])
   })
 })
 
@@ -1665,7 +1823,7 @@ const twoModes = {
 /**
  * The snapshot story `a` captures in its `dark` mode, which differs from `defaultSnapshot`.
  */
-const darkSnapshot = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 3])
+const darkSnapshot = new Uint8Array(await greyPng(10, 10, 64))
 
 /**
  * How story `a` answers: its `dark` mode, whose URL sets `theme:dark`, captures `darkSnapshot`.
@@ -1686,7 +1844,7 @@ describe('runCli modes', () => {
         '✓ web  a  N ms',
         '✓ web  a  dark  N ms',
         '✗ web  a  mobile  missing: no baseline yet; run visual-check update to write it',
-        "✗ web  b  differs: the snapshot isn't byte-identical to its baseline",
+        '✗ web  b  differs: 100 differ, 20 allowed',
         '2 passed · 1 differs · 1 missing',
       ),
     )
@@ -1822,10 +1980,10 @@ describe('runCli warning when a Storybook ignores the test path', () => {
       'web/button.stories.tsx': '',
       'docs/button.stories.tsx': '',
       'quick/button.stories.tsx': '',
-      'web/.visual-check/baselines/a.png': '',
-      'web/.visual-check/baselines/b.png': '',
-      'docs/.visual-check/baselines/c.png': '',
-      'quick/.visual-check/baselines/d.png': '',
+      'web/.visual-check/baselines/a.png': otherSnapshot,
+      'web/.visual-check/baselines/b.png': otherSnapshot,
+      'docs/.visual-check/baselines/c.png': otherSnapshot,
+      'quick/.visual-check/baselines/d.png': otherSnapshot,
     })
 
     installStorybook(join(project, 'web'), '10.0.1')

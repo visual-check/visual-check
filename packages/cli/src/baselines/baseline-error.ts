@@ -1,17 +1,4 @@
-/**
- * Gives the operating system's reason for a failed file call, without the call's name and paths that Node adds, such
- * as `EACCES: permission denied`. Any other error gives its message.
- */
-function reasonOf(error: unknown): string {
-  if (!(error instanceof Error)) {
-    return String(error)
-  }
-
-  const { syscall } = error as NodeJS.ErrnoException
-  const callStart = syscall === undefined ? -1 : error.message.indexOf(`, ${syscall}`)
-
-  return callStart > 0 ? error.message.slice(0, callStart) : error.message
-}
+import { systemReasonOf } from '../system-error/system-reason.js'
 
 /**
  * A baseline that is there couldn't be read, or a baseline couldn't be written, such as for a folder that isn't
@@ -44,7 +31,7 @@ export class BaselineError extends Error {
    * Keeps what failed, the baseline's path and the reason the error that caused it gives.
    */
   constructor(action: 'read' | 'write', path: string, cause: unknown) {
-    const reason = reasonOf(cause)
+    const reason = systemReasonOf(cause)
 
     super(`Couldn't ${action} the baseline ${path}: ${reason}.`, { cause })
     this.action = action

@@ -11,8 +11,15 @@ import { BrowserExitedError, BrowserLaunchError } from '../capture/driver/driver
 import { runWorkerPool } from '../capture/worker-pool.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
 import { ContainerError } from '../container/container-error.js'
+import { clearReport, ReportError, reportFolderOf, writeFailureImages } from '../report/report-folder.js'
 import { type Story, storyUrlOf } from '../storybook/read-stories.js'
 import { testPathWarningOf } from '../storybook/test-path.js'
+import {
+  createVisualDiff,
+  ImageDecodeError,
+  type VisualDiff,
+  type VisualDiffResult,
+} from '../visual-diff/visual-diff.js'
 import type { BrowserPlace } from './browser-route.js'
 import { dockerProblemOf } from './docker-problem.js'
 import type { LaunchBrowser } from './launch-browser.js'
@@ -135,7 +142,7 @@ interface SnapshotResult {
    */
   status: SnapshotStatus
   /**
-   * The line's last column, such as `142 ms` or `differs: …`.
+   * The line's last column, such as `142 ms` or `differs: 84 differ, 80 allowed (20 at scale 2)`.
    */
   detail: string
   /**
@@ -171,6 +178,29 @@ const statusesOf: Record<SnapshotRun['command'], { counted: SnapshotStatus[]; fa
 const baselineFixes: Record<BaselineError['action'], string> = {
   read: "Check that it's a file visual-check can read.",
   write: 'Check that its folder is writable and the disk has room.',
+}
+
+/**
+ * What each failed report call asks the person to check, after its reason.
+ */
+const reportFixes: Record<ReportError['action'], string> = {
+  clear: 'Check that visual-check can remove it.',
+  write: 'Check that its folder is writable and the disk has room.',
+}
+
+/**
+ * What `test` needs besides the run: the visual diff it compares snapshots with, and the report folder it writes the
+ * images of each differing snapshot to.
+ */
+interface TestTools {
+  /**
+   * The run's visual diff.
+   */
+  visualDiff: VisualDiff
+  /**
+   * The report folder.
+   */
+  reportFolder: string
 }
 
 /**
@@ -234,30 +264,71 @@ function displayPathOf(cwd: string, path: string): string {
 type CaptureStory = (story: StoryToCapture, started?: () => void) => Promise<StoryCapture>
 
 /**
- * Takes one snapshot as the command says. A story whose stories file didn't load is broken, with no capture and no
- * baseline read.
+ * Takes one snapshot: tests it when `test` gives its tools, else updates its baseline. A story whose stories file
+ * didn't load is broken, with no capture and no baseline read.
  */
 async function snapshotOf(
   run: SnapshotRun,
   item: PlannedSnapshot,
   captureStory: CaptureStory,
+  testTools: TestTools | undefined,
 ): Promise<SnapshotResult> {
   if ('broken' in item) {
     return { status: 'broken', detail: `broken: ${item.broken.message}` }
   }
 
-  return run.command === 'test'
-    ? await testSnapshot(item, captureStory)
-    : await updateSnapshot(item, captureStory, run.cwd)
+  return testTools === undefined
+    ? await updateSnapshot(item, captureStory, run.cwd)
+    : await testSnapshot(item, captureStory, testTools)
 }
 
 /**
- * Tests one snapshot: a missing baseline is reported without a capture, and a snapshot passes only when it holds the
- * baseline's bytes. It asks for a capture only once it has read the baseline. A pass's time leaves out the browser's
- * launch.
+ * Compares a snapshot with its baseline at `path` by the story's tolerance, at its viewport's device scale factor.
+ *
+ * @throws {BaselineError} When the files differ and the baseline can't be decoded, with the decoder's reason.
  */
-async function testSnapshot(item: SnapshotToCapture, captureStory: CaptureStory): Promise<SnapshotResult> {
-  const baseline = await readBaseline(baselinePathOf(item.storybook.baselines, item.key))
+async function compareWithBaseline(
+  visualDiff: VisualDiff,
+  item: SnapshotToCapture,
+  baseline: Uint8Array,
+  snapshot: Uint8Array,
+  path: string,
+): Promise<VisualDiffResult> {
+  try {
+    return await visualDiff.compare({
+      baseline,
+      snapshot,
+      tolerance: item.tolerance,
+      scale: item.viewport.deviceScaleFactor,
+    })
+  } catch (error) {
+    if (error instanceof ImageDecodeError && error.image === 'baseline') {
+      // The bare decoder reason, since the printed line already names the baseline.
+      throw new BaselineError('read', path, new Error(error.reason, { cause: error }))
+    }
+
+    throw error
+  }
+}
+
+/**
+ * Tests one snapshot: a missing baseline is reported without a capture, and a snapshot passes when it differs from
+ * its baseline by no more than the story's tolerance. One that differs beyond it, or in size, leaves its baseline,
+ * snapshot and visual diff in the report folder. It asks for a capture only once it has read the baseline. A pass's
+ * time is the capture's alone: it leaves out the browser's launch and the comparison.
+ *
+ * @throws {BaselineError} When the baseline can't be read or decoded.
+ * @throws {ReportError} When an image can't be written to the report folder.
+ * @throws {ImageDecodeError} When the snapshot can't be decoded, which the browser's PNG files rule out.
+ * @throws {Error} When a visual diff thread stops mid-comparison.
+ */
+async function testSnapshot(
+  item: SnapshotToCapture,
+  captureStory: CaptureStory,
+  { visualDiff, reportFolder }: TestTools,
+): Promise<SnapshotResult> {
+  const path = baselinePathOf(item.storybook.baselines, item.key)
+  const baseline = await readBaseline(path)
 
   if (baseline === undefined) {
     return { status: 'missing', detail: 'missing: no baseline yet; run visual-check update to write it' }
@@ -272,13 +343,17 @@ async function testSnapshot(item: SnapshotToCapture, captureStory: CaptureStory)
     return { status: 'broken', detail: `broken: ${capture.broken.message}` }
   }
 
-  const { completingMs } = capture
+  const elapsedMs = Math.round(performance.now() - started)
+  const { snapshot, completingMs } = capture
+  const result = await compareWithBaseline(visualDiff, item, baseline, snapshot, path)
 
-  if (!isByteIdentical(capture.snapshot, baseline)) {
-    return { status: 'differs', detail: "differs: the snapshot isn't byte-identical to its baseline", completingMs }
+  if (result.outcome === 'differs') {
+    await writeFailureImages(reportFolder, item.storybook.name, item.key, { baseline, snapshot, diff: result.diff })
+
+    return { status: 'differs', detail: `differs: ${result.message}`, completingMs }
   }
 
-  return { status: 'passed', detail: `${Math.round(performance.now() - started)} ms`, completingMs }
+  return { status: 'passed', detail: `${elapsedMs} ms`, completingMs }
 }
 
 /**
@@ -466,12 +541,13 @@ function browserStopMessageOf(
 }
 
 /**
- * Gives what to print for an error that stops the run with exit 2: a baseline that can't be read or written, Docker's
- * error, a failed download, a failed launch's or a browser exit's with the next step and the browser's last output, or
- * a version mismatch. A browser that fails or exits before any capture, with output saying its graphics process can't
- * start, gives the platform problem for its container's platform, or the config's inside visual-check's image unless
- * that is `host`, instead of the next step. A failed launch on the host whose output names a missing library gives
- * that library and both ways out. Any other error gives `undefined`.
+ * Gives what to print for an error that stops the run with exit 2: a baseline that can't be read, decoded or written, a
+ * report folder that can't be cleared or written to, Docker's error, a failed download, a failed launch's or a browser
+ * exit's with the next step and the browser's last output, or a version mismatch. A browser that fails or exits before
+ * any capture, with output saying its graphics process can't start, gives the platform problem for its container's
+ * platform, or the config's inside visual-check's image unless that is `host`, instead of the next step. A failed
+ * launch on the host whose output names a missing library gives that library and both ways out. Any other error gives
+ * `undefined`.
  *
  * `capturedAny` is whether a snapshot has been captured, which a broken or missing one hasn't.
  */
@@ -480,6 +556,13 @@ function stopMessageOf(error: unknown, run: SnapshotRun, capturedAny: boolean): 
     return (
       `visual-check couldn't ${error.action} the baseline ${displayPathOf(run.cwd, error.path)}: ${error.reason}. ` +
       `${baselineFixes[error.action]}\n`
+    )
+  }
+
+  if (error instanceof ReportError) {
+    return (
+      `visual-check couldn't ${error.action} ${displayPathOf(run.cwd, error.path)}: ${error.reason}. ` +
+      `${reportFixes[error.action]}\n`
     )
   }
 
@@ -538,13 +621,19 @@ function capturedAnyOf(snapshots: PlannedSnapshots | undefined): boolean {
 }
 
 /**
- * Takes every snapshot with a pool of `workers` that share the run's browser.
+ * Takes every snapshot with a pool of `workers` that share the run's browser, testing each when `test` gives its
+ * tools.
  */
-async function takeSnapshots(run: SnapshotRun, browser: RunBrowser, snapshots: PlannedSnapshots): Promise<void> {
+async function takeSnapshots(
+  run: SnapshotRun,
+  browser: RunBrowser,
+  snapshots: PlannedSnapshots,
+  testTools: TestTools | undefined,
+): Promise<void> {
   await runWorkerPool(run.workers, snapshots.items, async (item, index, worker) => {
     const captureStory: CaptureStory = (toCapture, started) => browser.capture(worker, toCapture, started)
 
-    snapshots.results[index] = await snapshotOf(run, item, captureStory)
+    snapshots.results[index] = await snapshotOf(run, item, captureStory, testTools)
   })
 }
 
@@ -555,8 +644,11 @@ async function takeSnapshots(run: SnapshotRun, browser: RunBrowser, snapshots: P
  * after the header, which counts them, then the counts; a mode's line names the mode after the story ID. The lines
  * follow config order, then selection order, then the story's default capture and its modes in order, whatever order
  * the captures finish in. Each snapshot has its own baseline, `<story-id>.png` for the default capture and
- * `<story-id>.<mode>.png` for a mode. `test` compares each snapshot with its baseline byte for byte and never captures
- * a missing baseline; `update` writes each snapshot whose baseline is missing or differs.
+ * `<story-id>.<mode>.png` for a mode. `test` compares each snapshot with its baseline by the story's tolerance, at the
+ * viewport's device scale factor, and never captures a missing baseline. It clears the report folder,
+ * `.visual-check/report` beside the config file, once the snapshots are planned, and writes the baseline, snapshot and
+ * visual diff of each snapshot that differs there. `update` writes each snapshot whose baseline is missing or isn't
+ * byte-identical to it, and never touches the report folder.
  *
  * Each Storybook with stories gets one options read, in config order, on a page of its own, covering every story its
  * `index.json` lists whatever the selection. So the browser is launched at the first read, even when no story then
@@ -567,12 +659,13 @@ async function takeSnapshots(run: SnapshotRun, browser: RunBrowser, snapshots: P
  * counted. Each story of a stories file that failed to load, or didn't load within readyTimeout, is one broken
  * snapshot, `load-failed`, with no mode, no capture and no baseline read.
  *
- * When the browser exits, every story in flight is broken, `browser-exited`, the browser is relaunched once at the
- * next read or story that needs it, and the run goes on; stderr then says so, with the browser's last output, whatever
- * the run exits with. A baseline that can't be read or written, a failed launch or relaunch, a version mismatch or the
- * relaunched browser's exit stops the run with exit 2, keeping the lines of the snapshots that finished. So does a
- * failed download. A browser that can't start its graphics process before the first capture says the machine can't
- * run the platform. The workers' sessions and the browsers are always closed.
+ * When the browser exits, every story in flight is broken, `browser-exited`, the browser is relaunched once at the next
+ * read or story that needs it, and the run goes on; stderr then says so, with the browser's last output, whatever the
+ * run exits with. A baseline that can't be read, decoded or written, a report folder that can't be cleared or written
+ * to, a failed launch or relaunch, a version mismatch or the relaunched browser's exit stops the run with exit 2,
+ * keeping the lines of the snapshots that finished. So does a failed download. A browser that can't start its graphics
+ * process before the first capture says the machine can't run the platform. The workers' sessions and the browsers are
+ * always closed.
  *
  * A run that finishes ends stderr with a warning for each Storybook, in config order, whose captured snapshots'
  * `completing` render steps took a median of 50 ms or more: it seems to ignore the test path. The warnings never
@@ -589,6 +682,10 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
     environment: run.environment,
     progress: run.progress,
   })
+  const testTools: TestTools | undefined =
+    run.command === 'test'
+      ? { visualDiff: createVisualDiff(), reportFolder: reportFolderOf(run.config.path) }
+      : undefined
   let snapshots: PlannedSnapshots | undefined
 
   try {
@@ -598,8 +695,12 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
       return { exitCode: 2, stdout: '', stderr: `${exitNoticeOf(browser.firstExit())}${plan.problem}\n` }
     }
 
+    if (testTools !== undefined) {
+      await clearReport(testTools.reportFolder)
+    }
+
     snapshots = plannedSnapshotsOf(run, plan.snapshots)
-    await takeSnapshots(run, browser, snapshots)
+    await takeSnapshots(run, browser, snapshots, testTools)
   } catch (error) {
     const message = stopMessageOf(error, run, capturedAnyOf(snapshots))
 
@@ -611,7 +712,11 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
 
     return { exitCode: 2, stdout, stderr: `${exitNoticeOf(browser.firstExit())}${message}` }
   } finally {
-    await browser.close()
+    try {
+      await browser.close()
+    } finally {
+      await testTools?.visualDiff.close()
+    }
   }
 
   const statuses = snapshots.results.flatMap((result) => (result === undefined ? [] : [result.status]))

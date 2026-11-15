@@ -1,7 +1,7 @@
 import { snapshotKeyOf } from '../baselines/baseline-files.js'
 import { type BrokenStory, failureReasonOf } from '../capture/capture-session.js'
 import type { OptionsRequest, StorybookOptions, StorybookOptionsRead } from '../capture/read-options.js'
-import type { Viewport } from '../config/define-config.js'
+import type { Tolerance, Viewport } from '../config/define-config.js'
 import { checkModeRules, type ModeRulesStory } from '../config/mode-rules.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
 import { checkStoryOptions, type ModeDefinition, type StoryOptions } from '../config/story-options.js'
@@ -50,13 +50,13 @@ type StoryOptionsOf =
     }
 
 /**
- * What planning needs of the config: its readyTimeout, in ms, and its viewport.
+ * What planning needs of the config: its readyTimeout, in ms, its viewport and its tolerance.
  */
-type PlanConfig = Pick<ResolvedConfig, 'readyTimeout' | 'viewport'>
+type PlanConfig = Pick<ResolvedConfig, 'readyTimeout' | 'viewport' | 'tolerance'>
 
 /**
  * A snapshot the run captures: the default capture or a listed mode of a selected story that isn't disabled, with its
- * Storybook, its key, the story's options, and the snapshot's viewport and globals.
+ * Storybook, its key, the story's options and tolerance, and the snapshot's viewport and globals.
  */
 export interface SnapshotToCapture {
   /**
@@ -79,6 +79,10 @@ export interface SnapshotToCapture {
    * The story's validated options.
    */
   options: StoryOptions
+  /**
+   * The story's tolerance: the config's under the story's, key by key. A mode shares it.
+   */
+  tolerance: Required<Tolerance>
   /**
    * The size the snapshot is laid out and captured at.
    */
@@ -332,14 +336,15 @@ function checkedOf(checkedById: ReadonlyMap<string, CheckedStory>, story: Story)
 /**
  * Plans a taken story's snapshots: its default capture, at the config's viewport under the story's, key by key, with
  * no globals, then each mode it lists, in the order its options hold them, at the default capture's viewport under the
- * mode's, with the mode's globals. A mode the story leaves out, `null`, isn't planned. A story whose stories file
- * didn't load gives one broken snapshot with no mode, since its modes are unknown.
+ * mode's, with the mode's globals. Each has the config's tolerance under the story's, key by key. A mode the story
+ * leaves out, `null`, isn't planned. A story whose stories file didn't load gives one broken snapshot with no mode,
+ * since its modes are unknown.
  */
 function storySnapshotsOf(
   storybook: ResolvedStorybook,
   story: Story,
   checked: StoryOptionsOf,
-  configViewport: Required<Viewport>,
+  config: PlanConfig,
 ): PlannedSnapshot[] {
   if ('broken' in checked) {
     return [{ storybook, story, mode: undefined, key: snapshotKeyOf(story.id), broken: checked.broken }]
@@ -352,7 +357,8 @@ function storySnapshotsOf(
     mode: undefined,
     key: snapshotKeyOf(story.id),
     options,
-    viewport: { ...configViewport, ...options.viewport },
+    tolerance: { ...config.tolerance, ...options.tolerance },
+    viewport: { ...config.viewport, ...options.viewport },
     globals: {},
   }
   const modes = Object.entries(options.modes ?? {}).flatMap(([mode, definition]): SnapshotToCapture[] =>
@@ -398,7 +404,7 @@ function planStorybook(
   const snapshots = stories.flatMap((story): PlannedSnapshot[] => {
     const checked = checkedOf(checkedById, story)
 
-    return isTaken(checked) ? storySnapshotsOf(storybook, story, checked, config.viewport) : []
+    return isTaken(checked) ? storySnapshotsOf(storybook, story, checked, config) : []
   })
 
   return { snapshots, issues: [...typeIssues, ...modeIssues] }
@@ -433,7 +439,8 @@ function invalidOptionsProblemOf(storybooks: readonly StorybookIssues[]): string
  * Storybook with stories, in the order given. A read covers every story the Storybook's `index.json` lists whatever
  * the selection, and every story's options are checked. Gives the snapshots in the order given and then selection
  * order. Each selected story that isn't disabled gives its default capture, then one snapshot per mode it lists, in
- * the order its options hold them, each with its key, its options, its viewport over the config's and its globals.
+ * the order its options hold them, each with its key, its options, its tolerance and viewport over the config's and
+ * its globals.
  * When its stories file failed to load or didn't load within readyTimeout, it gives one snapshot, the broken story it
  * makes, `load-failed`, with no mode. A read's problem stops the planning at once, and the Storybooks after it aren't
  * read. Invalid options stop it once every Storybook is read, with one block of issues per Storybook: each story's
