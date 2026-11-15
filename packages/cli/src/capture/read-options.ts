@@ -76,6 +76,7 @@ function timedOutProblem(
   readyTimeoutMs: number,
 ): string {
   const { storybookName, previewUrl } = request
+
   if (step === 'preview-start') {
     return `Storybook ${storybookName}'s preview never started at ${previewUrl} within readyTimeout (${readyTimeoutMs} ms). ${openPreview}`
   }
@@ -175,6 +176,7 @@ function describeRead(read: OptionsRead, request: OptionsRequest, readyTimeoutMs
         problem: read.message === '' ? `${failed}. ${fix}` : `${failed}: ${failureReasonOf(read.message)} ${fix}`,
       }
     }
+
     case 'unsupported':
       return {
         problem: `Storybook ${storybookName}'s preview has no loadStory, so visual-check can't read its per-story options. Check that its version is one visual-check supports, ${minimumText} to ${newestSupportedMajor}.x.`,
