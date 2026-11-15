@@ -1,6 +1,10 @@
 {
   "$schema": "./node_modules/fallow/schema.json",
-  "supportEntry": ["test-storybooks/storybook-10-react/visual-check.config.ts"],
+  "supportEntry": [
+    "test-storybooks/storybook-9-react/visual-check.config.ts",
+    "test-storybooks/storybook-10-react/visual-check.config.ts",
+    "test-storybooks/storybook-11-react/visual-check.config.ts"
+  ],
   "duplicates": {
     "minOccurrences": 2
   },
@@ -30,7 +34,7 @@
     "rules": [
       { "from": "cli/capture/driver/cdp", "allow": ["cli/capture/driver"] },
       { "from": "cli/capture/driver", "allow": [] },
-      { "from": "cli/capture", "allow": ["cli/capture/driver"] },
+      { "from": "cli/capture", "allow": ["cli/capture/driver", "cli/storybook"] },
       { "from": "cli/container", "allow": ["cli/capture/driver"] },
       { "from": "cli/browser-process", "allow": ["cli/capture/driver"] },
       { "from": "cli/baselines", "allow": [] },
@@ -69,10 +73,15 @@
         "packages/storybook-addon/src/preset.ts",
         "packages/repo-checks/src/check-chromium-checksums.ts",
         "packages/repo-checks/src/check-lockstep.ts",
+        "test-storybooks/storybook-9-react/.storybook/main.ts",
+        "test-storybooks/storybook-9-react/visual-check.config.ts",
         "test-storybooks/storybook-10-react/.storybook/main.ts",
+        "test-storybooks/storybook-10-react/.storybook/test-storybook-config.ts",
         "test-storybooks/storybook-10-react/stories/*.stories.tsx",
         "test-storybooks/storybook-10-react/e2e.ts",
         "test-storybooks/storybook-10-react/visual-check.config.ts",
+        "test-storybooks/storybook-11-react/.storybook/main.ts",
+        "test-storybooks/storybook-11-react/visual-check.config.ts",
         "packages/*/test/**/*.test.ts"
       ]
     }

@@ -90,18 +90,33 @@ export function readInstalledStorybookVersion(dir: string): string | undefined {
 }
 
 /**
+ * What checking a Storybook's `storybook` version found.
+ */
+interface StorybookVersionCheck {
+  /**
+   * The version of the `storybook` package installed for the Storybook's folder, as its `package.json` gives it.
+   * `undefined` when there's no install, or it has no readable version.
+   */
+  version: string | undefined
+  /**
+   * The warning for a version above the newest supported major, else `undefined`.
+   */
+  warning: string | undefined
+}
+
+/**
  * Checks the `storybook` version installed for the Storybook's folder. A version that can't be read or isn't a
- * version is skipped. Returns a warning for a version above the newest supported major, and `undefined` otherwise.
+ * version is skipped. Gives the version it read, with a warning for a version above the newest supported major.
  *
  * @throws {StorybookError} For a version below the minimum release line.
  *
  * @public
  */
-export function checkStorybookVersion(storybook: { name: string; dir: string }, cwd: string): string | undefined {
+export function checkStorybookVersion(storybook: { name: string; dir: string }, cwd: string): StorybookVersionCheck {
   const version = readInstalledStorybookVersion(storybook.dir)
 
   if (version === undefined) {
-    return undefined
+    return { version, warning: undefined }
   }
 
   const standing = classifyStorybookVersion(version)
@@ -114,11 +129,13 @@ export function checkStorybookVersion(storybook: { name: string; dir: string }, 
   }
 
   if (standing === 'above-maximum') {
-    return (
-      `Warning: Storybook ${storybook.name} runs storybook ${version}, ` +
-      `and visual-check supports ${minimumText} to ${newestSupportedMajor}. The run carries on.`
-    )
+    return {
+      version,
+      warning:
+        `Warning: Storybook ${storybook.name} runs storybook ${version}, ` +
+        `and visual-check supports ${minimumText} to ${newestSupportedMajor}. The run carries on.`,
+    }
   }
 
-  return undefined
+  return { version, warning: undefined }
 }

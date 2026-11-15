@@ -225,8 +225,9 @@ async function runTestOrUpdate(
     workers: workersOf(options, config, placement.host),
     place: placement.place,
     browserPackage: browserCheck.browserPackage,
-    selections: checks.storybooks.map(({ storybook, stories }) => ({
+    selections: checks.storybooks.map(({ storybook, version, stories }) => ({
       storybook,
+      version,
       stories: selectStories(stories, options.selection),
     })),
     cwd,

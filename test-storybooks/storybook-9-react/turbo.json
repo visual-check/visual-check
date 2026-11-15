@@ -1,0 +1,36 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build-storybook": {
+      "inputs": [
+        ".storybook/**",
+        "package.json",
+        "tsconfig.json",
+        "$TURBO_ROOT$/test-storybooks/storybook-10-react/.storybook/test-storybook-config.ts",
+        "$TURBO_ROOT$/test-storybooks/storybook-10-react/stories/**",
+        "$TURBO_ROOT$/test-storybooks/storybook-10-react/tsconfig.json"
+      ],
+      "outputs": ["storybook-static/**"]
+    },
+    "e2e": {
+      "cache": false,
+      "dependsOn": ["^build", "build-storybook"],
+      "passThroughEnv": [
+        "TEST_STORYBOOK_IMAGE",
+        "VISUAL_CHECK_CACHE_DIR",
+        "VISUAL_CHECK_CHROMIUM_MIRROR",
+        "HTTPS_PROXY",
+        "https_proxy",
+        "NO_PROXY",
+        "no_proxy"
+      ]
+    },
+    "test:type": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/test-storybooks/storybook-10-react/.storybook/test-storybook-config.ts"
+      ]
+    }
+  }
+}

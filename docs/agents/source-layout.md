@@ -63,7 +63,7 @@ packages/cli/src/
   index.ts              entry: the public config API
   commands/             init, test, update
   config/
-  storybook/            adapter: index.json
+  storybook/            adapter: index.json, story URLs, the preview script and the test path
   capture/
     driver/             the driver seam
       cdp/              adapter: raw CDP

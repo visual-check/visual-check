@@ -1,3 +1,5 @@
+import { storybookPageScript } from '../storybook/preview-script.js'
+
 /**
  * The non-enumerable global the page script keeps its state under, in every document of a page.
  */
@@ -15,8 +17,9 @@ const keptCharacters = 500
 
 /**
  * The script that runs at the start of every document of a page, before the page's own scripts, in every driver. It
- * changes no styles and never touches the document. It does only this, keeping its state under one non-enumerable
- * global:
+ * changes no styles except emptying Storybook 9.1 and 10's pause stylesheets. It reads the document only once the story
+ * finished: in the Storybook adapter's part, and in the wait for images and fonts, which also makes lazy images eager.
+ * It does only this, keeping its own state under one non-enumerable global:
  *
  * - wraps `Element.prototype.attachShadow` to record every shadow root it creates, closed ones included, in
  *   `shadowRoots`;
@@ -26,13 +29,24 @@ const keptCharacters = 500
  *   or typed array by index, without listing all its keys, and each string cut first. So the page's getters and
  *   `toJSON` never run and a huge array costs little. A Proxy's traps can still run: `ownKeys`,
  *   `getOwnPropertyDescriptor`, `getPrototypeOf`, and `get` for an array's `length`;
- * - hooks Storybook's channel when the preview sets `__STORYBOOK_ADDONS_CHANNEL__`, to note each `storyFinished` with
- *   its story ID and status, for `waitForStory`, which the readiness expression calls.
+ * - runs the Storybook adapter's script, which watches Storybook's preview for the story wait, empties Storybook 9.1
+ *   and 10's pause stylesheets, and keeps its state under a global of its own;
+ * - gives `waitForAssets`, which the wait for images and fonts expression calls. It takes the images in the document,
+ *   outside shadow roots and in every recorded one, skipping those no longer in it. It sets each lazy one's `loading`
+ *   to `eager` and decodes them all. A placeholder swapped for the full image leaves the image incomplete: its
+ *   decoding fails when the `src` changes meanwhile, and its `load` handler can swap it just after its decoding
+ *   resolved, as Chromium resolves an SVG's before the handler runs. So, a task after each round, it decodes again
+ *   the images still in the document and incomplete, until none are left. A broken image is complete, so it isn't
+ *   decoded again. Then it forces layout, so the fonts the layout needs start loading, and waits for
+ *   `document.fonts.ready`. One time limit covers both. A page without an API it uses, such as `document.fonts`, has
+ *   nothing to wait for there.
  *
  * It keeps the browser's own `setTimeout` and `clearTimeout`, so a story that fakes or replaces timers doesn't stall
- * the readiness wait. A value the page sets as the channel never makes Storybook's own assignment throw.
+ * the wait. The adapter's script runs first, so a failure in the rest can't keep the story wait from running and show
+ * as a page script that didn't run.
  */
-export const pageInitScript = `(() => {
+export const pageInitScript = `${storybookPageScript};
+(() => {
   if (Object.prototype.hasOwnProperty.call(globalThis, '${stateGlobal}')) {
     return
   }
@@ -41,10 +55,6 @@ export const pageInitScript = `(() => {
   const clearTimer = globalThis.clearTimeout.bind(globalThis)
   const shadowRoots = []
   const messages = []
-  const finished = new Map()
-  const waiters = new Set()
-  const channels = new WeakSet()
-  let channelSet = false
 
   const isError = typeof Error.isError === 'function' ? Error.isError : (value) => value instanceof Error
 
@@ -140,107 +150,220 @@ export const pageInitScript = `(() => {
     }
   }
 
-  const finish = (event) => {
-    if (typeof event !== 'object' || event === null || typeof event.storyId !== 'string') {
-      return
-    }
-    const status = typeof event.status === 'string' ? event.status : 'unknown'
-    finished.set(event.storyId, status)
-    for (const waiter of [...waiters]) {
-      waiter(event.storyId, status)
+  // The wait for images and fonts: every image decoded, then the fonts the layout needs loaded, never throwing.
+
+  const timedOut = Symbol('timed out')
+
+  const imagesIn = (root) => {
+    try {
+      return Array.from(root.querySelectorAll('img'))
+    } catch {
+      return []
     }
   }
 
-  const listen = (channel) => {
+  const makeEager = (image) => {
     try {
-      if (typeof channel !== 'object' || channel === null || channels.has(channel) || typeof channel.on !== 'function') {
-        return
+      if (image.loading === 'lazy') {
+        image.loading = 'eager'
       }
-      channel.on('storyFinished', finish)
-      channels.add(channel)
-      channelSet = true
     } catch {}
   }
 
-  let channel = globalThis.__STORYBOOK_ADDONS_CHANNEL__
-  listen(channel)
-  try {
-    Object.defineProperty(globalThis, '__STORYBOOK_ADDONS_CHANNEL__', {
-      configurable: true,
-      enumerable: true,
-      get: () => channel,
-      set: (value) => {
-        channel = value
-        listen(value)
-      },
+  const decode = (image) => {
+    try {
+      return Promise.resolve(image.decode()).catch(() => undefined)
+    } catch {
+      return undefined
+    }
+  }
+
+  const isConnected = (image) => {
+    try {
+      return image.isConnected === true
+    } catch {
+      return false
+    }
+  }
+
+  const isLoading = (image) => {
+    try {
+      return image.isConnected === true && image.complete !== true
+    } catch {
+      return false
+    }
+  }
+
+  const nextTask = () =>
+    new Promise((resolve) => {
+      setTimer(resolve, 0)
     })
-  } catch {}
 
-  const waitForStory = (storyId, timeoutMs) => new Promise((resolve) => {
-    if (finished.has(storyId)) {
-      resolve({ outcome: 'finished', status: finished.get(storyId) })
-      return
+  const forceLayout = () => {
+    try {
+      document.documentElement.getBoundingClientRect()
+    } catch {}
+  }
+
+  const fontsOf = () => {
+    try {
+      const fonts = document.fonts
+      return typeof fonts === 'object' && fonts !== null ? fonts : undefined
+    } catch {
+      return undefined
     }
-    const waiter = (finishedId, status) => {
-      if (finishedId === storyId) {
-        waiters.delete(waiter)
-        clearTimer(timer)
-        resolve({ outcome: 'finished', status })
+  }
+
+  const fontsLoaded = (fonts) => {
+    try {
+      return Promise.resolve(fonts === undefined ? undefined : fonts.ready).catch(() => undefined)
+    } catch {
+      return undefined
+    }
+  }
+
+  const loadingFaces = (fonts) => {
+    const faces = []
+    try {
+      for (const face of fonts) {
+        if (face.status !== 'loading') {
+          continue
+        }
+        const family = String(face.family).replace(/^(["'])(.*)\\1$/, '$2')
+        const description = family + ' ' + face.weight + ' ' + face.style
+        if (!faces.includes(description)) {
+          faces.push(description)
+        }
       }
-    }
-    const timer = setTimer(() => {
-      waiters.delete(waiter)
-      resolve({ outcome: 'timed-out', channel: channelSet })
-    }, timeoutMs)
-    waiters.add(waiter)
-  })
+    } catch {}
+    return faces
+  }
 
-  Object.defineProperty(globalThis, '${stateGlobal}', { value: Object.freeze({ shadowRoots, messages, waitForStory }) })
+  const waitForAssets = async (timeoutMs) => {
+    let timer
+    const deadline = new Promise((resolve) => {
+      timer = setTimer(() => resolve(timedOut), timeoutMs)
+    })
+    try {
+      let images = [document, ...shadowRoots].flatMap(imagesIn).filter(isConnected)
+      for (const image of images) {
+        makeEager(image)
+      }
+      while (images.length > 0) {
+        if ((await Promise.race([Promise.all(images.map(decode)), deadline])) === timedOut) {
+          return { outcome: 'timed-out', step: 'images', pending: images.filter(isLoading).length }
+        }
+        await nextTask()
+        images = images.filter(isLoading)
+      }
+      forceLayout()
+      const fonts = fontsOf()
+      if ((await Promise.race([fontsLoaded(fonts), deadline])) === timedOut) {
+        return { outcome: 'timed-out', step: 'fonts', pendingFaces: loadingFaces(fonts) }
+      }
+      return { outcome: 'ready' }
+    } finally {
+      clearTimer(timer)
+    }
+  }
+
+  Object.defineProperty(globalThis, '${stateGlobal}', {
+    value: Object.freeze({ shadowRoots, messages, waitForAssets }),
+  })
 })()`
 
 /**
- * What the readiness wait found in the page:
- *
- * - `finished`: Storybook reported the story finished, with this status, such as `success` or `error`;
- * - `timed-out`: the time limit passed first, and `channel` says whether Storybook's preview set its channel at all;
- * - `script-missing`: the page script hadn't run in the page, so there was nothing to wait with.
+ * What the wait for images and fonts found in the page.
  */
-export type StoryReadiness =
-  | { outcome: 'finished'; status: string }
-  | { outcome: 'timed-out'; channel: boolean }
-  | { outcome: 'script-missing' }
+export type AssetsReadiness =
+  | {
+      /**
+       * Every image decoded or failed to, and the fonts loaded.
+       */
+      outcome: 'ready'
+    }
+  | {
+      /**
+       * The time limit passed while images decoded.
+       */
+      outcome: 'timed-out'
+      /**
+       * The wait was decoding images.
+       */
+      step: 'images'
+      /**
+       * How many images still in the document hadn't finished loading. It's 0 when every image had loaded and some
+       * were still decoding.
+       */
+      pending: number
+    }
+  | {
+      /**
+       * The time limit passed while fonts loaded.
+       */
+      outcome: 'timed-out'
+      /**
+       * The wait was loading fonts.
+       */
+      step: 'fonts'
+      /**
+       * The font faces still loading, each once, as its family, weight and style. The weight and style are as declared,
+       * such as `Inter normal normal` or `Inter 100 900 normal`.
+       */
+      pendingFaces: string[]
+    }
+  | {
+      /**
+       * The page script hadn't run in the page, so there was nothing to wait with.
+       */
+      outcome: 'script-missing'
+    }
 
 /**
- * Builds the expression that waits in the page until Storybook reports this story finished, or `timeoutMs` passes. It
- * gives a `StoryReadiness`. A `storyFinished` for another story doesn't count, and one that came before the wait
- * started does.
+ * Builds the expression that waits in the page until every image decoded and the fonts loaded, or `timeoutMs` passes,
+ * rounded up to whole ms. Its value is the page's answer, which `readAssetsReadiness` reads.
  */
-export function storyReadinessExpression(storyId: string, timeoutMs: number): string {
+export function assetsReadyExpression(timeoutMs: number): string {
   const limit = Math.max(0, Math.ceil(timeoutMs))
 
   return `(async () => {
   const state = globalThis.${stateGlobal}
-  return state === undefined ? { outcome: 'script-missing' } : state.waitForStory(${JSON.stringify(storyId)}, ${limit})
+  return state === undefined ? { outcome: 'script-missing' } : state.waitForAssets(${limit})
 })()`
 }
 
 /**
- * Reads the value the readiness expression gave. Throws, quoting the value, when it's not a `StoryReadiness`.
+ * Reads the value the wait for images and fonts expression gave. Throws, quoting the value, when it's not an answer
+ * the page gives.
  */
-export function readStoryReadiness(value: unknown): StoryReadiness {
+export function readAssetsReadiness(value: unknown): AssetsReadiness {
   const answer: Record<string, unknown> = typeof value === 'object' && value !== null ? { ...value } : {}
+  const { pending, pendingFaces } = answer
 
-  if (answer.outcome === 'finished' && typeof answer.status === 'string') {
-    return { outcome: 'finished', status: answer.status }
+  if (answer.outcome === 'ready' || answer.outcome === 'script-missing') {
+    return { outcome: answer.outcome }
   }
 
-  if (answer.outcome === 'timed-out' && typeof answer.channel === 'boolean') {
-    return { outcome: 'timed-out', channel: answer.channel }
+  if (
+    answer.outcome === 'timed-out' &&
+    answer.step === 'images' &&
+    typeof pending === 'number' &&
+    Number.isInteger(pending) &&
+    pending >= 0
+  ) {
+    return { outcome: 'timed-out', step: 'images', pending }
   }
 
-  if (answer.outcome === 'script-missing') {
-    return { outcome: 'script-missing' }
+  if (
+    answer.outcome === 'timed-out' &&
+    answer.step === 'fonts' &&
+    Array.isArray(pendingFaces) &&
+    pendingFaces.every((face) => typeof face === 'string')
+  ) {
+    return { outcome: 'timed-out', step: 'fonts', pendingFaces: [...pendingFaces] }
   }
 
-  throw new Error(`The readiness wait in the page gave an answer visual-check doesn't know: ${JSON.stringify(value)}.`)
+  throw new Error(
+    `The wait for images and fonts in the page gave an answer visual-check doesn't know: ${JSON.stringify(value)}.`,
+  )
 }

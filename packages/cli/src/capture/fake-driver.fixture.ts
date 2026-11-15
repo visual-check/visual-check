@@ -1,11 +1,50 @@
+import { finishedAnswer } from '../storybook/preview-script.fixture.js'
 import type { BrowserExitedError, Driver, Page, PageSetup, PageViewport } from './driver/driver.js'
-import type { StoryReadiness } from './page-script.js'
+import { readyAnswer } from './page-script.fixture.js'
 
 /**
- * How one fake page answers each call. A call left out succeeds, as on a story that finished well: the readiness
- * wait gives `finished` with `success`, and the capture gives `defaultSnapshot`.
+ * How a fake page answers the waits evaluated in it. A wait left out answers as on a story that's ready: the story
+ * wait gives `finishedAnswer()`, and the wait for images and fonts gives `readyAnswer()`.
  */
-export interface FakePageBehaviour {
+interface FakeEvaluation {
+  /**
+   * Answers the story wait, given the driver's time limit for it.
+   */
+  storyWait?: (timeoutMs: number) => Promise<unknown>
+  /**
+   * Answers the wait for images and fonts, given the driver's time limit for it.
+   */
+  assetsWait?: (timeoutMs: number) => Promise<unknown>
+}
+
+/**
+ * Answers an expression evaluated in a fake page as `evaluation` says. It tells the waits apart by the function each
+ * calls in the page: `waitForStory` for the story wait, `waitForAssets` for the wait for images and fonts. Throws on
+ * any other expression, so one the fake doesn't know, such as a wait whose function was renamed, fails clearly.
+ *
+ * @public
+ */
+export async function answerEvaluate(
+  evaluation: FakeEvaluation,
+  expression: string,
+  timeoutMs: number,
+): Promise<unknown> {
+  if (expression.includes('.waitForStory(')) {
+    return evaluation.storyWait === undefined ? finishedAnswer() : await evaluation.storyWait(timeoutMs)
+  }
+
+  if (expression.includes('.waitForAssets(')) {
+    return evaluation.assetsWait === undefined ? readyAnswer() : await evaluation.assetsWait(timeoutMs)
+  }
+
+  throw new Error(`The fake page doesn't know this expression: ${expression}`)
+}
+
+/**
+ * How one fake page answers each call. A call left out succeeds, as on a story that's ready: the waits answer as
+ * `answerEvaluate` says, and the capture gives `defaultSnapshot`.
+ */
+export interface FakePageBehaviour extends FakeEvaluation {
   /**
    * Answers `clearStorage`.
    */
@@ -18,10 +57,6 @@ export interface FakePageBehaviour {
    * Answers `goto`.
    */
   goto?: (url: string, timeoutMs: number) => Promise<void>
-  /**
-   * Answers `evaluate`.
-   */
-  evaluate?: (expression: string, timeoutMs: number) => Promise<unknown>
   /**
    * Answers `captureFullPage`.
    */
@@ -58,7 +93,7 @@ export interface PageCall {
   /**
    * The called method.
    */
-  method: keyof FakePageBehaviour
+  method: keyof Page
   /**
    * The call's arguments.
    */
@@ -69,11 +104,6 @@ export interface PageCall {
  * The snapshot a fake page captures when its behaviour gives none.
  */
 export const defaultSnapshot = new Uint8Array([0x89, 0x50, 0x4e, 0x47])
-
-/**
- * The readiness a fake page's wait gives when its behaviour gives none: the story finished well.
- */
-const finishedWell: StoryReadiness = { outcome: 'finished', status: 'success' }
 
 /**
  * A driver whose pages answer as told, recording each page's setup and every call they receive.
@@ -120,7 +150,7 @@ export class FakeDriver implements Driver {
 
     const number = this.setups.length
     const answers = this.behaviour.pages?.[number - 1] ?? {}
-    const record = (method: keyof FakePageBehaviour, args: unknown[]): void => {
+    const record = (method: keyof Page, args: unknown[]): void => {
       this.calls.push({ page: number, method, args })
     }
 
@@ -140,7 +170,7 @@ export class FakeDriver implements Driver {
       evaluate: async (expression, timeoutMs) => {
         record('evaluate', [expression, timeoutMs])
 
-        return answers.evaluate === undefined ? finishedWell : await answers.evaluate(expression, timeoutMs)
+        return await answerEvaluate(answers, expression, timeoutMs)
       },
       captureFullPage: async () => {
         record('captureFullPage', [])

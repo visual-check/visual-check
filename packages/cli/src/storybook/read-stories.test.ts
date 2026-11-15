@@ -415,4 +415,78 @@ describe('storyUrlOf', () => {
       'http://127.0.0.1:6006/iframe.html?id=a%26b%3Dc%20d%2F%C3%A9&viewMode=story',
     )
   })
+
+  it('leaves the URL as it was with no globals or an empty record', () => {
+    const plain = 'http://127.0.0.1:6006/iframe.html?id=button--primary&viewMode=story'
+
+    expect(storyUrlOf('http://127.0.0.1:6006', 'button--primary', undefined)).toBe(plain)
+    expect(storyUrlOf('http://127.0.0.1:6006', 'button--primary', {})).toBe(plain)
+  })
+
+  it('adds strings, numbers and booleans as Storybook reads them, in insertion order', () => {
+    const url = storyUrlOf('http://127.0.0.1:6006', 'button--primary', {
+      theme: 'dark',
+      zoom: 1.5,
+      offset: -2,
+      rtl: true,
+      motion: false,
+    })
+
+    expect(new URL(url).searchParams.get('globals')).toBe('theme:dark;zoom:1.5;offset:-2;rtl:!true;motion:!false')
+    expect(url).toBe(
+      'http://127.0.0.1:6006/iframe.html?id=button--primary&viewMode=story' +
+        `&globals=${encodeURIComponent('theme:dark;zoom:1.5;offset:-2;rtl:!true;motion:!false')}`,
+    )
+  })
+
+  it('round-trips the globals through the URL query', () => {
+    const url = storyUrlOf('http://127.0.0.1:6006', 'button--primary', { k: 'v', k2: true })
+
+    expect(new URL(url).searchParams.get('globals')).toBe('k:v;k2:!true')
+  })
+
+  it('encodes spaces so Storybook decodes them back', () => {
+    const url = storyUrlOf('http://127.0.0.1:6006', 'button--primary', { 'color scheme': 'high contrast' })
+
+    expect(url).toContain('&globals=color%20scheme%3Ahigh%20contrast')
+    expect(new URL(url).searchParams.get('globals')).toBe('color scheme:high contrast')
+  })
+
+  it.each([
+    ['a key with a forbidden character', { 'the:me': 'dark' }, 'the:me'],
+    ['a key with a slash', { 'a/b': 'dark' }, 'a/b'],
+    ['an empty key', { '': 'dark' }, ''],
+    ['a string value with a colon', { theme: 'a:b' }, 'theme'],
+    ['a string value with a semicolon', { theme: 'a;b' }, 'theme'],
+    ['a string value with a slash', { theme: 'dark/blue' }, 'theme'],
+    ['NaN', { zoom: Number.NaN }, 'zoom'],
+    ['Infinity', { zoom: Number.POSITIVE_INFINITY }, 'zoom'],
+    ['a number with an exponent', { zoom: 1e21 }, 'zoom'],
+    ['a small number with an exponent', { zoom: 1e-7 }, 'zoom'],
+  ])('throws for %s, naming the key', (_name, globals, key) => {
+    expect(() => storyUrlOf('http://127.0.0.1:6006', 'button--primary', globals)).toThrow(
+      `Storybook can't take the global "${key}" from the URL:`,
+    )
+  })
+
+  it('names a number that is not in plain decimal digits', () => {
+    expect(() => storyUrlOf('http://127.0.0.1:6006', 'a', { zoom: 1e21 })).toThrow(
+      `Storybook can't take the global "zoom" from the URL: its value 1e+21 isn't a number in plain decimal digits.`,
+    )
+    expect(() => storyUrlOf('http://127.0.0.1:6006', 'a', { zoom: 1e-7 })).toThrow(
+      `Storybook can't take the global "zoom" from the URL: its value 1e-7 isn't a number in plain decimal digits.`,
+    )
+  })
+
+  it('keeps plain decimal numbers', () => {
+    const url = storyUrlOf('http://127.0.0.1:6006', 'a', { zoom: 1.5, offset: -2, none: 0 })
+
+    expect(new URL(url).searchParams.get('globals')).toBe('zoom:1.5;offset:-2;none:0')
+  })
+
+  it("names the value when it can't go in the URL", () => {
+    expect(() => storyUrlOf('http://127.0.0.1:6006', 'a', { theme: 'dark/blue' })).toThrow(
+      `Storybook can't take the global "theme" from the URL: its value "dark/blue" may hold only letters, digits, spaces, _ and -.`,
+    )
+  })
 })
