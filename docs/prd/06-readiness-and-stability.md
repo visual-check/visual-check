@@ -27,7 +27,7 @@ A story runs under visual-check as it does in plain Storybook. visual-check wait
 - `index.json` entries with `subtype: 'test'` (CSF Next's `.test()`) aren't stories. They're never captured, selected or counted.
 - What it absorbs per version:
   - **9.1 and 10:** it empties the pause stylesheets that Storybook's test path adds after `play`, as they're added.
-  - **11:** Storybook parks infinite animations on their first frame itself. visual-check pins those as it pins its own.
+  - **11:** Storybook finishes finite CSS animations and transitions itself, and parks infinite ones on their first frame. visual-check waits for the end events its `finish()` leaves pending, and pins what it parked as it pins its own.
   - **11:** globals are seeded from `initialGlobals` only. A mode's global counts as declared exactly when that Storybook would accept it from the URL.
   - **11:** the `wait` hook's context loses `argTypes`, `kind` and `story`, as `play`'s does.
 
@@ -68,19 +68,30 @@ A snapshot shows finite animations and transitions as finished, and infinite ani
 At capture, after the `wait` hook:
 
 1. Call `finish()` on every running finite animation, CSS or script, in the document and in every shadow root. Animations the page paused itself and scroll-driven ones are left alone.
-2. Let a frame pass, so end events run page logic.
-3. Repeat until two checks a frame apart find nothing finite running, for at most 20 rounds.
-4. Put infinite animations, and any still starting after 20 rounds, on their first keyframe.
-5. Pin what Chromium might paint stale. Every animation now on its first keyframe, and every finished animation whose fill mode still holds its end, is written into the element's inline style and then cancelled. A pseudo-element can't take an inline style, so its animation stays paused at 0.
-6. Freeze media: videos paused on frame 0, inline SVG animation paused at 0, and GIFs in `<img>` replaced by their first frame.
-7. When step 6 changed anything, let a frame pass so media events run page logic, such as a player's controls fading in when its video pauses, then repeat steps 1 to 5 once, until two checks a frame apart find nothing finite running.
-8. Check images and fonts again, making newly revealed lazy images eager first.
+2. Let a frame pass, so end events run page logic. The browser sends the end events of an animation finished by a call, the page's, Storybook's or visual-check's, only at its next rendering update, so they count as pending until two animation frames have passed since the latest call. A check that finds them pending lets a frame pass too.
+3. Repeat until two checks a frame apart find nothing finite running and no end events pending, for at most 20 rounds. Each check that finds either counts as a round.
+4. Put every animation still running on its first keyframe: infinite ones, finite ones whose `finish()` throws, such as one with a playback rate of 0, and any still starting after 20 rounds.
+5. Pin what Chromium might paint stale. Every animation step 4 put on its first keyframe, every one Storybook 11 parked, and every finished animation whose fill mode still holds its end, is written into the element's inline style and then cancelled. A pseudo-element can't take an inline style, so its animation stays as it is.
+6. Freeze media:
+   - Pause every video and stop it playing on its own. One that was playing, away from 0 or seeking goes back to frame 0. A paused video at 0 stays as it is, so it keeps its poster. A video that hasn't loaded anything, or has no seekable range, such as a live stream or a MediaStream in `srcObject`, is only paused.
+   - Pause the animations of every outermost inline SVG at 0. Every SVG has a running clock, so only one holding SMIL animation elements counts as a change.
+   - Give every GIF in an `<img>` its first frame as its only `srcset` candidate, at the density that keeps its size. A GIF is told by its URL: a path ending in `.gif`, or a `data:image/gif` URL. A still GIF is redrawn too, as there's no cheap way to tell it from an animated one.
+7. When step 6 changed anything, let a frame pass so media events run page logic, such as a player's controls fading in when its video pauses, then repeat steps 1 to 5 once, until two checks a frame apart find nothing finite running and no end events pending.
+8. When steps 1 to 7 changed anything, let two more frames pass, as a change made just before capture can still be rastering on a busy machine. Waiting for pending end events counts as a change, as page logic ran on them.
+9. When they changed anything, check images and fonts again, making newly revealed lazy images eager first. Otherwise nothing can have been revealed.
 
 Notes:
 
-- `play` sees real durations and every end event. A story with nothing running pays nothing.
+- `play` sees real durations and every end event. A story with nothing running and nothing pending pays nothing: its first check ends step 3, no frame passes, and images and fonts aren't checked again.
 - Closed shadow roots are reached because `attachShadow` is wrapped at document start. Declarative shadow roots are reached only when open.
-- Left to the project, through a mask or a `wait` hook: SVG in `<img>`, GIFs as CSS backgrounds or cross-origin without CORS, APNG, animated WebP, canvas, Lottie and other script-driven motion.
+- `Animation.prototype.finish` is wrapped at document start too, to know when end events are pending. Both wrappers pass `this`, the arguments, the result and any error through, so the page sees no difference.
+- An animation Storybook 11 parked is told by behaviour: a CSS animation or transition on the document's timeline, paused at 0. One the page itself paused at 0 matches too, and pinning leaves it looking the same.
+- Left to the project, through a mask or a `wait` hook:
+  - SVG in `<img>`;
+  - GIFs as CSS backgrounds, cross-origin without CORS, or at a URL without `.gif` or `data:image/gif`, and a GIF picked by a `<source>` in `<picture>`;
+  - a video that hasn't loaded anything;
+  - APNG, animated WebP, canvas, Lottie and other script-driven motion;
+  - animations and media inside same-origin iframes, which aren't reached.
 
 ## Retries and flaky snapshots
 
