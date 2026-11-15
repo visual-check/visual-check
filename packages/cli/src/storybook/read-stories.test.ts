@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { parseIndex, readStories, storyUrlOf } from './read-stories.js'
+import { parseIndex, previewUrlOf, readStories, storyUrlOf } from './read-stories.js'
 import { StorybookError, StorybookUnreachableError } from './storybook-error.js'
 
 /**
@@ -487,6 +487,33 @@ describe('storyUrlOf', () => {
   it("names the value when it can't go in the URL", () => {
     expect(() => storyUrlOf('http://127.0.0.1:6006', 'a', { theme: 'dark/blue' })).toThrow(
       `Storybook can't take the global "theme" from the URL: its value "dark/blue" may hold only letters, digits, spaces, _ and -.`,
+    )
+  })
+})
+
+describe('previewUrlOf', () => {
+  it("builds the preview's page without a story at a Storybook served at the root", () => {
+    expect(previewUrlOf('http://127.0.0.1:6006')).toBe('http://127.0.0.1:6006/iframe.html?viewMode=story')
+  })
+
+  it("keeps the Storybook's path, with or without a trailing slash, and drops its query and hash", () => {
+    expect(previewUrlOf('https://example.com/storybook?path=/story/a#top')).toBe(
+      'https://example.com/storybook/iframe.html?viewMode=story',
+    )
+    expect(previewUrlOf('https://example.com/storybook/')).toBe(
+      'https://example.com/storybook/iframe.html?viewMode=story',
+    )
+  })
+
+  it('keeps a path of several folders', () => {
+    expect(previewUrlOf('https://example.com/docs/storybook')).toBe(
+      'https://example.com/docs/storybook/iframe.html?viewMode=story',
+    )
+  })
+
+  it('leaves credentials out', () => {
+    expect(previewUrlOf('https://user:secret@example.com/storybook')).toBe(
+      'https://example.com/storybook/iframe.html?viewMode=story',
     )
   })
 })
