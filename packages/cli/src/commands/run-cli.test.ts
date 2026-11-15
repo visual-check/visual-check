@@ -196,6 +196,12 @@ interface FakeStory {
    * without globals when not given.
    */
   byGlobals?: Record<string, FakeStory>
+  /**
+   * How the story answers each load of its page in turn, by its URL: the first load as the first item, the second as
+   * the second, and every load past the list as the last. What each gives replaces the story's own answers. The story
+   * answers every load the same when not given.
+   */
+  captures?: FakeStory[]
 }
 
 /**
@@ -289,9 +295,9 @@ interface FakeBrowserRecord {
   reads: ReadRecord[]
   /**
    * The capture preparation each story's page was asked for, in order: the story's ID with the element and the masks
-   * it was sent.
+   * it was sent, and whether it was asked to find the remote content the page shows.
    */
-  preparations: { id: string; element: unknown; masks: unknown }[]
+  preparations: { id: string; element: unknown; masks: unknown; findRemote: unknown }[]
   /**
    * The setup of every page opened.
    */
@@ -473,6 +479,14 @@ function fakeDriverOf({
           if (globals !== null) {
             story = { ...story, ...story.byGlobals?.[globals] }
           }
+
+          const { captures } = story
+
+          if (captures !== undefined) {
+            const loads = record.urls.filter((loaded) => loaded === url).length
+
+            story = { ...story, ...captures[Math.min(loads, captures.length) - 1] }
+          }
         },
         evaluate: async (expression, timeoutMs) => {
           failIfGone()
@@ -482,9 +496,13 @@ function fakeDriverOf({
           const request = /\.prepareCapture\((.*), \d+\)\n\}\)\(\)$/s.exec(expression)?.[1]
 
           if (request !== undefined) {
-            const { element, masks } = JSON.parse(request) as { element: unknown; masks: unknown }
+            const { element, masks, findRemote } = JSON.parse(request) as {
+              element: unknown
+              masks: unknown
+              findRemote: unknown
+            }
 
-            record.preparations.push({ id, element, masks })
+            record.preparations.push({ id, element, masks, findRemote })
           }
 
           return await answerEvaluate(
@@ -1090,10 +1108,10 @@ async function createRun(
 }
 
 /**
- * Replaces the time of every pass line with `N`, since it varies from run to run.
+ * Replaces the time of every pass line with `N`, flaky or not, since it varies from run to run.
  */
 function withoutTimes(text: string): string {
-  return text.replace(/ {2}\d+ ms$/gm, '  N ms')
+  return text.replace(/ {2}\d+ ms( · flaky)?$/gm, '  N ms$1')
 }
 
 /**
@@ -1143,7 +1161,8 @@ describe('runCli test', () => {
         '2 passed · 1 differs · 1 broken · 1 missing',
       ),
     )
-    expect(storyIdsOf(record.urls).sort()).toEqual(['a', 'b', 'd', 'e'])
+    // The differing story is captured again once, by the default retries.
+    expect(storyIdsOf(record.urls).sort()).toEqual(['a', 'b', 'b', 'd', 'e'])
   })
 
   it('prints the configured number of workers in the header, the noun in the right number', async () => {
@@ -1861,7 +1880,8 @@ describe('runCli modes', () => {
         '2 passed · 1 differs · 1 missing',
       ),
     )
-    expect(storyIdsOf(record.urls).sort()).toEqual(['a', 'a', 'b'])
+    // The differing story is captured again once, by the default retries.
+    expect(storyIdsOf(record.urls).sort()).toEqual(['a', 'a', 'b', 'b'])
   })
 
   it("reports a mode's snapshot that breaks as broken, on its own line, and takes the others", async () => {
@@ -1936,6 +1956,195 @@ describe('runCli modes', () => {
 })
 
 /**
+ * A black PNG file of 10 × 12 pixels, whose size differs from `defaultSnapshot`'s.
+ */
+const tallerSnapshot = new Uint8Array(await greyPng(10, 12, 0))
+
+/**
+ * The heading of the list of flaky snapshots.
+ */
+const flakyHeading = 'Flaky snapshots, which passed on a retry:'
+
+describe('runCli retries and flaky snapshots', () => {
+  it("passes a snapshot that differs once and then passes, flaky, keeping its first capture's images", async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot })
+    const { options, record } = fakeBrowser({ a: { captures: [{ snapshot: otherSnapshot }, {}] } })
+    const result = await runCli(['test'], {}, project, options)
+    const images = join(reportFolderIn(project), 'images', 'web')
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe('')
+    expect(withoutTimes(result.stdout)).toBe(
+      printed(headerOf('test', 1), '✓ web  a  N ms · flaky', flakyHeading, '  web  a', '1 passed (1 flaky)'),
+    )
+    expect(storyIdsOf(record.urls)).toEqual(['a', 'a'])
+    expect(readdirSync(images).sort()).toEqual(['a.baseline.png', 'a.diff.png', 'a.snapshot.png'])
+    expect(new Uint8Array(readFileSync(join(images, 'a.baseline.png')))).toEqual(defaultSnapshot)
+    expect(new Uint8Array(readFileSync(join(images, 'a.snapshot.png')))).toEqual(otherSnapshot)
+    expect([...readFileSync(join(images, 'a.diff.png')).subarray(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47])
+  })
+
+  it('captures a differing snapshot once with retries set to 0', async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot }, 'retries: 0')
+    const { options, record } = fakeBrowser({ a: { captures: [{ snapshot: otherSnapshot }, {}] } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toBe(
+      printed(headerOf('test', 1), '✗ web  a  differs: 100 differ, 20 allowed', '0 passed · 1 differs'),
+    )
+    expect(storyIdsOf(record.urls)).toEqual(['a'])
+  })
+
+  it('captures a differing snapshot up to retries more times, passing it flaky on the last', async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot }, 'retries: 2')
+    const { options, record } = fakeBrowser({
+      a: { captures: [{ snapshot: otherSnapshot }, { snapshot: otherSnapshot }, {}] },
+    })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(0)
+    expect(withoutTimes(result.stdout)).toBe(
+      printed(headerOf('test', 1), '✓ web  a  N ms · flaky', flakyHeading, '  web  a', '1 passed (1 flaky)'),
+    )
+    expect(storyIdsOf(record.urls)).toEqual(['a', 'a', 'a'])
+  })
+
+  it("fails a snapshot that differs on every capture with its first capture's message and images", async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot }, 'retries: 2')
+    const { options, record } = fakeBrowser({
+      a: { captures: [{ snapshot: otherSnapshot }, { snapshot: tallerSnapshot }] },
+    })
+    const result = await runCli(['test'], {}, project, options)
+    const images = join(reportFolderIn(project), 'images', 'web')
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toBe(
+      printed(headerOf('test', 1), '✗ web  a  differs: 100 differ, 20 allowed', '0 passed · 1 differs'),
+    )
+    expect(storyIdsOf(record.urls)).toEqual(['a', 'a', 'a'])
+    expect(new Uint8Array(readFileSync(join(images, 'a.baseline.png')))).toEqual(defaultSnapshot)
+    expect(new Uint8Array(readFileSync(join(images, 'a.snapshot.png')))).toEqual(otherSnapshot)
+
+    // The visual diff of a run that captures the first snapshot only, with no retry.
+    const { project: once } = await createRun(['a'], { a: defaultSnapshot }, 'retries: 0')
+
+    await runCli(['test'], {}, once, fakeBrowser({ a: { snapshot: otherSnapshot } }).options)
+
+    const firstDiff = readFileSync(join(reportFolderIn(once), 'images', 'web', 'a.diff.png'))
+
+    expect(readFileSync(join(images, 'a.diff.png'))).toEqual(firstDiff)
+  })
+
+  it("stops with exit 2 when the relaunched browser exits during a retry, keeping the first capture's images", async () => {
+    const { project } = await createRun(['a', 'b'], { a: defaultSnapshot, b: defaultSnapshot }, 'workers: 1')
+    const { options, record } = fakeBrowser({
+      a: { browserExits: true },
+      b: { captures: [{ snapshot: otherSnapshot }, { browserExits: true }] },
+    })
+    const result = await runCli(['test'], {}, project, options)
+    const images = join(reportFolderIn(project), 'images', 'web')
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: printed(headerOf('test', 2, 1), `! web  a  ${browserExitedDetail}`),
+      stderr: `${relaunchNotice}${secondExitMessage}`,
+    })
+    expect(record.launches).toHaveLength(2)
+    expect(storyIdsOf(record.urls)).toEqual(['a', 'b', 'b'])
+    expect(readdirSync(images).sort()).toEqual(['b.baseline.png', 'b.diff.png', 'b.snapshot.png'])
+    expect(new Uint8Array(readFileSync(join(images, 'b.snapshot.png')))).toEqual(otherSnapshot)
+  })
+
+  it('retries a snapshot whose size differs from its baseline', async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot })
+    const { options, record } = fakeBrowser({ a: { captures: [{ snapshot: tallerSnapshot }, {}] } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(0)
+    expect(withoutTimes(result.stdout)).toContain('✓ web  a  N ms · flaky\n')
+    expect(storyIdsOf(record.urls)).toEqual(['a', 'a'])
+  })
+
+  it("doesn't retry a broken story", async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot })
+    const { options, record } = fakeBrowser({ a: { captures: [{ broken: true }, {}] } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toBe(printed(headerOf('test', 1), `! web  a  ${brokenDetail}`, '0 passed · 1 broken'))
+    expect(storyIdsOf(record.urls)).toEqual(['a'])
+  })
+
+  it("stops retrying at a broken retry, failing the snapshot with its first capture's message", async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot }, 'retries: 2')
+    const { options, record } = fakeBrowser({ a: { captures: [{ snapshot: otherSnapshot }, { broken: true }, {}] } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toBe(
+      printed(headerOf('test', 1), '✗ web  a  differs: 100 differ, 20 allowed', '0 passed · 1 differs'),
+    )
+    expect(storyIdsOf(record.urls)).toEqual(['a', 'a'])
+  })
+
+  it('never captures a missing baseline', async () => {
+    const { project } = await createRun(['a'])
+    const { options, record } = fakeBrowser({ a: { captures: [{ snapshot: otherSnapshot }, {}] } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.stdout).toBe(printed(headerOf('test', 1), missingLineOf('web', 'a'), '0 passed · 1 missing'))
+    expect(storyIdsOf(record.urls)).toEqual([])
+  })
+
+  it('searches for remote content only on retries, never on a first capture', async () => {
+    const { project } = await createRun(['a', 'b'], { a: defaultSnapshot, b: defaultSnapshot }, 'retries: 2')
+    const { options, record } = fakeBrowser({ b: { snapshot: otherSnapshot } })
+
+    await runCli(['test'], {}, project, options)
+
+    const searchesOf = (id: string): unknown[] =>
+      record.preparations.flatMap((preparation) => (preparation.id === id ? [preparation.findRemote] : []))
+
+    expect(searchesOf('a')).toEqual([false])
+    expect(searchesOf('b')).toEqual([false, true, true])
+  })
+
+  it('lists every flaky snapshot by name in snapshot order, with its mode, and counts them among the passes', async () => {
+    const { project } = await createRun(['a', 'b', 'c'], {
+      a: defaultSnapshot,
+      'a.dark': darkSnapshot,
+      b: defaultSnapshot,
+      c: defaultSnapshot,
+    })
+    const { options } = fakeBrowser(
+      {
+        a: { byGlobals: { 'theme:dark': { captures: [{ snapshot: otherSnapshot }, { snapshot: darkSnapshot }] } } },
+        b: { captures: [{ snapshot: otherSnapshot }, {}] },
+        c: { snapshot: otherSnapshot },
+      },
+      { read: { options: { a: { modes: { dark: twoModes.modes.dark } } } } },
+    )
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(1)
+    expect(withoutTimes(result.stdout)).toBe(
+      printed(
+        headerOf('test', 4),
+        '✓ web  a  N ms',
+        '✓ web  a  dark  N ms · flaky',
+        '✓ web  b  N ms · flaky',
+        '✗ web  c  differs: 100 differ, 20 allowed',
+        flakyHeading,
+        '  web  a  dark',
+        '  web  b',
+        '3 passed (2 flaky) · 1 differs',
+      ),
+    )
+  })
+})
+
+/**
  * Installs `storybook` at `version` in the folder, as `node_modules/storybook/package.json`.
  */
 function installStorybook(folder: string, version: string): void {
@@ -1983,8 +2192,9 @@ describe('runCli capture area and masks', () => {
           { name: 'ads', host: 'ads.example.com' },
           { name: 'ghost', selector: '.ghost' },
         ],
+        findRemote: false,
       },
-      { id: 'b', element: null, masks: [] },
+      { id: 'b', element: null, masks: [], findRemote: false },
     ])
   })
 

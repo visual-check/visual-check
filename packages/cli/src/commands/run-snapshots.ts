@@ -6,7 +6,7 @@ import type { ChromeForTestingPlatform } from '../browser/chrome-for-testing-pla
 import type { BrowserPackage } from '../browser/read-browser-package.js'
 import { BrowserDownloadError } from '../browser-download/browser-download-error.js'
 import { headlessShellPathsOf } from '../browser-download/install-headless-shell.js'
-import type { CaptureSettings, StoryCapture, StoryToCapture } from '../capture/capture-session.js'
+import type { BrokenStory, CaptureSettings, StoryCapture, StoryToCapture } from '../capture/capture-session.js'
 import { BrowserExitedError, BrowserLaunchError } from '../capture/driver/driver.js'
 import type { StoryMask } from '../capture/prepare-capture.js'
 import { runWorkerPool } from '../capture/worker-pool.js'
@@ -152,6 +152,10 @@ interface SnapshotResult {
    * captured, or whose page didn't see the step.
    */
   completingMs?: number | undefined
+  /**
+   * Whether the snapshot passed only on a retry, after its first capture differed.
+   */
+  flaky?: boolean
 }
 
 /**
@@ -191,8 +195,8 @@ const reportFixes: Record<ReportError['action'], string> = {
 }
 
 /**
- * What `test` needs besides the run: the visual diff it compares snapshots with, and the report folder it writes the
- * images of each differing snapshot to.
+ * What `test` needs besides the run: the visual diff it compares snapshots with, the report folder it writes the
+ * images of each differing snapshot to, and how many more times it captures a snapshot that differs.
  */
 interface TestTools {
   /**
@@ -203,6 +207,10 @@ interface TestTools {
    * The report folder.
    */
   reportFolder: string
+  /**
+   * How many more times a snapshot that differs is captured before it fails: the config's `retries`.
+   */
+  retries: number
 }
 
 /**
@@ -334,10 +342,137 @@ async function compareWithBaseline(
 }
 
 /**
+ * A capture of a story that wasn't broken: its snapshot, with how long Storybook's `completing` render step took and,
+ * when asked for, the remote content it shows.
+ */
+type CapturedStory = Extract<StoryCapture, { snapshot: Uint8Array }>
+
+/**
+ * A snapshot's baseline: its bytes and the path they were read from.
+ */
+interface Baseline {
+  /**
+   * The baseline's bytes.
+   */
+  bytes: Uint8Array
+  /**
+   * The baseline's path.
+   */
+  path: string
+}
+
+/**
+ * A capture of a snapshot compared with its baseline.
+ */
+interface ComparedCapture {
+  /**
+   * The capture.
+   */
+  capture: CapturedStory
+  /**
+   * How long the capture took, in ms, leaving out the browser's launch and the comparison.
+   */
+  elapsedMs: number
+  /**
+   * What the comparison with the baseline found.
+   */
+  result: VisualDiffResult
+}
+
+/**
+ * One capture of a snapshot compared with its baseline, or the broken story it came back as.
+ */
+type Attempt = ComparedCapture | Extract<StoryCapture, { broken: BrokenStory }>
+
+/**
+ * How a snapshot is captured on one attempt.
+ */
+interface AttemptOptions {
+  /**
+   * Whether the capture also brings back the remote content the snapshot shows.
+   */
+  findRemoteContent: boolean
+}
+
+/**
+ * What the retries of a snapshot that differs came to: the retry that passed, or the last retry when none did.
+ */
+type Retries =
+  | {
+      /**
+       * The retry that passed.
+       */
+      passed: ComparedCapture
+    }
+  | {
+      /**
+       * The last retry, which differs or is broken, or `undefined` when there was no retry.
+       */
+      failed: Attempt | undefined
+    }
+
+/**
+ * Captures a snapshot and compares it with its baseline. With `findRemoteContent`, the capture also brings back the
+ * remote content the snapshot shows. The time is the capture's alone: it leaves out the browser's launch and the
+ * comparison.
+ *
+ * @throws {BaselineError} When the files differ and the baseline can't be decoded.
+ * @throws {ImageDecodeError} When the snapshot can't be decoded, which the browser's PNG files rule out.
+ * @throws {Error} When a visual diff thread stops mid-comparison.
+ */
+async function attemptOf(
+  item: SnapshotToCapture,
+  captureStory: CaptureStory,
+  visualDiff: VisualDiff,
+  baseline: Baseline,
+  { findRemoteContent }: AttemptOptions,
+): Promise<Attempt> {
+  let started = performance.now()
+  const capture = await captureStory({ ...storyToCaptureOf(item), findRemoteContent }, () => {
+    started = performance.now()
+  })
+
+  if ('broken' in capture) {
+    return capture
+  }
+
+  const elapsedMs = Math.round(performance.now() - started)
+  const result = await compareWithBaseline(visualDiff, item, baseline.bytes, capture.snapshot, baseline.path)
+
+  return { capture, elapsedMs, result }
+}
+
+/**
+ * Captures a snapshot that differs again, up to `retries` times, by calling `attempt` for each retry. It stops at the
+ * first retry that passes or comes back broken.
+ */
+async function retryOf(retries: number, attempt: () => Promise<Attempt>): Promise<Retries> {
+  let last: Attempt | undefined
+
+  for (let retry = 0; retry < retries; retry += 1) {
+    last = await attempt()
+
+    if ('broken' in last) {
+      return { failed: last }
+    }
+
+    if (last.result.outcome !== 'differs') {
+      return { passed: last }
+    }
+  }
+
+  return { failed: last }
+}
+
+/**
  * Tests one snapshot: a missing baseline is reported without a capture, and a snapshot passes when it differs from
  * its baseline by no more than the story's tolerance. One that differs beyond it, or in size, leaves its baseline,
- * snapshot and visual diff in the report folder. It asks for a capture only once it has read the baseline. A pass's
- * time is the capture's alone: it leaves out the browser's launch and the comparison.
+ * snapshot and visual diff in the report folder at once, then is captured again, up to `retries` more times, each
+ * capture a fresh one that also brings back the remote content it shows. The first retry that passes makes the
+ * snapshot pass, flaky. A retry that comes back broken stops the retries. When no retry passes, the snapshot differs
+ * with its first capture's message, and the report keeps that capture's images. A broken first capture isn't retried.
+ * It asks for a capture only once it has read the baseline. A pass's time is the passing capture's alone: it leaves
+ * out the browser's launch and the comparison.
  *
  * @throws {BaselineError} When the baseline can't be read or decoded.
  * @throws {ReportError} When an image can't be written to the report folder.
@@ -347,35 +482,49 @@ async function compareWithBaseline(
 async function testSnapshot(
   item: SnapshotToCapture,
   captureStory: CaptureStory,
-  { visualDiff, reportFolder }: TestTools,
+  { visualDiff, reportFolder, retries }: TestTools,
 ): Promise<SnapshotResult> {
   const path = baselinePathOf(item.storybook.baselines, item.key)
-  const baseline = await readBaseline(path)
+  const bytes = await readBaseline(path)
 
-  if (baseline === undefined) {
+  if (bytes === undefined) {
     return { status: 'missing', detail: 'missing: no baseline yet; run visual-check update to write it' }
   }
 
-  let started = performance.now()
-  const capture = await captureStory(storyToCaptureOf(item), () => {
-    started = performance.now()
+  const attempt = (options: AttemptOptions): Promise<Attempt> =>
+    attemptOf(item, captureStory, visualDiff, { bytes, path }, options)
+  const first = await attempt({ findRemoteContent: false })
+
+  if ('broken' in first) {
+    return { status: 'broken', detail: `broken: ${first.broken.message}` }
+  }
+
+  const { capture, elapsedMs, result } = first
+
+  if (result.outcome !== 'differs') {
+    return { status: 'passed', detail: `${elapsedMs} ms`, completingMs: capture.completingMs }
+  }
+
+  await writeFailureImages(reportFolder, item.storybook.name, item.key, {
+    baseline: bytes,
+    snapshot: capture.snapshot,
+    diff: result.diff,
   })
 
-  if ('broken' in capture) {
-    return { status: 'broken', detail: `broken: ${capture.broken.message}` }
+  const retried = await retryOf(retries, () => attempt({ findRemoteContent: true }))
+
+  if ('failed' in retried) {
+    return { status: 'differs', detail: `differs: ${result.message}`, completingMs: capture.completingMs }
   }
 
-  const elapsedMs = Math.round(performance.now() - started)
-  const { snapshot, completingMs } = capture
-  const result = await compareWithBaseline(visualDiff, item, baseline, snapshot, path)
+  const { passed } = retried
 
-  if (result.outcome === 'differs') {
-    await writeFailureImages(reportFolder, item.storybook.name, item.key, { baseline, snapshot, diff: result.diff })
-
-    return { status: 'differs', detail: `differs: ${result.message}`, completingMs }
+  return {
+    status: 'passed',
+    detail: `${passed.elapsedMs} ms · flaky`,
+    completingMs: passed.capture.completingMs,
+    flaky: true,
   }
-
-  return { status: 'passed', detail: `${elapsedMs} ms`, completingMs }
 }
 
 /**
@@ -407,14 +556,18 @@ async function updateSnapshot(
 }
 
 /**
- * Builds the counts line: each counted status with its count, leaving out zero counts except the first.
+ * Builds the counts line: each counted status with its count, leaving out zero counts except the first. The passed
+ * count says how many of them are flaky, when any is.
  */
-function countsLineOf(command: SnapshotRun['command'], statuses: SnapshotStatus[]): string {
+function countsLineOf(command: SnapshotRun['command'], results: readonly SnapshotResult[]): string {
+  const flaky = results.filter((result) => result.flaky === true).length
+
   return statusesOf[command].counted
     .flatMap((counted, index) => {
-      const count = statuses.filter((status) => status === counted).length
+      const count = results.filter((result) => result.status === counted).length
+      const flakyNote = counted === 'passed' && flaky > 0 ? ` (${flaky} flaky)` : ''
 
-      return index === 0 || count > 0 ? [`${count} ${counted}`] : []
+      return index === 0 || count > 0 ? [`${count} ${counted}${flakyNote}`] : []
     })
     .join(' · ')
 }
@@ -614,18 +767,33 @@ function plannedSnapshotsOf(run: SnapshotRun, items: PlannedSnapshot[]): Planned
 }
 
 /**
- * Gives the line of each snapshot that has finished, in the snapshots' order: its mark, Storybook, story ID, mode when
- * it has one, and detail.
+ * Names a snapshot by its Storybook, story ID and mode when it has one, two spaces apart.
+ */
+function snapshotNameOf({ storybook, story, mode }: PlannedSnapshot): string {
+  const modeColumn = mode === undefined ? '' : `  ${mode}`
+
+  return `${storybook.name}  ${story.id}${modeColumn}`
+}
+
+/**
+ * Gives the line of each snapshot that has finished, in the snapshots' order: its mark, name and detail.
  */
 function linesOf({ items, results }: PlannedSnapshots): string[] {
-  return items.flatMap(({ storybook, story, mode }, index) => {
+  return items.flatMap((item, index) => {
     const result = results[index]
-    const modeColumn = mode === undefined ? '' : `  ${mode}`
 
-    return result === undefined
-      ? []
-      : [`${marks[result.status]} ${storybook.name}  ${story.id}${modeColumn}  ${result.detail}`]
+    return result === undefined ? [] : [`${marks[result.status]} ${snapshotNameOf(item)}  ${result.detail}`]
   })
+}
+
+/**
+ * Lists the flaky snapshots by name under a heading, in the snapshots' order, each indented by two spaces. Gives no
+ * line when none is flaky.
+ */
+function flakyLinesOf({ items, results }: PlannedSnapshots): string[] {
+  const names = items.flatMap((item, index) => (results[index]?.flaky === true ? [`  ${snapshotNameOf(item)}`] : []))
+
+  return names.length === 0 ? [] : ['Flaky snapshots, which passed on a retry:', ...names]
 }
 
 /**
@@ -669,8 +837,11 @@ async function takeSnapshots(
  * `<story-id>.<mode>.png` for a mode. `test` compares each snapshot with its baseline by the story's tolerance, at the
  * viewport's device scale factor, and never captures a missing baseline. It clears the report folder,
  * `.visual-check/report` beside the config file, once the snapshots are planned, and writes the baseline, snapshot and
- * visual diff of each snapshot that differs there. `update` writes each snapshot whose baseline is missing or isn't
- * byte-identical to it, and never touches the report folder.
+ * visual diff of each snapshot whose first capture differs there. A snapshot that differs is captured again, up to the
+ * config's `retries` more times; one that passes on a retry passes, flaky, and its line ends with `· flaky`. After the
+ * lines, `test` lists the flaky snapshots by name under a heading, when there are any, and its counts say how many
+ * passes are flaky. A flaky snapshot never fails the run. `update` writes each snapshot whose baseline is missing or
+ * isn't byte-identical to it, and never touches the report folder.
  *
  * Each Storybook with stories gets one options read, in config order, on a page of its own, covering every story its
  * `index.json` lists whatever the selection. So the browser is launched at the first read, even when no story then
@@ -706,7 +877,11 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
   })
   const testTools: TestTools | undefined =
     run.command === 'test'
-      ? { visualDiff: createVisualDiff(), reportFolder: reportFolderOf(run.config.path) }
+      ? {
+          visualDiff: createVisualDiff(),
+          reportFolder: reportFolderOf(run.config.path),
+          retries: run.config.retries,
+        }
       : undefined
   let snapshots: PlannedSnapshots | undefined
 
@@ -741,11 +916,13 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
     }
   }
 
-  const statuses = snapshots.results.flatMap((result) => (result === undefined ? [] : [result.status]))
+  const finished = snapshots.results.flatMap((result) => (result === undefined ? [] : [result]))
+  const statuses = finished.map((result) => result.status)
+  const lines = [...linesOf(snapshots), ...flakyLinesOf(snapshots), countsLineOf(run.command, finished)]
 
   return {
     exitCode: exitCodeOf(run.command, statuses),
-    stdout: printedOf(snapshots, [...linesOf(snapshots), countsLineOf(run.command, statuses)]),
+    stdout: printedOf(snapshots, lines),
     stderr: `${exitNoticeOf(browser.firstExit())}${testPathWarningsOf(run.selections, snapshots.items, snapshots.results)}`,
   }
 }
