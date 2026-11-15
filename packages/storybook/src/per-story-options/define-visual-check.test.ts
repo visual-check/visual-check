@@ -115,6 +115,63 @@ describe('defineVisualCheck', () => {
   })
 })
 
+describe('defineVisualCheck with a globals generic', () => {
+  type Globals = { theme: 'light' | 'dark'; density: 'compact' | 'comfortable' }
+
+  interface InterfaceGlobals {
+    theme: 'light' | 'dark'
+  }
+
+  const declaration = {
+    modes: {
+      dark: { globals: { theme: 'dark' } },
+      mobile: { viewport: { width: 375, height: 667, deviceScaleFactor: 2, touch: true } },
+    },
+  } as const
+
+  it('writes what the one-argument form writes', () => {
+    const typed = defineVisualCheck<Globals>()(declaration)
+    const untyped = defineVisualCheck(declaration)
+    const options = { modes: ['dark'] as const, viewport: { width: 800 }, masks: { ad: { host: 'ads.example.com' } } }
+
+    expect(typed(options)).toEqual(untyped(options))
+    expect(typed({ modes: ['dark'] }).visualCheck.modes).toEqual({ dark: declaration.modes.dark, mobile: null })
+  })
+
+  it('types globals by the generic', () => {
+    defineVisualCheck<Globals>()({ modes: { dark: { globals: { theme: 'dark' } } } })
+    defineVisualCheck<Globals>()({ modes: { dense: { globals: { density: 'compact', theme: 'light' } } } })
+    defineVisualCheck<InterfaceGlobals>()({ modes: { dark: { globals: { theme: 'dark' } } } })
+    // @ts-expect-error 'blue' is not a value of theme.
+    defineVisualCheck<Globals>()({ modes: { blue: { globals: { theme: 'blue' } } } })
+    // @ts-expect-error 'contrast' is not a declared global.
+    defineVisualCheck<Globals>()({ modes: { contrast: { globals: { contrast: 'high' } } } })
+    // @ts-expect-error 'blue' is not a value of theme, for an interface too.
+    defineVisualCheck<InterfaceGlobals>()({ modes: { blue: { globals: { theme: 'blue' } } } })
+  })
+
+  it('rejects a generic that is not an object of globals', () => {
+    // @ts-expect-error A string is not a set of globals.
+    defineVisualCheck<string>()
+  })
+
+  it('still checks mode names against the declaration', () => {
+    const visualCheck = defineVisualCheck<Globals>()({ modes: { dark: { globals: { theme: 'dark' } } } })
+
+    visualCheck({ modes: ['dark'] })
+    // @ts-expect-error 'tablet' is not a declared mode.
+    visualCheck({ modes: ['tablet'] })
+  })
+
+  it('keeps any GlobalValue in the one-argument form', () => {
+    defineVisualCheck({ modes: { any: { globals: { theme: 'blue', count: 2, flag: true } } } })
+    // @ts-expect-error A global can't be undefined.
+    defineVisualCheck({ modes: { unset: { globals: { theme: undefined } } } })
+    // @ts-expect-error A global is a string, a number or a boolean.
+    defineVisualCheck({ modes: { bad: { globals: { theme: { nested: 1 } } } } })
+  })
+})
+
 describe('merging through Storybook', () => {
   /**
    * Merges the levels as Storybook does, least specific first, and returns the merged `visualCheck`.
