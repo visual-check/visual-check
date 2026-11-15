@@ -85,8 +85,9 @@ export interface RunCliOptions {
    */
   machine?: BrowserHost
   /**
-   * The OS the CLI runs on, which decides between host networking and the proxy, and with `arch` picks the headless
-   * shell `platform: 'host'` downloads. `process.platform` by default. A test gives its own.
+   * The OS the CLI runs on, which decides between host networking and the proxy, whether `update` warns about baseline
+   * paths too long for Windows, and with `arch` picks the headless shell `platform: 'host'` downloads.
+   * `process.platform` by default. A test gives its own.
    */
   os?: NodeJS.Platform
   /**
@@ -234,6 +235,7 @@ async function runTestOrUpdate(
       allStories: stories,
     })),
     cwd,
+    os: cliOptions.os ?? process.platform,
     insideContainer,
     environment,
     launchBrowser: cliOptions.launchBrowser ?? createLaunchBrowser(),

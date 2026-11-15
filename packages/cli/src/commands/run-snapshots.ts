@@ -27,7 +27,13 @@ import { type PlannedSnapshot, planSnapshots, type SnapshotToCapture } from './p
 import { platformProblemOf } from './platform-problem.js'
 import { type FirstBrowserExit, type RunBrowser, runBrowserOf } from './run-browser.js'
 import { countsLineOf, displayPathOf } from './run-output.js'
-import { deleteStorybookOrphans, planUpdate, type StorybookOrphans, updateEndLinesOf } from './update-baselines.js'
+import {
+  deleteStorybookOrphans,
+  longPathWarningOf,
+  planUpdate,
+  type StorybookOrphans,
+  updateEndLinesOf,
+} from './update-baselines.js'
 
 /**
  * The stories a run covers in one Storybook, in the order they are taken and printed.
@@ -87,6 +93,10 @@ interface SnapshotRun {
    * The folder the CLI runs in. Printed paths are relative to it.
    */
   cwd: string
+  /**
+   * The OS the CLI runs on, which decides whether `update` warns about baseline paths too long for Windows.
+   */
+  os: NodeJS.Platform
   /**
    * Whether visual-check runs inside a container, which decides what a Docker problem suggests.
    */
@@ -436,6 +446,27 @@ function countOf(statuses: readonly SnapshotStatus[], counted: SnapshotStatus): 
 }
 
 /**
+ * Gives the path of each baseline `update` wrote, in the snapshots' order.
+ */
+function writtenPathsOf(snapshots: PlannedSnapshots): string[] {
+  return snapshots.items.flatMap((item, index) =>
+    snapshots.results[index]?.status === 'written' ? [baselinePathOf(item.storybook.baselines, item.key)] : [],
+  )
+}
+
+/**
+ * Warns, for `update` on Windows, about each baseline it wrote whose path is longer than 260 characters. Gives nothing
+ * for `test`, on any other OS, or when none is that long.
+ */
+function longPathWarningsOf(run: SnapshotRun, snapshots: PlannedSnapshots): string {
+  if (run.command !== 'update') {
+    return ''
+  }
+
+  return longPathWarningOf(run.os, run.cwd, writtenPathsOf(snapshots))
+}
+
+/**
  * Builds the lines that end a finished run's output: for `test`, the counts line, each counted status with its count,
  * leaving out zero counts except the first; for `update`, the counts of written, deleted and kept baselines and broken
  * snapshots, then the path of each baseline written, in the snapshots' order, and of each orphan deleted.
@@ -447,12 +478,8 @@ function endLinesOf(run: SnapshotRun, snapshots: PlannedSnapshots, deleted: stri
     return [countsLineOf(testCountedStatuses.map((status) => [status, countOf(statuses, status)]))]
   }
 
-  const written = snapshots.items.flatMap((item, index) =>
-    snapshots.results[index]?.status === 'written' ? [baselinePathOf(item.storybook.baselines, item.key)] : [],
-  )
-
   return updateEndLinesOf(run.cwd, {
-    written,
+    written: writtenPathsOf(snapshots),
     deleted,
     kept: countOf(statuses, 'kept'),
     broken: countOf(statuses, 'broken'),
@@ -747,8 +774,9 @@ async function takeSnapshots(
  * can't run the platform. The workers' sessions and the browsers are always closed.
  *
  * A run that finishes ends stderr with a warning for each Storybook, in config order, whose captured snapshots'
- * `completing` render steps took a median of 50 ms or more: it seems to ignore the test path. The warnings never change
- * the exit code.
+ * `completing` render steps took a median of 50 ms or more: it seems to ignore the test path. For `update` on Windows,
+ * stderr ends with one more warning when a baseline it wrote has a path longer than 260 characters: it names each such
+ * path and the git setting `core.longpaths`. The warnings never change the exit code.
  *
  * @throws {Error} Any other error, after closing the sessions and the browsers.
  */
@@ -813,6 +841,9 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
   return {
     exitCode: exitCodeOf(run.command, snapshots),
     stdout: printedOf(snapshots, [...linesOf(snapshots), ...endLinesOf(run, snapshots, deleted)]),
-    stderr: `${exitNoticeOf(browser.firstExit())}${testPathWarningsOf(run.selections, snapshots.items, snapshots.results)}`,
+    stderr:
+      exitNoticeOf(browser.firstExit()) +
+      testPathWarningsOf(run.selections, snapshots.items, snapshots.results) +
+      longPathWarningsOf(run, snapshots),
   }
 }

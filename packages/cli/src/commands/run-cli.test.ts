@@ -1818,6 +1818,85 @@ const invalidOptionsFix =
  */
 const disableIssue = 'visualCheck.disable: must be true or false. Got 1.'
 
+describe('runCli warning about baseline paths over 260 characters', () => {
+  const deepFolder = `${'d'.repeat(100)}/${'e'.repeat(100)}`
+  const warningHead =
+    "These baselines' paths are longer than 260 characters, which git on Windows checks out only with " +
+    'core.longpaths set. Run git config core.longpaths true.'
+
+  /**
+   * Starts a Storybook with the stories and makes a project whose baselines folder is `deepFolder`, with `baselines`
+   * written in it.
+   */
+  async function createDeepRun(storyIds: string[], baselines: Record<string, Uint8Array> = {}): Promise<string> {
+    const url = await startStorybook(storyIds)
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}', baselines: '${deepFolder}' } } }\n`,
+      './button.stories.tsx': '',
+    })
+
+    mkdirSync(join(project, deepFolder), { recursive: true })
+
+    for (const [id, bytes] of Object.entries(baselines)) {
+      writeFileSync(join(project, deepFolder, `${id}.png`), bytes)
+    }
+
+    return project
+  }
+
+  it('warns on Windows in update about each baseline it wrote with a path over 260 characters, keeping exit 0', async () => {
+    const project = await createDeepRun(['a', 'b'])
+    const { options } = fakeBrowser()
+    const result = await runCli(['update'], {}, project, { ...options, os: 'win32' })
+
+    expect(result).toEqual({
+      exitCode: 0,
+      stdout: printed(
+        headerOf('update', 2),
+        '✓ web  a  written: missing',
+        '✓ web  b  written: missing',
+        '2 written',
+        `written ${deepFolder}/a.png`,
+        `written ${deepFolder}/b.png`,
+      ),
+      stderr: printed(warningHead, `  ${deepFolder}/a.png`, `  ${deepFolder}/b.png`),
+    })
+    expect(join(project, deepFolder, 'a.png').length).toBeGreaterThan(260)
+  })
+
+  it('does not warn on another OS', async () => {
+    const project = await createDeepRun(['a'])
+    const result = await runCli(['update'], {}, project, fakeBrowser().options)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe('')
+  })
+
+  it('does not warn on Windows when every path written is short', async () => {
+    const { project } = await createRun(['a'])
+    const result = await runCli(['update'], {}, project, { ...fakeBrowser().options, os: 'win32' })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe('')
+  })
+
+  it('does not warn on Windows about a long-path baseline it kept', async () => {
+    const project = await createDeepRun(['a'], { a: defaultSnapshot })
+    const result = await runCli(['update'], {}, project, { ...fakeBrowser().options, os: 'win32' })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain('1 kept')
+    expect(result.stderr).toBe('')
+  })
+
+  it('does not warn in test on Windows', async () => {
+    const project = await createDeepRun(['a'], { a: defaultSnapshot })
+    const result = await runCli(['test'], {}, project, { ...fakeBrowser().options, os: 'win32' })
+
+    expect(result.stderr).toBe('')
+  })
+})
+
 describe('runCli per-story options', () => {
   it('reads each Storybook once, before any capture, with every story grouped by file, even with --filter', async () => {
     const web = await startStorybook(['a', 'b', 'c'], {

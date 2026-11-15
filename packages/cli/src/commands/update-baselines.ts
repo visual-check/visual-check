@@ -203,3 +203,30 @@ export function updateEndLinesOf(cwd: string, summary: UpdateSummary): string[] 
     ...summary.deleted.map((path) => `deleted ${displayPathOf(cwd, path)}`),
   ]
 }
+
+/**
+ * The longest path, in characters, that Windows takes without git's `core.longpaths`.
+ */
+const windowsPathLimit = 260
+
+/**
+ * Builds the warning for the baselines `update` wrote on Windows whose paths are longer than 260 characters, which git
+ * there checks out only with `core.longpaths` set: a sentence with the fix, then one line for each such path, in
+ * written order, relative to the folder the CLI runs in. Each line ends with a newline. Gives an empty string on any
+ * other OS, or when no path is that long.
+ */
+export function longPathWarningOf(os: NodeJS.Platform, cwd: string, written: readonly string[]): string {
+  const tooLong = written.filter((path) => path.length > windowsPathLimit)
+
+  if (os !== 'win32' || tooLong.length === 0) {
+    return ''
+  }
+
+  const lines = [
+    "These baselines' paths are longer than 260 characters, which git on Windows checks out only with " +
+      'core.longpaths set. Run git config core.longpaths true.',
+    ...tooLong.map((path) => `  ${displayPathOf(cwd, path)}`),
+  ]
+
+  return lines.map((line) => `${line}\n`).join('')
+}
