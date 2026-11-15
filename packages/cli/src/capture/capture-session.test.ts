@@ -25,6 +25,7 @@ const settings: CaptureSettings = {
   locale: 'pl-PL',
   colorScheme: 'dark',
   maskColor: '#00FF00',
+  listHosts: false,
 }
 
 /**
@@ -49,7 +50,7 @@ const secondary = {
  * Builds the capture preparation expression for a story without element or masks, with this time limit.
  */
 function plainPrepExpression(timeoutMs: number): string {
-  return prepareCaptureExpression({ element: null, masks: [], maskColor: '#00FF00' }, timeoutMs)
+  return prepareCaptureExpression({ element: null, masks: [], maskColor: '#00FF00', listRemoteHosts: false }, timeoutMs)
 }
 
 /**
@@ -91,6 +92,13 @@ describe('openCaptureSession', () => {
     ])
   })
 
+  it('watches requests on its page when the settings list hosts', async () => {
+    const driver = new FakeDriver()
+
+    await openCaptureSession(driver, { ...settings, listHosts: true }).capture(primary)
+    expect(driver.setups[0]?.watchRequests).toBe(true)
+  })
+
   it('keeps using its page while captures succeed', async () => {
     const driver = new FakeDriver()
     const session = openCaptureSession(driver, settings)
@@ -99,6 +107,55 @@ describe('openCaptureSession', () => {
     await session.capture(secondary)
     expect(driver.setups).toHaveLength(1)
     expect(driver.methods()).not.toContain('1:close')
+  })
+})
+
+describe('the hosts of a capture', () => {
+  const listing = { ...settings, listHosts: true }
+
+  it("are the page's request hosts, read after the capture, and the remote hosts the preparation found", async () => {
+    let captured = false
+    const driver = new FakeDriver({
+      pages: [
+        {
+          capturePrep: async () => ({ outcome: 'ready', box: null, remoteHosts: ['images.example.com'] }),
+          capture: async () => {
+            captured = true
+
+            return defaultSnapshot
+          },
+          requestHosts: () => (captured ? ['api.example.com'] : []),
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, listing).capture(primary)).toEqual({
+      snapshot: defaultSnapshot,
+      hosts: { requests: ['api.example.com'], remoteContent: ['images.example.com'] },
+    })
+    expect(driver.calls).toContainEqual({
+      page: 1,
+      method: 'evaluate',
+      args: [
+        prepareCaptureExpression({ element: null, masks: [], maskColor: '#00FF00', listRemoteHosts: true }, 10_000),
+        11_000,
+      ],
+    })
+  })
+
+  it('are empty when the preparation lists no remote hosts and the page sent no requests', async () => {
+    expect(await openCaptureSession(new FakeDriver(), listing).capture(primary)).toEqual({
+      snapshot: defaultSnapshot,
+      hosts: { requests: [], remoteContent: [] },
+    })
+  })
+
+  it('are left out of the snapshot when the settings do not list them', async () => {
+    const driver = new FakeDriver({ pages: [{ requestHosts: () => ['api.example.com'] }] })
+    const capture = await openCaptureSession(driver, settings).capture(primary)
+
+    expect(capture).toStrictEqual({ snapshot: defaultSnapshot, completingMs: undefined })
+    expect(driver.setups[0]?.watchRequests).toBe(false)
   })
 })
 
@@ -513,7 +570,13 @@ describe('the masks', () => {
       {
         page: 1,
         method: 'evaluate',
-        args: [prepareCaptureExpression({ element: '#card', masks: card.masks, maskColor: '#00FF00' }, 10_000), 11_000],
+        args: [
+          prepareCaptureExpression(
+            { element: '#card', masks: card.masks, maskColor: '#00FF00', listRemoteHosts: false },
+            10_000,
+          ),
+          11_000,
+        ],
       },
       { page: 1, method: 'capture', args: ['full-page'] },
     ])

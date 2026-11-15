@@ -1,6 +1,6 @@
 import { parkedByStorybookSource, storybookPageScript } from '../storybook/preview-script.js'
 import { endStateFunction } from './end-state.js'
-import { type CapturePrepRequest, prepareCaptureFunction } from './prepare-capture.js'
+import { type CapturePrepRequest, isTextList, prepareCaptureFunction } from './prepare-capture.js'
 import { remoteContentFunction } from './remote-content.js'
 
 /**
@@ -55,8 +55,8 @@ const keptCharacters = 500
  *   `remoteContentFunction` says;
  * - gives `prepareCapture`, which the capture preparation expression calls at capture, after the end state. It measures
  *   the element to capture, paints the masks over the page in the top layer, the host masks by what `findRemoteContent`
- *   finds, and hides the text caret in the document, in every shadow root and in same-origin frames, as
- *   `prepareCaptureFunction` says.
+ *   finds, lists the remote hosts when asked, and hides the text caret in the document, in every shadow root and in
+ *   same-origin frames, as `prepareCaptureFunction` says.
  *
  * It keeps the browser's own `setTimeout`, `clearTimeout` and `requestAnimationFrame`, so a story that fakes or
  * replaces timers or frames doesn't stall the wait, the end state or the remote content search. The adapter's script
@@ -396,8 +396,9 @@ export function endStateExpression(timeoutMs: number): string {
 
 /**
  * Builds the expression that prepares the page for its capture as `request` says, at capture, after the end state: it
- * measures the element, paints the masks and hides the caret. The host masks' remote content search gives up once
- * `timeoutMs` passes, rounded up to whole ms. The request goes into the expression as JSON, so any selector survives.
+ * measures the element, paints the masks and hides the caret. The remote content search, for host masks or for
+ * listing remote hosts, gives up once `timeoutMs` passes, rounded up to whole ms. The request goes into the
+ * expression as JSON, so any selector survives.
  * Its value is the page's answer, which `readCapturePrep` reads.
  */
 export function prepareCaptureExpression(request: CapturePrepRequest, timeoutMs: number): string {
@@ -433,12 +434,7 @@ export function readAssetsReadiness(value: unknown): AssetsReadiness {
     return { outcome: 'timed-out', step: 'images', pending }
   }
 
-  if (
-    answer.outcome === 'timed-out' &&
-    answer.step === 'fonts' &&
-    Array.isArray(pendingFaces) &&
-    pendingFaces.every((face) => typeof face === 'string')
-  ) {
+  if (answer.outcome === 'timed-out' && answer.step === 'fonts' && isTextList(pendingFaces)) {
     return { outcome: 'timed-out', step: 'fonts', pendingFaces: [...pendingFaces] }
   }
 

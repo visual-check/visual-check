@@ -66,7 +66,7 @@ function openPreparation(document: object, parts: PreparationPageParts = {}): Pr
   return {
     findRemoteContent,
     prepare: async (request) => {
-      const whole = { element: null, masks: [], maskColor: '#FF00FF', ...request }
+      const whole = { element: null, masks: [], maskColor: '#FF00FF', listRemoteHosts: false, ...request }
 
       return JSON.parse(JSON.stringify(await prepare(whole, 5000)))
     },
@@ -393,6 +393,113 @@ describe('host masks', () => {
   })
 })
 
+describe('listing the remote hosts', () => {
+  const items = [
+    item('images.example.com', { x: 1, y: 2, width: 3, height: 4 }),
+    item('cdn.example.com:8443', { x: 5, y: 6, width: 7, height: 8 }),
+    item('images.example.com', { x: 9, y: 9, width: 9, height: 9 }),
+    item('fonts.example.com', { x: 1, y: 1, width: 1, height: 1 }),
+  ]
+  const found = async (): Promise<unknown> => ({ outcome: 'found', items })
+
+  it('lists each host once, in the order found, searching once with the time limit and no host mask', async () => {
+    const { document, created } = fakeCaptureDocument()
+    const page = openPreparation(document, { remoteContent: found })
+
+    expect(await page.prepare({ listRemoteHosts: true })).toEqual({
+      outcome: 'ready',
+      box: null,
+      remoteHosts: ['images.example.com', 'cdn.example.com:8443', 'fonts.example.com'],
+    })
+    expect(page.findRemoteContent.mock.calls).toEqual([[5000]])
+    expect(created).toEqual([])
+  })
+
+  it('leaves out a host a host mask covers, by host or by hostname, and still searches once', async () => {
+    const { document, created } = fakeCaptureDocument()
+    const page = openPreparation(document, { remoteContent: found })
+
+    expect(
+      await page.prepare({
+        listRemoteHosts: true,
+        masks: [
+          { name: 'images', host: 'Images.Example.com' },
+          { name: 'cdn', host: 'cdn.example.com' },
+        ],
+      }),
+    ).toEqual({ outcome: 'ready', box: null, remoteHosts: ['fonts.example.com'] })
+    expect(page.findRemoteContent.mock.calls).toEqual([[5000]])
+    expect(created[0]?.children).toHaveLength(3)
+  })
+
+  it('searches nothing with an invalid selector mask or a missing element, even when listing', async () => {
+    const invalid = fakeCaptureDocument({ invalid: ['a['] })
+    const invalidPage = openPreparation(invalid.document, { remoteContent: found })
+    const missing = fakeCaptureDocument()
+    const missingPage = openPreparation(missing.document, { remoteContent: found })
+
+    expect(
+      await invalidPage.prepare({ listRemoteHosts: true, masks: [{ name: 'bad', selector: 'a[' }] }),
+    ).toMatchObject({ outcome: 'invalid-selector', of: 'mask' })
+    expect(await missingPage.prepare({ listRemoteHosts: true, element: '#card' })).toEqual({
+      outcome: 'element-missing',
+      found: 'nothing',
+    })
+    expect(invalidPage.findRemoteContent).not.toHaveBeenCalled()
+    expect(missingPage.findRemoteContent).not.toHaveBeenCalled()
+  })
+
+  it('paints only the selector mask boxes and still lists every host when there is no host mask', async () => {
+    const { document, created } = fakeCaptureDocument({
+      matches: { '.ad': [boxed({ x: 1, y: 2, width: 3, height: 4 })] },
+    })
+    const page = openPreparation(document, { remoteContent: found })
+
+    expect(await page.prepare({ listRemoteHosts: true, masks: [{ name: 'ads', selector: '.ad' }] })).toEqual({
+      outcome: 'ready',
+      box: null,
+      remoteHosts: ['images.example.com', 'cdn.example.com:8443', 'fonts.example.com'],
+    })
+    expect(created[0]?.children.map((mask) => mask.style.cssText)).toEqual([
+      maskStyle({ x: 1, y: 2, width: 3, height: 4 }),
+    ])
+  })
+
+  it('lists none when the search timed out and there is no host mask, capturing the story', async () => {
+    const { document } = fakeCaptureDocument()
+    const page = openPreparation(document, { remoteContent: async () => ({ outcome: 'timed-out' }) })
+
+    expect(await page.prepare({ listRemoteHosts: true })).toEqual({ outcome: 'ready', box: null, remoteHosts: [] })
+  })
+
+  it('stays timed out when the search timed out and there is a host mask', async () => {
+    const { document } = fakeCaptureDocument()
+    const page = openPreparation(document, { remoteContent: async () => ({ outcome: 'timed-out' }) })
+
+    expect(
+      await page.prepare({ listRemoteHosts: true, masks: [{ name: 'images', host: 'images.example.com' }] }),
+    ).toEqual({ outcome: 'timed-out' })
+  })
+
+  it('searches nothing and answers no hosts when none are asked for and there is no host mask', async () => {
+    const { document } = fakeCaptureDocument()
+    const page = openPreparation(document, { remoteContent: found })
+
+    expect(await page.prepare({})).toEqual({ outcome: 'ready', box: null })
+    expect(page.findRemoteContent).not.toHaveBeenCalled()
+  })
+
+  it('answers no hosts when none are asked for, even with a host mask', async () => {
+    const { document } = fakeCaptureDocument()
+    const page = openPreparation(document, { remoteContent: found })
+
+    expect(await page.prepare({ masks: [{ name: 'images', host: 'images.example.com' }] })).toEqual({
+      outcome: 'ready',
+      box: null,
+    })
+  })
+})
+
 describe('painting', () => {
   it("puts the boxes, in maskColor, in a manual popover under the root element, shown once they're in", async () => {
     const { document, created, events } = fakeCaptureDocument({
@@ -658,6 +765,14 @@ describe('readCapturePrep', () => {
     expect(readCapturePrep(answer)).toEqual(answer)
   })
 
+  it('reads the remote hosts of a ready capture', () => {
+    expect(readCapturePrep({ outcome: 'ready', box: null, remoteHosts: ['images.example.com'] })).toEqual({
+      outcome: 'ready',
+      box: null,
+      remoteHosts: ['images.example.com'],
+    })
+  })
+
   it.each(['timed-out', 'script-missing'])('reads %s', (outcome) => {
     expect(readCapturePrep({ outcome })).toEqual({ outcome })
   })
@@ -677,6 +792,8 @@ describe('readCapturePrep', () => {
     ['a box with a side that is not whole', { outcome: 'ready', box: { x: 0.5, y: 0, width: 10, height: 10 } }],
     ['a box with a side that is not finite', { outcome: 'ready', box: { x: 0, y: 0, width: Infinity, height: 10 } }],
     ['a box with a side that is text', { outcome: 'ready', box: { x: '0', y: 0, width: 10, height: 10 } }],
+    ['remote hosts that are not a list', { outcome: 'ready', box: null, remoteHosts: 'images.example.com' }],
+    ['remote hosts that are not all text', { outcome: 'ready', box: null, remoteHosts: ['a.com', 1] }],
     ['a box left of the document', { outcome: 'ready', box: { x: -1, y: 0, width: 10, height: 10 } }],
     ['a box above the document', { outcome: 'ready', box: { x: 0, y: -1, width: 10, height: 10 } }],
     ['a box of zero width', { outcome: 'ready', box: { x: 0, y: 0, width: 0, height: 10 } }],

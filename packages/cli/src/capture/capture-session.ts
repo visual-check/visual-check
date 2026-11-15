@@ -63,6 +63,11 @@ export interface CaptureSettings {
    * The colour masks are painted in: `#RGB` or `#RRGGBB`.
    */
   maskColor: string
+  /**
+   * Whether each capture also lists the hosts its story sends real network requests to and shows remote content from.
+   * It turns on the page's request watching, which costs about 5%, so only `update` sets it.
+   */
+  listHosts: boolean
 }
 
 /**
@@ -178,6 +183,23 @@ export type BrokenStory =
     }
 
 /**
+ * The hosts a story reaches, as a capture lists them.
+ *
+ * @public
+ */
+export interface StoryHosts {
+  /**
+   * The hosts the story's page sent real network requests to, as the page reports them, each once.
+   */
+  requests: string[]
+  /**
+   * The hosts of the remote content the story shows, each once, in the order found, without the hosts one of the
+   * story's host masks covers.
+   */
+  remoteContent: string[]
+}
+
+/**
  * What capturing a story gave: its snapshot, with how long Storybook's `completing` render step took, or, for a broken
  * story, why it can't be captured.
  *
@@ -194,6 +216,10 @@ export type StoryCapture =
        * 100 or more off it. `undefined` when the page didn't see both the `completing` and `completed` steps.
        */
       completingMs: number | undefined
+      /**
+       * The hosts the story reaches. Present exactly when the session's settings ask to list hosts.
+       */
+      hosts?: StoryHosts
     }
   | {
       /**
@@ -546,10 +572,12 @@ function describeFailure(error: unknown, step: Step, story: StoryToCapture, read
  * Captures a story on an open page: sets the story's viewport, loads the story, waits until Storybook reports it
  * finished with nothing gone wrong, waits for its images and fonts, runs its wait hook, brings it to its end state,
  * measures its element, paints its masks, hides the caret and captures the element's box, or the full page when the
- * story has no element. When the story has a wait hook, its images and fonts are checked again after it, and when the
- * end state changed anything, they're checked again before the masks. Loading, the waits, the hook, the end state,
- * those checks and the masks share readyTimeout, each getting only what's left of it. A story that can't be captured
- * comes back as a broken story. Rejects only with a `BrowserExitedError`.
+ * story has no element. When the settings ask to list hosts, it also gives the hosts the page sent requests to, read
+ * once the capture is done, and the hosts of the remote content the story shows, found with the masks. When the story
+ * has a wait hook, its images and fonts are checked again after it, and when the end state changed anything, they're
+ * checked again before the masks. Loading, the waits, the hook, the end state, those checks and the masks share
+ * readyTimeout, each getting only what's left of it. A story that can't be captured comes back as a broken story.
+ * Rejects only with a `BrowserExitedError`.
  */
 async function captureOnPage(page: Page, story: StoryToCapture, settings: CaptureSettings): Promise<StoryCapture> {
   const deadline = performance.now() + settings.readyTimeoutMs
@@ -618,20 +646,28 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
 
   /**
    * Measures the story's element, paints its masks and hides the caret. Gives what to capture: the element's box, or
-   * the full page when the story has no element. Gives why the story can't be captured instead when that failed.
+   * the full page when the story has no element, with the hosts of the remote content the story shows when the
+   * settings ask to list hosts. Gives why the story can't be captured instead when that failed.
    */
-  const prepareCapture = async (): Promise<{ area: CaptureArea } | { broken: BrokenStory }> => {
+  const prepareCapture = async (): Promise<{ area: CaptureArea; remoteHosts: string[] } | { broken: BrokenStory }> => {
     step = 'masks'
 
     const element = story.element ?? null
-    const request = { element, masks: story.masks ?? [], maskColor: settings.maskColor }
+    const request = {
+      element,
+      masks: story.masks ?? [],
+      maskColor: settings.maskColor,
+      listRemoteHosts: settings.listHosts,
+    }
     const prep = readCapturePrep(await waitInPage((limit) => prepareCaptureExpression(request, limit)))
 
     if (prep.outcome !== 'ready') {
       return { broken: describeCapturePrep(prep, element, settings.readyTimeoutMs) }
     }
 
-    return { area: prep.box ?? 'full-page' }
+    // The page script answers `remoteHosts` whenever it's asked to, and the CLI ships with its page script, so the
+    // fallback only covers a request that didn't ask for them.
+    return { area: prep.box ?? 'full-page', remoteHosts: prep.remoteHosts ?? [] }
   }
 
   try {
@@ -660,7 +696,17 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
 
     step = 'capture'
 
-    return { snapshot: await page.capture(prepared.area), completingMs: wait.completingMs }
+    const snapshot = await page.capture(prepared.area)
+
+    if (!settings.listHosts) {
+      return { snapshot, completingMs: wait.completingMs }
+    }
+
+    return {
+      snapshot,
+      completingMs: wait.completingMs,
+      hosts: { requests: page.requestHosts(), remoteContent: prepared.remoteHosts },
+    }
   } catch (error) {
     if (error instanceof BrowserExitedError) {
       throw error
@@ -685,8 +731,8 @@ function navigatedAway(capture: StoryCapture): boolean {
 
 /**
  * Gives how a page is set up for the settings: a user agent ending in `StorybookTestRunner`, the settings' time zone,
- * locale and colour scheme, the page script, and no watching of requests. A capture page and a page that reads options
- * are set up the same way.
+ * locale and colour scheme, the page script, and the watching of its real network requests when the settings list
+ * hosts. A capture page is set up this way.
  */
 export function pageSetupOf(settings: CaptureSettings): PageSetup {
   return {
@@ -695,7 +741,7 @@ export function pageSetupOf(settings: CaptureSettings): PageSetup {
     locale: settings.locale,
     colorScheme: settings.colorScheme,
     initScript: pageInitScript,
-    watchRequests: false,
+    watchRequests: settings.listHosts,
   }
 }
 

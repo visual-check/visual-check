@@ -280,6 +280,7 @@ function captureSettingsOf(config: ResolvedConfig): CaptureSettings {
     locale: config.locale,
     colorScheme: config.colorScheme,
     maskColor: config.maskColor,
+    listHosts: false,
   }
 }
 
