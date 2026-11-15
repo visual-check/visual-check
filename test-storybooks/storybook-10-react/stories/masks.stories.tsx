@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { visualCheck } from '../.storybook/visual-check.ts'
+import { remoteSquare } from './remote-origin.ts'
 
 declare global {
   /**
@@ -10,18 +11,6 @@ declare global {
    */
   var __visualCheckE2eGrow: boolean | undefined
 }
-
-/**
- * The origin the stories load remote content from: `localhost` on the story page's own port. Served on `127.0.0.1`, as
- * the end-to-end check serves it, that's another origin than the page's, so it's remote; on `localhost` it's the same
- * origin, so nothing is remote.
- */
-const remoteOrigin = `${location.protocol}//localhost:${location.port}`
-
-/**
- * A 48 × 48 teal square served from the remote origin.
- */
-const remoteSquare = `${remoteOrigin}/remote-content/square.png`
 
 /**
  * What a dialog shows.

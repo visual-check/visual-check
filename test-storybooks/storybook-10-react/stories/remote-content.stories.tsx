@@ -2,23 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import type { ReactNode, SyntheticEvent } from 'react'
 import { waitFor } from 'storybook/test'
 import { visualCheck } from '../.storybook/visual-check.ts'
-
-/**
- * The origin the stories load remote content from: `localhost` on the story page's own port. Served on `127.0.0.1`, as
- * the end-to-end check serves it, that's another origin than the page's, so it's remote; on `localhost` it's the same
- * origin, so nothing is remote.
- */
-const remoteOrigin = `${location.protocol}//localhost:${location.port}`
-
-/**
- * The path of a 48 × 48 teal square, served from the Storybook's `static` folder.
- */
-const squarePath = '/remote-content/square.png'
-
-/**
- * The teal square from the remote origin.
- */
-const remoteSquare = `${remoteOrigin}${squarePath}`
+import { remoteOrigin, remoteSquare, squarePath } from './remote-origin.ts'
 
 /**
  * The teal square from the story page's own origin.
