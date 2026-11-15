@@ -2,6 +2,8 @@
 
 One of this repo's own test Storybooks ([PRD 18](../../docs/prd/18-repo-ci.md#this-repos-own-test-storybooks)): a private React Storybook on Storybook 10 with a few plain stories, a set of [hazard stories](#the-hazard-stories) and a set of [readiness stories](#the-readiness-stories), their committed baselines in `.visual-check/baselines/` and the expected outcome of every story in `expected-outcomes.json`.
 
+The React test Storybooks on Storybook 9.1 ([`storybook-9-react`](../storybook-9-react/README.md)) and 11 ([`storybook-11-react`](../storybook-11-react/README.md)) read these stories, take their config from `.storybook/test-storybook-config.ts` as this one does, and run this `e2e.ts` from their own folders.
+
 `e2e.ts` is its end-to-end check. It serves the static build on `127.0.0.1`, runs the built CLI against it and checks nine cases. Inside visual-check's image the last three are replaced, and on the host other cases run; see below.
 
 - `test` against the committed baselines, with 2 workers, gives exactly the expected outcomes. The line of each broken readiness story says why: what it threw, that Storybook never sent `storyFinished`, or the font face `Never Loads`. Its stderr has no test-path warning.
@@ -22,7 +24,7 @@ The server never answers `/visual-check-e2e/never-loads.woff2`, the font file `F
 
 - `Alert`, `Confirm` and `Prompt` open their dialog as they render. visual-check accepts the alert and dismisses the other two, so the snapshots show `alert() returned`, `confirm() returned false` and `prompt() returned null`.
 - `BeforeUnload` leaves a `beforeunload` handler that asks to stay, so the next story's `goto` on the same page opens a dialog. visual-check accepts it, so that story loads; dismissing it would cancel the navigation and break that story.
-- `Popup` opens a popup in a loader, which visual-check closes. The loader waits until it's closed, so a popup left open breaks the story. The wait is in a loader because Storybook 10 reports a story whose `play` throws as a success.
+- `Popup` opens a popup in a loader, which visual-check closes. The loader waits until it's closed, so a popup left open makes the loader throw, which breaks the story.
 - `Crashes` allocates in `play` until its page reaches V8's heap limit, about 3.8 GB, and its renderer crashes: within a few seconds on a Mac, but 14 to 19 s on CI's runners, which is why the hazards case gives it 60 s. It's broken, `crashed`, and isn't retried; the next story gets a fresh page.
 - `Download` clicks a download link, which visual-check denies. The page can't tell a denied download from an allowed one, so this only checks that a download doesn't hold up the capture.
 - `Permissions` asks for the notification and geolocation permissions in a loader. visual-check denies both, so the snapshot shows `denied` and geolocation's `PERMISSION_DENIED` error.
@@ -48,7 +50,7 @@ The CLI's line for a broken story doesn't print its reason, so the committed-bas
 
 ## Running the end-to-end check
 
-`e2e.ts` works in the folder it starts in, so another test Storybook runs the same file from its own folder.
+`e2e.ts` works in the folder it starts in, so the 9.1 and 11 test Storybooks run the same file from their own folders.
 
 Until the browser image is published, every run names a locally built image through `TEST_STORYBOOK_IMAGE`. From the repo root:
 
