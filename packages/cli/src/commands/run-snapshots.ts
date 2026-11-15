@@ -699,7 +699,10 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
       await clearReport(testTools.reportFolder)
     }
 
-    snapshots = plannedSnapshotsOf(run, plan.snapshots)
+    snapshots = plannedSnapshotsOf(
+      run,
+      plan.snapshots.filter(({ selected }) => selected),
+    )
     await takeSnapshots(run, browser, snapshots, testTools)
   } catch (error) {
     const message = stopMessageOf(error, run, capturedAnyOf(snapshots))
