@@ -1598,7 +1598,7 @@ describe('runCli update', () => {
     expect(readdirSync(folder).sort()).toEqual(['.visual-check-0a1b2c.tmp', 'a.png', 'notes.txt', 'old.png'])
   })
 
-  it('keeps every baseline a story whose stories file failed to load could own, and leaves the story out', async () => {
+  it('keeps every baseline a story whose stories file failed to load could own, and leaves it out when its baseline is there', async () => {
     const longMode = `b.${'m'.repeat(300)}`
     const { project, folder } = await createRun(
       ['a', 'b'],
@@ -1627,6 +1627,28 @@ describe('runCli update', () => {
     })
     expect(storyIdsOf(record.urls)).toEqual(['a'])
     expect(readdirSync(folder).sort()).toEqual(['a.png', 'b.dark.png', `${shortenedStemOf(longMode)}.png`, 'b.png'])
+  })
+
+  it('breaks a story outside --filter whose stories file failed to load and has no baseline, and exits 1', async () => {
+    const { project, folder } = await createRun(['a', 'b'], { a: defaultSnapshot, 'b.dark': defaultSnapshot }, '', {
+      a: './a.stories.tsx',
+      b: './b.stories.tsx',
+    })
+    const { options, record } = fakeBrowser({}, { read: { failed: { './b.stories.tsx': 'SyntaxError' } } })
+    const result = await runCli(['update', '--filter', '^a$'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: printed(
+        headerOf('update', 2),
+        '✓ web  a  kept',
+        '! web  b  broken: Its stories file ./b.stories.tsx failed to load: SyntaxError.',
+        '0 written · 1 kept · 1 broken',
+      ),
+      stderr: '',
+    })
+    expect(storyIdsOf(record.urls)).toEqual(['a'])
+    expect(readdirSync(folder).sort()).toEqual(['a.png', 'b.dark.png'])
   })
 
   it('narrows writing and deleting to the Storybook --storybook names', async () => {

@@ -741,16 +741,17 @@ async function takeSnapshots(
  * config file, once the snapshots are planned, and writes the baseline, snapshot and visual diff of each snapshot that
  * differs there.
  *
- * `update` also takes every snapshot outside the selection that isn't broken and whose baseline is missing, so it
- * writes every missing baseline of the Storybooks in the run. Before any capture, it lists each Storybook's baselines
- * folder, where only `.png` files count, and decodes each of them; the first one that can't be listed or decoded, in
- * config order then file name order, stops the run with exit 2, printing nothing on stdout. It compares each snapshot
- * with its baseline as `test` does, and writes it when the baseline is missing or differs beyond tolerance or in size.
- * A baseline within tolerance stays untouched, even when its bytes differ. Once every snapshot is taken, it deletes the
- * orphans: the baselines that no planned snapshot calls for, selected or not, apart from any that could belong to a
- * story whose stories file didn't load. An orphan the file system takes for an expected baseline is that baseline, so
- * it stays. Its counts are of written, deleted and kept baselines and broken snapshots, followed by the path of each
- * baseline written and each orphan deleted. `update` never touches the report folder.
+ * `update` also takes every snapshot outside the selection whose baseline is missing, so it writes every missing
+ * baseline of the Storybooks in the run. A story outside the selection whose stories file didn't load is taken, and
+ * broken, when its default baseline is missing, and left out when it's there. Before any capture, it lists each
+ * Storybook's baselines folder, where only `.png` files count, and decodes each of them; the first one that can't be
+ * listed or decoded, in config order then file name order, stops the run with exit 2, printing nothing on stdout. It
+ * compares each snapshot with its baseline as `test` does, and writes it when the baseline is missing or differs beyond
+ * tolerance or in size. A baseline within tolerance stays untouched, even when its bytes differ. Once every snapshot is
+ * taken, it deletes the orphans: the baselines that no planned snapshot calls for, selected or not, apart from any that
+ * could belong to a story whose stories file didn't load. An orphan the file system takes for an expected baseline is
+ * that baseline, so it stays. Its counts are of written, deleted and kept baselines and broken snapshots, followed by
+ * the path of each baseline written and each orphan deleted. `update` never touches the report folder.
  *
  * Each Storybook with stories gets one options read, in config order, on a page of its own, covering every story its
  * `index.json` lists whatever the selection. So the browser is launched at the first read, even when no story then

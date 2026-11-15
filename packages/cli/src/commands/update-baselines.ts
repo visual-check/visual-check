@@ -27,8 +27,8 @@ export interface StorybookOrphans {
  */
 interface UpdatePlan {
   /**
-   * The snapshots it takes, in the planned order: each selected one, and each one outside the selection that isn't
-   * broken and whose baseline is missing.
+   * The snapshots it takes, in the planned order: each selected one, and each one outside the selection whose
+   * baseline is missing, a broken one included.
    */
   snapshots: PlannedSnapshot[]
   /**
@@ -124,8 +124,9 @@ async function checkFolder(
 }
 
 /**
- * Whether `update` takes a planned snapshot: a selected one always, one outside the selection only when it isn't
- * broken and the file system has no baseline at its exact path.
+ * Whether `update` takes a planned snapshot: a selected one always, one outside the selection only when the file
+ * system has no baseline at its exact path. That holds for a broken one too, a story whose stories file didn't load:
+ * its key is the story ID, so it's taken, and reported as broken, when the story's default baseline is missing.
  *
  * @throws {BaselineError} When the baseline's path can't be looked at.
  */
@@ -134,19 +135,15 @@ async function isTaken(snapshot: PlannedSnapshot): Promise<boolean> {
     return true
   }
 
-  if ('broken' in snapshot) {
-    return false
-  }
-
   return !(await hasBaseline(baselinePathOf(snapshot.storybook.baselines, snapshot.key)))
 }
 
 /**
  * Plans what `update` takes and deletes, before any capture. One Storybook at a time, in the order given, it lists the
  * baselines folder and decodes every baseline in it on the visual diff's threads, reading `concurrency` at once. It
- * takes every selected snapshot, and every snapshot outside the selection that isn't broken and has no baseline, in the
- * planned order. The orphans are the baselines no planned snapshot calls for, selected or not, apart from any that
- * could belong to a story whose stories file didn't load.
+ * takes every selected snapshot, and every snapshot outside the selection that has no baseline, a broken one included,
+ * in the planned order. The orphans are the baselines no planned snapshot calls for, selected or not, apart from any
+ * that could belong to a story whose stories file didn't load.
  *
  * @throws {BaselineError} When a folder can't be listed, or a baseline can't be read or decoded, for the first such
  * one in config order, then file name order.
