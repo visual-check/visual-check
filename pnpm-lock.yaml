@@ -144,6 +144,9 @@ importers:
       '@visual-check/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@visual-check/storybook':
+        specifier: workspace:*
+        version: link:../../packages/storybook
       '@visual-check/typescript-config':
         specifier: workspace:*
         version: link:../../packages/typescript-config
@@ -183,6 +186,9 @@ importers:
       '@visual-check/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@visual-check/storybook':
+        specifier: workspace:*
+        version: link:../../packages/storybook
       '@visual-check/typescript-config':
         specifier: workspace:*
         version: link:../../packages/typescript-config
@@ -222,6 +228,9 @@ importers:
       '@visual-check/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@visual-check/storybook':
+        specifier: workspace:*
+        version: link:../../packages/storybook
       '@visual-check/typescript-config':
         specifier: workspace:*
         version: link:../../packages/typescript-config

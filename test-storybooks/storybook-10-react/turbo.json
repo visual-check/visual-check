@@ -3,6 +3,7 @@
   "extends": ["//"],
   "tasks": {
     "build-storybook": {
+      "dependsOn": ["^build"],
       "inputs": [".storybook/**", "stories/**", "package.json", "tsconfig.json"],
       "outputs": ["storybook-static/**"]
     },

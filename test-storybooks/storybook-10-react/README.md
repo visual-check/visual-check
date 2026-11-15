@@ -1,22 +1,23 @@
 # @visual-check/test-storybook-10-react
 
-One of this repo's own test Storybooks ([PRD 18](../../docs/prd/18-repo-ci.md#this-repos-own-test-storybooks)): a private React Storybook on Storybook 10 with a few plain stories, a set of [hazard stories](#the-hazard-stories) and a set of [readiness stories](#the-readiness-stories), their committed baselines in `.visual-check/baselines/` and the expected outcome of every story in `expected-outcomes.json`.
+One of this repo's own test Storybooks ([PRD 18](../../docs/prd/18-repo-ci.md#this-repos-own-test-storybooks)): a private React Storybook on Storybook 10 with a few plain stories, a set of [hazard stories](#the-hazard-stories), a set of [readiness stories](#the-readiness-stories) and a set of [per-story options stories](#the-per-story-options-stories), their committed baselines in `.visual-check/baselines/` and the expected outcome of every story in `expected-outcomes.json`.
 
 The React test Storybooks on Storybook 9.1 ([`storybook-9-react`](../storybook-9-react/README.md)) and 11 ([`storybook-11-react`](../storybook-11-react/README.md)) read these stories, take their config from `.storybook/test-storybook-config.ts` as this one does, and run this `e2e.ts` from their own folders.
 
-`e2e.ts` is its end-to-end check. It serves the static build on `127.0.0.1`, runs the built CLI against it and checks nine cases. Inside visual-check's image the last three are replaced, and on the host other cases run; see below.
+`e2e.ts` is its end-to-end check. It serves the static build on `127.0.0.1`, runs the built CLI against it and checks ten cases. Inside visual-check's image the last three are replaced, and on the host other cases run; see below.
 
-- `test` against the committed baselines, with 2 workers, gives exactly the expected outcomes. The line of each broken readiness story says why: what it threw, that Storybook never sent `storyFinished`, or the font face `Never Loads`. Its stderr has no test-path warning.
-- `update` into an empty folder writes every story that isn't broken, `test` then passes them and finds the broken ones missing, and the baselines of the stories expected to pass are byte-identical to the committed ones. When they aren't, the written baselines are copied to `e2e-output/`. Both commands take 2 workers from the config.
+- `test` against the committed baselines, with 2 workers, gives exactly the expected outcomes. The line of each broken readiness story says why: what it threw, that Storybook never sent `storyFinished`, or the font face `Never Loads`. So does the line of each broken per-story options story: what its `wait` hook threw, or that its stories file failed to load and what the file threw. The two disabled stories have no line, though `index.json` lists them, and the header counts exactly the stories in `expected-outcomes.json`. Its stderr has no test-path warning.
+- `update` into an empty folder writes every story that isn't broken, `test` then passes them and finds the broken ones missing, apart from the two `load-fails` stories, which stay broken since they're broken before any baseline is read. The baselines of the stories expected to pass are byte-identical to the committed ones. When they aren't, the written baselines are copied to `e2e-output/`. Both commands take 2 workers from the config.
 - With 1 worker, the two storage stories run one after the other on the same page and both pass. Each checks that visual-check's markers aren't in cookies, `localStorage`, `sessionStorage` or IndexedDB, then writes them and checks they stuck, so the second fails when storage isn't cleared between captures. A broken storage story's line gives only Storybook's generic status: the stores it found are named in the error it throws in its page, which the CLI doesn't print. Opening the story in an ordinary browser won't show them, because nothing clears storage there, so every store holds the marker from the second visit on.
 - With 1 worker and a `readyTimeout` of 60 s, the hazard stories run one after the other, and `test` gives exactly their expected outcomes. The story that navigates away says it went to `/categories/burgers`, and the server is asked for its page 3 times: once, then on each of its 2 retries. The story that crashes says its page crashed. The stories after `BeforeUnload` and `Crashes` pass: the first loads once the `beforeunload` dialog is accepted, the second on a fresh page.
 - A stylesheet that changes the card story makes `test` exit 1 with that story differing.
 - A script that gives every `iframe.html` a plain browser's `navigator.userAgent`, without `StorybookTestRunner`, takes Storybook off its test path. `test` with 2 workers passes the button stories and exits 0, and its stderr warns exactly once that the Storybook seems to ignore the test path's user agent, naming `Storybook react` and the version of the `storybook` package installed in the folder. The case writes its own config naming the Storybook `react`, so the warning names `react` whichever folder the check runs from.
+- With a script in every page that asks `InvalidWhenAsked` for invalid options, `test` exits 2 before any capture. Its stderr names the story, `options--invalid-when-asked`, and the key, `visualCheck.tolerance.pixels`, and its stdout is empty.
 - Killing the CLI while it captures leaves none of its containers behind.
 - With 2 workers, `docker kill` on the browser's container while both workers capture breaks those 2 stories, each line saying the browser exited. The browser relaunches for the stories left, which get their expected outcomes, `test` exits 1, its stderr says the browser exited and visual-check relaunches it once, and none of its containers is left.
 - With 2 workers, `docker kill` on the browser's container while both workers capture, then on the relaunched browser's once it captures, stops `test` with exit 2. The first browser's 2 stories are broken, each line saying the browser exited, and no other story finished. Its stderr says the browser exited and visual-check relaunches it once, then that the browser exited again and "Run visual-check again.", and none of its containers is left.
 
-The server never answers `/visual-check-e2e/never-loads.woff2`, the font file `FontNeverLoads` asks for, so that story is broken in every case; stopping the server drops the request. A story page is an `iframe.html` with an `id`. The page visual-check reads every story's options on, `iframe.html?viewMode=story`, has none: the server never holds it, and the kill cases don't count it. The markup a case adds goes into every `iframe.html`, that page included, at the end of its `<head>`. The deliberate change and the CLI kill run with the default `workers`, `'auto'`. In the last three the server holds every story page, so the run is still capturing when the kill comes, and containers that were there before the run don't count. Where the browser exits once, the server answers the story pages right after the kill, so the stories left can pass; where it exits twice, it holds them throughout.
+The server never answers `/visual-check-e2e/never-loads.woff2`, the font file `FontNeverLoads` asks for, so that story is broken in every case; stopping the server drops the request. A story page is an `iframe.html` with an `id`. The page visual-check reads every story's options on, `iframe.html?viewMode=story`, has none: the server never holds it, and the kill cases don't count it. The markup a case adds goes into every `iframe.html`, that page included, at the end of its `<head>`. Storybook's own scripts there are modules, which run once the document is parsed, so a script the case adds runs before Storybook imports any stories file. The deliberate change and the CLI kill run with the default `workers`, `'auto'`. In the last three the server holds every story page, so the run is still capturing when the kill comes, and containers that were there before the run don't count. Where the browser exits once, the server answers the story pages right after the kill, so the stories left can pass; where it exits twice, it holds them throughout.
 
 ## The hazard stories
 
@@ -48,6 +49,31 @@ The server never answers `/visual-check-e2e/never-loads.woff2`, the font file `F
 
 The CLI's line for a broken story doesn't print its reason, so the committed-baselines case checks what each line says. The five broken stories have committed baselines too, each the story as it renders without its failure: `RenderThrows` without the throw, `PlayThrows`, `PlayLeavesUnhandledError` and `NeverReady` without their `play`, and `FontNeverLoads` with its font file 404ing, in the fallback font.
 
+## The per-story options stories
+
+Five stories files cover per-story options. Four of them set `parameters.visualCheck` through `visualCheck` from `.storybook/visual-check.ts`, which declares two modes that set only a viewport: `narrow`, 375 px wide, and `wide`, 1600 px wide. It imports `@visual-check/storybook`'s built `dist`. Turbo builds it before `build-storybook`, but `pnpm storybook` runs without Turbo, so on a fresh checkout build it first, from the repo root: `pnpm turbo run build --filter @visual-check/storybook`.
+
+Every React test Storybook's preview also loads `.storybook/shared-preview.ts`, through `previewAnnotations` in `.storybook/test-storybook-config.ts`. It isn't named `preview.ts`, so Storybook doesn't load it on its own. It sets three options for every story, none of which changes a snapshot:
+
+- `tolerance: { color: 0.01 }`, the default color tolerance.
+- The mask `e2e-never`, for `[data-visual-check-e2e-never]`, which no story has.
+- A `wait` hook that sets the text of the story's `[data-wait-target]` element to `preview wait ran`, when it has one. Only the wait stories do.
+
+The stories files:
+
+- `merged-options.stories.tsx` has one story, `Default`, which shows its merged `parameters.visualCheck` as JSON, with each function as `a function`. Its meta and the story each set every option but `wait` and `disable`, so the snapshot pins how Storybook merges them: `modes` is the story's empty list, so both modes are `null`; `viewport` is `{ width: 1280, height: 720 }` and `tolerance` is `{ color: 0, pixels: 0 }`, merged key by key; `masks` holds `e2e-never`, `never-a` and `never-c`, with `dropped` set to `null`; `element` is the story's `null`; `wait` is the preview's. None of it changes the capture: the viewport is the config's default, no mask matches anything, `element: null` is the full page, and no mode is listed.
+- `wait.stories.tsx` has one story for each way a story gets its `wait` hook:
+  - `InheritsPreviewWait` sets no `wait`, so the preview's writes `preview wait ran` into its note.
+  - `OwnWait`'s own `wait` replaces the preview's and writes `story wait ran`.
+  - `WaitTurnedOff` sets `wait: null`, so the note still says `wait didn't run`.
+  - `AwaitsLateContent` shows `Late content` 1500 ms after it renders, long after Storybook reports it finished. Its `wait` finds that text through `canvas`, which visual-check builds from `storybook/test` as `play` gets it, so the snapshot shows `Late content`.
+  - `Throws`'s `wait` throws. It's broken, `wait-threw`.
+- `disabled.stories.tsx` sets `disable: true` on its meta. `Skipped` inherits it, so visual-check never captures it, prints a line for it or counts it. `BroughtBack` sets `disable: false` and passes.
+- `options.stories.tsx` has `DisabledOnItsOwn`, which sets `disable: true` on the story alone and is left out the same way, and `InvalidWhenAsked`. That one passes, unless the page's `globalThis.__visualCheckE2eInvalidOptions` is `true` when its stories file is imported. Then its hand-written `parameters.visualCheck` sets `tolerance.pixels` to `'120%'`, which the invalid-options case checks.
+- `load-fails.stories.tsx` throws as the browser imports it, so loading it fails, and both its stories, `First` and `Second`, are broken, `load-failed`. Storybook's indexer reads the exports without running the file, so the build succeeds and `index.json` still lists them. The throw sits behind a `window` check only because an unconditional top-level throw would make the rest of the file unreachable, which Biome's `noUnreachable` rejects. Every browser has a `window`, so the check changes nothing there.
+
+`Throws` has a committed baseline, the story with a `wait` that does nothing. The two `load-fails` stories need none: visual-check breaks them before it reads a baseline.
+
 ## Running the end-to-end check
 
 `e2e.ts` works in the folder it starts in, so the 9.1 and 11 test Storybooks run the same file from their own folders.
@@ -59,11 +85,11 @@ packages/chromium/image/build.sh amd64 --output type=docker,name=visual-check-ch
 TEST_STORYBOOK_IMAGE=visual-check-chromium:amd64 pnpm turbo run e2e --filter @visual-check/test-storybook-10-react
 ```
 
-Turbo builds the CLI and the Storybook first. The check prints one line per case, then each of its problems, and exits 1 when any case fails.
+Turbo builds the CLI, `@visual-check/storybook` and the Storybook first. The check prints one line per case, then each of its problems, and exits 1 when any case fails.
 
 ## Running it inside visual-check's image
 
-`--inside-image` runs the check the way a job container on visual-check's image would: the CLI starts the browser itself, with no Docker. It needs the image's marker (`/etc/visual-check/chromium.json`) and no `docker` on the `PATH`, and it doesn't need `TEST_STORYBOOK_IMAGE`. It runs the first six cases above, then these two in place of the three that kill the CLI or the browser's container:
+`--inside-image` runs the check the way a job container on visual-check's image would: the CLI starts the browser itself, with no Docker. It needs the image's marker (`/etc/visual-check/chromium.json`) and no `docker` on the `PATH`, and it doesn't need `TEST_STORYBOOK_IMAGE`. It runs the first seven cases above, then these two in place of the three that kill the CLI or the browser's container:
 
 - With `platform: 'host'`, `test` uses the image's browser and gives exactly the expected outcomes.
 - With `platform: 'linux/arm64'`, `test` exits 2 before any capture, and its message names the image's architecture and the configured platform.
@@ -97,7 +123,7 @@ CI's "Ubuntu host" job runs `--host` where Chromium's sandbox can't start, so th
 
 ## Rewriting the baselines
 
-Baselines must come from the default `linux/amd64` platform, the one CI renders on. Build the CLI and the Storybook:
+Baselines must come from the default `linux/amd64` platform, the one CI renders on. Build the CLI, `@visual-check/storybook`, which the stories import, and the Storybook:
 
 ```sh
 pnpm turbo run build build-storybook --filter @visual-check/test-storybook-10-react...
@@ -109,6 +135,6 @@ Serve `storybook-static/` on `127.0.0.1` with any static server, then from this 
 TEST_STORYBOOK_IMAGE=visual-check-chromium:amd64 pnpm exec visual-check update --all --url http://127.0.0.1:<port>
 ```
 
-Run `test` the same way to check them, update `expected-outcomes.json` when a story is added or its outcome changes, and commit both. With an ordinary static server `FontNeverLoads` passes, since its font file 404s, though `expected-outcomes.json` gives it as broken; the end-to-end check, whose server never answers that file, confirms its outcome.
+Run `test` the same way to check them, update `expected-outcomes.json` when a story is added or its outcome changes, and commit both. The disabled stories are never captured, so they get no baseline and no entry there. With an ordinary static server `FontNeverLoads` passes, since its font file 404s, though `expected-outcomes.json` gives it as broken; the end-to-end check, whose server never answers that file, confirms its outcome.
 
-`update` leaves the baselines of the broken stories as they are, apart from `FontNeverLoads`: an ordinary static server 404s its font file, so there the story passes and `update` writes it in the fallback font. To rewrite another broken story's, take its failure out as its section above says, build the Storybook, run `update --filter` with the story's ID, then put the failure back and build again.
+`update` leaves the baselines of the broken stories as they are, apart from `FontNeverLoads`: an ordinary static server 404s its font file, so there the story passes and `update` writes it in the fallback font. To rewrite another broken story's, take its failure out as its section above says, build the Storybook, run `update --filter` with the story's ID, then put the failure back and build again. For `wait--throws`, that's its `wait` with the `throw` taken out, and `update --filter '^wait--throws$'`.
