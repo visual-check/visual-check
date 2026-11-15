@@ -33,12 +33,27 @@ const request: OptionsRequest = {
 }
 
 /**
- * Reads with a driver whose first page behaves as given, and gives the result with the driver.
+ * Reads with a driver whose first page behaves as given, and gives the result with the driver. The read asks for
+ * `request` by default.
  */
-async function readWith(page: FakePageBehaviour = {}): Promise<{ driver: FakeDriver; read: unknown }> {
+async function readWith(
+  page: FakePageBehaviour = {},
+  asked: OptionsRequest = request,
+): Promise<{ driver: FakeDriver; read: unknown }> {
   const driver = new FakeDriver({ pages: [page] })
 
-  return { driver, read: await readStoryOptions(driver, settings, request) }
+  return { driver, read: await readStoryOptions(driver, settings, asked) }
+}
+
+/**
+ * The problem an answer that doesn't match what the read asked for gives, after what's wrong with it.
+ */
+function mismatchProblemOf(mismatch: string): { problem: string } {
+  return {
+    problem:
+      "The page's answer to visual-check's read of Storybook web's per-story options doesn't match what it asked " +
+      `for: ${mismatch}. Run visual-check again, and report it if it keeps failing.`,
+  }
 }
 
 /**
@@ -81,7 +96,17 @@ describe('readStoryOptions', () => {
       { importPath: './src/broken.stories.ts', outcome: 'failed', message: 'Boom' },
       { importPath: './src/slow.stories.ts', outcome: 'timed-out' },
     ])
-    const { driver, read } = await readWith({ optionsRead: async () => answer })
+    const { driver, read } = await readWith(
+      { optionsRead: async () => answer },
+      {
+        ...request,
+        files: [
+          { importPath: './src/button.stories.ts', storyIds: ['button--primary'] },
+          { importPath: './src/broken.stories.ts', storyIds: ['broken--one', 'broken--two'] },
+          { importPath: './src/slow.stories.ts', storyIds: ['slow--one'] },
+        ],
+      },
+    )
 
     expect(read).toEqual({
       files: [
@@ -143,6 +168,78 @@ describe('readStoryOptions', () => {
 
     expect(read).toEqual({ problem })
     expect(driver.methods()).toEqual(['1:goto', '1:evaluate', '1:close'])
+  })
+
+  it.each([
+    ['leaves out a file', [], 'it left out the stories file ./src/button.stories.ts'],
+    [
+      'leaves out a story of a file that loaded',
+      [{ importPath: './src/button.stories.ts', stories: [{ id: 'button--primary', options: undefined }] }],
+      'it left out the story button--link of ./src/button.stories.ts',
+    ],
+    [
+      'gives a file it was not asked for',
+      [
+        {
+          importPath: './src/button.stories.ts',
+          stories: [
+            { id: 'button--primary', options: undefined },
+            { id: 'button--link', options: undefined },
+          ],
+        },
+        { importPath: './src/other.stories.ts', outcome: 'timed-out' as const },
+      ],
+      "it gave the stories file ./src/other.stories.ts, which visual-check didn't ask for",
+    ],
+    [
+      'gives a story it was not asked for',
+      [
+        {
+          importPath: './src/button.stories.ts',
+          stories: [
+            { id: 'button--primary', options: undefined },
+            { id: 'button--link', options: undefined },
+            { id: 'button--ghost', options: undefined },
+          ],
+        },
+      ],
+      "it gave the story button--ghost of ./src/button.stories.ts, which visual-check didn't ask for",
+    ],
+    [
+      'gives a file twice',
+      [
+        { importPath: './src/button.stories.ts', outcome: 'timed-out' as const },
+        { importPath: './src/button.stories.ts', outcome: 'timed-out' as const },
+      ],
+      'it gave the stories file ./src/button.stories.ts twice',
+    ],
+  ])('gives a problem when the answer %s, and closes the page', async (_name, answer, mismatch) => {
+    const { driver, read } = await readWith({ optionsRead: async () => optionsReadAnswer(answer) })
+
+    expect(read).toEqual(mismatchProblemOf(mismatch))
+    expect(driver.methods()).toEqual(['1:goto', '1:evaluate', '1:close'])
+  })
+
+  it('takes a file that failed to load with none of its stories, and in another order than asked', async () => {
+    const asked: OptionsRequest = {
+      ...request,
+      files: [
+        { importPath: './src/a.stories.ts', storyIds: ['a--one'] },
+        { importPath: './src/b.stories.ts', storyIds: ['b--one'] },
+      ],
+    }
+    const answer = optionsReadAnswer([
+      { importPath: './src/b.stories.ts', stories: [{ id: 'b--one', options: undefined }] },
+      { importPath: './src/a.stories.ts', outcome: 'failed', message: 'Boom' },
+    ])
+    const { read } = await readWith({ optionsRead: async () => answer }, asked)
+
+    expect(read).toEqual({
+      files: [
+        { importPath: './src/b.stories.ts', outcome: 'loaded', stories: [{ id: 'b--one', options: undefined }] },
+        { importPath: './src/a.stories.ts', outcome: 'failed', message: 'Boom' },
+      ],
+    })
   })
 
   it('gives a problem when the page cannot be opened', async () => {

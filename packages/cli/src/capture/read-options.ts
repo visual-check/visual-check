@@ -38,7 +38,8 @@ export interface OptionsRequest {
 export type StorybookOptionsRead =
   | {
       /**
-       * What the page read of each stories file, in the order asked for.
+       * What the page read of each stories file asked for, and of each story asked for in a file that loaded. It holds
+       * nothing else.
        */
       files: FileOptions[]
     }
@@ -83,6 +84,79 @@ function timedOutProblem(
 }
 
 /**
+ * Lists what the read must answer for, each as text: every stories file, and every story of a file that loaded.
+ * `storyIdsOf` gives a file's stories, or `undefined` for a file that didn't load.
+ */
+function entriesOf<File extends { importPath: string }>(
+  files: readonly File[],
+  storyIdsOf: (file: File) => readonly string[] | undefined,
+): string[] {
+  return files.flatMap((file) => [
+    `the stories file ${file.importPath}`,
+    ...(storyIdsOf(file) ?? []).map((id) => `the story ${id} of ${file.importPath}`),
+  ])
+}
+
+/**
+ * Gives the first entry that comes again in the list, or `undefined` when none does.
+ */
+function firstRepeatOf(entries: readonly string[]): string | undefined {
+  const seen = new Set<string>()
+
+  for (const entry of entries) {
+    if (seen.has(entry)) {
+      return entry
+    }
+
+    seen.add(entry)
+  }
+
+  return undefined
+}
+
+/**
+ * Says how the files the page read differ from the files asked for: the first file or story it left out, gave though
+ * it wasn't asked for, or gave twice. Gives `undefined` when they match.
+ */
+function mismatchOf(asked: readonly StoriesFile[], read: readonly FileOptions[]): string | undefined {
+  const loaded = new Set(read.flatMap((file) => (file.outcome === 'loaded' ? [file.importPath] : [])))
+  const wanted = entriesOf(asked, (file) => (loaded.has(file.importPath) ? file.storyIds : undefined))
+  const given = entriesOf(read, (file) => (file.outcome === 'loaded' ? file.stories.map(({ id }) => id) : undefined))
+  const givenSet = new Set(given)
+  const missing = wanted.find((entry) => !givenSet.has(entry))
+
+  if (missing !== undefined) {
+    return `it left out ${missing}`
+  }
+
+  const wantedSet = new Set(wanted)
+  const extra = given.find((entry) => !wantedSet.has(entry))
+
+  if (extra !== undefined) {
+    return `it gave ${extra}, which visual-check didn't ask for`
+  }
+
+  const twice = firstRepeatOf(given)
+
+  return twice === undefined ? undefined : `it gave ${twice} twice`
+}
+
+/**
+ * Gives the files the page read, or a problem when they aren't exactly the files and stories asked for.
+ */
+function filesReadOf(files: FileOptions[], request: OptionsRequest): StorybookOptionsRead {
+  const mismatch = mismatchOf(request.files, files)
+
+  if (mismatch === undefined) {
+    return { files }
+  }
+
+  return {
+    problem: `The page's answer to visual-check's read of Storybook ${request.storybookName}'s per-story options doesn't match what it asked for: ${mismatch}. ${tryAgain}`,
+  }
+}
+
+/**
  * Says what the page found, in the terms of the run: the files it read, or why it couldn't read them.
  */
 function describeRead(read: OptionsRead, request: OptionsRequest, readyTimeoutMs: number): StorybookOptionsRead {
@@ -90,7 +164,7 @@ function describeRead(read: OptionsRead, request: OptionsRequest, readyTimeoutMs
 
   switch (read.outcome) {
     case 'read':
-      return { files: read.files }
+      return filesReadOf(read.files, request)
     case 'timed-out':
       return { problem: timedOutProblem(read.step, request, readyTimeoutMs) }
     case 'preview-failed': {
@@ -175,8 +249,9 @@ async function readOnPage(
  * Reads the merged per-story options of the stories in a Storybook's preview, on a page of its own set up as a
  * capture page is. The page loads the preview, which renders no story, and reads each stories file, giving the preview
  * and the files each the whole readyTimeout. It's closed afterwards, ignoring a failure to. Whatever goes wrong other
- * than the browser exiting comes back as a problem that names the Storybook and the fix. Rejects only with a
- * `BrowserExitedError`, and then the page isn't closed, since the browser is gone.
+ * than the browser exiting comes back as a problem that names the Storybook and the fix, an answer that isn't exactly
+ * the files and stories asked for included. Rejects only with a `BrowserExitedError`, and then the page isn't closed,
+ * since the browser is gone.
  *
  * @public
  */

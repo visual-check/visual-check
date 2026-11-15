@@ -172,8 +172,9 @@ export async function runCli(
  * for Testing builds for the machine, else in a container), Docker answers `docker info` with a running engine of Linux
  * containers when the browser runs in a container, every Storybook in the run has a supported `storybook` version
  * installed, and every Storybook in the run answers with an index. In a container, the browser reaches a Storybook by
- * the route the five rules give, from the container the CLI runs in, Docker's engine and the OS. Then it captures the
- * selected stories.
+ * the route the five rules give, from the container the CLI runs in, Docker's engine and the OS. Then it reads and
+ * checks the per-story options of every story each Storybook's index lists, whatever the selection, and captures the
+ * selected stories that aren't disabled.
  *
  * @throws {ConfigError} When the config can't be found, loaded or used.
  */
@@ -229,6 +230,7 @@ async function runTestOrUpdate(
       storybook,
       version,
       stories: selectStories(stories, options.selection),
+      allStories: stories,
     })),
     cwd,
     insideContainer,

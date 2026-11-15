@@ -69,6 +69,8 @@ export interface StoryToCapture {
 /**
  * Why a story can't be captured, as a code a report can group by.
  *
+ * - `load-failed`: its stories file failed to load, or didn't load within readyTimeout, so every story of that file is
+ *   broken. The run's options read gives it, before any capture; a capture session never does.
  * - `error`: the story, Storybook or the browser failed it: Storybook reported an error or showed its error display,
  *   the story threw, the page script didn't run, or a step of the capture failed.
  * - `play-threw`: the story's `play` function threw or left unhandled errors.
@@ -82,6 +84,7 @@ export interface StoryToCapture {
  * @public
  */
 export type BrokenReason =
+  | 'load-failed'
   | 'error'
   | 'play-threw'
   | 'timeout'
@@ -91,8 +94,10 @@ export type BrokenReason =
   | 'browser-exited'
 
 /**
- * A story that can't be captured: why, and a one-line message for people saying so. A story whose fonts didn't load
- * also keeps the faces still loading, and a story that navigated away keeps where it went.
+ * A story that can't be captured: why, and a one-line message for people saying so. A capture session gives one for a
+ * story it can't capture, and the run gives one for a story in flight when its browser exits and for each story of a
+ * stories file that didn't load. A story whose fonts didn't load also keeps the faces still loading, and a story that
+ * navigated away keeps where it went.
  *
  * @public
  */
@@ -217,6 +222,8 @@ function notReady(readyTimeoutMs: number, doing: string): string {
 
 /**
  * Gives an error's message, or the thrown value as text, ending with a period.
+ *
+ * @public
  */
 export function failureReasonOf(error: unknown): string {
   const reason = error instanceof Error ? error.message : String(error)

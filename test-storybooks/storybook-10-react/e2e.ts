@@ -238,7 +238,7 @@ const readinessLines: [storyId: string, says: string][] = [
 const testPathWarning = 'StorybookTestRunner user agent'
 
 /**
- * The test-path case: the script it adds to every story page, which makes `navigator.userAgent` the page's own without
+ * The test-path case: the script it adds to every `iframe.html`, which makes `navigator.userAgent` the page's own without
  * ` StorybookTestRunner`, as a Storybook that ignores visual-check's user agent sees it, and the stories it captures,
  * by the pattern their IDs match.
  */
@@ -267,7 +267,7 @@ const killTimeouts = { capturing: 60_000, removed: 10_000 }
  */
 const browserExits = {
   storyLineSays: 'The browser exited',
-  relaunched: ['The browser exited', 'visual-check relaunches it once for the stories left.'],
+  relaunched: ['The browser exited', 'visual-check relaunches it once for the rest of the run.'],
   stopped: ['The browser exited', 'Run visual-check again.'],
 }
 
@@ -308,16 +308,18 @@ const contentTypes: Record<string, string> = {
 }
 
 /**
- * How the static server changes what it serves.
+ * How the static server changes what it serves. A story page is an `iframe.html` with an `id`, the page of the story
+ * the browser captures. The page visual-check reads every story's options on, `iframe.html?viewMode=story`, has none.
  */
 interface ServeOptions {
   /**
-   * Markup added to the end of every `iframe.html`'s `<head>`.
+   * Markup added to the end of every `iframe.html`'s `<head>`, the options-reading page's included, not only a story
+   * page's.
    */
   injectIntoStoryPage?: string
   /**
-   * Leaves every `iframe.html` request unanswered until `releaseStoryPages()` or the server stops, so a run can't
-   * finish a capture meanwhile.
+   * Leaves every story page request unanswered until `releaseStoryPages()` or the server stops, so a run can't finish
+   * a capture meanwhile. The options-reading page is answered at once.
    */
   holdStoryPages?: boolean
 }
@@ -332,7 +334,7 @@ interface StorybookServer {
   url: string
   /**
    * The ID of the story each request for a story page was for, the `id` of its `iframe.html`, in the order they came,
-   * held or not. A request means the browser is capturing that story.
+   * held or not. A request means the browser is capturing that story. The options-reading page isn't a story page.
    */
   storyPageRequests: () => string[]
   /**
@@ -688,8 +690,8 @@ function withMarkup(page: Buffer, markup: string | undefined): Buffer | string {
 }
 
 /**
- * Answers a request for a URL path with the static build's file, or 404 when it names no file there. A story page
- * gets the markup `injectIntoStoryPage` gives.
+ * Answers a request for a URL path with the static build's file, or 404 when it names no file there. Every
+ * `iframe.html`, the options-reading page included, gets the markup `injectIntoStoryPage` gives.
  */
 function serveFile(pathname: string, response: ServerResponse, options: ServeOptions): void {
   const filePath = staticFileOf(pathname)
@@ -708,16 +710,18 @@ function serveFile(pathname: string, response: ServerResponse, options: ServeOpt
 }
 
 /**
- * Records a request for a story's page under the story's ID, the `id` search parameter of its `iframe.html`.
+ * Gives the ID of the story a request is for when it asks for a story page, an `iframe.html` with an `id`, or
+ * `undefined` for any other request, the options-reading page's included.
  */
-function recordStoryPageRequest(storyPageRequests: string[], searchParams: URLSearchParams): void {
-  storyPageRequests.push(searchParams.get('id') ?? '')
+function storyPageIdOf(pathname: string, searchParams: URLSearchParams): string | undefined {
+  return pathname === '/iframe.html' ? (searchParams.get('id') ?? undefined) : undefined
 }
 
 /**
  * Serves the static build on a free port of 127.0.0.1, changed as the options say, and records the requests for story
- * pages. While it holds them, it keeps each one's answer until they're released. It never answers a request for the
- * font file the font readiness story asks for, until it stops.
+ * pages. While it holds them, it keeps each one's answer until they're released. The options-reading page is never
+ * held or recorded, so a run reads every story's options before it asks for a story page. It never answers a request
+ * for the font file the font readiness story asks for, until it stops.
  */
 async function serveStorybook(options: ServeOptions = {}): Promise<StorybookServer> {
   const storyPageRequests: string[] = []
@@ -727,8 +731,8 @@ async function serveStorybook(options: ServeOptions = {}): Promise<StorybookServ
   /**
    * Records a request for a story page, then answers it, or keeps the answer while the server holds story pages.
    */
-  const answerStoryPage = (searchParams: URLSearchParams, answer: () => void): void => {
-    recordStoryPageRequest(storyPageRequests, searchParams)
+  const answerStoryPage = (storyId: string, answer: () => void): void => {
+    storyPageRequests.push(storyId)
 
     if (holding) {
       heldAnswers.push(answer)
@@ -742,13 +746,14 @@ async function serveStorybook(options: ServeOptions = {}): Promise<StorybookServ
   const server = createServer((request, response) => {
     const { pathname, searchParams } = new URL(request.url ?? '/', 'http://127.0.0.1')
     const answer = (): void => serveFile(pathname, response, options)
+    const storyId = storyPageIdOf(pathname, searchParams)
 
     if (pathname === neverAnsweredPath) {
       return
     }
 
-    if (pathname === '/iframe.html') {
-      answerStoryPage(searchParams, answer)
+    if (storyId !== undefined) {
+      answerStoryPage(storyId, answer)
 
       return
     }
@@ -1281,7 +1286,7 @@ async function checkDeliberateChange(expected: Outcomes): Promise<string[]> {
 }
 
 /**
- * With every story page's `navigator.userAgent` its own without `StorybookTestRunner`, Storybook takes the path it
+ * With every `iframe.html`'s `navigator.userAgent` its own without `StorybookTestRunner`, Storybook takes the path it
  * takes off the test path, waiting about 100 ms as each story completes. `test` with 2 workers gives the button
  * stories their expected outcomes, so it exits 0, and standard error warns once that the Storybook seems to ignore the
  * user agent, naming it and the version of the `storybook` package installed here. The case writes its own config

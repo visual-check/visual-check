@@ -73,20 +73,30 @@ export function optionsReadAnswer(files: readonly FileRead[]): Record<string, un
 }
 
 /**
- * Answers an options read expression as the page would where every file loads and no story has options, by running
- * the real expression against a page script that reads the files it asks for.
+ * Answers the options read as the page would where every file loads and no story has options.
+ */
+function everyFileLoaded(files: readonly StoriesFile[]): Record<string, unknown> {
+  return optionsReadAnswer(
+    files.map(({ importPath, storyIds }) => ({
+      importPath,
+      stories: storyIds.map((id) => ({ id, options: undefined })),
+    })),
+  )
+}
+
+/**
+ * Answers an options read expression by running the real expression against a page script whose read gives what
+ * `answer` builds from the files the expression asks for. By default it answers as the page would where every file
+ * loads and no story has options.
  *
  * @public
  */
-export async function answerOptionsReadExpression(expression: string): Promise<unknown> {
+export async function answerOptionsReadExpression(
+  expression: string,
+  answer: (files: StoriesFile[]) => unknown = everyFileLoaded,
+): Promise<unknown> {
   const state = {
-    readOptions: async (files: StoriesFile[]) =>
-      optionsReadAnswer(
-        files.map(({ importPath, storyIds }) => ({
-          importPath,
-          stories: storyIds.map((id) => ({ id, options: undefined })),
-        })),
-      ),
+    readOptions: async (files: StoriesFile[]) => answer(files),
   }
 
   return await runInNewContext(expression, { [stateGlobal]: state })
