@@ -15,6 +15,7 @@ const settings: CaptureSettings = {
   timezone: 'Europe/Warsaw',
   locale: 'pl-PL',
   colorScheme: 'dark',
+  maskColor: '#FF00FF',
 }
 
 /**

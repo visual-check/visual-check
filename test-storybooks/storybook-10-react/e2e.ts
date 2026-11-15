@@ -190,6 +190,17 @@ const deliberateChange = {
 }
 
 /**
+ * The grow case: the masked story it widens, by the pattern its ID matches, and the script it adds to every
+ * `iframe.html`, which runs before Storybook imports any stories file and widens the story's masked element from 200 to
+ * 300 px, so its mask grows with it.
+ */
+const growingMask = {
+  storyId: 'masks--grows',
+  filter: /^masks--grows$/,
+  script: '<script>globalThis.__visualCheckE2eGrow = true</script>',
+}
+
+/**
  * The one-pixel change: the story it changes, by its ID and the pattern that matches only it, the stylesheet that
  * changes it and the detail its line must hold with `pixels: 0`, `differs:` included so a larger count can't match.
  * The stylesheet draws one black CSS pixel at (1000, 600) through a fixed `body::after`, which takes no space in the
@@ -293,6 +304,17 @@ const perStoryOptionsLines: [storyId: string, says: string][] = [
   ['wait--throws', "The story's wait hook threw Error: visual-check: wait threw"],
   ['load-fails--first', 'failed to load: Error: visual-check: this stories file fails to load'],
   ['load-fails--second', 'failed to load: Error: visual-check: this stories file fails to load'],
+]
+
+/**
+ * What the line of each broken capture area story says, in its reason's own wording: that the element selector matched
+ * nothing or a box of zero size, and that the full page is over the most a capture can be, with the hint to set
+ * `element`.
+ */
+const captureAreaLines: [storyId: string, says: string][] = [
+  ['capture-area--element-missing', 'matched nothing'],
+  ['capture-area--element-zero-size', 'box of zero size'],
+  ['capture-area--too-tall', 'over 32,767 on a side. Set element'],
 ]
 
 /**
@@ -1286,16 +1308,19 @@ async function checkCommittedBaselines(expected: Outcomes): Promise<string[]> {
 
 /**
  * Lists what is wrong with a run of `test --all` against the committed baselines. It gives exactly the expected
- * outcomes. Each broken readiness and per-story options story's line says why, and standard error has no test-path
- * warning, since every page is on Storybook's test path. The disabled stories, which `index.json` lists, have no line,
- * and the header counts exactly the snapshots with an expected outcome, the modes' included. The story that lists
- * `dark` and `mobile` has exactly 3 lines, and the story with its own list of modes has no line for the meta's `dark`.
- * Outside the Storybook 10 test Storybook, the committed animation baselines are byte-identical to its own.
+ * outcomes. Each broken readiness, per-story options and capture area story's line says why, and standard error has
+ * no test-path warning, since every page is on Storybook's test path. The disabled stories, which `index.json` lists,
+ * have no line, and the header counts exactly the snapshots with an expected outcome, the modes' included. The story
+ * that lists `dark` and `mobile` has exactly 3 lines, and the story with its own list of modes has no line for the
+ * meta's `dark`. Outside the Storybook 10 test Storybook, the committed animation baselines are byte-identical to its
+ * own.
  */
 function committedBaselinesProblems(run: CliRun, expected: Outcomes): string[] {
   return [
     ...expectedRunProblems('test', run, expected),
-    ...[...readinessLines, ...perStoryOptionsLines].flatMap(([storyId, says]) => lineSaysProblems(run, storyId, says)),
+    ...[...readinessLines, ...perStoryOptionsLines, ...captureAreaLines].flatMap(([storyId, says]) =>
+      lineSaysProblems(run, storyId, says),
+    ),
     ...noTestPathWarningProblems(run.stderr),
     ...storybook10AnimationProblems(),
     ...disabledStoryProblems(run),
@@ -1590,6 +1615,21 @@ async function checkDeliberateChange(expected: Outcomes): Promise<string[]> {
     return [
       ...exitCodeProblems('test', run, 1),
       ...outcomeProblems('test', run.outcomes, { ...expected, [deliberateChange.storyId]: 'differs' }),
+    ]
+  })
+}
+
+/**
+ * A masked element that grows, and its mask with it, fails `test` with that story's snapshot differing: the mask
+ * covers the element's box as it is at capture, not the baseline's.
+ */
+async function checkGrowingMask(): Promise<string[]> {
+  return await withStorybookServer({ injectIntoIframe: growingMask.script }, async (server) => {
+    const run = await runCli(['test', '--filter', growingMask.filter.source, '--url', server.url])
+
+    return [
+      ...exitCodeProblems('test', run, 1),
+      ...outcomeProblems('test', run.outcomes, { [growingMask.storyId]: 'differs' }),
     ]
   })
 }
@@ -2194,7 +2234,7 @@ if (setupProblems.length > 0) {
   const expected = readExpectedOutcomes()
   const passed = await runCases([
     {
-      name: "committed baselines: test gives the expected outcomes, each broken readiness and per-story options story's line says why, no line for a disabled story, the header counts the expected outcomes, a story listing two modes has 3 lines, a story's own modes leave out the meta's, no test-path warning, the animation baselines are byte-identical to storybook-10-react's",
+      name: "committed baselines: test gives the expected outcomes, each broken readiness, per-story options and capture area story's line says why, no line for a disabled story, the header counts the expected outcomes, a story listing two modes has 3 lines, a story's own modes leave out the meta's, no test-path warning, the animation baselines are byte-identical to storybook-10-react's",
       run: () => checkCommittedBaselines(expected),
     },
     {
@@ -2216,6 +2256,10 @@ if (setupProblems.length > 0) {
     {
       name: `deliberate change: test exits 1 and ${deliberateChange.storyId} differs`,
       run: () => checkDeliberateChange(expected),
+    },
+    {
+      name: `a masked element that grows: test exits 1 and ${growingMask.storyId} differs`,
+      run: checkGrowingMask,
     },
     {
       name: `one-pixel change: with pixels: 0, test exits 1, ${onePixelChange.storyId} differs saying "1 differ, 0 allowed" and the report holds its images; with the default tolerance, test passes it`,

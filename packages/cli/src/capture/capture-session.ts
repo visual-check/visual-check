@@ -3,7 +3,10 @@ import { testPathUserAgentSuffix } from '../storybook/test-path.js'
 import { readWaitHookRun, type WaitHookRun, waitHookExpression } from '../storybook/wait-hook.js'
 import {
   BrowserExitedError,
+  type CaptureArea,
+  CaptureTooLargeError,
   type Driver,
+  maxCaptureSide,
   type Page,
   PageCrashedError,
   PageNavigatedAwayError,
@@ -17,8 +20,10 @@ import {
   assetsReadyExpression,
   endStateExpression,
   pageInitScript,
+  prepareCaptureExpression,
   readAssetsReadiness,
 } from './page-script.js'
+import { type CapturePrep, readCapturePrep, type StoryMask } from './prepare-capture.js'
 
 /**
  * How much longer than a wait in the page the driver waits for its answer, in ms. The wait in the page gives up first
@@ -36,10 +41,10 @@ export interface CaptureSettings {
    * The config's `readyTimeout`, in ms, per attempt: a story that navigates away is captured again, up to 2 more times,
    * each with the whole of it. It's counted from just before the viewport is set. Loading the story (`goto`), waiting
    * for Storybook to report it finished, waiting for its images and fonts, running its wait hook, checking its images
-   * and fonts again after the hook, bringing it to its end state and checking its images and fonts again after that
-   * share it, each getting what's left, in whole ms rounded up. Each wait in the page gives up when it runs out, and the
-   * driver allows up to 1 s more for the page's answer. Setting the viewport and the capture are bound by the driver's
-   * own fixed limits instead.
+   * and fonts again after the hook, bringing it to its end state, checking its images and fonts again after that and
+   * painting its masks share it, each getting what's left, in whole ms rounded up. Each wait in the page gives up when
+   * it runs out, and the driver allows up to 1 s more for the page's answer. Setting the viewport and the capture are
+   * bound by the driver's own fixed limits instead.
    */
   readyTimeoutMs: number
   /**
@@ -54,10 +59,15 @@ export interface CaptureSettings {
    * The colour scheme the page's `prefers-color-scheme` media feature reports.
    */
   colorScheme: PageSetup['colorScheme']
+  /**
+   * The colour masks are painted in: `#RGB` or `#RRGGBB`.
+   */
+  maskColor: string
 }
 
 /**
- * A snapshot to capture: a story's URL, with a mode's globals in it, and the viewport to capture it at.
+ * A snapshot to capture: a story's URL, with a mode's globals in it, the viewport to capture it at, and the story's
+ * element and masks.
  *
  * @public
  */
@@ -75,6 +85,14 @@ export interface StoryToCapture {
    * The size the snapshot is laid out and captured at: the default capture's, or its mode's merged over it.
    */
   viewport: PageViewport
+  /**
+   * The CSS selector of the element whose box is captured. The full page is captured without it.
+   */
+  element?: string
+  /**
+   * The masks painted over the story before its capture, in order. None without it.
+   */
+  masks?: readonly StoryMask[]
 }
 
 /**
@@ -90,6 +108,8 @@ export interface StoryToCapture {
  * - `wait-threw`: the story's `wait` hook threw or rejected.
  * - `navigated-away`: the story's page went to another document.
  * - `crashed`: the page crashed, usually from running out of memory.
+ * - `too-tall`: the capture is over 32,767 device pixels on a side.
+ * - `element-missing`: the story's `element` selector matched nothing, or an element whose box is of zero size.
  * - `browser-exited`: the browser exited while the story was in flight. The run's browser gives it; a capture session
  *   rejects with a `BrowserExitedError` instead.
  *
@@ -104,6 +124,8 @@ export type BrokenReason =
   | 'wait-threw'
   | 'navigated-away'
   | 'crashed'
+  | 'too-tall'
+  | 'element-missing'
   | 'browser-exited'
 
 /**
@@ -213,6 +235,7 @@ type Step =
   | 'assets-after-wait'
   | 'end-state'
   | 'assets-after-end-state'
+  | 'masks'
   | 'capture'
 
 /**
@@ -233,6 +256,7 @@ const stepNames: Record<Step, string> = {
   'assets-after-wait': 'waiting for images and fonts after its wait hook',
   'end-state': 'bringing the story to its end state',
   'assets-after-end-state': 'waiting for images and fonts after its end state',
+  masks: 'painting its masks and hiding the caret',
   capture: 'capturing the snapshot',
 }
 
@@ -249,6 +273,7 @@ const stepTimeouts: Partial<Record<Step, string>> = {
   'end-state': 'its page stopped answering while visual-check brought it to its end state',
   'assets-after-end-state':
     'its page stopped answering while visual-check waited for its images and fonts after its end state',
+  masks: 'its page stopped answering while visual-check painted its masks and hid the caret',
 }
 
 /**
@@ -403,6 +428,49 @@ function describeEndState(endState: Exclude<EndState, { outcome: 'settled' }>, r
 }
 
 /**
+ * Says why a story can't be captured, from what preparing its capture found. `element` is the story's element selector.
+ */
+function describeCapturePrep(
+  prep: Exclude<CapturePrep, { outcome: 'ready' }>,
+  element: string | null,
+  readyTimeoutMs: number,
+): BrokenStory {
+  switch (prep.outcome) {
+    case 'element-missing':
+      return {
+        reason: 'element-missing',
+        message:
+          prep.found === 'nothing'
+            ? `The element selector ${JSON.stringify(element)} matched nothing.`
+            : `The element selector ${JSON.stringify(element)} matched an element with a box of zero size.`,
+      }
+    case 'invalid-selector':
+      return {
+        reason: 'error',
+        message:
+          prep.of === 'element'
+            ? `The element selector ${JSON.stringify(element)} isn't valid CSS: ${failureReasonOf(prep.message)}`
+            : `The selector of mask ${JSON.stringify(prep.name)} isn't valid CSS: ${failureReasonOf(prep.message)}`,
+      }
+    case 'timed-out':
+      return {
+        reason: 'timeout',
+        message: notReady(readyTimeoutMs, 'visual-check was still looking for remote content to mask'),
+      }
+    case 'script-missing':
+      return {
+        reason: 'error',
+        message: "visual-check's page script didn't run in the story's page, so it couldn't paint its masks.",
+      }
+    case 'paint-failed':
+      return {
+        reason: 'error',
+        message: `visual-check couldn't paint the story's masks: ${failureReasonOf(prep.message)}`,
+      }
+  }
+}
+
+/**
  * Says why a story isn't ready to capture, from what running its wait hook found.
  */
 function describeWaitHookRun(
@@ -431,7 +499,9 @@ function describeWaitHookRun(
 
 /**
  * Says why a story couldn't be captured, from the error a step failed with. A `PageTimeoutError` from loading the story
- * or from a wait in the page means readyTimeout ran out. `story` shows a URL on the story's own origin as a path.
+ * or from a wait in the page means readyTimeout ran out. A `CaptureTooLargeError` means the story is too tall to
+ * capture: the hint says to set `element` for the full page, or to capture a smaller element. `story` shows a URL on
+ * the story's own origin as a path.
  */
 function describeFailure(error: unknown, step: Step, story: StoryToCapture, readyTimeoutMs: number): BrokenStory {
   if (error instanceof PageCrashedError) {
@@ -446,6 +516,15 @@ function describeFailure(error: unknown, step: Step, story: StoryToCapture, read
       reason: 'navigated-away',
       message: `The story navigated away to ${displayUrlOf(error.url, story.url)}. Await the new page before clicking.`,
       url: error.url,
+    }
+  }
+
+  if (error instanceof CaptureTooLargeError) {
+    const hint = story.element === undefined ? 'Set element to capture part of the story' : 'Capture a smaller element'
+
+    return {
+      reason: 'too-tall',
+      message: `The capture is ${error.deviceWidth} × ${error.deviceHeight} device pixels, over ${maxCaptureSide.toLocaleString('en-US')} on a side. ${hint}, or use a smaller viewport.`,
     }
   }
 
@@ -465,11 +544,12 @@ function describeFailure(error: unknown, step: Step, story: StoryToCapture, read
 
 /**
  * Captures a story on an open page: sets the story's viewport, loads the story, waits until Storybook reports it
- * finished with nothing gone wrong, waits for its images and fonts, runs its wait hook, brings it to its end state and
- * captures the full page. When the story has a wait hook, its images and fonts are checked again after it, and when the
- * end state changed anything, they're checked again before the capture. Loading, the waits, the hook, the end state and
- * those checks share readyTimeout, each getting only what's left of it. A story that can't be captured comes back as a
- * broken story. Rejects only with a `BrowserExitedError`.
+ * finished with nothing gone wrong, waits for its images and fonts, runs its wait hook, brings it to its end state,
+ * measures its element, paints its masks, hides the caret and captures the element's box, or the full page when the
+ * story has no element. When the story has a wait hook, its images and fonts are checked again after it, and when the
+ * end state changed anything, they're checked again before the masks. Loading, the waits, the hook, the end state,
+ * those checks and the masks share readyTimeout, each getting only what's left of it. A story that can't be captured
+ * comes back as a broken story. Rejects only with a `BrowserExitedError`.
  */
 async function captureOnPage(page: Page, story: StoryToCapture, settings: CaptureSettings): Promise<StoryCapture> {
   const deadline = performance.now() + settings.readyTimeoutMs
@@ -520,6 +600,40 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
       : describeWaitHookRun(run, settings.readyTimeoutMs)
   }
 
+  /**
+   * Brings the story to its end state, and checks its images and fonts again when that changed anything. Gives why the
+   * story isn't ready, or nothing when it is.
+   */
+  const bringToEndState = async (): Promise<BrokenStory | undefined> => {
+    step = 'end-state'
+
+    const endState = readEndState(await waitInPage(endStateExpression))
+
+    if (endState.outcome !== 'settled') {
+      return describeEndState(endState, settings.readyTimeoutMs)
+    }
+
+    return endState.changed ? await checkAssets('assets-after-end-state') : undefined
+  }
+
+  /**
+   * Measures the story's element, paints its masks and hides the caret. Gives what to capture: the element's box, or
+   * the full page when the story has no element. Gives why the story can't be captured instead when that failed.
+   */
+  const prepareCapture = async (): Promise<{ area: CaptureArea } | { broken: BrokenStory }> => {
+    step = 'masks'
+
+    const element = story.element ?? null
+    const request = { element, masks: story.masks ?? [], maskColor: settings.maskColor }
+    const prep = readCapturePrep(await waitInPage((limit) => prepareCaptureExpression(request, limit)))
+
+    if (prep.outcome !== 'ready') {
+      return { broken: describeCapturePrep(prep, element, settings.readyTimeoutMs) }
+    }
+
+    return { area: prep.box ?? 'full-page' }
+  }
+
   try {
     await page.setViewport(story.viewport)
     step = 'load'
@@ -532,31 +646,21 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
       return { broken: describeStoryWait(wait, settings.readyTimeoutMs) }
     }
 
-    const broken = (await checkAssets('assets')) ?? (await runWaitHook())
+    const broken = (await checkAssets('assets')) ?? (await runWaitHook()) ?? (await bringToEndState())
 
     if (broken !== undefined) {
       return { broken }
     }
 
-    step = 'end-state'
+    const prepared = await prepareCapture()
 
-    const endState = readEndState(await waitInPage(endStateExpression))
-
-    if (endState.outcome !== 'settled') {
-      return { broken: describeEndState(endState, settings.readyTimeoutMs) }
-    }
-
-    if (endState.changed) {
-      const brokenAfterEndState = await checkAssets('assets-after-end-state')
-
-      if (brokenAfterEndState !== undefined) {
-        return { broken: brokenAfterEndState }
-      }
+    if ('broken' in prepared) {
+      return prepared
     }
 
     step = 'capture'
 
-    return { snapshot: await page.captureFullPage(), completingMs: wait.completingMs }
+    return { snapshot: await page.capture(prepared.area), completingMs: wait.completingMs }
   } catch (error) {
     if (error instanceof BrowserExitedError) {
       throw error

@@ -5,6 +5,7 @@
     "test-storybooks/storybook-10-react/visual-check.config.ts",
     "test-storybooks/storybook-11-react/visual-check.config.ts"
   ],
+  "ignorePatterns": ["test-storybooks/storybook-10-react/static/**"],
   "workspaces": {
     "settings": {
       "test-storybooks/storybook-9-react": { "ignoreDependencies": ["@visual-check/storybook"] },
@@ -96,6 +97,7 @@
         "test-storybooks/storybook-10-react/.storybook/shared-preview.ts",
         "test-storybooks/storybook-10-react/.storybook/visual-check.ts",
         "test-storybooks/storybook-10-react/stories/*.stories.tsx",
+        "test-storybooks/storybook-10-react/stories/remote-origin.ts",
         "test-storybooks/storybook-10-react/e2e.ts",
         "test-storybooks/storybook-10-react/visual-check.config.ts",
         "test-storybooks/storybook-11-react/.storybook/main.ts",
