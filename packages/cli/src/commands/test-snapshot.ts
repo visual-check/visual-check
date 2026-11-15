@@ -1,9 +1,15 @@
 import { BaselineError } from '../baselines/baseline-error.js'
 import { baselinePathOf, readBaseline } from '../baselines/baseline-files.js'
-import type { BrokenStory, StoryCapture } from '../capture/capture-session.js'
+import type { BrokenStory, RemoteContentBox, StoryCapture } from '../capture/capture-session.js'
 import { writeFailureImages } from '../report/report-folder.js'
-import { ImageDecodeError, type VisualDiff, type VisualDiffResult } from '../visual-diff/visual-diff.js'
+import {
+  ImageDecodeError,
+  type ImageRegion,
+  type VisualDiff,
+  type VisualDiffResult,
+} from '../visual-diff/visual-diff.js'
 import type { SnapshotToCapture } from './plan-snapshots.js'
+import { remoteContentHintOf } from './remote-content-hint.js'
 import { type CaptureStory, type SnapshotResult, storyToCaptureOf } from './snapshot-result.js'
 
 /**
@@ -26,7 +32,8 @@ export interface TestTools {
 }
 
 /**
- * Compares a snapshot with its baseline at `path` by the story's tolerance, at its viewport's device scale factor.
+ * Compares a snapshot with its baseline at `path` by the story's tolerance, at its viewport's device scale factor. With
+ * `regions`, a failure by pixels says whether every differing pixel lies inside one of them.
  *
  * @throws {BaselineError} When the files differ and the baseline can't be decoded, with the decoder's reason.
  */
@@ -36,6 +43,7 @@ async function compareWithBaseline(
   baseline: Uint8Array,
   snapshot: Uint8Array,
   path: string,
+  regions: readonly ImageRegion[] | undefined,
 ): Promise<VisualDiffResult> {
   try {
     return await visualDiff.compare({
@@ -43,6 +51,7 @@ async function compareWithBaseline(
       snapshot,
       tolerance: item.tolerance,
       scale: item.viewport.deviceScaleFactor,
+      ...(regions === undefined ? {} : { regions }),
     })
   } catch (error) {
     if (error instanceof ImageDecodeError && error.image === 'baseline') {
@@ -125,9 +134,23 @@ type Retries =
     }
 
 /**
+ * Gives the regions of a snapshot's remote content boxes, in the boxes' order, each grown by `margin` image pixels on
+ * every side, so a differing pixel on an anti-aliased edge counts as inside.
+ */
+function regionsAround(boxes: readonly RemoteContentBox[], margin: number): ImageRegion[] {
+  return boxes.map(({ x, y, width, height }) => ({
+    x: x - margin,
+    y: y - margin,
+    width: width + 2 * margin,
+    height: height + 2 * margin,
+  }))
+}
+
+/**
  * Captures a snapshot and compares it with its baseline. With `findRemoteContent`, the capture also brings back the
- * remote content the snapshot shows. The time is the capture's alone: it leaves out the browser's launch and the
- * comparison.
+ * remote content the snapshot shows, and the comparison is told its boxes, each grown by the device scale factor
+ * rounded up, in image pixels, so a failure by pixels says which boxes hold the differing pixels. The time is the
+ * capture's alone: it leaves out the browser's launch and the comparison.
  *
  * @throws {BaselineError} When the files differ and the baseline can't be decoded.
  * @throws {ImageDecodeError} When the snapshot can't be decoded, which the browser's PNG files rule out.
@@ -150,7 +173,11 @@ async function attemptOf(
   }
 
   const elapsedMs = Math.round(performance.now() - started)
-  const result = await compareWithBaseline(visualDiff, item, baseline.bytes, capture.snapshot, baseline.path)
+  const regions =
+    capture.remoteContent === undefined
+      ? undefined
+      : regionsAround(capture.remoteContent, Math.ceil(item.viewport.deviceScaleFactor))
+  const result = await compareWithBaseline(visualDiff, item, baseline.bytes, capture.snapshot, baseline.path, regions)
 
   return { capture, elapsedMs, result }
 }
@@ -178,14 +205,37 @@ async function retryOf(retries: number, attempt: () => Promise<Attempt>): Promis
 }
 
 /**
+ * Gives the hosts of the remote content that holds a retry's differing pixels, each once, in the order of its boxes,
+ * when every differing pixel lies inside that remote content. Gives `undefined` when there was no retry, when it's
+ * broken or differs in size, when its remote content is unknown, or when a differing pixel lies outside it.
+ */
+function remoteHostsOf(retry: Attempt | undefined): string[] | undefined {
+  if (retry === undefined || 'broken' in retry) {
+    return undefined
+  }
+
+  const { capture, result } = retry
+
+  if (result.outcome !== 'differs' || result.reason !== 'pixels' || result.regionsHit === undefined) {
+    return undefined
+  }
+
+  const boxes = capture.remoteContent ?? []
+
+  return [...new Set(result.regionsHit.flatMap((index) => boxes[index]?.host ?? []))]
+}
+
+/**
  * Tests one snapshot: a missing baseline is reported without a capture, and a snapshot passes when it differs from
  * its baseline by no more than the story's tolerance. One that differs beyond it, or in size, leaves its baseline,
  * snapshot and visual diff in the report folder at once, then is captured again, up to `retries` more times, each
  * capture a fresh one that also brings back the remote content it shows. The first retry that passes makes the
  * snapshot pass, flaky. A retry that comes back broken stops the retries. When no retry passes, the snapshot differs
- * with its first capture's message, and the report keeps that capture's images. A broken first capture isn't retried.
- * It asks for a capture only once it has read the baseline. A pass's time is the passing capture's alone: it leaves
- * out the browser's launch and the comparison.
+ * with its first capture's message, and the report keeps that capture's images. When both the first capture and the
+ * last retry differ by pixels, and every differing pixel of the last retry lies inside its remote content, give or take
+ * the device scale factor rounded up, the result carries a hint that names those hosts. A broken first capture isn't
+ * retried. It asks for a capture only once it has read the baseline. A pass's time is the passing capture's alone: it
+ * leaves out the browser's launch and the comparison.
  *
  * @throws {BaselineError} When the baseline can't be read or decoded.
  * @throws {ReportError} When an image can't be written to the report folder.
@@ -227,7 +277,14 @@ export async function testSnapshot(
   const retried = await retryOf(retries, () => attempt({ findRemoteContent: true }))
 
   if ('failed' in retried) {
-    return { status: 'differs', detail: `differs: ${result.message}`, completingMs: capture.completingMs }
+    const hosts = result.reason === 'pixels' ? remoteHostsOf(retried.failed) : undefined
+
+    return {
+      status: 'differs',
+      detail: `differs: ${result.message}`,
+      completingMs: capture.completingMs,
+      ...(hosts === undefined ? {} : { hint: remoteContentHintOf(hosts) }),
+    }
   }
 
   const { passed } = retried

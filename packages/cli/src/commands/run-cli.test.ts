@@ -29,7 +29,7 @@ import { ContainerError } from '../container/container-error.js'
 import { answerOptionsReadExpression, optionsReadAnswer } from '../storybook/options-read.fixture.js'
 import type { StoriesFile } from '../storybook/options-read.js'
 import { finishedAnswer } from '../storybook/preview-script.fixture.js'
-import { greyPng, whitePixels } from '../visual-diff/images.fixture.js'
+import { greyPng, type PixelChange, whitePixels } from '../visual-diff/images.fixture.js'
 import type { ContainerRoute } from './browser-route.js'
 import type { BrowserLaunch, LaunchBrowser } from './launch-browser.js'
 import { type RunCliOptions, runCli } from './run-cli.js'
@@ -202,6 +202,11 @@ interface FakeStory {
    * answers every load the same when not given.
    */
   captures?: FakeStory[]
+  /**
+   * The remote content the page gives when the capture asks for it, each item by its host and box in CSS pixels of the
+   * top document. The page gives none, leaving the remote content unknown, when not given.
+   */
+  remote?: { host: string; x: number; y: number; width: number; height: number }[]
 }
 
 /**
@@ -494,13 +499,14 @@ function fakeDriverOf({
           const status = story.broken === true ? 'error' : 'success'
           const completingMs = story.completingMs ?? null
           const request = /\.prepareCapture\((.*), \d+\)\n\}\)\(\)$/s.exec(expression)?.[1]
+          const preparation =
+            request === undefined
+              ? undefined
+              : (JSON.parse(request) as { element: unknown; masks: unknown; findRemote: unknown })
+          const remote = preparation?.findRemote === true ? story.remote : undefined
 
-          if (request !== undefined) {
-            const { element, masks, findRemote } = JSON.parse(request) as {
-              element: unknown
-              masks: unknown
-              findRemote: unknown
-            }
+          if (preparation !== undefined) {
+            const { element, masks, findRemote } = preparation
 
             record.preparations.push({ id, element, masks, findRemote })
           }
@@ -509,6 +515,7 @@ function fakeDriverOf({
             {
               storyWait: async () => finishedAnswer({ status, completingMs }),
               optionsRead: async () => await answerOptionsReadExpression(expression, answerRead),
+              capturePrep: async () => ({ outcome: 'ready', box: null, ...(remote === undefined ? {} : { remote }) }),
             },
             expression,
             timeoutMs,
@@ -2141,6 +2148,234 @@ describe('runCli retries and flaky snapshots', () => {
         '3 passed (2 flaky) · 1 differs',
       ),
     )
+  })
+})
+
+/**
+ * Makes changes to white over the square of `size` × `size` pixels whose top left pixel is at `x`, `y`.
+ */
+function whiteSquare(x: number, y: number, size: number): PixelChange[] {
+  return Array.from({ length: size * size }, (_, index) => ({
+    x: x + (index % size),
+    y: y + Math.floor(index / size),
+    rgba: [255, 255, 255, 255],
+  }))
+}
+
+/**
+ * A black PNG file of the same size as `defaultSnapshot`, with a white square of 5 × 5 pixels from 2, 2: 25 pixels
+ * that differ, beyond the default tolerance at scale 1.
+ */
+const squareSnapshot = new Uint8Array(await greyPng(10, 10, 0, whiteSquare(2, 2, 5)))
+
+/**
+ * The line of story `a` when its snapshot is `squareSnapshot`.
+ */
+const squareLine = '✗ web  a  differs: 25 differ, 20 allowed'
+
+/**
+ * Remote content from `images.unsplash.com` that covers the white square of `squareSnapshot` exactly.
+ */
+const squareRemote = [{ host: 'images.unsplash.com', x: 2, y: 2, width: 5, height: 5 }]
+
+/**
+ * Remote content from `images.unsplash.com` in a corner, far from the white square of `squareSnapshot`.
+ */
+const cornerRemote = [{ host: 'images.unsplash.com', x: 9, y: 9, width: 1, height: 1 }]
+
+/**
+ * The hint under a snapshot's line when it differs only inside remote content from `images.unsplash.com`.
+ */
+const unsplashHint = [
+  '  hint: Differs only inside remote content from images.unsplash.com. A CDN can serve different bytes to different ' +
+    'machines. Mask it by host:',
+  "    { host: 'images.unsplash.com' }",
+  '  See https://visual-check.vercel.app/docs/remote-content',
+]
+
+describe('runCli remote content hint', () => {
+  it('hints at a host mask when a retry differs only inside remote content, and still fails the snapshot', async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot })
+    const { options } = fakeBrowser({
+      a: { captures: [{ snapshot: squareSnapshot }, { snapshot: squareSnapshot, remote: squareRemote }] },
+    })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: printed(headerOf('test', 1), squareLine, ...unsplashHint, '0 passed · 1 differs'),
+      stderr: '',
+    })
+  })
+
+  it('gives no hint when the first capture or the last retry differs in size', async () => {
+    const whole = [{ host: 'images.unsplash.com', x: 0, y: 0, width: 10, height: 12 }]
+    const runs = [
+      [{ snapshot: tallerSnapshot }, { snapshot: squareSnapshot, remote: whole }],
+      [{ snapshot: squareSnapshot }, { snapshot: tallerSnapshot, remote: whole }],
+    ]
+
+    for (const captures of runs) {
+      const { project } = await createRun(['a'], { a: defaultSnapshot })
+      const result = await runCli(['test'], {}, project, fakeBrowser({ a: { captures } }).options)
+
+      expect(result.exitCode).toBe(1)
+      expect(result.stdout).not.toContain('hint:')
+    }
+  })
+
+  it('gives no hint when a differing pixel lies more than 1 px outside the remote content', async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot })
+    const remote = [{ host: 'images.unsplash.com', x: 4, y: 4, width: 3, height: 3 }]
+    const { options } = fakeBrowser({
+      a: { captures: [{ snapshot: squareSnapshot }, { snapshot: squareSnapshot, remote }] },
+    })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.stdout).toBe(printed(headerOf('test', 1), squareLine, '0 passed · 1 differs'))
+  })
+
+  it('counts a differing pixel within 1 px of the remote content as inside it, for anti-aliased edges', async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot })
+    const remote = [{ host: 'images.unsplash.com', x: 3, y: 3, width: 3, height: 3 }]
+    const { options } = fakeBrowser({
+      a: { captures: [{ snapshot: squareSnapshot }, { snapshot: squareSnapshot, remote }] },
+    })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.stdout).toBe(printed(headerOf('test', 1), squareLine, ...unsplashHint, '0 passed · 1 differs'))
+  })
+
+  it('hints by remote content that reaches past the image', async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot })
+    const remote = [{ host: 'images.unsplash.com', x: -3, y: -3, width: 10, height: 10 }]
+    const { options } = fakeBrowser({
+      a: { captures: [{ snapshot: squareSnapshot }, { snapshot: squareSnapshot, remote }] },
+    })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.stdout).toBe(printed(headerOf('test', 1), squareLine, ...unsplashHint, '0 passed · 1 differs'))
+  })
+
+  it('grows the margin with the device scale factor, rounded up', async () => {
+    // The remote content covers image pixels 6 to 13 at scale 2, and 4 to 15 with the margin of 2.
+    const remote = [{ host: 'images.unsplash.com', x: 3, y: 3, width: 4, height: 4 }]
+    const hintsOf = async (snapshot: Uint8Array): Promise<boolean> => {
+      const { project } = await createRun(['a'], { a: new Uint8Array(await greyPng(20, 20, 0)) })
+      const { options } = fakeBrowser(
+        { a: { captures: [{ snapshot }, { snapshot, remote }] } },
+        { read: { options: { a: { viewport: { deviceScaleFactor: 2 } } } } },
+      )
+      const result = await runCli(['test'], {}, project, options)
+
+      expect(result.exitCode).toBe(1)
+
+      return result.stdout.includes('hint:')
+    }
+
+    expect(await hintsOf(new Uint8Array(await greyPng(20, 20, 0, whiteSquare(4, 4, 10))))).toBe(true)
+    expect(await hintsOf(new Uint8Array(await greyPng(20, 20, 0, whiteSquare(3, 3, 11))))).toBe(false)
+  })
+
+  it('gives no hint with retries set to 0', async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot }, 'retries: 0')
+    const { options } = fakeBrowser({ a: { snapshot: squareSnapshot, remote: squareRemote } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.stdout).toBe(printed(headerOf('test', 1), squareLine, '0 passed · 1 differs'))
+  })
+
+  it('gives no hint to a snapshot that passes on a retry', async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot })
+    const { options } = fakeBrowser({ a: { captures: [{ snapshot: squareSnapshot }, { remote: squareRemote }] } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).not.toContain('hint:')
+  })
+
+  it('gives no hint when the last retry is broken', async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot }, 'retries: 2')
+    const { options } = fakeBrowser({
+      a: {
+        captures: [{ snapshot: squareSnapshot }, { snapshot: squareSnapshot, remote: squareRemote }, { broken: true }],
+      },
+    })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.stdout).toBe(printed(headerOf('test', 1), squareLine, '0 passed · 1 differs'))
+  })
+
+  it('names each host whose remote content holds a differing pixel once, in the order of its boxes', async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot })
+    const remote = [
+      { host: 'b.com', x: 2, y: 2, width: 2, height: 5 },
+      { host: 'a.com', x: 9, y: 9, width: 1, height: 1 },
+      { host: 'b.com', x: 4, y: 2, width: 1, height: 5 },
+      { host: 'c.com', x: 5, y: 2, width: 2, height: 5 },
+    ]
+    const { options } = fakeBrowser({
+      a: { captures: [{ snapshot: squareSnapshot }, { snapshot: squareSnapshot, remote }] },
+    })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.stdout).toBe(
+      printed(
+        headerOf('test', 1),
+        squareLine,
+        '  hint: Differs only inside remote content from b.com and c.com. A CDN can serve different bytes to different ' +
+          'machines. Mask it by host:',
+        "    { host: 'b.com' }",
+        "    { host: 'c.com' }",
+        '  See https://visual-check.vercel.app/docs/remote-content',
+        '0 passed · 1 differs',
+      ),
+    )
+  })
+
+  it("hints by the last retry's remote content alone", async () => {
+    const hintsOf = async (captures: FakeStory[]): Promise<boolean> => {
+      const { project } = await createRun(['a'], { a: defaultSnapshot }, 'retries: 2')
+      const result = await runCli(['test'], {}, project, fakeBrowser({ a: { captures } }).options)
+
+      return result.stdout.includes('hint:')
+    }
+    const first = { snapshot: squareSnapshot, remote: squareRemote }
+
+    expect(
+      await hintsOf([
+        first,
+        { snapshot: squareSnapshot, remote: squareRemote },
+        { snapshot: squareSnapshot, remote: cornerRemote },
+      ]),
+    ).toBe(false)
+    expect(
+      await hintsOf([
+        first,
+        { snapshot: squareSnapshot, remote: cornerRemote },
+        { snapshot: squareSnapshot, remote: squareRemote },
+      ]),
+    ).toBe(true)
+  })
+
+  it('prints the hint of a finished snapshot when the run stops with exit 2', async () => {
+    const { project } = await createRun(
+      ['a', 'b', 'c'],
+      { a: defaultSnapshot, b: defaultSnapshot, c: defaultSnapshot },
+      'workers: 1',
+    )
+    const { options } = fakeBrowser({
+      a: { captures: [{ snapshot: squareSnapshot }, { snapshot: squareSnapshot, remote: squareRemote }] },
+      b: { browserExits: true },
+      c: { browserExits: true },
+    })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: printed(headerOf('test', 3, 1), squareLine, ...unsplashHint, `! web  b  ${browserExitedDetail}`),
+      stderr: `${relaunchNotice}${secondExitMessage}`,
+    })
   })
 })
 

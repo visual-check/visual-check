@@ -11,7 +11,7 @@ export type SnapshotStatus = 'passed' | 'differs' | 'missing' | 'broken' | 'writ
 
 /**
  * One snapshot's status, the text its line ends with and, for a captured snapshot, how long Storybook's `completing`
- * render step took.
+ * render step took. A snapshot that differs can carry a hint, printed under its line.
  */
 export interface SnapshotResult {
   /**
@@ -31,6 +31,11 @@ export interface SnapshotResult {
    * Whether the snapshot passed only on a retry, after its first capture differed.
    */
   flaky?: boolean
+  /**
+   * What the person can do about a snapshot that differs, such as masking the remote content it differs inside, as
+   * lines with no indentation.
+   */
+  hint?: string[]
 }
 
 /**

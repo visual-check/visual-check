@@ -476,13 +476,20 @@ function snapshotNameOf({ storybook, story, mode }: PlannedSnapshot): string {
 }
 
 /**
- * Gives the line of each snapshot that has finished, in the snapshots' order: its mark, name and detail.
+ * Gives the line of each snapshot that has finished, in the snapshots' order: its mark, name and detail, followed by
+ * the lines of its hint, when it has one, each indented by two spaces.
  */
 function linesOf({ items, results }: PlannedSnapshots): string[] {
   return items.flatMap((item, index) => {
     const result = results[index]
 
-    return result === undefined ? [] : [`${marks[result.status]} ${snapshotNameOf(item)}  ${result.detail}`]
+    if (result === undefined) {
+      return []
+    }
+
+    const hintLines = result.hint?.map((line) => `  ${line}`) ?? []
+
+    return [`${marks[result.status]} ${snapshotNameOf(item)}  ${result.detail}`, ...hintLines]
   })
 }
 
@@ -538,10 +545,13 @@ async function takeSnapshots(
  * viewport's device scale factor, and never captures a missing baseline. It clears the report folder,
  * `.visual-check/report` beside the config file, once the snapshots are planned, and writes the baseline, snapshot and
  * visual diff of each snapshot whose first capture differs there. A snapshot that differs is captured again, up to the
- * config's `retries` more times; one that passes on a retry passes, flaky, and its line ends with `· flaky`. After the
- * lines, `test` lists the flaky snapshots by name under a heading, when there are any, and its counts say how many
- * passes are flaky. A flaky snapshot never fails the run. `update` writes each snapshot whose baseline is missing or
- * isn't byte-identical to it, and never touches the report folder.
+ * config's `retries` more times; one that passes on a retry passes, flaky, and its line ends with `· flaky`. One that
+ * still differs by pixels on its first capture and its last retry, with every differing pixel of the last retry inside
+ * its remote content, give or take the device scale factor rounded up, gets a hint under its line: the hosts, a mask
+ * line for each and the docs page. The hint never changes the exit code. After the lines, `test` lists the flaky
+ * snapshots by name under a heading, when there are any, and its counts say how many passes are flaky. A flaky
+ * snapshot never fails the run. `update` writes each snapshot whose baseline is missing or isn't byte-identical to it,
+ * and never touches the report folder.
  *
  * Each Storybook with stories gets one options read, in config order, on a page of its own, covering every story its
  * `index.json` lists whatever the selection. So the browser is launched at the first read, even when no story then
