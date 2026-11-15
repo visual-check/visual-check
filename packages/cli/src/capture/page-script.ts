@@ -17,8 +17,8 @@ const keptCharacters = 500
 
 /**
  * The script that runs at the start of every document of a page, before the page's own scripts, in every driver. It
- * changes no styles, and only the Storybook adapter's part reads the document, once the story finished. It does only
- * this, keeping its own state under one non-enumerable global:
+ * changes no styles except emptying Storybook 9.1 and 10's pause stylesheets, and only the Storybook adapter's part
+ * reads the document, once the story finished. It does only this, keeping its own state under one non-enumerable global:
  *
  * - wraps `Element.prototype.attachShadow` to record every shadow root it creates, closed ones included, in
  *   `shadowRoots`;
@@ -28,8 +28,8 @@ const keptCharacters = 500
  *   or typed array by index, without listing all its keys, and each string cut first. So the page's getters and
  *   `toJSON` never run and a huge array costs little. A Proxy's traps can still run: `ownKeys`,
  *   `getOwnPropertyDescriptor`, `getPrototypeOf`, and `get` for an array's `length`;
- * - runs the Storybook adapter's script, which watches Storybook's preview for the story wait and keeps its state
- *   under a global of its own.
+ * - runs the Storybook adapter's script, which watches Storybook's preview for the story wait, empties Storybook 9.1
+ *   and 10's pause stylesheets, and keeps its state under a global of its own.
  *
  * The adapter's script runs first, so a failure in the rest can't keep the story wait from running and show as a
  * page script that didn't run.

@@ -49,6 +49,10 @@ interface FakePage {
    */
   documentReads: () => number
   /**
+   * What the page's original `appendChild` saw on each call: `this`, the node and the node's text at that moment.
+   */
+  appended: () => { target: unknown; node: unknown; text: unknown }[]
+  /**
    * Runs JavaScript in the page and gives back what it evaluates to.
    */
   run: (code: string) => unknown
@@ -74,12 +78,16 @@ interface FakePageOptions {
    * Whether the page's document has a body. It has one by default.
    */
   body?: boolean
+  /**
+   * Whether the page has `Node` and `HTMLStyleElement`. It has them by default.
+   */
+  nodes?: boolean
 }
 
 /**
  * Builds a fake page without the adapter's script. Its timers and clock are the test's fake ones.
  */
-function blankPage({ globals = {}, body = true }: FakePageOptions = {}): FakePage {
+function blankPage({ globals = {}, body = true, nodes = true }: FakePageOptions = {}): FakePage {
   const bodyClasses = new Set<string>()
   const pageBody = { classList: { contains: (name: string) => bodyClasses.has(name) } }
   let documentReads = 0
@@ -94,12 +102,46 @@ function blankPage({ globals = {}, body = true }: FakePageOptions = {}): FakePag
   })
 
   const context: Context = createContext(sandbox)
+  const appended: { target: unknown; node: unknown; text: unknown }[] = []
+
+  if (nodes) {
+    sandbox.recordAppend = (target: unknown, node: unknown, text: unknown) => {
+      appended.push({ target, node, text })
+    }
+
+    runInContext(
+      `globalThis.Node = class Node {
+        appendChild(node) {
+          let text
+          try {
+            text = node.textContent
+          } catch {
+            text = 'unreadable'
+          }
+          recordAppend(this, node, text)
+          if (node.fails) {
+            throw new Error('append failed')
+          }
+          return node
+        }
+      }
+      globalThis.HTMLStyleElement = class HTMLStyleElement extends Node {
+        constructor(text) {
+          super()
+          this.textContent = text
+        }
+      }`,
+      context,
+    )
+  }
+
   const run = (code: string): unknown => runInContext(code, context)
   const setGlobal = run('(name, value) => { globalThis[name] = value }') as (name: string, value: unknown) => void
 
   return {
     bodyClasses,
     documentReads: () => documentReads,
+    appended: () => appended,
     run,
     setGlobal,
     evaluate: async (expression) => JSON.parse(JSON.stringify(await run(expression))),
@@ -679,6 +721,8 @@ describe("the adapter's script", () => {
     page.setGlobal('__STORYBOOK_PREVIEW__', { ready: async () => undefined })
     channel.emit('storyRenderPhaseChanged', { newPhase: 'rendering', renderId: 1, storyId: 'button--primary' })
     channel.emit('storyThrewException', { name: 'Error', message: 'boom' })
+    appendStyle(page, disableSheet)
+    appendStyle(page, 'a { color: red }')
     await timedOutWait(page)
     expect(page.documentReads()).toBe(0)
   })
@@ -696,6 +740,144 @@ describe("the adapter's script", () => {
 
     page.run(storybookPageScript)
     expect(channel.listenerCounts()).toHaveProperty('storyFinished', 1)
+  })
+})
+
+/**
+ * The pause stylesheet Storybook 9.1 and 10 add on the test path, with the direction of its animations.
+ */
+function pauseSheet(direction: 'reverse' | 'normal'): string {
+  return `*, *:before, *:after {
+    animation-delay: 0s !important;
+    animation-direction: ${direction} !important;
+    animation-play-state: paused !important;
+    transition: none !important;
+  }`
+}
+
+/**
+ * The stylesheet Storybook 9.1 and 10 add and remove again to disable animations on the test path.
+ */
+const disableSheet = `*, *:before, *:after {
+    animation: none !important;
+  }`
+
+/**
+ * Appends a new `<style>` element with this text to a fake page's `<head>`-like node and gives back what the original
+ * `appendChild` saw of its text.
+ */
+function appendStyle(page: FakePage, text: string): unknown {
+  page.setGlobal('__text', text)
+  page.run('new Node().appendChild(new HTMLStyleElement(globalThis.__text))')
+
+  return page.appended().at(-1)?.text
+}
+
+describe("the test path's pause stylesheets", () => {
+  it.each([
+    ['the pause stylesheet, reversed', pauseSheet('reverse')],
+    ['the pause stylesheet, forward', pauseSheet('normal')],
+    ['the disable stylesheet', disableSheet],
+  ])('empties %s before it is appended', (_name, text) => {
+    expect(appendStyle(openPage(), text)).toBe('')
+  })
+
+  it.each([
+    ['one that runs an animation', '*, *:before, *:after {\n    animation: spin 1s infinite;\n  }'],
+    ['one with another selector', 'body {\n    animation: none !important;\n  }'],
+    [
+      'one that sets another property first',
+      '*, *:before, *:after {\n    color: red;\n    animation: none !important;\n  }',
+    ],
+  ])('keeps the text of %s', (_name, text) => {
+    expect(appendStyle(openPage(), text)).toBe(text)
+  })
+
+  it('lets a node that is not a style element through untouched', () => {
+    const page = openPage()
+
+    page.run(
+      `globalThis.__plain = { textContent: ${JSON.stringify(disableSheet)} }; new Node().appendChild(globalThis.__plain)`,
+    )
+    expect(page.appended().at(-1)?.text).toBe(disableSheet)
+    expect(page.run('globalThis.__plain.textContent')).toBe(disableSheet)
+  })
+
+  it('calls the original with the same this and node, and gives back its result', () => {
+    const page = openPage()
+
+    expect(
+      page.run(`(() => {
+        globalThis.__parent = new Node()
+        globalThis.__style = new HTMLStyleElement('a { color: red }')
+
+        return globalThis.__parent.appendChild(globalThis.__style) === globalThis.__style
+      })()`),
+    ).toBe(true)
+    expect(page.run('globalThis.__parent')).toBe(page.appended()[0]?.target)
+    expect(page.run('globalThis.__style')).toBe(page.appended()[0]?.node)
+  })
+
+  it('lets what the original throws through', () => {
+    const page = openPage()
+
+    expect(() =>
+      page.run(
+        '(() => { const style = new HTMLStyleElement(""); style.fails = true; new Node().appendChild(style) })()',
+      ),
+    ).toThrow('append failed')
+  })
+
+  it('wraps appendChild once when it runs twice', () => {
+    const page = openPage()
+    const wrapped = page.run('Node.prototype.appendChild')
+
+    page.run(storybookPageScript)
+    expect(page.run('Node.prototype.appendChild')).toBe(wrapped)
+  })
+
+  it('keeps the text of a stylesheet of the page that starts like the disable stylesheet', () => {
+    const text = `${disableSheet}\n.card { color: red }`
+
+    expect(appendStyle(openPage(), text)).toBe(text)
+  })
+
+  it('still appends a node whose text cannot be read', () => {
+    const page = openPage()
+
+    page.run(`(() => {
+      const style = new HTMLStyleElement('')
+
+      Object.defineProperty(style, 'textContent', { get: () => { throw new Error('unreadable') } })
+      new Node().appendChild(style)
+    })()`)
+    expect(page.appended()).toHaveLength(1)
+  })
+
+  it('leaves the script and the wait working when appendChild cannot be replaced', async () => {
+    const page = blankPage()
+
+    page.run(
+      "Object.defineProperty(Node.prototype, 'appendChild', { value: Node.prototype.appendChild, writable: false })",
+    )
+    page.run(storybookPageScript)
+
+    const channel = new FakeChannel()
+
+    page.setGlobal('__STORYBOOK_ADDONS_CHANNEL__', channel)
+
+    const wait = page.evaluate(storyWaitExpression('button--primary', 1000))
+
+    channel.emit('storyFinished', { storyId: 'button--primary', status: 'success' })
+    expect(await wait).toEqual(finishedAnswer())
+  })
+
+  it('leaves the wait working in a page without Node or HTMLStyleElement', async () => {
+    const { page, channel } = openStorybookPage({ nodes: false })
+    const wait = page.evaluate(storyWaitExpression('button--primary', 1000))
+
+    channel.emit('storyFinished', { storyId: 'button--primary', status: 'success' })
+    expect(await wait).toEqual(finishedAnswer())
   })
 })
 

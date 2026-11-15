@@ -51,11 +51,11 @@ Once per page:
 - **User agent** ends in `StorybookTestRunner`, which puts Storybook on its test path.
 - **Emulation:** `timezone`, `locale` and `colorScheme` from the config, focus emulation, and `prefers-reduced-motion: no-preference`.
 - **A script at document start** that does only three things:
-  - empties the pause stylesheets Storybook 9 and 10 add on the test path;
+  - empties the pause stylesheets Storybook 9.1 and 10 add on the test path;
   - wraps `attachShadow` to record every shadow root;
   - collects console messages, uncaught errors and unhandled rejections.
 
-  It changes no styles.
+  It changes no other styles.
 - Evaluations run with a user gesture, so `beforeunload` fires and can be handled.
 
 ## Each capture

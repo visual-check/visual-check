@@ -100,9 +100,27 @@ const keptErrors = 10
 const keptCharacters = 500
 
 /**
- * The script that runs at the start of every document of a page, as part of the page script. It changes no styles,
- * and it reads the document only once the story finished. It does only this, keeping its state under one
- * non-enumerable, frozen global:
+ * Matches the text of the two stylesheets Storybook 9.1 and 10 append to the document on the test path while a story
+ * completes: the one that disables animations for a moment, and the one that pauses them for good. Both are a single
+ * rule for `*, *:before, *:after`, matched in full so a stylesheet of the page's own never matches. It checks the text,
+ * not the version: Storybook 11 adds no stylesheet, so nothing matches there.
+ */
+const pauseSheetPattern = new RegExp(
+  [
+    String.raw`^\s*\*,\s*\*:before,\s*\*:after\s*\{\s*(?:`,
+    String.raw`animation:\s*none\s*!important;`,
+    String.raw`|animation-delay:\s*0s\s*!important;`,
+    String.raw`\s*animation-direction:\s*(?:reverse|normal)\s*!important;`,
+    String.raw`\s*animation-play-state:\s*paused\s*!important;`,
+    String.raw`\s*transition:\s*none\s*!important;`,
+    String.raw`)\s*\}\s*$`,
+  ].join(''),
+)
+
+/**
+ * The script that runs at the start of every document of a page, as part of the page script. Its one style change is
+ * to empty the pause stylesheets Storybook 9.1 and 10 add on the test path, and it reads the document only once the
+ * story finished. It does only this, keeping its state under one non-enumerable, frozen global:
  *
  * - hooks Storybook's channel when the preview sets `__STORYBOOK_ADDONS_CHANNEL__`, to note each `storyFinished` with
  *   its story ID and status, each story's last render step, and when its `completing` and `completed` steps came;
@@ -112,6 +130,10 @@ const keptCharacters = 500
  *   is described as text;
  * - hooks Storybook's preview when it sets `__STORYBOOK_PREVIEW__`, to note that the preview started, and calls its
  *   `ready()` just after, to note when it becomes ready. A preview that replaces another is waited for on its own;
+ * - wraps `Node.prototype.appendChild` to empty the text of a `<style>` element that matches Storybook 9.1 and 10's
+ *   pause or disable stylesheet just before it's appended, so the story keeps running as in plain Storybook. It leaves
+ *   every other node and style alone, and passes `this`, the arguments, the result and any error of the original
+ *   through. Where the page has no `Node` or `HTMLStyleElement` it does nothing;
  * - gives `waitForStory`, which the story wait expression calls.
  *
  * It keeps the browser's own `setTimeout`, `clearTimeout` and `performance.now`, so a story that fakes or replaces
@@ -287,6 +309,27 @@ export const storybookPageScript = `(() => {
 
   hook('${channelGlobal}', listen)
   hook('${previewGlobal}', watchPreview)
+
+  // Emptying the pause stylesheets Storybook 9.1 and 10 add on the test path, by what they say.
+
+  if (typeof Node === 'function' && typeof HTMLStyleElement === 'function') {
+    const pauseSheet = ${String(pauseSheetPattern)}
+    const apply = Reflect.apply
+    const StyleElement = HTMLStyleElement
+
+    try {
+      const originalAppendChild = Node.prototype.appendChild
+
+      Node.prototype.appendChild = function appendChild(node) {
+        try {
+          if (node instanceof StyleElement && pauseSheet.test(node.textContent)) {
+            node.textContent = ''
+          }
+        } catch {}
+        return apply(originalAppendChild, this, arguments)
+      }
+    } catch {}
+  }
 
   // The wait: the page's answer once the story finished, or where it was when the time ran out.
 
