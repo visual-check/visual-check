@@ -210,6 +210,51 @@ const hazards = {
 }
 
 /**
+ * The font file the font readiness story asks for. The server never answers it, so the font face stays loading and
+ * that story is broken, `fonts-not-loaded`, in every case. Stopping the server drops the held request.
+ */
+const neverAnsweredPath = '/visual-check-e2e/never-loads.woff2'
+
+/**
+ * What the line of each broken readiness story says, a story once for each text it must hold. The CLI's line gives no
+ * reason code, so each text is in its reason's own wording, pinning the reason as well as what the story threw or what
+ * it was still waiting for when readyTimeout ran out.
+ */
+const readinessLines: [storyId: string, says: string][] = [
+  ['readiness--render-throws', 'The story threw Error: visual-check: the render threw'],
+  ['readiness--play-throws', 'play function threw Error: visual-check: play threw'],
+  [
+    'readiness--play-leaves-unhandled-error',
+    'play function left unhandled errors: Error: visual-check: unhandled during play',
+  ],
+  ['readiness--never-ready', 'Storybook never sent storyFinished'],
+  ['readiness--font-never-loads', "fonts hadn't loaded"],
+  ['readiness--font-never-loads', 'Still loading: Never Loads'],
+]
+
+/**
+ * What the warning for a Storybook that ignores the test path's user agent says, wherever it names the Storybook.
+ */
+const testPathWarning = 'StorybookTestRunner user agent'
+
+/**
+ * The test-path case: the script it adds to every story page, which makes `navigator.userAgent` the page's own without
+ * ` StorybookTestRunner`, as a Storybook that ignores visual-check's user agent sees it, and the stories it captures,
+ * by the pattern their IDs match.
+ */
+const userAgentIgnored = {
+  script:
+    '<script>(() => { const plain = navigator.userAgent.replace(" StorybookTestRunner", ""); ' +
+    'Object.defineProperty(Navigator.prototype, "userAgent", { configurable: true, get: () => plain }) })()</script>',
+  filter: /^button--/,
+}
+
+/**
+ * The `storybook` package installed for this package, whose version the test-path warning names.
+ */
+const storybookPackagePath = join(packageDir, 'node_modules', 'storybook', 'package.json')
+
+/**
  * How long the kill cases wait for the browser to ask for story pages, and for the run's containers to go once the
  * CLI is killed or ends, in milliseconds.
  */
@@ -410,6 +455,16 @@ interface BrowserPackage {
 }
 
 /**
+ * The part of the installed `storybook` package that the test-path case uses.
+ */
+interface StorybookPackage {
+  /**
+   * Its version, such as `10.6.7`.
+   */
+  version: string
+}
+
+/**
  * What the host cases share.
  */
 interface HostRun {
@@ -580,6 +635,13 @@ function readBrowserPackage(): BrowserPackage {
 }
 
 /**
+ * Reads the `storybook` package installed for this package.
+ */
+function readStorybookPackage(): StorybookPackage {
+  return JSON.parse(readFileSync(storybookPackagePath, 'utf8')) as StorybookPackage
+}
+
+/**
  * Gives Chrome for Testing's name for this machine's platform, such as `mac-arm64`.
  *
  * @throws {Error} When visual-check downloads no headless shell for the machine.
@@ -654,26 +716,39 @@ function recordStoryPageRequest(storyPageRequests: string[], searchParams: URLSe
 
 /**
  * Serves the static build on a free port of 127.0.0.1, changed as the options say, and records the requests for story
- * pages. While it holds them, it keeps each one's answer until they're released.
+ * pages. While it holds them, it keeps each one's answer until they're released. It never answers a request for the
+ * font file the font readiness story asks for, until it stops.
  */
 async function serveStorybook(options: ServeOptions = {}): Promise<StorybookServer> {
   const storyPageRequests: string[] = []
   const heldAnswers: (() => void)[] = []
   let holding = options.holdStoryPages ?? false
-  const server = createServer((request, response) => {
-    const { pathname, searchParams } = new URL(request.url ?? '/', 'http://127.0.0.1')
-    const answer = (): void => serveFile(pathname, response, options)
 
-    if (pathname !== '/iframe.html') {
-      answer()
-
-      return
-    }
-
+  /**
+   * Records a request for a story page, then answers it, or keeps the answer while the server holds story pages.
+   */
+  const answerStoryPage = (searchParams: URLSearchParams, answer: () => void): void => {
     recordStoryPageRequest(storyPageRequests, searchParams)
 
     if (holding) {
       heldAnswers.push(answer)
+
+      return
+    }
+
+    answer()
+  }
+
+  const server = createServer((request, response) => {
+    const { pathname, searchParams } = new URL(request.url ?? '/', 'http://127.0.0.1')
+    const answer = (): void => serveFile(pathname, response, options)
+
+    if (pathname === neverAnsweredPath) {
+      return
+    }
+
+    if (pathname === '/iframe.html') {
+      answerStoryPage(searchParams, answer)
 
       return
     }
@@ -1040,13 +1115,18 @@ async function waitUntil(condition: () => boolean, timeoutMilliseconds: number):
 }
 
 /**
- * `test` against the committed baselines, with 2 workers, gives exactly the expected outcomes.
+ * `test` against the committed baselines, with 2 workers, gives exactly the expected outcomes. Each broken readiness
+ * story's line says why, and standard error has no test-path warning, since every page is on Storybook's test path.
  */
 async function checkCommittedBaselines(expected: Outcomes): Promise<string[]> {
   return await withStorybookServer({}, async (server) => {
     const run = await runCli(['test', '--all', '--url', server.url, '--workers', String(parallelWorkers)])
 
-    return expectedRunProblems('test', run, expected)
+    return [
+      ...expectedRunProblems('test', run, expected),
+      ...readinessLines.flatMap(([storyId, says]) => lineSaysProblems(run, storyId, says)),
+      ...noTestPathWarningProblems(run.stderr),
+    ]
   })
 }
 
@@ -1198,6 +1278,52 @@ async function checkDeliberateChange(expected: Outcomes): Promise<string[]> {
       ...outcomeProblems('test', run.outcomes, { ...expected, [deliberateChange.storyId]: 'differs' }),
     ]
   })
+}
+
+/**
+ * With every story page's `navigator.userAgent` its own without `StorybookTestRunner`, Storybook takes the path it
+ * takes off the test path, waiting about 100 ms as each story completes. `test` with 2 workers gives the button
+ * stories their expected outcomes, so it exits 0, and standard error warns once that the Storybook seems to ignore the
+ * user agent, naming it and the version of the `storybook` package installed here. The case writes its own config
+ * naming the Storybook `react`, so the warning names `react` whichever folder the check runs from.
+ */
+async function checkTestPathWarning(expected: Outcomes): Promise<string[]> {
+  const { version } = readStorybookPackage()
+
+  return await withStorybookServer({ injectIntoStoryPage: userAgentIgnored.script }, (server) =>
+    withTemporaryFolder(async (folder) => {
+      const config = writeConfig(folder, server.url, committedBaselines)
+      const run = await runCli(['test', '--filter', userAgentIgnored.filter.source, '--config', config])
+
+      return [
+        ...expectedRunProblems('test', run, outcomesMatching(expected, userAgentIgnored.filter)),
+        ...testPathWarningProblems(run.stderr, version),
+      ]
+    }),
+  )
+}
+
+/**
+ * Gives the problem with standard error when it doesn't warn about the test path exactly once, or the warning doesn't
+ * name the Storybook `react` and this `storybook` version, or none.
+ */
+function testPathWarningProblems(stderr: string, storybookVersion: string): string[] {
+  const warnings = stderr.split('\n').filter((line) => line.includes(testPathWarning))
+  const [warning, ...others] = warnings
+  const names = `Storybook react (storybook ${storybookVersion})`
+
+  if (warning === undefined || others.length > 0) {
+    return [`test warned about the test path ${warnings.length} times, expected once${outputOf(stderr)}`]
+  }
+
+  return warning.includes(names) ? [] : [`test's warning doesn't name ${names}: ${warning}`]
+}
+
+/**
+ * Gives the problem with standard error when it warns about the test path, or none.
+ */
+function noTestPathWarningProblems(stderr: string): string[] {
+  return stderr.includes(testPathWarning) ? [`test warned about the test path${outputOf(stderr)}`] : []
 }
 
 /**
@@ -1619,7 +1745,10 @@ if (setupProblems.length > 0) {
 } else {
   const expected = JSON.parse(readFileSync(join(packageDir, 'expected-outcomes.json'), 'utf8')) as Outcomes
   const passed = await runCases([
-    { name: 'committed baselines: test gives the expected outcomes', run: () => checkCommittedBaselines(expected) },
+    {
+      name: "committed baselines: test gives the expected outcomes, each broken readiness story's line says why, no test-path warning",
+      run: () => checkCommittedBaselines(expected),
+    },
     {
       name: "update then test: update writes every story that isn't broken, test passes them and finds the broken ones missing, the baselines match the committed ones",
       run: () => checkUpdateThenTest(expected),
@@ -1635,6 +1764,10 @@ if (setupProblems.length > 0) {
     {
       name: `deliberate change: test exits 1 and ${deliberateChange.storyId} differs`,
       run: () => checkDeliberateChange(expected),
+    },
+    {
+      name: "test path: a Storybook that ignores the test path's user agent triggers the warning once, and the run passes",
+      run: () => checkTestPathWarning(expected),
     },
     ...(insideImage ? insideImageCases(expected) : outsideImageCases(expected)),
   ])
