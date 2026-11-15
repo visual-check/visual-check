@@ -2,6 +2,8 @@ import sharp from 'sharp'
 
 /**
  * One pixel to set in a test image, in RGBA.
+ *
+ * @public
  */
 export interface PixelChange {
   /**
@@ -20,6 +22,8 @@ export interface PixelChange {
 
 /**
  * Makes an opaque PNG file of `width` × `height` pixels in the grey `grey`, with `changes` set on top.
+ *
+ * @public
  */
 export async function greyPng(
   width: number,
@@ -51,6 +55,8 @@ export async function reencodePng(file: Uint8Array, compressionLevel: number): P
 
 /**
  * Makes `count` changes to white along the rows of an image `width` pixels wide, from the top left.
+ *
+ * @public
  */
 export function whitePixels(count: number, width: number): PixelChange[] {
   return Array.from({ length: count }, (_, index) => ({
