@@ -145,6 +145,24 @@ describe('a capture', () => {
     expect(capture).toEqual({ snapshot: bytes })
     expect('snapshot' in capture && capture.snapshot).toBe(bytes)
   })
+
+  it('gives how long the story\'s "completing" render step took beside its snapshot', async () => {
+    const driver = new FakeDriver({ pages: [{ storyWait: async () => finishedAnswer({ completingMs: 104 }) }] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toStrictEqual({
+      snapshot: defaultSnapshot,
+      completingMs: 104,
+    })
+  })
+
+  it('gives no "completing" time when the page saw no completing and completed render steps', async () => {
+    const driver = new FakeDriver({ pages: [{ storyWait: async () => finishedAnswer({ completingMs: null }) }] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toStrictEqual({
+      snapshot: defaultSnapshot,
+      completingMs: undefined,
+    })
+  })
 })
 
 describe("clearing the previous story's storage", () => {

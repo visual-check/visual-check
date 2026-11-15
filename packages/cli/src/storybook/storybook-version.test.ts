@@ -144,26 +144,26 @@ describe('readInstalledStorybookVersion', () => {
 })
 
 describe('checkStorybookVersion', () => {
-  it('returns nothing for a supported version', () => {
+  it('gives the version without a warning for a supported version', () => {
     const dir = createFolder()
 
     install(dir, JSON.stringify({ version: '9.1.0' }))
 
-    expect(checkStorybookVersion({ name: 'web', dir }, dir)).toBeUndefined()
+    expect(checkStorybookVersion({ name: 'web', dir }, dir)).toStrictEqual({ version: '9.1.0', warning: undefined })
   })
 
-  it('returns nothing when there is no install to read', () => {
+  it('gives no version and no warning when there is no install to read', () => {
     const dir = createFolder()
 
-    expect(checkStorybookVersion({ name: 'web', dir }, dir)).toBeUndefined()
+    expect(checkStorybookVersion({ name: 'web', dir }, dir)).toStrictEqual({ version: undefined, warning: undefined })
   })
 
-  it('returns nothing for a version it cannot read', () => {
+  it('gives a version it cannot read without a warning', () => {
     const dir = createFolder()
 
     install(dir, JSON.stringify({ version: 'latest' }))
 
-    expect(checkStorybookVersion({ name: 'web', dir }, dir)).toBeUndefined()
+    expect(checkStorybookVersion({ name: 'web', dir }, dir)).toStrictEqual({ version: 'latest', warning: undefined })
   })
 
   it('throws for a version below 9.1, naming the folder relative to the current folder', () => {
@@ -188,13 +188,14 @@ describe('checkStorybookVersion', () => {
     expect(() => checkStorybookVersion({ name: 'web', dir }, dir)).toThrow('Upgrade storybook in the current folder.')
   })
 
-  it('returns a warning for a version above 11', () => {
+  it('gives the version with a warning for a version above 11', () => {
     const dir = createFolder()
 
     install(dir, JSON.stringify({ version: '12.0.0' }))
 
-    expect(checkStorybookVersion({ name: 'web', dir }, dir)).toBe(
-      'Warning: Storybook web runs storybook 12.0.0, and visual-check supports 9.1 to 11. The run carries on.',
-    )
+    expect(checkStorybookVersion({ name: 'web', dir }, dir)).toStrictEqual({
+      version: '12.0.0',
+      warning: 'Warning: Storybook web runs storybook 12.0.0, and visual-check supports 9.1 to 11. The run carries on.',
+    })
   })
 })

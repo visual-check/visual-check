@@ -12,6 +12,7 @@ import { runWorkerPool } from '../capture/worker-pool.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
 import { ContainerError } from '../container/container-error.js'
 import { type Story, storyUrlOf } from '../storybook/read-stories.js'
+import { testPathWarningOf } from '../storybook/test-path.js'
 import type { BrowserPlace } from './browser-route.js'
 import { dockerProblemOf } from './docker-problem.js'
 import type { LaunchBrowser } from './launch-browser.js'
@@ -27,6 +28,10 @@ interface StorybookSelection {
    * The Storybook.
    */
   storybook: ResolvedStorybook
+  /**
+   * The version of the `storybook` package installed for it, or `undefined` when it can't be read.
+   */
+  version: string | undefined
   /**
    * Its selected stories.
    */
@@ -102,7 +107,8 @@ interface SnapshotRunResult {
   stdout: string
   /**
    * When the first browser exited mid-run, that it exited, whether visual-check relaunches it once, and its last output.
-   * Then, for a run that stopped with exit 2, what stopped it. Nothing for a run that went on with no exit.
+   * Then, for a run that stopped with exit 2, what stopped it, or for a run that finished, a warning for each Storybook
+   * that seems to ignore the test path. Nothing for a run that went on with no exit and no warning.
    */
   stderr: string
 }
@@ -113,7 +119,8 @@ interface SnapshotRunResult {
 type SnapshotStatus = 'passed' | 'differs' | 'missing' | 'broken' | 'written' | 'kept'
 
 /**
- * One snapshot's status and the text its line ends with.
+ * One snapshot's status, the text its line ends with and, for a captured snapshot, how long Storybook's `completing`
+ * render step took.
  */
 interface SnapshotResult {
   /**
@@ -124,6 +131,11 @@ interface SnapshotResult {
    * The line's last column, such as `142 ms` or `differs: …`.
    */
   detail: string
+  /**
+   * How long Storybook's `completing` render step took for the story, in ms. `undefined` for a story that wasn't
+   * captured, or whose page didn't see the step.
+   */
+  completingMs?: number | undefined
 }
 
 /**
@@ -226,11 +238,13 @@ async function testSnapshot(
     return { status: 'broken', detail: `broken: ${capture.broken.message}` }
   }
 
+  const { completingMs } = capture
+
   if (!isByteIdentical(capture.snapshot, baseline)) {
-    return { status: 'differs', detail: "differs: the snapshot isn't byte-identical to its baseline" }
+    return { status: 'differs', detail: "differs: the snapshot isn't byte-identical to its baseline", completingMs }
   }
 
-  return { status: 'passed', detail: `${Math.round(performance.now() - started)} ms` }
+  return { status: 'passed', detail: `${Math.round(performance.now() - started)} ms`, completingMs }
 }
 
 /**
@@ -249,16 +263,17 @@ async function updateSnapshot(
     return { status: 'broken', detail: `broken: ${capture.broken.message}` }
   }
 
+  const { completingMs } = capture
   const path = baselinePathOf(storybook.baselines, story.id)
   const baseline = await readBaseline(path)
 
   if (baseline !== undefined && isByteIdentical(capture.snapshot, baseline)) {
-    return { status: 'kept', detail: 'kept' }
+    return { status: 'kept', detail: 'kept', completingMs }
   }
 
   await writeBaseline(path, capture.snapshot)
 
-  return { status: 'written', detail: `written ${displayPathOf(cwd, path)}` }
+  return { status: 'written', detail: `written ${displayPathOf(cwd, path)}`, completingMs }
 }
 
 /**
@@ -307,6 +322,27 @@ function exitNoticeOf(exit: FirstBrowserExit | undefined): string {
     : "No story left needed a capture, so visual-check didn't relaunch the browser."
 
   return `${exit.error.message}\n${relaunch}\n${browserOutputOf(exit.error.output)}`
+}
+
+/**
+ * Warns, one line each, for every Storybook in the run whose stories' `completing` render steps took a median of 50 ms
+ * or more, in config order: it seems to ignore the test path. Gives nothing when none does.
+ */
+function testPathWarningsOf(
+  selections: readonly StorybookSelection[],
+  items: readonly { storybook: ResolvedStorybook }[],
+  results: readonly (SnapshotResult | undefined)[],
+): string {
+  return selections
+    .flatMap(({ storybook, version }) => {
+      const completingMs = items.flatMap((item, index) =>
+        item.storybook === storybook ? (results[index]?.completingMs ?? []) : [],
+      )
+      const warning = testPathWarningOf({ name: storybook.name, version }, completingMs)
+
+      return warning === undefined ? [] : [`${warning}\n`]
+    })
+    .join('')
 }
 
 /**
@@ -446,6 +482,10 @@ function stopMessageOf(error: unknown, run: SnapshotRun, capturedAny: boolean): 
  * failed download. A browser that can't start its graphics process before the first capture says the machine can't
  * run the platform. The workers' sessions and the browsers are always closed.
  *
+ * A run that finishes ends stderr with a warning for each Storybook, in config order, whose captured snapshots'
+ * `completing` render steps took a median of 50 ms or more: it seems to ignore the test path. The warnings never
+ * change the exit code.
+ *
  * @throws {Error} Any other error, after closing the sessions and the browsers.
  */
 export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult> {
@@ -495,6 +535,6 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
   return {
     exitCode: exitCodeOf(run.command, statuses),
     stdout: printed([...linesOf(), countsLineOf(run.command, statuses)]),
-    stderr: exitNoticeOf(browser.firstExit()),
+    stderr: `${exitNoticeOf(browser.firstExit())}${testPathWarningsOf(run.selections, items, results)}`,
   }
 }

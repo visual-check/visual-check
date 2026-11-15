@@ -154,6 +154,10 @@ interface FakeStory {
    */
   broken?: boolean
   /**
+   * How long Storybook's `completing` render step took for the story, in ms. The page saw no such step when not given.
+   */
+  completingMs?: number
+  /**
    * Whether the browser exits while capturing it.
    */
   browserExits?: boolean
@@ -350,8 +354,13 @@ function fakeDriverOf({ stories, record, version, browser = 1, gates = new Map()
           failIfGone()
 
           const status = story.broken === true ? 'error' : 'success'
+          const completingMs = story.completingMs ?? null
 
-          return await answerEvaluate({ storyWait: async () => finishedAnswer({ status }) }, expression, timeoutMs)
+          return await answerEvaluate(
+            { storyWait: async () => finishedAnswer({ status, completingMs }) },
+            expression,
+            timeoutMs,
+          )
         },
         captureFullPage: async () => {
           gateOf(gates, `capturing ${id}`).resolve()
@@ -1101,6 +1110,164 @@ describe('runCli update', () => {
 
     expect(result.stdout).toContain('✓ web  a  written web/.visual-check/baselines/a.png\n')
     expect(existsSync(join(project, 'packages', 'web', '.visual-check', 'baselines', 'a.png'))).toBe(true)
+  })
+})
+
+/**
+ * Installs `storybook` at `version` in the folder, as `node_modules/storybook/package.json`.
+ */
+function installStorybook(folder: string, version: string): void {
+  mkdirSync(join(folder, 'node_modules', 'storybook'), { recursive: true })
+  writeFileSync(join(folder, 'node_modules', 'storybook', 'package.json'), JSON.stringify({ version }))
+}
+
+/**
+ * Builds the warning for a Storybook that seems to ignore the test path, as a run prints it.
+ */
+function testPathWarningOf(name: string, storybookVersion: string, medianMs: number): string {
+  return (
+    `Warning: Storybook ${name} (${storybookVersion}) seems to ignore visual-check's StorybookTestRunner user agent: ` +
+    `its "completing" render step took a median of ${medianMs} ms, so each capture takes about 100 ms longer. ` +
+    'Snapshots stay correct.\n'
+  )
+}
+
+describe('runCli warning when a Storybook ignores the test path', () => {
+  it('warns once at the end, naming the Storybook and its version, when the median is 50 ms or more', async () => {
+    const { project } = await createRun(['a', 'b', 'c'], { a: defaultSnapshot, b: defaultSnapshot, c: defaultSnapshot })
+
+    installStorybook(project, '9.1.2')
+
+    const { options } = fakeBrowser({ a: { completingMs: 101 }, b: { completingMs: 103 }, c: { completingMs: 0 } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(0)
+    expect(withoutTimes(result.stdout)).toBe(
+      printed(headerOf('test', 3), '✓ web  a  N ms', '✓ web  b  N ms', '✓ web  c  N ms', '3 passed'),
+    )
+    expect(result.stderr).toBe(testPathWarningOf('web', 'storybook 9.1.2', 101))
+  })
+
+  it("doesn't warn when the median is below 50 ms", async () => {
+    const { project } = await createRun(['a', 'b', 'c'], { a: defaultSnapshot, b: defaultSnapshot, c: defaultSnapshot })
+
+    installStorybook(project, '9.1.2')
+
+    const { options } = fakeBrowser({ a: { completingMs: 0 }, b: { completingMs: 49 }, c: { completingMs: 120 } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe('')
+  })
+
+  it('warns for each Storybook in config order, whatever the exit code', async () => {
+    const web = await startStorybook(['a', 'b'])
+    const docs = await startStorybook(['c'])
+    const quick = await startStorybook(['d'])
+    const project = createProject({
+      'visual-check.config.mjs':
+        `export default { storybooks: { web: { dir: 'web', url: '${web}' }, ` +
+        `docs: { dir: 'docs', url: '${docs}' }, quick: { dir: 'quick', url: '${quick}' } } }\n`,
+      'web/button.stories.tsx': '',
+      'docs/button.stories.tsx': '',
+      'quick/button.stories.tsx': '',
+      'web/.visual-check/baselines/a.png': '',
+      'web/.visual-check/baselines/b.png': '',
+      'docs/.visual-check/baselines/c.png': '',
+      'quick/.visual-check/baselines/d.png': '',
+    })
+
+    installStorybook(join(project, 'web'), '10.0.1')
+    installStorybook(join(project, 'quick'), '10.0.1')
+
+    const { options } = fakeBrowser({
+      a: { completingMs: 110 },
+      b: { completingMs: 130 },
+      c: { completingMs: 104 },
+      d: { completingMs: 1 },
+    })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toContain('0 passed · 4 differs')
+    expect(result.stderr).toBe(
+      testPathWarningOf('web', 'storybook 10.0.1', 120) +
+        testPathWarningOf('docs', 'its storybook version is unknown', 104),
+    )
+  })
+
+  it('warns after an update too', async () => {
+    const { project } = await createRun(['a', 'b'], { a: defaultSnapshot })
+
+    installStorybook(project, '9.1.2')
+
+    const { options } = fakeBrowser({ a: { completingMs: 100 }, b: { completingMs: 120 } })
+    const result = await runCli(['update'], {}, project, options)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain('1 written · 1 kept')
+    expect(result.stderr).toBe(testPathWarningOf('web', 'storybook 9.1.2', 110))
+  })
+
+  it("leaves out broken stories' times", async () => {
+    const { project } = await createRun(['a', 'b', 'c'], { a: defaultSnapshot, b: defaultSnapshot, c: defaultSnapshot })
+
+    installStorybook(project, '9.1.2')
+
+    const { options } = fakeBrowser({
+      a: { completingMs: 0 },
+      b: { completingMs: 200, broken: true },
+      c: { completingMs: 200, broken: true },
+    })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toBe('')
+  })
+
+  it('warns after the version warnings and the notice of a browser exit', async () => {
+    const { project } = await createRun(
+      ['a', 'b', 'c'],
+      { a: defaultSnapshot, b: defaultSnapshot, c: defaultSnapshot },
+      'workers: 1',
+    )
+
+    installStorybook(project, '12.0.0')
+
+    const { options } = fakeBrowser({
+      a: { completingMs: 100 },
+      b: { completingMs: 100, browserExits: true },
+      c: { completingMs: 100 },
+    })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toBe(
+      'Warning: Storybook web runs storybook 12.0.0, and visual-check supports 9.1 to 11. The run carries on.\n' +
+        relaunchNotice +
+        testPathWarningOf('web', 'storybook 12.0.0', 100),
+    )
+  })
+
+  it("doesn't warn when the run stops with exit 2", async () => {
+    const { project } = await createRun(
+      ['a', 'b', 'c', 'd'],
+      { a: defaultSnapshot, b: defaultSnapshot, c: defaultSnapshot, d: defaultSnapshot },
+      'workers: 1',
+    )
+
+    installStorybook(project, '9.1.2')
+
+    const { options } = fakeBrowser({
+      a: { completingMs: 100 },
+      b: { browserExits: true },
+      c: { completingMs: 100 },
+      d: { browserExits: true },
+    })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stderr).toBe(`${relaunchNotice}${secondExitMessage}`)
   })
 })
 

@@ -143,12 +143,29 @@ export type BrokenStory =
     }
 
 /**
- * What capturing a story gave: its snapshot, as PNG bytes exactly as the browser made them, or, for a broken story,
- * why it can't be captured.
+ * What capturing a story gave: its snapshot, with how long Storybook's `completing` render step took, or, for a broken
+ * story, why it can't be captured.
  *
  * @public
  */
-export type StoryCapture = { snapshot: Uint8Array } | { broken: BrokenStory }
+export type StoryCapture =
+  | {
+      /**
+       * The snapshot, as PNG bytes exactly as the browser made them.
+       */
+      snapshot: Uint8Array
+      /**
+       * How long Storybook's `completing` render step took for the story, in ms: about 0 on Storybook's test path, and
+       * 100 or more off it. `undefined` when the page didn't see both the `completing` and `completed` steps.
+       */
+      completingMs: number | undefined
+    }
+  | {
+      /**
+       * Why the story can't be captured.
+       */
+      broken: BrokenStory
+    }
 
 /**
  * Captures stories one at a time on one page of a running browser.
@@ -387,7 +404,7 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
 
     step = 'capture'
 
-    return { snapshot: await page.captureFullPage() }
+    return { snapshot: await page.captureFullPage(), completingMs: wait.completingMs }
   } catch (error) {
     if (error instanceof BrowserExitedError) {
       throw error
