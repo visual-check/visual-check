@@ -46,6 +46,10 @@ interface StoryOptionsRead {
    * that wasn't plain is an instance of a class with the name of the original's class.
    */
   options: unknown
+  /**
+   * The keys of the globals the story or its meta pins in its own `globals`, none when the page couldn't read them.
+   */
+  pinnedGlobals: string[]
 }
 
 /**
@@ -105,6 +109,11 @@ export type OptionsRead =
        * The preview was ready and loaded or failed each stories file.
        */
       outcome: 'read'
+      /**
+       * The globals Storybook keeps from a story's URL, which are the keys of its `initialGlobals` and `globalTypes`,
+       * or `null` when the page couldn't read them.
+       */
+      declaredGlobals: string[] | null
       /**
        * Each stories file, in the order asked for.
        */
@@ -192,6 +201,13 @@ function textOf(value: unknown): string {
 }
 
 /**
+ * Gives a value that is an array of strings, or throws.
+ */
+function textListOf(value: unknown): string[] {
+  return listOf(value).map(textOf)
+}
+
+/**
  * Gives a record's own value under a key, or throws when the key isn't a string the record holds as its own.
  */
 function ownValueOf<Value>(record: Readonly<Record<string, Value>>, key: unknown): Value {
@@ -267,12 +283,12 @@ function decode(value: unknown): unknown {
 }
 
 /**
- * Reads one story's options.
+ * Reads one story's options and pinned globals.
  */
 function readStory(value: unknown): StoryOptionsRead {
   const story = recordOf(value)
 
-  return { id: textOf(story.id), options: decode(story.options) }
+  return { id: textOf(story.id), options: decode(story.options), pinnedGlobals: textListOf(story.pinnedGlobals) }
 }
 
 /**
@@ -309,7 +325,11 @@ function isPreviewStep(value: unknown): value is PreviewStep {
  * Reads the page's answer by its outcome, from the rest of its fields.
  */
 const answerReaders: Record<OptionsRead['outcome'], (answer: Record<string, unknown>) => OptionsRead> = {
-  read: ({ files }) => ({ outcome: 'read', files: listOf(files).map(readFileOptions) }),
+  read: ({ declaredGlobals, files }) => ({
+    outcome: 'read',
+    declaredGlobals: declaredGlobals === null ? null : textListOf(declaredGlobals),
+    files: listOf(files).map(readFileOptions),
+  }),
   'timed-out': ({ step }) => ({ outcome: 'timed-out', step: isPreviewStep(step) ? step : unknownShape() }),
   'preview-failed': ({ message }) => ({ outcome: 'preview-failed', message: textOf(message) }),
   unsupported: () => ({ outcome: 'unsupported' }),
@@ -333,7 +353,8 @@ function quoted(value: unknown): string {
 
 /**
  * Reads the value the options read expression gave, and says what it comes to, with each story's options decoded
- * back into JS values. Throws, quoting the value, when it's not an answer the page gives.
+ * back into JS values, and the Storybook's declared globals and each story's pinned globals as lists of keys. Throws,
+ * quoting the value, when it's not an answer the page gives.
  *
  * @public
  */

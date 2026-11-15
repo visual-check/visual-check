@@ -157,8 +157,11 @@ const pauseSheetPattern = new RegExp(
  *   the latest preview to become ready or fail, then calls its `loadStory` for every story of every file: all files at
  *   once, each within its own time limit, counted from then. A file that fails or runs out of time never stops
  *   another. It answers with each story's `parameters.visualCheck`, encoded by `optionsEncoderSource` so it crosses
- *   as JSON, or with why each other file didn't load, on one line. It never calls `extract()`, never loads a docs
- *   entry, and keeps nothing between reads;
+ *   as JSON, and the own enumerable string keys of its `storyGlobals`, the globals it or its meta pins, none when they
+ *   can't be read; or with why each other file didn't load, on one line. It answers too with the globals the
+ *   Storybook declares: the string names its story store's `userGlobals.allowedGlobalNames` holds, or `null` when
+ *   that can't be read or isn't a `Set`. It never calls `extract()`, never loads a docs entry, and keeps nothing
+ *   between reads;
  * - gives `runWait`, which the wait hook expression calls with a story ID and a time limit. It takes the latest
  *   preview's `currentRender`, and answers `no-render` unless that's a render of the story with its `story` and a
  *   `storyContext()`. When the story's merged `parameters.visualCheck.wait` is a function, it calls it once with a
@@ -197,6 +200,14 @@ export const storybookPageScript = `(() => {
   const channels = new WeakSet()
   const previews = new WeakMap()
   let latestPreview
+
+  const readSafely = (read) => {
+    try {
+      return read()
+    } catch {
+      return undefined
+    }
+  }
 
   // Describing error payloads: one line of plain fields, never throwing.
 
@@ -446,7 +457,8 @@ export const storybookPageScript = `(() => {
     waiters.add(waiter)
   })
 
-  // The options read: each story's options, through the latest preview's loadStory, encoded so they cross as JSON.
+  // The options read: each story's options, through the latest preview's loadStory, encoded so they cross as JSON, with
+  // the globals the Storybook declares and the globals each story pins.
 
   const encodeValue = ${optionsEncoderSource}
 
@@ -459,6 +471,20 @@ export const storybookPageScript = `(() => {
     }
     return encodeValue(options)
   }
+
+  const keysOf = (value) => (typeof value === 'object' && value !== null ? Object.keys(value) : undefined)
+
+  // Set.prototype.values throws for anything but a Set, so a look-alike never counts as one.
+  const allowedNamesOf = (store) =>
+    readSafely(() =>
+      Array.from(Set.prototype.values.call(store.userGlobals.allowedGlobalNames)).filter(
+        (name) => typeof name === 'string',
+      ),
+    )
+
+  const declaredGlobalsOf = (preview) => allowedNamesOf(readSafely(() => preview.storyStoreValue)) ?? null
+
+  const pinnedGlobalsOf = (story) => readSafely(() => keysOf(story.storyGlobals)) ?? []
 
   const settledAnswer = () => {
     const latest = latestPreview
@@ -519,7 +545,11 @@ export const storybookPageScript = `(() => {
         resolve({
           importPath,
           outcome: 'loaded',
-          stories: storyIds.map((id, index) => ({ id, options: encodeOptions(stories[index]) })),
+          stories: storyIds.map((id, index) => ({
+            id,
+            options: encodeOptions(stories[index]),
+            pinnedGlobals: pinnedGlobalsOf(stories[index]),
+          })),
         })
       },
       (error) => {
@@ -539,6 +569,7 @@ export const storybookPageScript = `(() => {
     }
     return {
       outcome: 'read',
+      declaredGlobals: declaredGlobalsOf(settled.preview),
       files: await Promise.all(files.map((file) => readFile(settled.preview, file, timeoutMs))),
     }
   }
@@ -576,14 +607,6 @@ export const storybookPageScript = `(() => {
       (error) => settle({ outcome: 'threw', text: describeError(error) }),
     )
   })
-
-  const readSafely = (read) => {
-    try {
-      return read()
-    } catch {
-      return undefined
-    }
-  }
 
   const testHelpers = () => {
     const testModule = readSafely(() => globalThis.${testModuleGlobal})

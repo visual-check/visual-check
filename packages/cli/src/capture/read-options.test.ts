@@ -73,29 +73,36 @@ describe('readStoryOptions', () => {
     expect(driver.calls[1]?.args).toEqual([optionsReadExpression(files, 15_000), 31_000])
   })
 
-  it('gives every file loaded with no story options by default', async () => {
+  it('gives every file loaded, and nothing else read, by default', async () => {
     const { read } = await readWith()
 
     expect(read).toEqual({
+      declaredGlobals: null,
       files: [
         {
           importPath: './src/button.stories.ts',
           outcome: 'loaded',
           stories: [
-            { id: 'button--primary', options: undefined },
-            { id: 'button--link', options: undefined },
+            { id: 'button--primary', options: undefined, pinnedGlobals: [] },
+            { id: 'button--link', options: undefined, pinnedGlobals: [] },
           ],
         },
       ],
     })
   })
 
-  it('passes the files the page read through, and closes the page', async () => {
-    const answer = optionsReadAnswer([
-      { importPath: './src/button.stories.ts', stories: [{ id: 'button--primary', options: { threshold: 0.1 } }] },
-      { importPath: './src/broken.stories.ts', outcome: 'failed', message: 'Boom' },
-      { importPath: './src/slow.stories.ts', outcome: 'timed-out' },
-    ])
+  it("passes the Storybook's declared globals and the files the page read through, and closes the page", async () => {
+    const answer = optionsReadAnswer(
+      [
+        {
+          importPath: './src/button.stories.ts',
+          stories: [{ id: 'button--primary', options: { threshold: 0.1 }, pinnedGlobals: ['theme'] }],
+        },
+        { importPath: './src/broken.stories.ts', outcome: 'failed', message: 'Boom' },
+        { importPath: './src/slow.stories.ts', outcome: 'timed-out' },
+      ],
+      ['theme', 'locale'],
+    )
     const { driver, read } = await readWith(
       { optionsRead: async () => answer },
       {
@@ -109,11 +116,12 @@ describe('readStoryOptions', () => {
     )
 
     expect(read).toEqual({
+      declaredGlobals: ['theme', 'locale'],
       files: [
         {
           importPath: './src/button.stories.ts',
           outcome: 'loaded',
-          stories: [{ id: 'button--primary', options: { threshold: 0.1 } }],
+          stories: [{ id: 'button--primary', options: { threshold: 0.1 }, pinnedGlobals: ['theme'] }],
         },
         { importPath: './src/broken.stories.ts', outcome: 'failed', message: 'Boom' },
         { importPath: './src/slow.stories.ts', outcome: 'timed-out' },
@@ -235,8 +243,13 @@ describe('readStoryOptions', () => {
     const { read } = await readWith({ optionsRead: async () => answer }, asked)
 
     expect(read).toEqual({
+      declaredGlobals: null,
       files: [
-        { importPath: './src/b.stories.ts', outcome: 'loaded', stories: [{ id: 'b--one', options: undefined }] },
+        {
+          importPath: './src/b.stories.ts',
+          outcome: 'loaded',
+          stories: [{ id: 'b--one', options: undefined, pinnedGlobals: [] }],
+        },
         { importPath: './src/a.stories.ts', outcome: 'failed', message: 'Boom' },
       ],
     })

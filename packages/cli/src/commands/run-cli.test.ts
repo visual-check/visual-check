@@ -1337,6 +1337,23 @@ describe('runCli per-story options', () => {
     expect(record.closed).toBe(true)
   })
 
+  it('exits 2 for a bad mode name, naming the story and key, and captures nothing', async () => {
+    const { project } = await createRun(['a', 'b'], { a: defaultSnapshot, b: defaultSnapshot })
+    const { options, record } = fakeBrowser({}, { read: { options: { b: { modes: { Dark: { globals: {} } } } } } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr:
+        'Storybook web has invalid per-story options:\n' +
+        '  - b: visualCheck.modes.Dark: a mode name takes lowercase letters, digits and -. Rename it in <configDir>/visual-check.ts.\n' +
+        invalidOptionsFix,
+    })
+    expect(storyIdsOf(record.urls)).toEqual([])
+    expect(record.closed).toBe(true)
+  })
+
   it('validates the options of stories the selection leaves out', async () => {
     const { project } = await createRun(['a', 'b'], { a: defaultSnapshot })
     const { options } = fakeBrowser({}, { read: { options: { b: { disable: 1 } } } })

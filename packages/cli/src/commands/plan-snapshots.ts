@@ -1,5 +1,6 @@
 import { type BrokenStory, failureReasonOf } from '../capture/capture-session.js'
-import type { OptionsRequest, StorybookOptionsRead } from '../capture/read-options.js'
+import type { OptionsRequest, StorybookOptions, StorybookOptionsRead } from '../capture/read-options.js'
+import { checkModeRules, type ModeRulesStory } from '../config/mode-rules.js'
 import type { ResolvedStorybook } from '../config/resolve-config.js'
 import { checkStoryOptions, type StoryOptions } from '../config/story-options.js'
 import type { FileOptions, StoriesFile } from '../storybook/options-read.js'
@@ -62,6 +63,11 @@ export type PlannedSnapshot = {
 } & StoryOptionsOf
 
 /**
+ * What the page read of one story of a file that loaded: its options and the globals it pins.
+ */
+type StoryRead = Extract<FileOptions, { outcome: 'loaded' }>['stories'][number]
+
+/**
  * What the page read of a Storybook's stories files, ready to look each story up in.
  */
 interface StorybookRead {
@@ -70,9 +76,27 @@ interface StorybookRead {
    */
   files: Map<string, FileOptions>
   /**
-   * The options of each story of a file that loaded, by story ID.
+   * What the page read of each story of a file that loaded, by story ID.
    */
-  options: Map<string, unknown>
+  stories: Map<string, StoryRead>
+}
+
+/**
+ * One story of a Storybook's `index.json` with its options checked.
+ */
+interface CheckedStory {
+  /**
+   * The story.
+   */
+  story: Story
+  /**
+   * Its validated options or its issues, or, when its stories file didn't load, the broken story it makes.
+   */
+  checked: StoryOptionsOf | { issues: string[] }
+  /**
+   * The globals it pins, none when its stories file didn't load.
+   */
+  pinnedGlobals: readonly string[]
 }
 
 /**
@@ -122,7 +146,7 @@ async function readStorybookOptions(
   { storybook, allStories }: StorybookStories,
 ): Promise<StorybookOptionsRead> {
   if (allStories.length === 0) {
-    return { files: [] }
+    return { declaredGlobals: null, files: [] }
   }
 
   return await readOptions({
@@ -157,8 +181,8 @@ function loadFailedOf(file: Exclude<FileOptions, { outcome: 'loaded' }>, readyTi
 function storybookReadOf(files: readonly FileOptions[]): StorybookRead {
   return {
     files: new Map(files.map((file) => [file.importPath, file])),
-    options: new Map(
-      files.flatMap((file) => (file.outcome === 'loaded' ? file.stories.map(({ id, options }) => [id, options]) : [])),
+    stories: new Map(
+      files.flatMap((file) => (file.outcome === 'loaded' ? file.stories.map((story) => [story.id, story]) : [])),
     ),
   }
 }
@@ -179,34 +203,34 @@ function fileReadOf(read: StorybookRead, story: Story): FileOptions {
 }
 
 /**
- * Gives the story's options as the page read them from its stories file, which loaded.
+ * Gives what the page read of the story from its stories file, which loaded.
  *
  * @throws {Error} When the read left the story out, which reading the options rules out.
  */
-function optionsReadOf(read: StorybookRead, story: Story): unknown {
-  if (!read.options.has(story.id)) {
+function storyReadOf(read: StorybookRead, story: Story): StoryRead {
+  const storyRead = read.stories.get(story.id)
+
+  if (storyRead === undefined) {
     throw new Error(`The options read left out ${story.id}, a story of ${story.importPath}.`)
   }
 
-  return read.options.get(story.id)
+  return storyRead
 }
 
 /**
- * Checks one story's options from what the page read of its stories file: its validated options or its issues, or,
- * when the file didn't load, the broken story it makes.
+ * Checks one story's options from what the page read of its stories file: its validated options or its issues, with
+ * the globals it pins, or, when the file didn't load, the broken story it makes.
  */
-function checkedStoryOf(
-  read: StorybookRead,
-  story: Story,
-  readyTimeoutMs: number,
-): StoryOptionsOf | { issues: string[] } {
+function checkedStoryOf(read: StorybookRead, story: Story, readyTimeoutMs: number): CheckedStory {
   const file = fileReadOf(read, story)
 
   if (file.outcome !== 'loaded') {
-    return { broken: loadFailedOf(file, readyTimeoutMs) }
+    return { story, checked: { broken: loadFailedOf(file, readyTimeoutMs) }, pinnedGlobals: [] }
   }
 
-  return checkStoryOptions(optionsReadOf(read, story))
+  const { options, pinnedGlobals } = storyReadOf(read, story)
+
+  return { story, checked: checkStoryOptions(options), pinnedGlobals }
 }
 
 /**
@@ -221,28 +245,60 @@ function isTaken(checked: StoryOptionsOf | { issues: string[] }): checked is Sto
 }
 
 /**
- * Plans one Storybook's snapshots from what the page read of its stories files: every story it lists is checked, and
- * each selected story that isn't disabled is planned. Gives its planned snapshots and its issues.
+ * Gives the stories whose options are valid, in the order given, as the mode rules take them: with the globals each
+ * pins. A story with issues, or of a file that didn't load, is left out.
+ */
+function modeRulesStoriesOf(checkedStories: readonly CheckedStory[]): ModeRulesStory[] {
+  return checkedStories.flatMap(({ story, checked, pinnedGlobals }) =>
+    'options' in checked ? [{ id: story.id, options: checked.options, pinnedGlobals }] : [],
+  )
+}
+
+/**
+ * Gives a selected story's checked options from the checks of every story its Storybook's `index.json` lists.
+ *
+ * @throws {Error} When `index.json` doesn't list the story, which selecting stories rules out.
+ */
+function checkedOf(checkedById: ReadonlyMap<string, CheckedStory>, story: Story): CheckedStory['checked'] {
+  const checked = checkedById.get(story.id)
+
+  if (checked === undefined) {
+    throw new Error(`The selection holds ${story.id}, which the Storybook's index.json doesn't list.`)
+  }
+
+  return checked.checked
+}
+
+/**
+ * Plans one Storybook's snapshots from what the page read: every story its `index.json` lists is checked, and each
+ * selected story that isn't disabled is planned. Gives its planned snapshots and its issues: the type issues of every
+ * story in `index.json` order, then the mode rules' issues of the stories whose options are valid, checked in
+ * `index.json` order against the globals the Storybook declares, a rule skipped when the page couldn't read them.
  */
 function planStorybook(
   selection: StorybookStories,
-  read: readonly FileOptions[],
+  { declaredGlobals, files }: StorybookOptions,
   readyTimeoutMs: number,
 ): { snapshots: PlannedSnapshot[]; issues: string[] } {
   const { storybook, stories, allStories } = selection
-  const storybookRead = storybookReadOf(read)
-  const issues = allStories.flatMap((story) => {
-    const checked = checkedStoryOf(storybookRead, story, readyTimeoutMs)
-
-    return 'issues' in checked ? checked.issues.map((issue) => `${story.id}: ${issue}`) : []
-  })
+  const storybookRead = storybookReadOf(files)
+  const checkedStories = allStories.map((story) => checkedStoryOf(storybookRead, story, readyTimeoutMs))
+  const checkedById = new Map(checkedStories.map((checkedStory) => [checkedStory.story.id, checkedStory]))
+  const typeIssues = checkedStories.flatMap(({ story, checked }) =>
+    'issues' in checked ? checked.issues.map((issue) => `${story.id}: ${issue}`) : [],
+  )
+  const modeIssues = checkModeRules(
+    storybook.name,
+    modeRulesStoriesOf(checkedStories),
+    declaredGlobals === null ? null : new Set(declaredGlobals),
+  )
   const snapshots = stories.flatMap((story): PlannedSnapshot[] => {
-    const checked = checkedStoryOf(storybookRead, story, readyTimeoutMs)
+    const checked = checkedOf(checkedById, story)
 
     return isTaken(checked) ? [{ storybook, story, ...checked }] : []
   })
 
-  return { snapshots, issues }
+  return { snapshots, issues: [...typeIssues, ...modeIssues] }
 }
 
 /**
@@ -276,9 +332,12 @@ function invalidOptionsProblemOf(storybooks: readonly StorybookIssues[]): string
  * order: each selected story that isn't disabled, with its options, or, when its stories file failed to load or didn't
  * load within readyTimeout, the broken story it makes, `load-failed`. A read's problem stops the planning at once, and
  * the Storybooks after it aren't read. Invalid options stop it once every Storybook is read, with one block of issues
- * per Storybook. Either way, it gives the problem, with no trailing newline.
+ * per Storybook: each story's type issues, then the mode rules' issues of the stories whose options are valid, checked
+ * against the globals the Storybook declares and the globals each story pins. Either way, it gives the problem, with
+ * no trailing newline.
  *
- * @throws {Error} What `readOptions` throws, and when a read leaves out a stories file or a story it was asked for.
+ * @throws {Error} What `readOptions` throws, when a read leaves out a stories file or a story it was asked for, and
+ * when the selection holds a story `index.json` doesn't list.
  */
 export async function planSnapshots(
   selections: readonly StorybookStories[],
@@ -295,7 +354,7 @@ export async function planSnapshots(
       return read
     }
 
-    const planned = planStorybook(selection, read.files, readyTimeoutMs)
+    const planned = planStorybook(selection, read, readyTimeoutMs)
 
     snapshots.push(...planned.snapshots)
     invalid.push({ name: selection.storybook.name, issues: planned.issues })

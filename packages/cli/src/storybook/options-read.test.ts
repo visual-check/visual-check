@@ -91,14 +91,21 @@ function className(value: unknown): unknown {
  * An answer that read one file whose one story has these encoded options.
  */
 function loadedWith(options: unknown): Record<string, unknown> {
-  return readWith({ importPath: './a.stories.tsx', outcome: 'loaded', stories: [{ id: 'a--one', options }] })
+  return storyWith({ id: 'a--one', options, pinnedGlobals: [] })
 }
 
 /**
- * An answer that read this one file.
+ * An answer that read one file with this one story.
+ */
+function storyWith(story: unknown): Record<string, unknown> {
+  return readWith({ importPath: './a.stories.tsx', outcome: 'loaded', stories: [story] })
+}
+
+/**
+ * An answer that read this one file, in a Storybook whose declared globals can't be read.
  */
 function readWith(file: unknown): Record<string, unknown> {
-  return { outcome: 'read', files: [file] }
+  return { outcome: 'read', declaredGlobals: null, files: [file] }
 }
 
 describe('readOptionsAnswer', () => {
@@ -117,19 +124,54 @@ describe('readOptionsAnswer', () => {
 
     expect(readOptionsAnswer(answer)).toEqual({
       outcome: 'read',
+      declaredGlobals: null,
       files: [
         {
           importPath: './button.stories.tsx',
           outcome: 'loaded',
           stories: [
-            { id: 'button--primary', options: { tolerance: 0.1 } },
-            { id: 'button--secondary', options: undefined },
+            { id: 'button--primary', options: { tolerance: 0.1 }, pinnedGlobals: [] },
+            { id: 'button--secondary', options: undefined, pinnedGlobals: [] },
           ],
         },
         { importPath: './card.stories.tsx', outcome: 'failed', message: 'SyntaxError: Unexpected token' },
         { importPath: './list.stories.tsx', outcome: 'timed-out' },
       ],
     })
+  })
+
+  it("reads the Storybook's declared globals and the globals each story pins", () => {
+    const answer = optionsReadAnswer(
+      [
+        {
+          importPath: './button.stories.tsx',
+          stories: [
+            { id: 'button--primary', options: undefined, pinnedGlobals: ['theme', 'locale'] },
+            { id: 'button--secondary', options: undefined },
+          ],
+        },
+      ],
+      ['theme', 'locale', 'density'],
+    )
+
+    expect(readOptionsAnswer(answer)).toEqual({
+      outcome: 'read',
+      declaredGlobals: ['theme', 'locale', 'density'],
+      files: [
+        {
+          importPath: './button.stories.tsx',
+          outcome: 'loaded',
+          stories: [
+            { id: 'button--primary', options: undefined, pinnedGlobals: ['theme', 'locale'] },
+            { id: 'button--secondary', options: undefined, pinnedGlobals: [] },
+          ],
+        },
+      ],
+    })
+  })
+
+  it('reads a Storybook that declares no globals', () => {
+    expect(readOptionsAnswer(optionsReadAnswer([], []))).toEqual({ outcome: 'read', declaredGlobals: [], files: [] })
   })
 
   it.each(['preview-start', 'preview-ready'])('reads a timeout in the %s step', (step) => {
@@ -241,18 +283,21 @@ describe('readOptionsAnswer', () => {
     ['null', null],
     ['an answer of another outcome', { outcome: 'done' }],
     ['an outcome every object inherits', { outcome: 'toString' }],
-    ['a read without files', { outcome: 'read' }],
+    ['a read without files', { outcome: 'read', declaredGlobals: null }],
+    ['a read without declared globals', { outcome: 'read', files: [] }],
+    ['declared globals that are not a list', { outcome: 'read', declaredGlobals: 'theme', files: [] }],
+    ['a declared global that is not text', { outcome: 'read', declaredGlobals: ['theme', 1], files: [] }],
     ['a timeout in the story step', { outcome: 'timed-out', step: 'story' }],
     ['a failed preview without a message', { outcome: 'preview-failed' }],
     ['a file without an import path', readWith({ outcome: 'timed-out' })],
     ['a file of another outcome', readWith({ importPath: './a.stories.tsx', outcome: 'skipped' })],
     ['a failed file without a message', readWith({ importPath: './a.stories.tsx', outcome: 'failed' })],
     ['a loaded file without stories', readWith({ importPath: './a.stories.tsx', outcome: 'loaded' })],
-    [
-      'a story without an ID',
-      readWith({ importPath: './a.stories.tsx', outcome: 'loaded', stories: [{ options: { kind: 'null' } }] }),
-    ],
-    ['a story without options', readWith({ importPath: './a.stories.tsx', outcome: 'loaded', stories: [{ id: 'a' }] })],
+    ['a story without an ID', storyWith({ options: { kind: 'null' }, pinnedGlobals: [] })],
+    ['a story without options', storyWith({ id: 'a', pinnedGlobals: [] })],
+    ['a story without pinned globals', storyWith({ id: 'a', options: { kind: 'null' } })],
+    ['pinned globals that are null', storyWith({ id: 'a', options: { kind: 'null' }, pinnedGlobals: null })],
+    ['a pinned global that is not text', storyWith({ id: 'a', options: { kind: 'null' }, pinnedGlobals: [null] })],
     ['options of another kind', loadedWith({ kind: 'date' })],
     ['options of a kind every object inherits', loadedWith({ kind: 'constructor' })],
     ['options without a kind', loadedWith({})],

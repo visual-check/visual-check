@@ -233,10 +233,18 @@ const optionsRequest: OptionsRequest = {
 }
 
 /**
- * Gives what reading the options of `optionsRequest` gives when the page finds it loaded with no options.
+ * Gives what reading the options of `optionsRequest` gives when the page finds it loaded with no options or pinned
+ * globals, and can't read the declared globals.
  */
 const optionsRead: StorybookOptionsRead = {
-  files: [{ importPath: './src/a.stories.ts', outcome: 'loaded', stories: [{ id: 'a', options: undefined }] }],
+  declaredGlobals: null,
+  files: [
+    {
+      importPath: './src/a.stories.ts',
+      outcome: 'loaded',
+      stories: [{ id: 'a', options: undefined, pinnedGlobals: [] }],
+    },
+  ],
 }
 
 /**

@@ -563,9 +563,10 @@ async function takeSnapshots(run: SnapshotRun, browser: RunBrowser, snapshots: P
  * `index.json` lists whatever the selection. So the browser is launched at the first read, even when no story then
  * needs a capture, and a run launches nothing only when no Storybook has stories. A read problem, at the first
  * Storybook that has one, or invalid options in any Storybook stop the run with exit 2 before any capture, printing
- * nothing on stdout. A disabled story is left out: it isn't captured, printed or counted. Each story of a stories file
- * that failed to load, or didn't load within readyTimeout, is broken, `load-failed`, with no capture and no baseline
- * read.
+ * nothing on stdout. Invalid options include a mode that breaks the mode rules, such as a bad name, a global the
+ * Storybook doesn't declare or one the story pins. A disabled story is left out: it isn't captured, printed or
+ * counted. Each story of a stories file that failed to load, or didn't load within readyTimeout, is broken,
+ * `load-failed`, with no capture and no baseline read.
  *
  * When the browser exits, every story in flight is broken, `browser-exited`, the browser is relaunched once at the
  * next read or story that needs it, and the run goes on; stderr then says so, with the browser's last output, whatever
