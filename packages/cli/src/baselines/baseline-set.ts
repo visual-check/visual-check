@@ -22,7 +22,7 @@ const shortenedKeyPattern = new RegExp(`^(.+)-[0-9a-f]{${shortenedHashLength}}$`
  */
 interface BaselineSet {
   /**
-   * The name of each baseline in the folder, each ending in `.png`.
+   * The name of each baseline in the folder as listed, each ending in `.png`.
    */
   fileNames: readonly string[]
   /**
@@ -71,20 +71,22 @@ function couldBeKeyOf(fileKey: string, storyId: string): boolean {
 }
 
 /**
- * Finds the orphans among the baselines of one Storybook's folder: each file name that no expected key's file name
- * matches and that no story whose stories file didn't load could own, since any file that could be one of their keys
- * is kept. Names are compared folded to NFC and lower case. Gives the orphans in the order given.
+ * Finds the orphans among the baselines of one Storybook's folder: each file name that isn't exactly an expected key's
+ * file name and that no story whose stories file didn't load could own. A name that differs from an expected one only
+ * in case or in how an accented letter is encoded is an orphan here. Whether it's that baseline under another name is
+ * the file system's call, made when the orphans are deleted. The keys of a story whose stories file didn't load are
+ * unknown, so names are compared with its ID folded to NFC and lower case, and any file that could be one of its keys
+ * is kept. Gives the orphans in the order given.
  *
  * @public
  */
 export function orphansOf({ fileNames, expectedKeys, unloadedStoryIds }: BaselineSet): string[] {
-  const expected = new Set(expectedKeys.map((key) => foldedFileNameOf(baselineFileNameOf(key))))
+  const expected = new Set(expectedKeys.map((key) => baselineFileNameOf(key)))
   const unloaded = unloadedStoryIds.map(foldedFileNameOf)
 
   return fileNames.filter((fileName) => {
-    const folded = foldedFileNameOf(fileName)
-    const fileKey = stemOfFileName(folded)
+    const fileKey = stemOfFileName(foldedFileNameOf(fileName))
 
-    return !expected.has(folded) && !unloaded.some((storyId) => couldBeKeyOf(fileKey, storyId))
+    return !expected.has(fileName) && !unloaded.some((storyId) => couldBeKeyOf(fileKey, storyId))
   })
 }

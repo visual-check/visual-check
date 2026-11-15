@@ -30,11 +30,14 @@ describe('orphansOf', () => {
     expect(orphansOf({ fileNames, expectedKeys: ['a', 'a.dark', longKey], unloadedStoryIds: [] })).toEqual([])
   })
 
-  it('keeps a baseline whose name differs only in case or in how an accented letter is encoded', () => {
-    const fileNames = [`caf${decomposedE}--primary.png`, 'Button--Primary.png']
+  it('gives a baseline whose name differs from an expected one only in case or in accent encoding as an orphan', () => {
+    const fileNames = [`caf${decomposedE}--primary.png`, 'Button--Primary.png', 'button--primary.png']
     const expectedKeys = [`caf${composedE}--primary`, 'button--primary']
 
-    expect(orphansOf({ fileNames, expectedKeys, unloadedStoryIds: [] })).toEqual([])
+    expect(orphansOf({ fileNames, expectedKeys, unloadedStoryIds: [] })).toEqual([
+      `caf${decomposedE}--primary.png`,
+      'Button--Primary.png',
+    ])
   })
 
   it('gives the orphans in the order given', () => {
@@ -50,6 +53,12 @@ describe('orphansOf', () => {
     const fileNames = ['button.png', 'button.dark.png', 'Button.Wide.png', baselineFileNameOf(longMode)]
 
     expect(orphansOf({ fileNames, expectedKeys: [], unloadedStoryIds: ['button'] })).toEqual([])
+  })
+
+  it("keeps a baseline of a story whose file didn't load that differs from its keys only in case or accent encoding", () => {
+    const fileNames = [`Caf${decomposedE}.png`, `caf${decomposedE}.Dark.png`]
+
+    expect(orphansOf({ fileNames, expectedKeys: [], unloadedStoryIds: [`caf${composedE}`] })).toEqual([])
   })
 
   it("keeps the shortened baselines of a long story ID whose file didn't load", () => {

@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
+import type { Dirent } from 'node:fs'
 import { mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { BaselineError } from './baseline-error.js'
@@ -159,22 +160,13 @@ export async function hasBaseline(path: string): Promise<boolean> {
 }
 
 /**
- * Lists the names of the baselines in a baselines folder, sorted by name: every regular file whose name ends in
- * `.png`, as written. Other files, such as a temporary file a killed run left, and subfolders are left out. A missing
- * folder holds no baselines.
+ * Gives the entries of a baselines folder, with their types. A missing folder has none.
  *
  * @throws {BaselineError} When the folder is there but can't be listed, such as a file in its place.
- *
- * @public
  */
-export async function listBaselines(folder: string): Promise<string[]> {
+async function folderEntriesOf(folder: string): Promise<Dirent[]> {
   try {
-    const entries = await readdir(folder, { withFileTypes: true })
-
-    return entries
-      .filter((entry) => entry.isFile() && entry.name.endsWith(baselineExtension))
-      .map((entry) => entry.name)
-      .sort()
+    return await readdir(folder, { withFileTypes: true })
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return []
@@ -185,7 +177,64 @@ export async function listBaselines(folder: string): Promise<string[]> {
 }
 
 /**
- * Deletes a baseline. One that is already gone counts as deleted.
+ * Whether a symbolic link leads to a regular file. A broken link, whose target is missing, doesn't, nor does one that
+ * leads to a folder.
+ *
+ * @throws {BaselineError} When the link's target can't be looked at for another reason.
+ */
+async function linksToFile(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isFile()
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return false
+    }
+
+    throw new BaselineError('read', path, error)
+  }
+}
+
+/**
+ * Whether an entry of a baselines folder is a baseline: its name ends in `.png`, and it's a regular file or a symbolic
+ * link that leads to one.
+ *
+ * @throws {BaselineError} When a link's target can't be looked at, apart from a missing one.
+ */
+async function isBaselineEntry(folder: string, entry: Dirent): Promise<boolean> {
+  if (!entry.name.endsWith(baselineExtension)) {
+    return false
+  }
+
+  if (entry.isFile()) {
+    return true
+  }
+
+  return entry.isSymbolicLink() && (await linksToFile(join(folder, entry.name)))
+}
+
+/**
+ * Lists the names of the baselines in a baselines folder, sorted by name: every regular file whose name ends in
+ * `.png`, as written, and every symbolic link of such a name that leads to a regular file. Other files, such as a
+ * temporary file a killed run left, subfolders, broken links and links to folders are left out. A missing folder holds
+ * no baselines.
+ *
+ * @throws {BaselineError} When the folder is there but can't be listed, such as a file in its place, or a link's
+ * target can't be looked at, apart from a missing one.
+ *
+ * @public
+ */
+export async function listBaselines(folder: string): Promise<string[]> {
+  const entries = await folderEntriesOf(folder)
+  const isBaseline = await Promise.all(entries.map((entry) => isBaselineEntry(folder, entry)))
+
+  return entries
+    .filter((_, index) => isBaseline[index])
+    .map((entry) => entry.name)
+    .sort()
+}
+
+/**
+ * Deletes a baseline. One that is already gone counts as deleted. For a symbolic link, only the link goes.
  *
  * @throws {BaselineError} When it can't be deleted, such as when its folder isn't writable.
  */
@@ -202,8 +251,9 @@ async function deleteBaseline(path: string): Promise<void> {
 /**
  * Deletes the orphans of one baselines folder, one at a time in the order given, and gives the paths deleted. An
  * orphan the file system takes for one of the expected baselines, as macOS can for names that differ only in a way it
- * folds, is the same file, so it stays and isn't given. `expectedPaths` are the paths of every baseline the
- * Storybook's snapshots call for, there or not.
+ * folds, is the same file, so it stays and isn't given. So does a link to one. An orphan that is a symbolic link to
+ * another file loses the link only. `expectedPaths` are the paths of every baseline the Storybook's snapshots call
+ * for, there or not.
  *
  * @throws {BaselineError} When an expected baseline can't be looked at, or an orphan can't be deleted. The orphans
  * after it stay.

@@ -8,6 +8,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -322,6 +323,22 @@ describe('listBaselines', () => {
     expect(await listBaselines(folder)).toEqual(['a.dark.png', 'a.png', 'b.png'])
   })
 
+  it.skipIf(process.platform === 'win32')(
+    'lists a link that leads to a file, leaving out a broken link and a link to a folder',
+    async () => {
+      const folder = createFolder()
+      const elsewhere = createFolder()
+
+      writeFileSync(join(elsewhere, 'target.png'), snapshot)
+      mkdirSync(join(elsewhere, 'folder'))
+      symlinkSync(join(elsewhere, 'target.png'), join(folder, 'linked.png'))
+      symlinkSync(join(elsewhere, 'missing.png'), join(folder, 'broken.png'))
+      symlinkSync(join(elsewhere, 'folder'), join(folder, 'folder.png'))
+      symlinkSync(join(elsewhere, 'target.png'), join(folder, 'linked.txt'))
+      expect(await listBaselines(folder)).toEqual(['linked.png'])
+    },
+  )
+
   it('gives no baselines for a missing folder', async () => {
     expect(await listBaselines(join(createFolder(), 'baselines'))).toEqual([])
   })
@@ -372,6 +389,25 @@ describe('deleteOrphans', () => {
     expect(await deleteOrphans([join(folder, 'other-name.png')], [join(folder, 'a.png')])).toEqual([])
     expect(readdirSync(folder).sort()).toEqual(['a.png', 'other-name.png'])
   })
+
+  it.skipIf(process.platform === 'win32')(
+    'deletes only the link of an orphan that links to another file, and keeps one that links to an expected one',
+    async () => {
+      const folder = createFolder()
+      const elsewhere = createFolder()
+
+      writeFileSync(join(folder, 'a.png'), snapshot)
+      writeFileSync(join(elsewhere, 'target.png'), snapshot)
+      symlinkSync(join(elsewhere, 'target.png'), join(folder, 'linked.png'))
+      symlinkSync(join(folder, 'a.png'), join(folder, 'to-a.png'))
+
+      const orphans = [join(folder, 'linked.png'), join(folder, 'to-a.png')]
+
+      expect(await deleteOrphans(orphans, [join(folder, 'a.png')])).toEqual([join(folder, 'linked.png')])
+      expect(readdirSync(folder).sort()).toEqual(['a.png', 'to-a.png'])
+      expect(readFileSync(join(elsewhere, 'target.png'))).toEqual(Buffer.from(snapshot))
+    },
+  )
 
   it.skipIf(process.platform !== 'darwin')(
     "keeps an orphan the file system takes for an expected baseline, as macOS does for 'ς' and 'σ'",

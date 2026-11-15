@@ -1755,6 +1755,28 @@ describe('runCli update', () => {
     expect(readdirSync(folder).sort()).toEqual(['a.png', 'other-name.png'])
   })
 
+  it('keeps a baseline named in another case where the file system takes it for the expected one, else replaces it', async () => {
+    const { project, folder } = await createRun(['a'], { A: defaultSnapshot })
+    const caseInsensitive = existsSync(join(folder, 'a.png'))
+    const result = await runCli(['update'], {}, project, fakeBrowser().options)
+
+    expect(result).toEqual({
+      exitCode: 0,
+      stdout: caseInsensitive
+        ? printed(headerOf('update', 1), '✓ web  a  kept', '0 written · 1 kept')
+        : printed(
+            headerOf('update', 1),
+            '✓ web  a  written: missing',
+            '1 written · 1 deleted',
+            'written .visual-check/baselines/a.png',
+            'deleted .visual-check/baselines/A.png',
+          ),
+      stderr: '',
+    })
+    expect(readdirSync(folder)).toHaveLength(1)
+    expect(new Uint8Array(readFileSync(join(folder, 'a.png')))).toEqual(defaultSnapshot)
+  })
+
   it('takes only the missing mode of a story outside the filter whose default baseline is there', async () => {
     const { project, folder } = await createRun(['a', 'b'], { a: defaultSnapshot, b: defaultSnapshot })
     const { options, record } = fakeBrowser(
