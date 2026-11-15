@@ -62,6 +62,13 @@ export interface BrowserProcess {
 export type StartBrowser = (browserArguments: readonly string[]) => BrowserProcess
 
 /**
+ * The OS a browser runs on, which picks the font table its pages use.
+ *
+ * @public
+ */
+export type BrowserSystem = 'linux' | 'macos' | 'windows'
+
+/**
  * A running browser that snapshots are captured in.
  *
  * @public
@@ -378,8 +385,9 @@ export class PageNavigatedAwayError extends Error {
 }
 
 /**
- * The browser didn't connect, or failed the checks visual-check runs on it before capturing: it exited before
- * answering, didn't answer in time, answered its first call with an error, or failed a check.
+ * The browser didn't connect, or failed the checks visual-check runs on it before capturing: it exited, or couldn't
+ * start, before answering its version call, didn't answer in time, answered with an error or without a version, or
+ * failed a check.
  *
  * @public
  */
@@ -396,18 +404,25 @@ export class BrowserLaunchError extends Error {
   readonly output: readonly string[]
 
   /**
+   * True only when the browser exited, or couldn't start, before it answered its version call. False when it didn't
+   * answer in time, answered with an error or without a version, or failed a check.
+   */
+  readonly exited: boolean
+
+  /**
    * Whether the browser's output says its graphics process couldn't start, which is how a browser fails under an
    * emulator that can't run it.
    */
   readonly graphicsFailed: boolean
 
   /**
-   * Takes the message saying what went wrong, the browser's last output lines and whether they say its graphics
-   * process couldn't start, `false` unless given.
+   * Takes the message saying what went wrong, the browser's last output lines, whether the browser exited before it
+   * answered, and whether its output says its graphics process couldn't start, `false` unless given.
    */
-  constructor(message: string, output: readonly string[], graphicsFailed = false) {
+  constructor(message: string, output: readonly string[], options: { exited: boolean; graphicsFailed?: boolean }) {
     super(message)
     this.output = output
-    this.graphicsFailed = graphicsFailed
+    this.exited = options.exited
+    this.graphicsFailed = options.graphicsFailed ?? false
   }
 }

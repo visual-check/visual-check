@@ -98,18 +98,24 @@ describe('PageNavigatedAwayError', () => {
 })
 
 describe('BrowserLaunchError', () => {
-  it('keeps the message and the output lines, with no graphics failure unless given', () => {
-    expect(new BrowserLaunchError('The browser exited with code 1 before it answered.', ['bad flag'])).toMatchObject({
+  it('keeps the message, the output lines and whether it exited, with no graphics failure unless given', () => {
+    expect(
+      new BrowserLaunchError('The browser exited with code 1 before it answered.', ['bad flag'], { exited: true }),
+    ).toMatchObject({
       name: 'BrowserLaunchError',
       message: 'The browser exited with code 1 before it answered.',
       output: ['bad flag'],
+      exited: true,
       graphicsFailed: false,
     })
   })
 
   it('keeps whether its graphics process failed', () => {
     expect(
-      new BrowserLaunchError('The browser exited with code 133 before it answered.', [], true).graphicsFailed,
+      new BrowserLaunchError('The browser exited with code 133 before it answered.', [], {
+        exited: true,
+        graphicsFailed: true,
+      }).graphicsFailed,
     ).toBe(true)
   })
 })

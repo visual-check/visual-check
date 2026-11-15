@@ -33,7 +33,7 @@ function browserExitingWith(lines: readonly string[]): FakeBrowser {
  * Launches a driver on the fake browser, with the sandbox off unless the options say otherwise.
  */
 function launch(browser: FakeBrowser, options: Partial<CdpDriverOptions> = {}) {
-  return launchCdpDriver({ sandbox: false, profileDir, start: browser.start, ...options })
+  return launchCdpDriver({ sandbox: false, profileDir, system: 'linux', start: browser.start, ...options })
 }
 
 /**
@@ -107,6 +107,7 @@ describe('launchCdpDriver', () => {
       name: 'BrowserLaunchError',
       message: "The browser couldn't start: spawn docker ENOENT.",
       output: [],
+      exited: true,
     })
   })
 
@@ -124,6 +125,7 @@ describe('launchCdpDriver', () => {
       name: 'BrowserLaunchError',
       message: 'The browser exited with code 1 before it answered.',
       output: sixtyLines.slice(10),
+      exited: true,
     })
   })
 
@@ -173,6 +175,7 @@ describe('launchCdpDriver', () => {
       name: 'BrowserLaunchError',
       message: "The browser didn't answer within 0.05 s.",
       output: ['still starting'],
+      exited: false,
     })
     expect(browser.killed).toBe(true)
   })
@@ -208,6 +211,7 @@ describe('launchCdpDriver', () => {
     await expect(launch(browser)).rejects.toMatchObject({
       name: 'BrowserLaunchError',
       message: 'The browser answered its version call with an error: Internal error',
+      exited: false,
     })
     expect(browser.killed).toBe(true)
   })
@@ -229,6 +233,7 @@ describe('launchCdpDriver', () => {
       await expect(launch(browser)).rejects.toMatchObject({
         name: 'BrowserLaunchError',
         message: "The browser's answer to its version call has no version or user agent.",
+        exited: false,
       })
       expect(browser.killed).toBe(true)
     },

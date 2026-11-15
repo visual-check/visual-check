@@ -126,6 +126,7 @@ export async function checkProxyReach(
     throw new BrowserLaunchError(
       `The browser failed while visual-check checked that it can reach the proxy: ${sentenceOf(error)}`,
       [],
+      { exited: false },
     )
   } finally {
     await page?.close().catch(() => undefined)

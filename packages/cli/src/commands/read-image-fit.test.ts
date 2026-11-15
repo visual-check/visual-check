@@ -13,6 +13,13 @@ const browserPackage: BrowserPackage = {
   chromium: '157.0.8103.78',
   image: { tag: 'ghcr.io/visual-check/chromium:157.0.0', digest: `sha256:${'ab'.repeat(32)}` },
   headlessShell: '/opt/chrome-headless-shell/chrome-headless-shell',
+  sha256: {
+    linux64: '1'.repeat(64),
+    'linux-arm64': '2'.repeat(64),
+    'mac-x64': '3'.repeat(64),
+    'mac-arm64': '4'.repeat(64),
+    win64: '5'.repeat(64),
+  },
 }
 
 /**
@@ -130,11 +137,8 @@ describe('readImageFit', () => {
     expect(problem.endsWith(`.\n${imageFix}`)).toBe(true)
   })
 
-  it("gives today's message for the host platform outside visual-check's image", () => {
-    expect(readImageFit('host', browserPackage, absentMarker())).toEqual({
-      problem:
-        "visual-check can't run the browser on the host yet. Set platform to 'linux/amd64' or 'linux/arm64' in the config.",
-    })
+  it("gives the host platform outside visual-check's image", () => {
+    expect(readImageFit('host', browserPackage, absentMarker())).toEqual({ insideImage: false, platform: 'host' })
   })
 
   it("gives the config's platform for the container outside visual-check's image", () => {

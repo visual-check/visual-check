@@ -1,3 +1,4 @@
+import type { ChromeForTestingPlatform } from '../browser/chrome-for-testing-platform.js'
 import type { ContainerPlatform } from '../container/browser-container.js'
 
 /**
@@ -12,10 +13,40 @@ import type { ContainerPlatform } from '../container/browser-container.js'
 export type ContainerRoute = 'host' | `container:${string}` | 'proxy'
 
 /**
- * Where a run's browser runs: directly inside visual-check's image, or in visual-check's container on a platform, with
- * the route it reaches a Storybook by.
+ * Where a run's browser runs: directly inside visual-check's image, in visual-check's container on a platform with the
+ * route it reaches a Storybook by, or on the host.
  */
-export type BrowserPlace = { in: 'image' } | { in: 'container'; platform: ContainerPlatform; route: ContainerRoute }
+export type BrowserPlace =
+  | {
+      /**
+       * The browser runs directly inside visual-check's image.
+       */
+      in: 'image'
+    }
+  | {
+      /**
+       * The browser runs in visual-check's container.
+       */
+      in: 'container'
+      /**
+       * The platform the container runs on.
+       */
+      platform: ContainerPlatform
+      /**
+       * How the browser reaches a Storybook.
+       */
+      route: ContainerRoute
+    }
+  | {
+      /**
+       * The browser runs on the host, with no Docker, and reaches a Storybook as the machine does.
+       */
+      in: 'host'
+      /**
+       * The Chrome for Testing platform whose headless shell runs on the machine.
+       */
+      platform: ChromeForTestingPlatform
+    }
 
 /**
  * What decides how the browser reaches a Storybook.

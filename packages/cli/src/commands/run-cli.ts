@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { availableParallelism, totalmem } from 'node:os'
 import { checkBrowserPackage } from '../browser/browser-package.js'
 import { runImageOf } from '../browser/browser-version.js'
+import { chromeForTestingPlatformOf } from '../browser/chrome-for-testing-platform.js'
 import { imageMarkerPath } from '../browser/image-marker.js'
 import type { BrowserPackage } from '../browser/read-browser-package.js'
 import { autoWorkerCount, type BrowserHost } from '../capture/worker-pool.js'
@@ -17,7 +18,7 @@ import { knownContainerIdOf } from '../container/own-container.js'
 import { type BrowserPlace, browserPlaceOf } from './browser-route.js'
 import { checkStorybooks } from './check-storybooks.js'
 import { dockerProblemOf } from './docker-problem.js'
-import { type LaunchBrowser, launchBrowser } from './launch-browser.js'
+import { createLaunchBrowser, type LaunchBrowser } from './launch-browser.js'
 import { parseCommandLine, type RunOptions, UsageError } from './parse-command-line.js'
 import { readImageFit } from './read-image-fit.js'
 import { runSnapshots } from './run-snapshots.js'
@@ -78,37 +79,45 @@ export interface RunCliOptions {
    */
   imageMarkerPath?: string
   /**
-   * Writes progress as it happens, such as an image pull's. Progress is dropped when it isn't given.
-   */
-  progress?: (text: string) => void
-  /**
-   * Launches the browser that `test` and `update` capture in. By default, in visual-check's container the image is
-   * pulled when Docker lacks it and the browser starts in the container, reaching a Storybook by the launch's route, and
-   * inside visual-check's image the browser starts directly as a child process. Either way it connects over CDP. A test
-   * gives a fake.
-   */
-  launchBrowser?: LaunchBrowser
-  /**
-   * Asks Docker what its engine has, before a run whose browser runs in visual-check's container reaches a Storybook.
-   * It also tells whether the engine is Docker Desktop's, which decides the browser's route to a Storybook. Inside
-   * visual-check's image no Docker is used, so it isn't asked. By default it runs `docker info`. A test gives a fake.
-   */
-  probeDocker?: ProbeDocker
-  /**
    * The CPUs and memory of the machine the CLI runs on, which `workers: 'auto'` reads when the browser runs inside
-   * visual-check's image. By default `os.availableParallelism()` and `os.totalmem()`. A test gives its own.
+   * visual-check's image or on the host. By default `os.availableParallelism()` and `os.totalmem()`. A test gives its
+   * own.
    */
   machine?: BrowserHost
+  /**
+   * The OS the CLI runs on, which decides between host networking and the proxy, and with `arch` picks the headless
+   * shell `platform: 'host'` downloads. `process.platform` by default. A test gives its own.
+   */
+  os?: NodeJS.Platform
+  /**
+   * The CPU architecture of the machine the CLI runs on, which with `os` picks the headless shell `platform: 'host'`
+   * downloads. `process.arch` by default. A test gives its own.
+   */
+  arch?: NodeJS.Architecture
   /**
    * Whether visual-check runs inside a container. By default it looks for the file Docker and Podman leave in a
    * container's root, and for `KUBERNETES_SERVICE_HOST`, which Kubernetes sets in every pod. A test gives its answer.
    */
   insideContainer?: boolean
   /**
-   * The OS the CLI runs on, which decides between host networking and the proxy. `process.platform` by default. A test
-   * gives its own.
+   * Writes progress as it happens, such as an image pull's or a download's. Progress is dropped when it isn't given.
    */
-  os?: NodeJS.Platform
+  progress?: (text: string) => void
+  /**
+   * Launches the browser that `test` and `update` capture in. By default, in visual-check's container the image is
+   * pulled when Docker lacks it and the browser starts in the container, reaching a Storybook by the launch's route;
+   * inside visual-check's image the browser starts directly as a child process; and on the host the headless shell is
+   * downloaded at the first launch, then starts as a child process with Chromium's sandbox, or without it when it exits
+   * at launch. Each way it connects over CDP. A test gives a fake.
+   */
+  launchBrowser?: LaunchBrowser
+  /**
+   * Asks Docker what its engine has, before a run whose browser runs in visual-check's container reaches a Storybook.
+   * It also tells whether the engine is Docker Desktop's, which decides the browser's route to a Storybook. Inside
+   * visual-check's image and on the host no Docker is used, so it isn't asked. By default it runs `docker info`. A test
+   * gives a fake.
+   */
+  probeDocker?: ProbeDocker
   /**
    * Finds the ID of the container the CLI runs in, when the Docker daemon knows it. By default it reads
    * `/proc/self/mountinfo` and asks `docker inspect`. A test gives a fake.
@@ -159,11 +168,12 @@ export async function runCli(
 /**
  * Runs `test` or `update` after the checks that come first: `update` runs only locally, the browser package is
  * installed and readable, the config is found, valid and usable, the browser has a place to run (inside visual-check's
- * image when its marker fits the browser package and the platform, else in a container, never on the host), Docker
- * answers `docker info` with a running engine of Linux containers when the browser runs in a container, every
- * Storybook in the run has a supported `storybook` version installed, and every Storybook in the run answers with an
- * index. In a container, the browser reaches a Storybook by the route the five rules give, from the container the CLI
- * runs in, Docker's engine and the OS. Then it captures the selected stories.
+ * image when its marker fits the browser package and the platform, else on the host for `platform: 'host'` when Chrome
+ * for Testing builds for the machine, else in a container), Docker answers `docker info` with a running engine of Linux
+ * containers when the browser runs in a container, every Storybook in the run has a supported `storybook` version
+ * installed, and every Storybook in the run answers with an index. In a container, the browser reaches a Storybook by
+ * the route the five rules give, from the container the CLI runs in, Docker's engine and the OS. Then it captures the
+ * selected stories.
  *
  * @throws {ConfigError} When the config can't be found, loaded or used.
  */
@@ -221,7 +231,8 @@ async function runTestOrUpdate(
     })),
     cwd,
     insideContainer,
-    launchBrowser: cliOptions.launchBrowser ?? launchBrowser,
+    environment,
+    launchBrowser: cliOptions.launchBrowser ?? createLaunchBrowser(),
     progress: cliOptions.progress ?? (() => undefined),
   })
 
@@ -247,11 +258,11 @@ function insideContainerOf(cliOptions: RunCliOptions, environment: Record<string
 }
 
 /**
- * Decides where the run's browser runs and reads the CPUs and memory there: inside visual-check's image the machine's
- * own, with no Docker used, and in visual-check's container Docker's engine's, which the Docker probe reads. In a
- * container, the route to a Storybook comes from the container the CLI runs in, whether the engine is Docker
- * Desktop's, and the OS. Gives the place with them, or what to print when the browser has no place to run or Docker
- * can't run it.
+ * Decides where the run's browser runs and reads the CPUs and memory there: inside visual-check's image and on the
+ * host the machine's own, with no Docker used, and in visual-check's container Docker's engine's, which the Docker
+ * probe reads. In a container, the route to a Storybook comes from the container the CLI runs in, whether the engine
+ * is Docker Desktop's, and the OS. Gives the place with them, or what to print when the browser has no place to run or
+ * Docker can't run it.
  *
  * @throws {Error} Any error the probe throws besides a `ContainerError`.
  */
@@ -271,6 +282,10 @@ async function placeAndProbe(
     return { place: browserPlaceOf({ insideImage: true }), host: cliOptions.machine ?? machineOf() }
   }
 
+  if (imageFit.platform === 'host') {
+    return hostPlaceOf(cliOptions)
+  }
+
   let docker: DockerHost
 
   try {
@@ -284,6 +299,21 @@ async function placeAndProbe(
   }
 
   return { place: await containerPlaceOf(imageFit.platform, docker, cliOptions), host: docker }
+}
+
+/**
+ * Places the browser on the host, as the headless shell Chrome for Testing builds for the machine's OS and CPU
+ * architecture, with the machine's CPUs and memory. No Docker is used. Gives the problem that exits 2 when Chrome for
+ * Testing has no build for the machine.
+ */
+function hostPlaceOf(cliOptions: RunCliOptions): { place: BrowserPlace; host: BrowserHost } | { problem: string } {
+  const download = chromeForTestingPlatformOf(cliOptions.os ?? process.platform, cliOptions.arch ?? process.arch)
+
+  if ('problem' in download) {
+    return { problem: `${download.problem}\n` }
+  }
+
+  return { place: { in: 'host', platform: download.platform }, host: cliOptions.machine ?? machineOf() }
 }
 
 /**

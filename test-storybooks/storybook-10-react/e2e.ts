@@ -1,11 +1,19 @@
 // The end-to-end check of this test Storybook: it serves the static build, runs the built CLI against it and checks
 // what the CLI reports. Run it with `pnpm turbo run e2e --filter @visual-check/test-storybook-10-react`, which builds the
 // CLI and the Storybook first, with TEST_STORYBOOK_IMAGE naming the browser image. It prints one line per case, then
-// each of its problems, and exits 1 when any case fails.
+// each of its problems, and exits 1 when any case fails. Turbo hands the arguments after `--` to this script, as in
+// `pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --host`.
 //
 // With `--inside-image` it runs inside visual-check's amd64 browser image, where the CLI starts the browser itself: it
 // needs no TEST_STORYBOOK_IMAGE and no docker, and checks `platform: 'host'` and a platform mismatch in place of the
 // kill case.
+//
+// With `--host` it runs on the machine itself with `platform: 'host'`, and needs no TEST_STORYBOOK_IMAGE or docker.
+// Its two cases share a cache, VISUAL_CHECK_CACHE_DIR when the caller sets it, so it can look at the cache after the
+// run, else a temporary folder. The cache must start empty: `update` downloads the headless shell into it, then `test`
+// reuses it. They capture one story, against baselines `update` writes, since the committed ones need the image's
+// fonts. `--no-docker`, which needs `--host` and no docker on the PATH, adds a case: with the default platform, `test`
+// exits 2 with the no-Docker error.
 import { type ChildProcessByStdio, spawn, spawnSync } from 'node:child_process'
 import {
   accessSync,
@@ -13,6 +21,7 @@ import {
   cpSync,
   existsSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -21,7 +30,7 @@ import {
 import { createServer, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
-import { delimiter, extname, join, sep } from 'node:path'
+import { delimiter, extname, join, resolve as resolvePath, sep } from 'node:path'
 import type { Readable } from 'node:stream'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
@@ -72,9 +81,51 @@ const diagnosticsDir = join(packageDir, 'e2e-output')
 const insideImage = process.argv.includes('--inside-image')
 
 /**
+ * Whether the check runs the browser on the machine itself, as the `--host` argument says.
+ */
+const onHost = process.argv.includes('--host')
+
+/**
+ * Whether the check on the machine itself also checks the error for a run with no Docker, as the `--no-docker`
+ * argument says.
+ */
+const withoutDocker = process.argv.includes('--no-docker')
+
+/**
  * Where visual-check's browser image records the browser it holds.
  */
 const markerPath = '/etc/visual-check/chromium.json'
+
+/**
+ * The browser package, through this package's workspace link to it, which names the Chromium version the CLI
+ * downloads for the host.
+ */
+const browserPackagePath = join(packageDir, 'node_modules', '@visual-check', 'chromium', 'chromium.json')
+
+/**
+ * Chrome for Testing's name for the platform of each machine visual-check downloads a headless shell for, by Node's
+ * OS and architecture.
+ */
+const chromeForTestingPlatforms: Record<string, string> = {
+  'linux/x64': 'linux64',
+  'linux/arm64': 'linux-arm64',
+  'darwin/x64': 'mac-x64',
+  'darwin/arm64': 'mac-arm64',
+  'win32/x64': 'win64',
+}
+
+/**
+ * The story the host cases capture. One shows the download and its reuse.
+ */
+const hostStoryId = 'card--default'
+
+/**
+ * What the CLI says when there's no docker command: the problem, then the fix that names `platform: 'host'`.
+ */
+const noDockerTexts = [
+  "visual-check runs the browser in Docker, and there's no docker command on PATH.",
+  "Start or install Docker, or set platform: 'host' in the config.",
+]
 
 /**
  * The browser image every run uses, until the browser package names a published one.
@@ -244,6 +295,35 @@ interface ImageMarker {
 }
 
 /**
+ * The part of the browser package that the cold cache case uses.
+ */
+interface BrowserPackage {
+  /**
+   * The Chromium version, such as `157.0.8103.78`.
+   */
+  chromium: string
+}
+
+/**
+ * What the host cases share.
+ */
+interface HostRun {
+  /**
+   * The path of the config, which sets `platform: 'host'` and keeps the baselines in a folder that starts empty.
+   */
+  config: string
+  /**
+   * The folder the CLI caches the headless shell in.
+   */
+  cacheDir: string
+  /**
+   * The environment without `CI`, which `update` refuses to run under, and with `VISUAL_CHECK_CACHE_DIR` naming the
+   * cache folder.
+   */
+  environment: NodeJS.ProcessEnv
+}
+
+/**
  * One end-to-end case: what it checks, and the check, which gives every problem it finds.
  */
 interface Case {
@@ -258,15 +338,55 @@ interface Case {
 }
 
 /**
- * Lists what the check needs and doesn't have: the static build and the built CLI, then the browser image, or inside
- * visual-check's image its marker and no docker.
+ * Lists what the check needs and doesn't have: the static build and the built CLI, arguments that go together, then
+ * what its mode needs.
  */
 function findSetupProblems(): string[] {
   return [
     ...(existsSync(join(staticDir, 'index.json')) ? [] : [`storybook-static/ is missing: ${turboHint}`]),
     ...(existsSync(cliBin) ? [] : [`The CLI is not built: ${turboHint}`]),
-    ...(insideImage ? findInsideImageProblems() : findBrowserImageProblems()),
+    ...findArgumentProblems(),
+    ...findModeProblems(),
   ]
+}
+
+/**
+ * Lists what is wrong with the arguments: `--inside-image` and `--host` are separate modes, and `--no-docker` needs
+ * `--host`.
+ */
+function findArgumentProblems(): string[] {
+  const conflicts: [boolean, string][] = [
+    [insideImage && onHost, '--inside-image and --host are separate modes: give one of them.'],
+    [withoutDocker && !onHost, '--no-docker only runs with --host.'],
+  ]
+
+  return conflicts.filter(([conflicting]) => conflicting).map(([, problem]) => problem)
+}
+
+/**
+ * Lists what the mode the arguments pick needs and doesn't have: inside visual-check's image its marker and no docker,
+ * on the machine itself what `--no-docker` needs, else the browser image.
+ */
+function findModeProblems(): string[] {
+  if (insideImage) {
+    return findInsideImageProblems()
+  }
+
+  if (onHost) {
+    return findHostProblems()
+  }
+
+  return findBrowserImageProblems()
+}
+
+/**
+ * Lists what the check needs on the machine itself: with `--no-docker`, no docker, since that case checks the error
+ * for a run without it.
+ */
+function findHostProblems(): string[] {
+  return withoutDocker && isDockerOnPath()
+    ? ['docker is on the PATH: --no-docker checks the error for a run without it, so run it where there is none.']
+    : []
 }
 
 /**
@@ -329,6 +449,29 @@ function readMarker(): ImageMarker {
 }
 
 /**
+ * Reads the browser package.
+ */
+function readBrowserPackage(): BrowserPackage {
+  return JSON.parse(readFileSync(browserPackagePath, 'utf8')) as BrowserPackage
+}
+
+/**
+ * Gives Chrome for Testing's name for this machine's platform, such as `mac-arm64`.
+ *
+ * @throws {Error} When visual-check downloads no headless shell for the machine.
+ */
+function thisMachinesChromeForTestingPlatform(): string {
+  const machine = `${process.platform}/${process.arch}`
+  const platform = chromeForTestingPlatforms[machine]
+
+  if (platform === undefined) {
+    throw new Error(`visual-check downloads no headless shell for ${machine}, so --host can't run here`)
+  }
+
+  return platform
+}
+
+/**
  * Gives the path of the file in the static build that a URL path names, or `undefined` when it names no file there.
  */
 function staticFileOf(pathname: string): string | undefined {
@@ -342,6 +485,13 @@ function staticFileOf(pathname: string): string | undefined {
  */
 function isFile(path: string): boolean {
   return existsSync(path) && statSync(path).isFile()
+}
+
+/**
+ * Whether nothing is at this path, or an empty folder is.
+ */
+function isMissingOrEmpty(path: string): boolean {
+  return !existsSync(path) || (statSync(path).isDirectory() && readdirSync(path).length === 0)
 }
 
 /**
@@ -770,11 +920,11 @@ async function checkDeliberateChange(expected: Outcomes): Promise<string[]> {
 }
 
 /**
- * Runs `test --all` against the committed baselines with a config that sets this platform, and hands the run and the
- * server to `check`.
+ * Runs `test --all` against the committed baselines with a config that sets this platform, or none when it is
+ * `undefined`, and hands the run and the server to `check`.
  */
 async function testWithPlatform(
-  platform: string,
+  platform: string | undefined,
   check: (run: CliRun, server: StorybookServer) => string[],
 ): Promise<string[]> {
   return await withStorybookServer({}, (server) =>
@@ -804,11 +954,129 @@ async function checkPlatformMismatch(): Promise<string[]> {
   return await testWithPlatform(platform, (run, server) => [
     ...exitCodeProblems('test', run, 2),
     ...outcomeProblems('test', run.outcomes, {}),
-    ...[`image for ${arch}`, `platform is ${platform}`]
-      .filter((text) => !run.stderr.includes(text))
-      .map((text) => `the message doesn't say "${text}"${outputOf(run.stderr)}`),
-    ...(server.storyPageRequested() ? ['the browser asked for a story, so the run captured'] : []),
+    ...missingTextProblems(run.stderr, [`image for ${arch}`, `platform is ${platform}`]),
+    ...capturedProblems(server),
   ])
+}
+
+/**
+ * Lists each text the message on standard error doesn't hold, with the whole message.
+ */
+function missingTextProblems(stderr: string, texts: string[]): string[] {
+  return texts
+    .filter((text) => !stderr.includes(text))
+    .map((text) => `the message doesn't say "${text}"${outputOf(stderr)}`)
+}
+
+/**
+ * Gives the problem when the browser asked for a story, which means the run captured, or none.
+ */
+function capturedProblems(server: StorybookServer): string[] {
+  return server.storyPageRequested() ? ['the browser asked for a story, so the run captured'] : []
+}
+
+/**
+ * Where there's no docker, the default platform makes `test` exit 2 before any capture: the message says there's no
+ * docker command, and offers to start or install Docker or to set `platform: 'host'`.
+ */
+async function checkNoDocker(): Promise<string[]> {
+  return await testWithPlatform(undefined, (run, server) => [
+    ...exitCodeProblems('test', run, 2),
+    ...outcomeProblems('test', run.outcomes, {}),
+    ...missingTextProblems(run.stderr, noDockerTexts),
+    ...capturedProblems(server),
+  ])
+}
+
+/**
+ * Writes the config the host cases share, with `platform: 'host'` and its baselines in a new folder inside the
+ * temporary one, and gives what they share. The cache is VISUAL_CHECK_CACHE_DIR when the caller sets it, resolved as
+ * the CLI resolves it in this package's folder, else a new folder inside the temporary one.
+ */
+function hostRunOf(folder: string, url: string): HostRun {
+  const cacheSetting = process.env.VISUAL_CHECK_CACHE_DIR
+  const cacheDir = cacheSetting ? resolvePath(packageDir, cacheSetting) : join(folder, 'cache')
+
+  return {
+    config: writeConfig(folder, url, join(folder, 'baselines'), 'host'),
+    cacheDir,
+    environment: { ...localEnvironment(), VISUAL_CHECK_CACHE_DIR: cacheDir },
+  }
+}
+
+/**
+ * With an empty cache, `update` says it is downloading the browser package's Chromium for this machine's platform,
+ * writes the story's baseline and exits 0, and the cache then holds the marker of a complete install.
+ */
+async function checkColdCache(host: HostRun): Promise<string[]> {
+  if (!isMissingOrEmpty(host.cacheDir)) {
+    return [
+      `the cache ${host.cacheDir} isn't empty, so update wouldn't download: ` +
+        'empty it, or set VISUAL_CHECK_CACHE_DIR to an empty folder or leave it unset',
+    ]
+  }
+
+  const { chromium } = readBrowserPackage()
+  const platform = thisMachinesChromeForTestingPlatform()
+  const download = `Downloading Chromium ${chromium} (${platform})`
+  const marker = join(host.cacheDir, 'chromium', chromium, `chrome-headless-shell-${platform}.done`)
+  const run = await runCli(['update', '--filter', hostStoryId, '--config', host.config], host.environment)
+
+  return [
+    ...expectedRunProblems('update', run, { [hostStoryId]: 'written' }),
+    ...missingTextProblems(run.stderr, [download]),
+    ...(isFile(marker) ? [] : [`the cache has no ${marker}`]),
+  ]
+}
+
+/**
+ * With the cache `update` filled, `test` downloads nothing and passes the story against the baseline `update` wrote.
+ */
+async function checkWarmCache(host: HostRun): Promise<string[]> {
+  const run = await runCli(['test', '--filter', hostStoryId, '--config', host.config], host.environment)
+
+  return [
+    ...expectedRunProblems('test', run, { [hostStoryId]: 'passed' }),
+    ...(run.stderr.includes('Downloading') ? [`test downloaded again${outputOf(run.stderr)}`] : []),
+  ]
+}
+
+/**
+ * The host cases, in order: the cold cache case, then the warm cache case, which needs the baseline and the cache the
+ * cold one leaves and so runs only when that one passed, then with `--no-docker` the no-Docker case.
+ */
+function hostCases(host: HostRun): Case[] {
+  let coldCachePassed = false
+
+  return [
+    {
+      name: `cold cache: update downloads the headless shell and writes ${hostStoryId}`,
+      run: async () => {
+        const problems = await checkColdCache(host)
+
+        coldCachePassed = problems.length === 0
+
+        return problems
+      },
+    },
+    {
+      name: `warm cache: test downloads nothing and ${hostStoryId} passes`,
+      run: async () => (coldCachePassed ? await checkWarmCache(host) : ['not run: the cold cache case failed']),
+    },
+    ...(withoutDocker
+      ? [{ name: "no Docker: the default platform exits 2 offering platform: 'host'", run: checkNoDocker }]
+      : []),
+  ]
+}
+
+/**
+ * Runs the host cases and resolves with whether all of them passed. They share one server and a temporary folder,
+ * which holds their config and baselines, and their cache when the caller doesn't name one.
+ */
+async function runHostCases(): Promise<boolean> {
+  return await withStorybookServer({}, (server) =>
+    withTemporaryFolder((folder) => runCases(hostCases(hostRunOf(folder, server.url)))),
+  )
 }
 
 /**
@@ -932,6 +1200,8 @@ const setupProblems = findSetupProblems()
 if (setupProblems.length > 0) {
   console.error(setupProblems.join('\n'))
   process.exitCode = 1
+} else if (onHost) {
+  process.exitCode = (await runHostCases()) ? 0 : 1
 } else {
   const expected = JSON.parse(readFileSync(join(packageDir, 'expected-outcomes.json'), 'utf8')) as Outcomes
   const passed = await runCases([

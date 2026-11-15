@@ -17,6 +17,7 @@
       { "name": "cli/browser-process", "patterns": ["packages/cli/src/browser-process/**"] },
       { "name": "cli/baselines", "patterns": ["packages/cli/src/baselines/**"] },
       { "name": "cli/browser", "patterns": ["packages/cli/src/browser/**"] },
+      { "name": "cli/browser-download", "patterns": ["packages/cli/src/browser-download/**"] },
       { "name": "cli/commands", "patterns": ["packages/cli/src/commands/**"] },
       { "name": "cli/config", "patterns": ["packages/cli/src/config/**"] },
       { "name": "cli/storybook", "patterns": ["packages/cli/src/storybook/**"] },
@@ -34,11 +35,13 @@
       { "from": "cli/browser-process", "allow": ["cli/capture/driver"] },
       { "from": "cli/baselines", "allow": [] },
       { "from": "cli/browser", "allow": ["cli/config"] },
+      { "from": "cli/browser-download", "allow": [] },
       {
         "from": "cli/commands",
         "allow": [
           "cli/baselines",
           "cli/browser",
+          "cli/browser-download",
           "cli/browser-process",
           "cli/capture",
           "cli/capture/driver",
