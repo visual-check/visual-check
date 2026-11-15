@@ -1148,12 +1148,12 @@ describe('the options read', () => {
     expect(preview.requested).toEqual(['button--primary', 'button--primary'])
   })
 
-  it('touches nothing on the preview but ready() and loadStory(), so extract() never runs', async () => {
+  it('touches only ready(), loadStory() and the story store, so extract() never runs', async () => {
     const page = openPage()
     const touched = new Set<PropertyKey>()
     const extract = vi.fn()
     const preview = new Proxy(
-      { ready: async () => undefined, loadStory: async () => ({ parameters: {} }), extract },
+      { ready: async () => undefined, loadStory: async () => ({ parameters: {} }), storyStoreValue: {}, extract },
       {
         get: (target, key) => {
           touched.add(key)
@@ -1165,7 +1165,7 @@ describe('the options read', () => {
 
     page.setGlobal('__STORYBOOK_PREVIEW__', preview)
     await readOptions(page, [cardFile])
-    expect([...touched]).toEqual(['ready', 'loadStory'])
+    expect([...touched]).toEqual(['ready', 'loadStory', 'storyStoreValue'])
     expect(extract).not.toHaveBeenCalled()
   })
 
@@ -1173,6 +1173,118 @@ describe('the options read', () => {
     const page = blankPage()
 
     expect(await readOptions(page, [buttonFile])).toEqual({ outcome: 'script-missing' })
+  })
+})
+
+/**
+ * Reads the options of `buttonFile` from a preview whose story store is `storyStoreValue`, and gives the declared
+ * globals the page answered.
+ */
+async function declaredGlobalsOf(storyStoreValue: unknown): Promise<unknown> {
+  const page = openPage()
+
+  page.setGlobal('__STORYBOOK_PREVIEW__', Object.assign(new FakePreview(), { storyStoreValue }))
+
+  const answer = (await readOptions(page, [buttonFile])) as { declaredGlobals: unknown }
+
+  return answer.declaredGlobals
+}
+
+/**
+ * Throws, as a getter Storybook or the page broke would.
+ *
+ * @throws {Error} Always.
+ */
+function hostile(): never {
+  throw new Error('hostile')
+}
+
+describe("the Storybook's declared globals", () => {
+  it("are the names Storybook's globals store allows", async () => {
+    expect(await declaredGlobalsOf({ userGlobals: { allowedGlobalNames: new Set(['theme', 'locale']) } })).toEqual([
+      'theme',
+      'locale',
+    ])
+  })
+
+  it("leave out an allowed name that isn't text", async () => {
+    expect(await declaredGlobalsOf({ userGlobals: { allowedGlobalNames: new Set(['theme', 1]) } })).toEqual(['theme'])
+  })
+
+  it.each<[string, unknown]>([
+    ['a preview without a story store', undefined],
+    ['a story store without a globals store', {}],
+    ['allowed names that are not a set', { userGlobals: { allowedGlobalNames: ['theme'] } }],
+    [
+      'allowed names that cannot be read',
+      {
+        userGlobals: {
+          get allowedGlobalNames() {
+            return hostile()
+          },
+        },
+      },
+    ],
+  ])('are unknown, as null, for %s', async (_what, storyStoreValue) => {
+    expect(await declaredGlobalsOf(storyStoreValue)).toBeNull()
+  })
+
+  it("are unknown, as null, when the preview's story store cannot be read", async () => {
+    const page = openPage()
+    const preview = new FakePreview()
+
+    Object.defineProperty(preview, 'storyStoreValue', { get: hostile })
+    page.setGlobal('__STORYBOOK_PREVIEW__', preview)
+    expect(await readOptions(page, [buttonFile])).toEqual(loadedAnswer(buttonFile))
+  })
+})
+
+/**
+ * Reads the options of one story whose `loadStory` resolves with `story`, and gives the globals the page answered it
+ * pins.
+ */
+async function pinnedGlobalsOf(story: unknown): Promise<unknown> {
+  const page = openPage()
+
+  page.setGlobal('__STORYBOOK_PREVIEW__', new FakePreview({ 'button--primary': async () => story }))
+
+  const answer = (await readOptions(page, [buttonFile])) as { files: { stories: { pinnedGlobals: unknown }[] }[] }
+
+  return answer.files[0]?.stories[0]?.pinnedGlobals
+}
+
+describe('the globals each story pins', () => {
+  it("are the keys of the story's storyGlobals, its meta's and its own globals merged", async () => {
+    expect(await pinnedGlobalsOf({ parameters: {}, storyGlobals: { theme: 'dark', locale: 'pl' } })).toEqual([
+      'theme',
+      'locale',
+    ])
+  })
+
+  it('leave out keys that are inherited, not enumerable or symbols', async () => {
+    const storyGlobals = Object.create({ inherited: true })
+
+    Object.defineProperty(storyGlobals, 'hidden', { value: true, enumerable: false })
+    storyGlobals[Symbol('theme')] = 'dark'
+    storyGlobals.theme = 'dark'
+    expect(await pinnedGlobalsOf({ storyGlobals })).toEqual(['theme'])
+  })
+
+  it.each<[string, unknown]>([
+    ['a story without storyGlobals', { parameters: {} }],
+    ['storyGlobals that are not an object', { storyGlobals: 'dark' }],
+    ['a story that is not an object', undefined],
+    [
+      'storyGlobals that cannot be read',
+      {
+        get storyGlobals() {
+          return hostile()
+        },
+      },
+    ],
+    ['storyGlobals whose keys cannot be listed', { storyGlobals: new Proxy({}, { ownKeys: hostile }) }],
+  ])('are none for %s', async (_what, story) => {
+    expect(await pinnedGlobalsOf(story)).toEqual([])
   })
 })
 

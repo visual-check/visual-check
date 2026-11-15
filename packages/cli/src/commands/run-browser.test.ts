@@ -191,7 +191,6 @@ function runBrowserWith(...browsers: (FakeBrowser | Promise<FakeBrowser> | Error
       place: { in: 'image' },
       environment: {},
       settings: {
-        viewport: { width: 1280, height: 720, deviceScaleFactor: 1 },
         readyTimeoutMs: 15_000,
         timezone: 'UTC',
         locale: 'en-US',
@@ -208,7 +207,11 @@ function runBrowserWith(...browsers: (FakeBrowser | Promise<FakeBrowser> | Error
  * Gives the story with the given ID and the URL of its own page.
  */
 function storyOf(id: string): StoryToCapture {
-  return { id, url: `http://127.0.0.1:6006/iframe.html?id=${id}&viewMode=story` }
+  return {
+    id,
+    url: `http://127.0.0.1:6006/iframe.html?id=${id}&viewMode=story`,
+    viewport: { width: 1280, height: 720, deviceScaleFactor: 1, touch: false },
+  }
 }
 
 /**
@@ -233,10 +236,18 @@ const optionsRequest: OptionsRequest = {
 }
 
 /**
- * Gives what reading the options of `optionsRequest` gives when the page finds it loaded with no options.
+ * Gives what reading the options of `optionsRequest` gives when the page finds it loaded with no options or pinned
+ * globals, and can't read the declared globals.
  */
 const optionsRead: StorybookOptionsRead = {
-  files: [{ importPath: './src/a.stories.ts', outcome: 'loaded', stories: [{ id: 'a', options: undefined }] }],
+  declaredGlobals: null,
+  files: [
+    {
+      importPath: './src/a.stories.ts',
+      outcome: 'loaded',
+      stories: [{ id: 'a', options: undefined, pinnedGlobals: [] }],
+    },
+  ],
 }
 
 /**

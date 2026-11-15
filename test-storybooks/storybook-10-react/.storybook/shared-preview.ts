@@ -1,3 +1,5 @@
+import type { Decorator } from '@storybook/react-vite'
+import { createElement } from 'react'
 import { visualCheck } from './visual-check.ts'
 
 /**
@@ -22,3 +24,31 @@ export const parameters = {
     },
   }),
 }
+
+/**
+ * The globals every React test Storybook declares, with their starting values. Declaring `theme` here lets the `dark`
+ * mode set it in the story's URL, since Storybook drops a global it doesn't declare.
+ */
+export const initialGlobals = { theme: 'light' }
+
+/**
+ * The look of the dark surface the `dark` theme wraps a story in.
+ */
+const darkSurfaceStyle = { padding: 16, background: '#111', color: '#eee' }
+
+/**
+ * Wraps the story in a dark surface when the `theme` global is `dark`. With any other theme, `light` included, it
+ * renders the story as it is, so no snapshot outside the `dark` mode changes.
+ */
+const withTheme: Decorator = (Story, context) => {
+  if (context.globals.theme !== 'dark') {
+    return createElement(Story)
+  }
+
+  return createElement('div', { style: darkSurfaceStyle }, createElement(Story))
+}
+
+/**
+ * The decorators every React test Storybook's preview adds.
+ */
+export const decorators = [withTheme]

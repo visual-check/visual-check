@@ -5,6 +5,7 @@ import {
   isPlainObject,
   join,
   type Keys,
+  lowercaseNamePattern,
   meets,
   mustBe,
   nonEmptyString,
@@ -170,7 +171,7 @@ function checkStorybooks(value: unknown, path: string): string[] {
   }
 
   return entries.flatMap(([name, settings]) => [
-    ...(/^[a-z0-9-]+$/.test(name)
+    ...(lowercaseNamePattern.test(name)
       ? []
       : [`${join(path, name)}: a Storybook name takes lowercase letters, digits and -.`]),
     ...checkStorybook(settings, join(path, name)),

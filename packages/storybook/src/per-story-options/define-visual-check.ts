@@ -65,15 +65,32 @@ export type Mask = { selector: string; host?: never } | { host: string; selector
 export type WrittenMask = { selector: string; host: null } | { host: string; selector: null }
 
 /**
+ * What a generic that types a mode's globals must look like: global names that map to global values. It takes a `type`
+ * alias and an `interface` alike.
+ */
+type GlobalsConstraint<Globals> = object & { [Name in keyof Globals]: GlobalValue }
+
+/**
+ * The shape of globals when no generic types them: any name, any global value.
+ */
+type GlobalsShape = Record<string, GlobalValue>
+
+/**
+ * The globals a mode may set. A typed `Globals` makes every global optional, since a mode sets some of them. The
+ * untyped shape stays as it is, so that a global can't be set to `undefined`.
+ */
+type ModeGlobals<Globals> = string extends keyof Globals ? Globals : Partial<Globals>
+
+/**
  * A named set of globals and viewport that a story can be captured in besides its default capture.
  *
  * @public
  */
-export interface ModeDefinition {
+export interface ModeDefinition<Globals extends GlobalsConstraint<Globals> = GlobalsShape> {
   /**
-   * The Storybook globals the mode sets, which go into the story's URL.
+   * The Storybook globals the mode sets, which go into the story's URL. A mode sets some of the globals, not all.
    */
-  globals?: Record<string, GlobalValue>
+  globals?: ModeGlobals<Globals>
   /**
    * The viewport the mode sets. It merges over the story's own viewport, so the mode wins.
    */
@@ -85,11 +102,14 @@ export interface ModeDefinition {
  *
  * @public
  */
-export interface VisualCheckDeclaration<ModeName extends string> {
+export interface VisualCheckDeclaration<
+  ModeName extends string,
+  Globals extends GlobalsConstraint<Globals> = GlobalsShape,
+> {
   /**
    * The Storybook's modes by name. A name takes lowercase letters, digits and `-`.
    */
-  modes: Record<ModeName, ModeDefinition>
+  modes: Record<ModeName, ModeDefinition<Globals>>
 }
 
 /**
@@ -179,11 +199,22 @@ export interface VisualCheckParameter {
 }
 
 /**
+ * The function that writes `parameters.visualCheck` for one level, with mode names checked against the declaration.
+ *
+ * @public
+ */
+export type VisualCheck<ModeName extends string> = (options: VisualCheckOptions<NoInfer<ModeName>>) => {
+  visualCheck: VisualCheckParameter
+}
+
+/**
  * Declares a Storybook's modes once and returns the function that writes `parameters.visualCheck`.
  *
  * The project calls it in `<configDir>/visual-check.ts` and exports the result as `visualCheck`. Stories files import
  * that `visualCheck`, not this package, and spread its result into `parameters` of `preview`, a meta or a story:
  * `parameters: { ...visualCheck({ modes: ['dark'] }) }`. Mode names are checked against the declaration.
+ *
+ * To type the globals a mode sets, pass them as a generic and call the result: `defineVisualCheck<Globals>()({ modes })`.
  *
  * Storybook merges the three levels, and the most specific level wins:
  *
@@ -199,7 +230,33 @@ export interface VisualCheckParameter {
  */
 export function defineVisualCheck<const ModeName extends string>(
   declaration: VisualCheckDeclaration<ModeName>,
-): (options: VisualCheckOptions<NoInfer<ModeName>>) => { visualCheck: VisualCheckParameter } {
+): VisualCheck<ModeName>
+/**
+ * Types the globals a mode sets. It takes no argument and returns the function that takes the declaration, because
+ * TypeScript can't infer the mode names when it is given only the generic. To type the globals, pass them as a generic
+ * and call the result: `defineVisualCheck<Globals>()({ modes })`.
+ *
+ * @public
+ */
+export function defineVisualCheck<Globals extends GlobalsConstraint<Globals>>(): <const ModeName extends string>(
+  declaration: VisualCheckDeclaration<ModeName, Globals>,
+) => VisualCheck<ModeName>
+/**
+ * Implements both call forms: without a declaration it returns the declarer, with one it declares the modes.
+ *
+ * @public
+ */
+export function defineVisualCheck(declaration?: VisualCheckDeclaration<string>): unknown {
+  if (declaration === undefined) {
+    return declareModes
+  }
+  return declareModes(declaration)
+}
+
+/**
+ * Returns the function that writes `parameters.visualCheck` for the declared modes.
+ */
+function declareModes(declaration: VisualCheckDeclaration<string>): VisualCheck<string> {
   /**
    * Writes the parameter for one level.
    */

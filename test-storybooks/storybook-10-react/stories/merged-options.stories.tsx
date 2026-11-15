@@ -86,10 +86,10 @@ type Story = StoryObj<typeof meta>
 
 /**
  * Shows the options Storybook merged from the preview, the meta and the story, so its snapshot pins how each key
- * merges: `modes` is the story's list, so both modes are `null`; `viewport` and `tolerance` merge key by key; `masks`
- * merges by name, with `dropped` dropped; `element` is the story's `null`; `wait` is the preview's hook. Each merged
- * value is one no capture depends on: the viewport is the config's default 1280 × 720, no mask matches anything,
- * `element: null` is the full page, and no mode is listed.
+ * merges: `modes` is the story's empty list, so all four modes are `null`; `viewport` and `tolerance` merge key by key;
+ * `masks` merges by name, with `dropped` dropped; `element` is the story's `null`; `wait` is the preview's hook. Each
+ * merged value is one no capture depends on: the viewport is the config's default 1280 × 720, no mask matches
+ * anything, `element: null` is the full page, and no mode is listed.
  */
 export const Default: Story = {
   parameters: {

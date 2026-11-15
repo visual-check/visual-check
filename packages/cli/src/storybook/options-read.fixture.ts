@@ -20,9 +20,9 @@ type FileRead =
        */
       importPath: string
       /**
-       * Each story's ID and options, in order.
+       * Each story's ID and options, in order, each with the globals it pins, none when not given.
        */
-      stories: { id: string; options: unknown }[]
+      stories: { id: string; options: unknown; pinnedGlobals?: string[] }[]
     }
   | {
       /**
@@ -50,21 +50,30 @@ type FileRead =
     }
 
 /**
- * Builds what the options read in the page answers once it read these stories files, as it crosses to Node: each
- * loaded file's options encoded by the page's own encoder, and passed through JSON.
+ * Builds what the options read in the page answers once it read these stories files, as it crosses to Node: the
+ * Storybook's declared globals, `null` (unknown) when not given, and each loaded file's options encoded by the page's
+ * own encoder, and passed through JSON.
  *
  * @public
  */
-export function optionsReadAnswer(files: readonly FileRead[]): Record<string, unknown> {
+export function optionsReadAnswer(
+  files: readonly FileRead[],
+  declaredGlobals: readonly string[] | null = null,
+): Record<string, unknown> {
   return JSON.parse(
     JSON.stringify({
       outcome: 'read',
+      declaredGlobals,
       files: files.map((file) =>
         'stories' in file
           ? {
               importPath: file.importPath,
               outcome: 'loaded',
-              stories: file.stories.map(({ id, options }) => ({ id, options: encode(options) })),
+              stories: file.stories.map(({ id, options, pinnedGlobals = [] }) => ({
+                id,
+                options: encode(options),
+                pinnedGlobals,
+              })),
             }
           : file,
       ),
@@ -73,7 +82,8 @@ export function optionsReadAnswer(files: readonly FileRead[]): Record<string, un
 }
 
 /**
- * Answers the options read as the page would where every file loads and no story has options.
+ * Answers the options read as the page would where every file loads, no story has options or pins a global, and the
+ * Storybook's declared globals can't be read.
  */
 function everyFileLoaded(files: readonly StoriesFile[]): Record<string, unknown> {
   return optionsReadAnswer(
@@ -87,7 +97,7 @@ function everyFileLoaded(files: readonly StoriesFile[]): Record<string, unknown>
 /**
  * Answers an options read expression by running the real expression against a page script whose read gives what
  * `answer` builds from the files the expression asks for. By default it answers as the page would where every file
- * loads and no story has options.
+ * loads, no story has options or pins a global, and the Storybook's declared globals can't be read.
  *
  * @public
  */

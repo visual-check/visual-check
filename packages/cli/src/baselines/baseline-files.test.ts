@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { BaselineError } from './baseline-error.js'
-import { baselinePathOf, isByteIdentical, readBaseline, writeBaseline } from './baseline-files.js'
+import { baselinePathOf, isByteIdentical, readBaseline, snapshotKeyOf, writeBaseline } from './baseline-files.js'
 
 /**
  * The temporary folders the tests made, removed after each test.
@@ -32,10 +32,26 @@ afterEach(() => {
   }
 })
 
+describe('snapshotKeyOf', () => {
+  it('keys the default capture by the story ID alone', () => {
+    expect(snapshotKeyOf('components-button--primary')).toBe('components-button--primary')
+  })
+
+  it('keys a mode by the story ID, a dot and the mode', () => {
+    expect(snapshotKeyOf('components-button--primary', 'dark')).toBe('components-button--primary.dark')
+  })
+})
+
 describe('baselinePathOf', () => {
-  it("names the default capture's baseline after the story ID, in the baselines folder", () => {
+  it("names the default capture's baseline after its key, the story ID, in the baselines folder", () => {
     expect(baselinePathOf('/project/.visual-check/baselines', 'components-button--primary')).toBe(
       join('/project/.visual-check/baselines', 'components-button--primary.png'),
+    )
+  })
+
+  it("names a mode's baseline after its key, in the baselines folder", () => {
+    expect(baselinePathOf('/project/.visual-check/baselines', 'components-button--primary.dark')).toBe(
+      join('/project/.visual-check/baselines', 'components-button--primary.dark.png'),
     )
   })
 })

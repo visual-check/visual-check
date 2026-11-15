@@ -31,18 +31,30 @@ export interface OptionsRequest {
 }
 
 /**
- * What reading the options gave: what the page read of each stories file, or a problem that stops the run.
+ * What the page read of a Storybook: the globals it declares and each stories file.
+ *
+ * @public
+ */
+export interface StorybookOptions {
+  /**
+   * The globals Storybook keeps from a story's URL, which are the keys of its `initialGlobals` and `globalTypes`, or
+   * `null` when the page couldn't read them.
+   */
+  declaredGlobals: string[] | null
+  /**
+   * What the page read of each stories file asked for, and of each story asked for in a file that loaded. It holds
+   * nothing else.
+   */
+  files: FileOptions[]
+}
+
+/**
+ * What reading the options gave: what the page read of the Storybook, or a problem that stops the run.
  *
  * @public
  */
 export type StorybookOptionsRead =
-  | {
-      /**
-       * What the page read of each stories file asked for, and of each story asked for in a file that loaded. It holds
-       * nothing else.
-       */
-      files: FileOptions[]
-    }
+  | StorybookOptions
   | {
       /**
        * One or more lines for people saying why the options couldn't be read, with no trailing newline.
@@ -143,13 +155,17 @@ function mismatchOf(asked: readonly StoriesFile[], read: readonly FileOptions[])
 }
 
 /**
- * Gives the files the page read, or a problem when they aren't exactly the files and stories asked for.
+ * Gives the declared globals and the files the page read, or a problem when the files aren't exactly the files and
+ * stories asked for.
  */
-function filesReadOf(files: FileOptions[], request: OptionsRequest): StorybookOptionsRead {
+function filesReadOf(
+  { declaredGlobals, files }: Extract<OptionsRead, { outcome: 'read' }>,
+  request: OptionsRequest,
+): StorybookOptionsRead {
   const mismatch = mismatchOf(request.files, files)
 
   if (mismatch === undefined) {
-    return { files }
+    return { declaredGlobals, files }
   }
 
   return {
@@ -165,7 +181,7 @@ function describeRead(read: OptionsRead, request: OptionsRequest, readyTimeoutMs
 
   switch (read.outcome) {
     case 'read':
-      return filesReadOf(read.files, request)
+      return filesReadOf(read, request)
     case 'timed-out':
       return { problem: timedOutProblem(read.step, request, readyTimeoutMs) }
     case 'preview-failed': {
@@ -248,12 +264,12 @@ async function readOnPage(
 }
 
 /**
- * Reads the merged per-story options of the stories in a Storybook's preview, on a page of its own set up as a
- * capture page is. The page loads the preview, which renders no story, and reads each stories file, giving the preview
- * and the files each the whole readyTimeout. It's closed afterwards, ignoring a failure to. Whatever goes wrong other
- * than the browser exiting comes back as a problem that names the Storybook and the fix, an answer that isn't exactly
- * the files and stories asked for included. Rejects only with a `BrowserExitedError`, and then the page isn't closed,
- * since the browser is gone.
+ * Reads the merged per-story options of the stories in a Storybook's preview, with the globals each story pins and the
+ * globals the Storybook declares, on a page of its own set up as a capture page is. The page loads the preview, which
+ * renders no story, and reads each stories file, giving the preview and the files each the whole readyTimeout. It's
+ * closed afterwards, ignoring a failure to. Whatever goes wrong other than the browser exiting comes back as a problem
+ * that names the Storybook and the fix, an answer that isn't exactly the files and stories asked for included. Rejects
+ * only with a `BrowserExitedError`, and then the page isn't closed, since the browser is gone.
  *
  * @public
  */
