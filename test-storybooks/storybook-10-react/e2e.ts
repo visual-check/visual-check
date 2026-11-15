@@ -31,7 +31,7 @@ import {
 import { createServer, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
-import { delimiter, extname, join, resolve as resolvePath, sep } from 'node:path'
+import { basename, delimiter, extname, join, resolve as resolvePath, sep } from 'node:path'
 import type { Readable } from 'node:stream'
 import { setTimeout as sleep } from 'node:timers/promises'
 
@@ -181,8 +181,8 @@ const deliberateChange = {
 }
 
 /**
- * How many workers the committed-baselines case and the update-then-test case capture with, so they capture in
- * parallel on any machine.
+ * How many workers every case that captures in parallel uses, through `--workers` or the config it writes, so each
+ * captures in parallel on any machine.
  */
 const parallelWorkers = 2
 
@@ -192,6 +192,23 @@ const parallelWorkers = 2
  * cleared between them.
  */
 const storageFilter = /^storage--/
+
+/**
+ * The animation stories, by the pattern their IDs match. visual-check brings each to its end state at capture.
+ */
+const animationFilter = /^animations--/
+
+/**
+ * How many times the end-state case runs `test` on the animation stories, one run after the other, so a snapshot that
+ * isn't the same on every run shows.
+ */
+const endStateRuns = 10
+
+/**
+ * The Storybook 10 test Storybook's committed baselines. Each animation story's snapshot is the same on every
+ * Storybook, so the other test Storybooks' committed animation baselines must equal these byte for byte.
+ */
+const storybook10Baselines = resolvePath(packageDir, '..', 'storybook-10-react', '.visual-check', 'baselines')
 
 /**
  * The hazard stories, by the pattern their IDs match, and what the hazards case checks beyond their outcomes: where
@@ -1026,11 +1043,15 @@ interface ConfigOptions {
    * The `readyTimeout`, in ms. The config's default when not given.
    */
   readyTimeout?: number
+  /**
+   * How many more times a failing snapshot is captured before it fails. The config's default when not given.
+   */
+  retries?: number
 }
 
 /**
  * Writes a config for this Storybook, served at the URL, with its baselines in the given folder, that captures with 2
- * workers, and the platform and `readyTimeout` the options give. Gives its path.
+ * workers, and the platform, `readyTimeout` and `retries` the options give. Gives its path.
  */
 function writeConfig(folder: string, url: string, baselines: string, options: ConfigOptions = {}): string {
   const path = join(folder, 'visual-check.config.mjs')
@@ -1117,6 +1138,7 @@ async function waitUntil(condition: () => boolean, timeoutMilliseconds: number):
 /**
  * `test` against the committed baselines, with 2 workers, gives exactly the expected outcomes. Each broken readiness
  * story's line says why, and standard error has no test-path warning, since every page is on Storybook's test path.
+ * Outside the Storybook 10 test Storybook, the committed animation baselines are byte-identical to its own.
  */
 async function checkCommittedBaselines(expected: Outcomes): Promise<string[]> {
   return await withStorybookServer({}, async (server) => {
@@ -1126,8 +1148,91 @@ async function checkCommittedBaselines(expected: Outcomes): Promise<string[]> {
       ...expectedRunProblems('test', run, expected),
       ...readinessLines.flatMap(([storyId, says]) => lineSaysProblems(run, storyId, says)),
       ...noTestPathWarningProblems(run.stderr),
+      ...storybook10AnimationProblems(),
     ]
   })
+}
+
+/**
+ * Lists how the committed animation baselines differ from the Storybook 10 test Storybook's, or none when this is that
+ * Storybook. Both folders must hold the same `animations--*.png` files, byte for byte. `test` passes each animation
+ * story here against its baseline, so on Storybook 11 this checks that its own pause of animations, then visual-check's
+ * end state, gives Storybook 10's snapshots.
+ */
+function storybook10AnimationProblems(): string[] {
+  if (committedBaselines === storybook10Baselines) {
+    return []
+  }
+
+  const names = new Set([
+    ...animationBaselineNames(committedBaselines),
+    ...animationBaselineNames(storybook10Baselines),
+  ])
+
+  return [...names].sort().flatMap((name) => storybook10MatchProblems(name))
+}
+
+/**
+ * Lists the names of the animation stories' baselines in a folder, such as `animations--video.png`.
+ */
+function animationBaselineNames(folder: string): string[] {
+  return readdirSync(folder).filter((name) => animationFilter.test(name) && extname(name) === '.png')
+}
+
+/**
+ * Gives the problem with a baseline when it isn't committed both in this package and in the Storybook 10 test
+ * Storybook, or isn't byte-identical in both, or none. The problem names this package by its folder, such as
+ * `storybook-11-react`.
+ */
+function storybook10MatchProblems(name: string): string[] {
+  const packageFolder = basename(packageDir)
+  const committed = join(committedBaselines, name)
+  const storybook10 = join(storybook10Baselines, name)
+
+  if (!isFile(committed)) {
+    return [`${name} is in storybook-10-react's baselines but not committed in ${packageFolder}`]
+  }
+
+  if (!isFile(storybook10)) {
+    return [`${name} is committed in ${packageFolder} but not in storybook-10-react's baselines`]
+  }
+
+  return isSameFile(committed, storybook10) ? [] : [`${name} in ${packageFolder} differs from storybook-10-react's`]
+}
+
+/**
+ * On one server, `test` runs the animation stories against the committed baselines 10 times, one run after the
+ * other, with a config that sets 2 workers and `retries: 0`, and each run gives every one of them its expected outcome.
+ * With no retries, and `test` comparing byte for byte, a run that passes captured each snapshot byte-identical to its
+ * baseline. Every run's problems are kept, each led by its run's number, so a story whose snapshot changes shows how
+ * often it did. A run that a signal ended, as the time limit does, stops the case: that's a broken setup, not a
+ * snapshot that changed, and 10 of them would outlast CI's job.
+ */
+async function checkEndStateRuns(expected: Outcomes): Promise<string[]> {
+  const expectedAnimations = outcomesMatching(expected, animationFilter)
+
+  return await withStorybookServer({}, (server) =>
+    withTemporaryFolder(async (folder) => {
+      const config = writeConfig(folder, server.url, committedBaselines, { retries: 0 })
+      const problems: string[] = []
+
+      for (let runNumber = 1; runNumber <= endStateRuns; runNumber += 1) {
+        const run = await runCli(['test', '--filter', animationFilter.source, '--config', config])
+
+        problems.push(
+          ...expectedRunProblems('test', run, expectedAnimations).map((problem) => `run ${runNumber}: ${problem}`),
+        )
+
+        if (run.signal !== null && runNumber < endStateRuns) {
+          problems.push(`runs ${runNumber + 1} to ${endStateRuns} not run: run ${runNumber} was ended by ${run.signal}`)
+
+          break
+        }
+      }
+
+      return problems
+    }),
+  )
 }
 
 /**
@@ -1746,8 +1851,12 @@ if (setupProblems.length > 0) {
   const expected = JSON.parse(readFileSync(join(packageDir, 'expected-outcomes.json'), 'utf8')) as Outcomes
   const passed = await runCases([
     {
-      name: "committed baselines: test gives the expected outcomes, each broken readiness story's line says why, no test-path warning",
+      name: "committed baselines: test gives the expected outcomes, each broken readiness story's line says why, no test-path warning, the animation baselines are byte-identical to storybook-10-react's",
       run: () => checkCommittedBaselines(expected),
+    },
+    {
+      name: `end state: ${endStateRuns} runs of test give every animation story its expected outcome, byte-identical to its baseline`,
+      run: () => checkEndStateRuns(expected),
     },
     {
       name: "update then test: update writes every story that isn't broken, test passes them and finds the broken ones missing, the baselines match the committed ones",
