@@ -1,3 +1,4 @@
+import { readStoryWait, type StoryWait, storyWaitExpression } from '../storybook/preview-script.js'
 import {
   BrowserExitedError,
   type Driver,
@@ -8,7 +9,7 @@ import {
   PageTimeoutError,
   type PageViewport,
 } from './driver/driver.js'
-import { pageInitScript, readStoryReadiness, type StoryReadiness, storyReadinessExpression } from './page-script.js'
+import { pageInitScript } from './page-script.js'
 
 /**
  * What every page's user agent ends in. It puts Storybook 9.1 and later on its test path, which skips a fixed 100 ms
@@ -17,10 +18,10 @@ import { pageInitScript, readStoryReadiness, type StoryReadiness, storyReadiness
 const userAgentSuffix = ' StorybookTestRunner'
 
 /**
- * How much longer than the readiness wait in the page the driver waits for its answer, in ms. The wait in the page
- * gives up first and says why; this catches a page that stopped answering.
+ * How much longer than the story wait in the page the driver waits for its answer, in ms. The wait in the page gives
+ * up first and says why; this catches a page that stopped answering.
  */
-const readinessMarginMs = 1_000
+const storyWaitMarginMs = 1_000
 
 /**
  * How a session captures every story.
@@ -73,8 +74,9 @@ export interface StoryToCapture {
 /**
  * Why a story can't be captured, as a code a report can group by.
  *
- * - `error`: the story, Storybook or the browser failed it: Storybook reported a status other than success, the page
- *   script didn't run, or a step of the capture failed.
+ * - `error`: the story, Storybook or the browser failed it: Storybook reported an error or showed its error display,
+ *   the story threw, the page script didn't run, or a step of the capture failed.
+ * - `play-threw`: the story's `play` function threw or left unhandled errors.
  * - `timeout`: the story wasn't ready within readyTimeout.
  * - `navigated-away`: the story's page went to another document.
  * - `crashed`: the page crashed, usually from running out of memory.
@@ -83,7 +85,7 @@ export interface StoryToCapture {
  *
  * @public
  */
-export type BrokenReason = 'error' | 'timeout' | 'navigated-away' | 'crashed' | 'browser-exited'
+export type BrokenReason = 'error' | 'play-threw' | 'timeout' | 'navigated-away' | 'crashed' | 'browser-exited'
 
 /**
  * A story that can't be captured: why, and a one-line message for people saying so. A story that navigated away also
@@ -149,7 +151,7 @@ export interface CaptureSession {
 /**
  * A step of one capture.
  */
-type Step = 'viewport' | 'load' | 'wait' | 'capture'
+type Step = 'viewport' | 'load' | 'story' | 'capture'
 
 /**
  * What each step does, as a phrase that follows "while".
@@ -157,7 +159,7 @@ type Step = 'viewport' | 'load' | 'wait' | 'capture'
 const stepNames: Record<Step, string> = {
   viewport: 'setting the viewport',
   load: 'loading the story',
-  wait: 'waiting for the story to finish',
+  story: 'waiting for the story to finish',
   capture: 'capturing the snapshot',
 }
 
@@ -166,7 +168,7 @@ const stepNames: Record<Step, string> = {
  */
 const stepTimeouts: Partial<Record<Step, string>> = {
   load: 'its page was still loading',
-  wait: 'its page stopped answering while visual-check waited for it to finish',
+  story: 'its page stopped answering while visual-check waited for the story to finish',
 }
 
 /**
@@ -205,25 +207,35 @@ function displayUrlOf(url: string, storyUrl: string): string {
 }
 
 /**
- * Says why a story isn't ready to capture, from what the readiness wait found.
+ * Says what a story wait that timed out was still waiting for, by the step it was in.
  */
-function describeReadiness(readiness: StoryReadiness, readyTimeoutMs: number): BrokenStory {
-  switch (readiness.outcome) {
-    case 'finished':
-      return {
-        reason: 'error',
-        message: `Storybook reported the story finished with status ${JSON.stringify(readiness.status)}, as it does when a loader, beforeEach or the render throws, when play leaves unhandled errors, or when a check such as accessibility fails.`,
-      }
+function stillWaitingFor(wait: Extract<StoryWait, { outcome: 'timed-out' }>): string {
+  if (wait.step === 'preview-start') {
+    return "Storybook's preview never started in its page"
+  }
+
+  if (wait.step === 'preview-ready') {
+    return "Storybook's preview started but never became ready"
+  }
+
+  if (wait.lastRenderStep === undefined) {
+    return 'Storybook never sent storyFinished for it'
+  }
+
+  return `Storybook never sent storyFinished for it, and its last render step was ${JSON.stringify(wait.lastRenderStep)}`
+}
+
+/**
+ * Says why a story isn't ready to capture, from what the story wait found.
+ */
+function describeStoryWait(wait: Exclude<StoryWait, { outcome: 'finished' }>, readyTimeoutMs: number): BrokenStory {
+  switch (wait.outcome) {
+    case 'play-threw':
+      return { reason: 'play-threw', message: wait.message }
+    case 'errored':
+      return { reason: 'error', message: wait.message }
     case 'timed-out':
-      return {
-        reason: 'timeout',
-        message: notReady(
-          readyTimeoutMs,
-          readiness.channel
-            ? 'Storybook never sent storyFinished for it'
-            : "Storybook's preview never started in its page",
-        ),
-      }
+      return { reason: 'timeout', message: notReady(readyTimeoutMs, stillWaitingFor(wait)) }
     case 'script-missing':
       return {
         reason: 'error',
@@ -265,9 +277,9 @@ function describeFailure(error: unknown, step: Step, story: StoryToCapture, read
 }
 
 /**
- * Captures a story on an open page: sets the viewport, loads the story, waits until Storybook reports it finished and
- * captures the full page. Loading and waiting share readyTimeout, each getting only what's left of it. A story that
- * can't be captured comes back as a broken story. Rejects only with a `BrowserExitedError`.
+ * Captures a story on an open page: sets the viewport, loads the story, waits until Storybook reports it finished with
+ * nothing gone wrong and captures the full page. Loading and waiting share readyTimeout, each getting only what's left
+ * of it. A story that can't be captured comes back as a broken story. Rejects only with a `BrowserExitedError`.
  */
 async function captureOnPage(page: Page, story: StoryToCapture, settings: CaptureSettings): Promise<StoryCapture> {
   const deadline = performance.now() + settings.readyTimeoutMs
@@ -278,14 +290,13 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
     await page.setViewport(settings.viewport)
     step = 'load'
     await page.goto(story.url, timeLeft())
-    step = 'wait'
+    step = 'story'
 
     const limit = timeLeft()
-    const answer = await page.evaluate(storyReadinessExpression(story.id, limit), limit + readinessMarginMs)
-    const readiness = readStoryReadiness(answer)
+    const wait = readStoryWait(await page.evaluate(storyWaitExpression(story.id, limit), limit + storyWaitMarginMs))
 
-    if (readiness.outcome !== 'finished' || readiness.status !== 'success') {
-      return { broken: describeReadiness(readiness, settings.readyTimeoutMs) }
+    if (wait.outcome !== 'finished') {
+      return { broken: describeStoryWait(wait, settings.readyTimeoutMs) }
     }
 
     step = 'capture'

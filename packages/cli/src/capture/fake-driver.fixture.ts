@@ -1,9 +1,9 @@
+import { finishedAnswer } from '../storybook/preview-script.fixture.js'
 import type { BrowserExitedError, Driver, Page, PageSetup, PageViewport } from './driver/driver.js'
-import type { StoryReadiness } from './page-script.js'
 
 /**
- * How one fake page answers each call. A call left out succeeds, as on a story that finished well: the readiness
- * wait gives `finished` with `success`, and the capture gives `defaultSnapshot`.
+ * How one fake page answers each call. A call left out succeeds, as on a story that finished well: the story wait
+ * gives `finishedAnswer()`, and the capture gives `defaultSnapshot`.
  */
 export interface FakePageBehaviour {
   /**
@@ -71,11 +71,6 @@ export interface PageCall {
 export const defaultSnapshot = new Uint8Array([0x89, 0x50, 0x4e, 0x47])
 
 /**
- * The readiness a fake page's wait gives when its behaviour gives none: the story finished well.
- */
-const finishedWell: StoryReadiness = { outcome: 'finished', status: 'success' }
-
-/**
  * A driver whose pages answer as told, recording each page's setup and every call they receive.
  */
 export class FakeDriver implements Driver {
@@ -140,7 +135,7 @@ export class FakeDriver implements Driver {
       evaluate: async (expression, timeoutMs) => {
         record('evaluate', [expression, timeoutMs])
 
-        return answers.evaluate === undefined ? finishedWell : await answers.evaluate(expression, timeoutMs)
+        return answers.evaluate === undefined ? finishedAnswer() : await answers.evaluate(expression, timeoutMs)
       },
       captureFullPage: async () => {
         record('captureFullPage', [])

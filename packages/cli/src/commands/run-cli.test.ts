@@ -24,6 +24,7 @@ import {
   type PageViewport,
 } from '../capture/driver/driver.js'
 import { ContainerError } from '../container/container-error.js'
+import { finishedAnswer } from '../storybook/preview-script.fixture.js'
 import type { ContainerRoute } from './browser-route.js'
 import type { BrowserLaunch, LaunchBrowser } from './launch-browser.js'
 import { type RunCliOptions, runCli } from './run-cli.js'
@@ -347,7 +348,7 @@ function fakeDriverOf({ stories, record, version, browser = 1, gates = new Map()
         evaluate: async () => {
           failIfGone()
 
-          return { outcome: 'finished', status: story.broken === true ? 'error' : 'success' }
+          return finishedAnswer({ status: story.broken === true ? 'error' : 'success' })
         },
         captureFullPage: async () => {
           gateOf(gates, `capturing ${id}`).resolve()
@@ -856,7 +857,7 @@ Other options:
  */
 const brokenDetail =
   'broken: Storybook reported the story finished with status "error", as it does when a loader, beforeEach or the ' +
-  'render throws, when play leaves unhandled errors, or when a check such as accessibility fails.'
+  'render throws, or when a check such as accessibility fails.'
 
 /**
  * The detail of a story in flight when the fake browser exited.

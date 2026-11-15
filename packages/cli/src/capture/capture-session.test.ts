@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { finishedAnswer, timedOutAnswer } from '../storybook/preview-script.fixture.js'
+import { storyWaitExpression } from '../storybook/preview-script.js'
 import { type CaptureSettings, openCaptureSession } from './capture-session.js'
 import {
   BrowserExitedError,
@@ -8,7 +10,7 @@ import {
   PageTimeoutError,
 } from './driver/driver.js'
 import { defaultSnapshot, FakeDriver, type FakePageBehaviour } from './fake-driver.fixture.js'
-import { pageInitScript, storyReadinessExpression } from './page-script.js'
+import { pageInitScript } from './page-script.js'
 
 /**
  * The settings every session in these tests captures with.
@@ -91,7 +93,7 @@ describe('a capture', () => {
     expect(driver.calls).toEqual([
       { page: 1, method: 'setViewport', args: [{ width: 1280, height: 720, deviceScaleFactor: 2 }] },
       { page: 1, method: 'goto', args: [primary.url, 10_000] },
-      { page: 1, method: 'evaluate', args: [storyReadinessExpression('button--primary', 10_000), 11_000] },
+      { page: 1, method: 'evaluate', args: [storyWaitExpression('button--primary', 10_000), 11_000] },
       { page: 1, method: 'captureFullPage', args: [] },
     ])
   })
@@ -103,7 +105,7 @@ describe('a capture', () => {
 
     await openCaptureSession(driver, settings).capture(primary)
     expect(driver.calls[1]?.args).toEqual([primary.url, 9500])
-    expect(driver.calls[2]?.args).toEqual([storyReadinessExpression('button--primary', 6500), 7500])
+    expect(driver.calls[2]?.args).toEqual([storyWaitExpression('button--primary', 6500), 7500])
   })
 
   it('rounds the time left up to whole ms', async () => {
@@ -159,7 +161,7 @@ describe("clearing the previous story's storage", () => {
   })
 
   it("clears nothing on the fresh page that replaced a broken story's page", async () => {
-    const driver = new FakeDriver({ pages: [{ evaluate: async () => ({ outcome: 'finished', status: 'error' }) }] })
+    const driver = new FakeDriver({ pages: [{ evaluate: async () => finishedAnswer({ status: 'error' }) }] })
     const session = openCaptureSession(driver, settings)
 
     await session.capture(primary)
@@ -216,38 +218,76 @@ describe("clearing the previous story's storage", () => {
 
 describe('a broken story', () => {
   it('is one Storybook reports finished with a status other than success, naming the status', async () => {
-    const driver = new FakeDriver({ pages: [{ evaluate: async () => ({ outcome: 'finished', status: 'error' }) }] })
+    const driver = new FakeDriver({ pages: [{ evaluate: async () => finishedAnswer({ status: 'error' }) }] })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
       broken: {
         reason: 'error',
         message:
-          'Storybook reported the story finished with status "error", as it does when a loader, beforeEach or the render throws, when play leaves unhandled errors, or when a check such as accessibility fails.',
+          'Storybook reported the story finished with status "error", as it does when a loader, beforeEach or the render throws, or when a check such as accessibility fails.',
       },
     })
     expect(driver.methods()).not.toContain('1:captureFullPage')
   })
 
-  it('is one that never finishes, saying Storybook never reported it finished', async () => {
-    const driver = new FakeDriver({ pages: [{ evaluate: async () => ({ outcome: 'timed-out', channel: true }) }] })
+  it.each([
+    [
+      'play-threw',
+      'whose play function threw, even though Storybook reports it finished well',
+      { errors: [{ event: 'playFunctionThrewException', text: 'Error: boom' }] },
+      "The story's play function threw Error: boom.",
+    ],
+    [
+      'play-threw',
+      'whose play function left unhandled errors',
+      { status: 'error', errors: [{ event: 'unhandledErrorsWhilePlaying', text: 'Error: late' }] },
+      "The story's play function left unhandled errors: Error: late.",
+    ],
+    [
+      'error',
+      'that threw as it rendered',
+      { errors: [{ event: 'storyThrewException', text: 'TypeError: x is undefined' }] },
+      'The story threw TypeError: x is undefined.',
+    ],
+    [
+      'error',
+      'where Storybook showed its error display',
+      { errorDisplay: true },
+      'Storybook showed its error display.',
+    ],
+  ])('is %s for a story %s, saying so', async (reason, _what, answer, message) => {
+    const driver = new FakeDriver({ pages: [{ evaluate: async () => finishedAnswer(answer) }] })
 
-    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: {
-        reason: 'timeout',
-        message: "The story wasn't ready within readyTimeout (10000 ms): Storybook never sent storyFinished for it.",
-      },
-    })
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({ broken: { reason, message } })
+    expect(driver.methods()).not.toContain('1:captureFullPage')
   })
 
-  it('is one whose Storybook preview never starts, saying so', async () => {
-    const driver = new FakeDriver({ pages: [{ evaluate: async () => ({ outcome: 'timed-out', channel: false }) }] })
+  it.each([
+    [
+      "Storybook's preview never started",
+      timedOutAnswer('preview-start'),
+      "Storybook's preview never started in its page",
+    ],
+    [
+      "Storybook's preview never became ready",
+      timedOutAnswer('preview-ready'),
+      "Storybook's preview started but never became ready",
+    ],
+    [
+      'Storybook never reported the story finished',
+      timedOutAnswer('story'),
+      'Storybook never sent storyFinished for it',
+    ],
+    [
+      'Storybook never reported the story finished, with its last render step',
+      timedOutAnswer('story', 'playing'),
+      'Storybook never sent storyFinished for it, and its last render step was "playing"',
+    ],
+  ])('is a timeout when %s, saying so', async (_what, answer, doing) => {
+    const driver = new FakeDriver({ pages: [{ evaluate: async () => answer }] })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: {
-        reason: 'timeout',
-        message:
-          "The story wasn't ready within readyTimeout (10000 ms): Storybook's preview never started in its page.",
-      },
+      broken: { reason: 'timeout', message: `The story wasn't ready within readyTimeout (10000 ms): ${doing}.` },
     })
   })
 
@@ -284,7 +324,7 @@ describe('a broken story', () => {
     })
   })
 
-  it("is one whose page doesn't answer the readiness wait in time, naming that step", async () => {
+  it("is one whose page doesn't answer the story wait in time, naming that step", async () => {
     const driver = new FakeDriver({
       pages: [
         {
@@ -301,7 +341,7 @@ describe('a broken story', () => {
       broken: {
         reason: 'timeout',
         message:
-          "The story wasn't ready within readyTimeout (10000 ms): its page stopped answering while visual-check waited for it to finish.",
+          "The story wasn't ready within readyTimeout (10000 ms): its page stopped answering while visual-check waited for the story to finish.",
       },
     })
   })
@@ -385,14 +425,14 @@ describe('a broken story', () => {
     })
   })
 
-  it("is one whose readiness wait gives an answer visual-check doesn't know", async () => {
+  it("is one whose story wait gives an answer visual-check doesn't know", async () => {
     const driver = new FakeDriver({ pages: [{ evaluate: async () => 42 }] })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
       broken: {
         reason: 'error',
         message:
-          "Waiting for the story to finish failed: The readiness wait in the page gave an answer visual-check doesn't know: 42.",
+          "Waiting for the story to finish failed: The Storybook wait in the page gave an answer visual-check doesn't know: 42.",
       },
     })
   })
@@ -539,7 +579,7 @@ describe('a broken story', () => {
   })
 
   it('closes its page when Storybook reports the story failed too', async () => {
-    const driver = new FakeDriver({ pages: [{ evaluate: async () => ({ outcome: 'finished', status: 'error' }) }] })
+    const driver = new FakeDriver({ pages: [{ evaluate: async () => finishedAnswer({ status: 'error' }) }] })
     const session = openCaptureSession(driver, settings)
 
     await session.capture(primary)
@@ -667,7 +707,14 @@ describe('a story that navigates away', () => {
         },
       },
     ],
-    ['timeout', { evaluate: async () => ({ outcome: 'timed-out', channel: true }) }],
+    ['timeout', { evaluate: async () => timedOutAnswer('story') }],
+    [
+      'play-threw',
+      {
+        evaluate: async () =>
+          finishedAnswer({ errors: [{ event: 'playFunctionThrewException', text: 'Error: boom' }] }),
+      },
+    ],
   ]
 
   it.each(otherOutcomes)('is not retried when the first attempt is %s', async (reason, behaviour) => {
@@ -690,6 +737,7 @@ describe('a story that navigates away', () => {
         {
           goto: async () => {
             pass(4_000)
+
             throw new PageNavigatedAwayError('http://localhost:6006/one', 'The page navigated to /one.')
           },
         },

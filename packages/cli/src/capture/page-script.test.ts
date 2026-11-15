@@ -1,32 +1,7 @@
 import { type Context, createContext, runInContext } from 'node:vm'
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest'
-import { pageInitScript, readStoryReadiness, storyReadinessExpression } from './page-script.js'
-
-/**
- * A stand-in for Storybook's channel: it keeps the listeners `on` adds and calls them on `emit`.
- */
-class FakeChannel {
-  /**
-   * The listeners by event name, in the order they were added.
-   */
-  readonly listeners = new Map<string, ((...args: unknown[]) => void)[]>()
-
-  /**
-   * Adds a listener for an event.
-   */
-  on(eventName: string, listener: (...args: unknown[]) => void): void {
-    this.listeners.set(eventName, [...(this.listeners.get(eventName) ?? []), listener])
-  }
-
-  /**
-   * Calls every listener of an event with these arguments.
-   */
-  emit(eventName: string, ...args: unknown[]): void {
-    for (const listener of this.listeners.get(eventName) ?? []) {
-      listener(...args)
-    }
-  }
-}
+import { readStoryWait, storyWaitExpression } from '../storybook/preview-script.js'
+import { pageInitScript } from './page-script.js'
 
 /**
  * The console methods the fake page has, each a mock standing for the browser's own.
@@ -89,7 +64,7 @@ interface FakePage {
 }
 
 /**
- * Builds a fake page with these globals already set, without the page script.
+ * Builds a fake page with these globals already set, in place of its own, without the page script.
  */
 function blankPage(globals: Record<string, unknown> = {}): FakePage {
   const window = new EventTarget()
@@ -101,12 +76,13 @@ function blankPage(globals: Record<string, unknown> = {}): FakePage {
     }
   }
   const sandbox: Record<string, unknown> = {
-    ...globals,
     console: { ...browserConsole },
     Element,
     setTimeout,
     clearTimeout,
+    performance,
     addEventListener: window.addEventListener.bind(window),
+    ...globals,
   }
 
   Object.defineProperty(sandbox, 'document', {
@@ -144,25 +120,6 @@ function openPage(globals: Record<string, unknown> = {}): FakePage {
 }
 
 /**
- * Says whether a promise has settled by the time every pending callback has run.
- */
-async function settledYet(promise: Promise<unknown>): Promise<boolean> {
-  let settled = false
-
-  promise.then(
-    () => {
-      settled = true
-    },
-    () => {
-      settled = true
-    },
-  )
-  await vi.advanceTimersByTimeAsync(0)
-
-  return settled
-}
-
-/**
  * Reads what the page script recorded of the page's console messages and errors.
  */
 function messages(page: FakePage): unknown {
@@ -175,172 +132,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers()
-})
-
-describe('the readiness wait', () => {
-  it("resolves once Storybook's channel reports the story finished", async () => {
-    const page = openPage()
-    const channel = new FakeChannel()
-
-    page.setGlobal('__STORYBOOK_ADDONS_CHANNEL__', channel)
-
-    const readiness = page.evaluate(storyReadinessExpression('button--primary', 1000))
-
-    channel.emit('storyFinished', { storyId: 'button--primary', status: 'success' })
-    expect(await readiness).toEqual({ outcome: 'finished', status: 'success' })
-  })
-
-  it('gives the status Storybook reported', async () => {
-    const page = openPage()
-    const channel = new FakeChannel()
-
-    page.setGlobal('__STORYBOOK_ADDONS_CHANNEL__', channel)
-
-    const readiness = page.evaluate(storyReadinessExpression('button--primary', 1000))
-
-    channel.emit('storyFinished', { storyId: 'button--primary', status: 'error' })
-    expect(await readiness).toEqual({ outcome: 'finished', status: 'error' })
-  })
-
-  it('ignores storyFinished for another story', async () => {
-    const page = openPage()
-    const channel = new FakeChannel()
-
-    page.setGlobal('__STORYBOOK_ADDONS_CHANNEL__', channel)
-
-    const readiness = page.evaluate(storyReadinessExpression('button--primary', 1000))
-
-    channel.emit('storyFinished', { storyId: 'button--secondary', status: 'success' })
-    await vi.advanceTimersByTimeAsync(1000)
-    expect(await readiness).toEqual({ outcome: 'timed-out', channel: true })
-  })
-
-  it('counts a storyFinished that came before the wait started', async () => {
-    const page = openPage()
-    const channel = new FakeChannel()
-
-    page.setGlobal('__STORYBOOK_ADDONS_CHANNEL__', channel)
-    channel.emit('storyFinished', { storyId: 'button--primary', status: 'success' })
-
-    expect(await page.evaluate(storyReadinessExpression('button--primary', 1000))).toEqual({
-      outcome: 'finished',
-      status: 'success',
-    })
-  })
-
-  it('hooks a channel the page set before the script ran', async () => {
-    const channel = new FakeChannel()
-    const page = openPage({ __STORYBOOK_ADDONS_CHANNEL__: channel })
-    const readiness = page.evaluate(storyReadinessExpression('button--primary', 1000))
-
-    channel.emit('storyFinished', { storyId: 'button--primary', status: 'success' })
-    expect(await readiness).toEqual({ outcome: 'finished', status: 'success' })
-  })
-
-  it('hooks a channel that replaces the first one', async () => {
-    const page = openPage()
-    const channel = new FakeChannel()
-
-    page.setGlobal('__STORYBOOK_ADDONS_CHANNEL__', new FakeChannel())
-    page.setGlobal('__STORYBOOK_ADDONS_CHANNEL__', channel)
-
-    const readiness = page.evaluate(storyReadinessExpression('button--primary', 1000))
-
-    channel.emit('storyFinished', { storyId: 'button--primary', status: 'success' })
-    expect(await readiness).toEqual({ outcome: 'finished', status: 'success' })
-  })
-
-  it('subscribes once to a channel set twice', () => {
-    const page = openPage()
-    const channel = new FakeChannel()
-
-    page.setGlobal('__STORYBOOK_ADDONS_CHANNEL__', channel)
-    page.setGlobal('__STORYBOOK_ADDONS_CHANNEL__', channel)
-    expect(channel.listeners.get('storyFinished')).toHaveLength(1)
-  })
-
-  it("never throws into the page's assignment of a channel it can't use, and hooks a usable one after it", async () => {
-    const page = openPage()
-    const channel = new FakeChannel()
-
-    page.run(`
-      globalThis.__STORYBOOK_ADDONS_CHANNEL__ = { get on() { throw new Error('hostile') } }
-      const { proxy, revoke } = Proxy.revocable({}, {})
-      revoke()
-      globalThis.__STORYBOOK_ADDONS_CHANNEL__ = proxy
-    `)
-    page.setGlobal('__STORYBOOK_ADDONS_CHANNEL__', channel)
-
-    const readiness = page.evaluate(storyReadinessExpression('button--primary', 1000))
-
-    channel.emit('storyFinished', { storyId: 'button--primary', status: 'success' })
-    expect(await readiness).toEqual({ outcome: 'finished', status: 'success' })
-  })
-
-  it('leaves the channel readable where Storybook set it', () => {
-    const page = openPage()
-    const channel = new FakeChannel()
-
-    page.setGlobal('__STORYBOOK_ADDONS_CHANNEL__', channel)
-    expect(page.run('globalThis.__STORYBOOK_ADDONS_CHANNEL__')).toBe(channel)
-  })
-
-  it('times out when the story never finishes, saying Storybook never set its channel', async () => {
-    const page = openPage()
-    const readiness = page.evaluate(storyReadinessExpression('button--primary', 1000))
-
-    await vi.advanceTimersByTimeAsync(999)
-    await vi.advanceTimersByTimeAsync(1)
-    expect(await readiness).toEqual({ outcome: 'timed-out', channel: false })
-  })
-
-  it("times out on time with the browser's own timer when the story replaces setTimeout and clearTimeout", async () => {
-    const page = openPage()
-
-    page.run('globalThis.setTimeout = () => 0; globalThis.clearTimeout = () => undefined')
-
-    const readiness = page.evaluate(storyReadinessExpression('button--primary', 1000))
-
-    await vi.advanceTimersByTimeAsync(999)
-    expect(await settledYet(readiness)).toBe(false)
-    await vi.advanceTimersByTimeAsync(1)
-    expect(await readiness).toEqual({ outcome: 'timed-out', channel: false })
-  })
-
-  it("clears its timer with the browser's own clearTimeout when the story replaced it", async () => {
-    const page = openPage()
-    const channel = new FakeChannel()
-
-    page.setGlobal('__STORYBOOK_ADDONS_CHANNEL__', channel)
-    page.run('globalThis.clearTimeout = () => undefined')
-
-    const readiness = page.evaluate(storyReadinessExpression('button--primary', 1000))
-
-    channel.emit('storyFinished', { storyId: 'button--primary', status: 'success' })
-    await readiness
-    expect(vi.getTimerCount()).toBe(0)
-  })
-
-  it('keeps waiting until the time limit has passed', async () => {
-    const page = openPage()
-    const channel = new FakeChannel()
-
-    page.setGlobal('__STORYBOOK_ADDONS_CHANNEL__', channel)
-
-    const readiness = page.evaluate(storyReadinessExpression('button--primary', 1000))
-
-    await vi.advanceTimersByTimeAsync(999)
-    channel.emit('storyFinished', { storyId: 'button--primary', status: 'success' })
-    expect(await readiness).toEqual({ outcome: 'finished', status: 'success' })
-  })
-
-  it("says when the page script didn't run in the page", async () => {
-    const page = blankPage()
-
-    expect(await page.evaluate(storyReadinessExpression('button--primary', 1000))).toEqual({
-      outcome: 'script-missing',
-    })
-  })
 })
 
 describe('the shadow root record', () => {
@@ -516,18 +307,36 @@ describe('the message record', () => {
 })
 
 describe('the page script', () => {
-  it("never reads the page's document, so it changes no styles", async () => {
+  it("never reads the page's document while the story runs, so it changes no styles", async () => {
     const page = openPage()
 
-    page.setGlobal('__STORYBOOK_ADDONS_CHANNEL__', new FakeChannel())
     page.run("console.log('a line')")
     new page.Element().attachShadow({ mode: 'open' })
 
-    const readiness = page.evaluate(storyReadinessExpression('button--primary', 1000))
+    const wait = page.evaluate(storyWaitExpression('button--primary', 1000))
 
     await vi.advanceTimersByTimeAsync(1000)
-    await readiness
+    await wait
     expect(page.documentReads()).toBe(0)
+  })
+
+  it("runs the Storybook adapter's script, so the story wait can run", async () => {
+    const page = openPage()
+    const wait = page.evaluate(storyWaitExpression('button--primary', 0))
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(readStoryWait(await wait)).toHaveProperty('outcome', 'timed-out')
+  })
+
+  it("runs the Storybook adapter's script even when the rest of it fails", async () => {
+    const page = blankPage({ addEventListener: undefined })
+
+    expect(() => page.run(pageInitScript)).toThrow('addEventListener is not a function')
+
+    const wait = page.evaluate(storyWaitExpression('button--primary', 0))
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(readStoryWait(await wait)).toHaveProperty('outcome', 'timed-out')
   })
 
   it('keeps its state out of enumeration', () => {
@@ -543,31 +352,5 @@ describe('the page script', () => {
     page.run("console.log('a line')")
     expect(messages(page)).toEqual([{ kind: 'console.log', text: 'a line' }])
     expect(page.console.log).toHaveBeenCalledTimes(1)
-  })
-})
-
-describe('readStoryReadiness', () => {
-  it('reads a finished story with its status', () => {
-    expect(readStoryReadiness({ outcome: 'finished', status: 'error' })).toEqual({
-      outcome: 'finished',
-      status: 'error',
-    })
-  })
-
-  it('reads a timeout, with whether the channel was set', () => {
-    expect(readStoryReadiness({ outcome: 'timed-out', channel: false })).toEqual({
-      outcome: 'timed-out',
-      channel: false,
-    })
-  })
-
-  it('reads a missing page script', () => {
-    expect(readStoryReadiness({ outcome: 'script-missing' })).toEqual({ outcome: 'script-missing' })
-  })
-
-  it('throws on any other answer, quoting it', () => {
-    expect(() => readStoryReadiness({ outcome: 'finished' })).toThrow(
-      'The readiness wait in the page gave an answer visual-check doesn\'t know: {"outcome":"finished"}.',
-    )
   })
 })

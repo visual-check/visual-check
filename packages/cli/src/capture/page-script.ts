@@ -1,3 +1,5 @@
+import { storybookPageScript } from '../storybook/preview-script.js'
+
 /**
  * The non-enumerable global the page script keeps its state under, in every document of a page.
  */
@@ -15,8 +17,8 @@ const keptCharacters = 500
 
 /**
  * The script that runs at the start of every document of a page, before the page's own scripts, in every driver. It
- * changes no styles and never touches the document. It does only this, keeping its state under one non-enumerable
- * global:
+ * changes no styles, and only the Storybook adapter's part reads the document, once the story finished. It does only
+ * this, keeping its own state under one non-enumerable global:
  *
  * - wraps `Element.prototype.attachShadow` to record every shadow root it creates, closed ones included, in
  *   `shadowRoots`;
@@ -26,25 +28,20 @@ const keptCharacters = 500
  *   or typed array by index, without listing all its keys, and each string cut first. So the page's getters and
  *   `toJSON` never run and a huge array costs little. A Proxy's traps can still run: `ownKeys`,
  *   `getOwnPropertyDescriptor`, `getPrototypeOf`, and `get` for an array's `length`;
- * - hooks Storybook's channel when the preview sets `__STORYBOOK_ADDONS_CHANNEL__`, to note each `storyFinished` with
- *   its story ID and status, for `waitForStory`, which the readiness expression calls.
+ * - runs the Storybook adapter's script, which watches Storybook's preview for the story wait and keeps its state
+ *   under a global of its own.
  *
- * It keeps the browser's own `setTimeout` and `clearTimeout`, so a story that fakes or replaces timers doesn't stall
- * the readiness wait. A value the page sets as the channel never makes Storybook's own assignment throw.
+ * The adapter's script runs first, so a failure in the rest can't keep the story wait from running and show as a
+ * page script that didn't run.
  */
-export const pageInitScript = `(() => {
+export const pageInitScript = `${storybookPageScript};
+(() => {
   if (Object.prototype.hasOwnProperty.call(globalThis, '${stateGlobal}')) {
     return
   }
 
-  const setTimer = globalThis.setTimeout.bind(globalThis)
-  const clearTimer = globalThis.clearTimeout.bind(globalThis)
   const shadowRoots = []
   const messages = []
-  const finished = new Map()
-  const waiters = new Set()
-  const channels = new WeakSet()
-  let channelSet = false
 
   const isError = typeof Error.isError === 'function' ? Error.isError : (value) => value instanceof Error
 
@@ -140,107 +137,5 @@ export const pageInitScript = `(() => {
     }
   }
 
-  const finish = (event) => {
-    if (typeof event !== 'object' || event === null || typeof event.storyId !== 'string') {
-      return
-    }
-    const status = typeof event.status === 'string' ? event.status : 'unknown'
-    finished.set(event.storyId, status)
-    for (const waiter of [...waiters]) {
-      waiter(event.storyId, status)
-    }
-  }
-
-  const listen = (channel) => {
-    try {
-      if (typeof channel !== 'object' || channel === null || channels.has(channel) || typeof channel.on !== 'function') {
-        return
-      }
-      channel.on('storyFinished', finish)
-      channels.add(channel)
-      channelSet = true
-    } catch {}
-  }
-
-  let channel = globalThis.__STORYBOOK_ADDONS_CHANNEL__
-  listen(channel)
-  try {
-    Object.defineProperty(globalThis, '__STORYBOOK_ADDONS_CHANNEL__', {
-      configurable: true,
-      enumerable: true,
-      get: () => channel,
-      set: (value) => {
-        channel = value
-        listen(value)
-      },
-    })
-  } catch {}
-
-  const waitForStory = (storyId, timeoutMs) => new Promise((resolve) => {
-    if (finished.has(storyId)) {
-      resolve({ outcome: 'finished', status: finished.get(storyId) })
-      return
-    }
-    const waiter = (finishedId, status) => {
-      if (finishedId === storyId) {
-        waiters.delete(waiter)
-        clearTimer(timer)
-        resolve({ outcome: 'finished', status })
-      }
-    }
-    const timer = setTimer(() => {
-      waiters.delete(waiter)
-      resolve({ outcome: 'timed-out', channel: channelSet })
-    }, timeoutMs)
-    waiters.add(waiter)
-  })
-
-  Object.defineProperty(globalThis, '${stateGlobal}', { value: Object.freeze({ shadowRoots, messages, waitForStory }) })
+  Object.defineProperty(globalThis, '${stateGlobal}', { value: Object.freeze({ shadowRoots, messages }) })
 })()`
-
-/**
- * What the readiness wait found in the page:
- *
- * - `finished`: Storybook reported the story finished, with this status, such as `success` or `error`;
- * - `timed-out`: the time limit passed first, and `channel` says whether Storybook's preview set its channel at all;
- * - `script-missing`: the page script hadn't run in the page, so there was nothing to wait with.
- */
-export type StoryReadiness =
-  | { outcome: 'finished'; status: string }
-  | { outcome: 'timed-out'; channel: boolean }
-  | { outcome: 'script-missing' }
-
-/**
- * Builds the expression that waits in the page until Storybook reports this story finished, or `timeoutMs` passes. It
- * gives a `StoryReadiness`. A `storyFinished` for another story doesn't count, and one that came before the wait
- * started does.
- */
-export function storyReadinessExpression(storyId: string, timeoutMs: number): string {
-  const limit = Math.max(0, Math.ceil(timeoutMs))
-
-  return `(async () => {
-  const state = globalThis.${stateGlobal}
-  return state === undefined ? { outcome: 'script-missing' } : state.waitForStory(${JSON.stringify(storyId)}, ${limit})
-})()`
-}
-
-/**
- * Reads the value the readiness expression gave. Throws, quoting the value, when it's not a `StoryReadiness`.
- */
-export function readStoryReadiness(value: unknown): StoryReadiness {
-  const answer: Record<string, unknown> = typeof value === 'object' && value !== null ? { ...value } : {}
-
-  if (answer.outcome === 'finished' && typeof answer.status === 'string') {
-    return { outcome: 'finished', status: answer.status }
-  }
-
-  if (answer.outcome === 'timed-out' && typeof answer.channel === 'boolean') {
-    return { outcome: 'timed-out', channel: answer.channel }
-  }
-
-  if (answer.outcome === 'script-missing') {
-    return { outcome: 'script-missing' }
-  }
-
-  throw new Error(`The readiness wait in the page gave an answer visual-check doesn't know: ${JSON.stringify(value)}.`)
-}

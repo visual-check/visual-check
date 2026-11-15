@@ -30,7 +30,7 @@
     "rules": [
       { "from": "cli/capture/driver/cdp", "allow": ["cli/capture/driver"] },
       { "from": "cli/capture/driver", "allow": [] },
-      { "from": "cli/capture", "allow": ["cli/capture/driver"] },
+      { "from": "cli/capture", "allow": ["cli/capture/driver", "cli/storybook"] },
       { "from": "cli/container", "allow": ["cli/capture/driver"] },
       { "from": "cli/browser-process", "allow": ["cli/capture/driver"] },
       { "from": "cli/baselines", "allow": [] },
