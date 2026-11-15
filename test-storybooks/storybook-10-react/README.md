@@ -1,6 +1,6 @@
 # @visual-check/test-storybook-10-react
 
-One of this repo's own test Storybooks ([PRD 18](../../docs/prd/18-repo-ci.md#this-repos-own-test-storybooks)): a private React Storybook on Storybook 10 with a few plain stories, a set of [hazard stories](#the-hazard-stories) and a set of [readiness stories](#the-readiness-stories), their committed baselines in `.visual-check/baselines/` and the expected outcome of every story in `expected-outcomes.json`.
+One of this repo's own test Storybooks ([PRD 18](../../docs/prd/18-repo-ci.md#this-repos-own-test-storybooks)): a private React Storybook on Storybook 10 with a few plain stories, a set of [hazard stories](#the-hazard-stories), a set of [readiness stories](#the-readiness-stories) and a set of [animation stories](#the-animation-stories), their committed baselines in `.visual-check/baselines/` and the expected outcome of every story in `expected-outcomes.json`.
 
 The React test Storybooks on Storybook 9.1 ([`storybook-9-react`](../storybook-9-react/README.md)) and 11 ([`storybook-11-react`](../storybook-11-react/README.md)) read these stories, take their config from `.storybook/test-storybook-config.ts` as this one does, and run this `e2e.ts` from their own folders.
 
@@ -47,6 +47,28 @@ The server never answers `/visual-check-e2e/never-loads.woff2`, the font file `F
 - `FontNeverLoads` asks for a font face, `Never Loads`, whose file the end-to-end check's server never answers. It's broken, `fonts-not-loaded`, once `readyTimeout` runs out, naming the face. Its loader waits for the window's `load` event first, so the font's request can't hold up the `load` that visual-check's `goto` waits for. Under `storybook dev` the file 404s and the story passes.
 
 The CLI's line for a broken story doesn't print its reason, so the committed-baselines case checks what each line says. The five broken stories have committed baselines too, each the story as it renders without its failure: `RenderThrows` without the throw, `PlayThrows`, `PlayLeavesUnhandledError` and `NeverReady` without their `play`, and `FontNeverLoads` with its font file 404ing, in the fallback font.
+
+## The animation stories
+
+`stories/animations.stories.tsx` has one story for each kind of motion that visual-check brings to its end state at capture, and one for the motion it leaves alone. Each story runs as in plain Storybook: `play` sees animations and transitions run for their real durations, with every end event, and visual-check brings the page to its end state only once the story has finished. The stories are drawn in solid colours on a fixed-size stage, so the end state is plain in the snapshot. All of them pass:
+
+- `TransitionsInPlay` clicks a button in `play` that opens a drawer and turns a box green through CSS transitions, the box's after a 400 ms delay. They're still running when `play` finishes, so the snapshot shows the drawer open over its half-dark overlay, and the box green, only because they're finished.
+- `KeyframesInPlay` mounts a drawer in `play` whose keyframe animations have no fill, so the snapshot shows the drawer open at its own styles.
+- `EntranceForwards` fades in two boxes whose own style is `opacity: 0`, one with `forwards` and one after a 600 ms delay with `both`. Only their fill mode keeps them visible, and the snapshot shows both.
+- `ScriptAnimations` moves two boxes with `element.animate()`, one with `fill: 'forwards'` and one without, so the snapshot shows the first moved and the second back where it started.
+- `ChainedAnimation` has three steps, each mounted by the last one's `animationend`. The middle one's animation has no fill, so once it's finished nothing is left of it but its pending `animationend`. visual-check lets the end events of every finished animation run page logic before it pins anything, Storybook 11's included, and finishes again until nothing finite is running, so the snapshot shows the last step: three boxes and `step 3 ended`.
+- `ExitUnmounts` clicks Close in `play`, which starts the dialog's exit animation. The dialog unmounts on its `animationend`, as Radix's Presence does, so the snapshot shows `state: gone` and no dialog.
+- `PlayAwaitsEndEvents` starts a 400 ms transition and a 400 ms animation in `play`, and waits for their `transitionend` and `animationend`. It throws when they come in under 390 ms or not within 5 s, so it passes only when `play` sees real durations and every end event. The snapshot shows `play saw transitionend and animationend`.
+- `InfiniteAnimations` has a CSS spinner, a CSS pulse, an infinite animation on a `::after` pseudo-element and an infinite `element.animate()`. They never end, so the snapshot shows each on its first keyframe. A pseudo-element's animation can't be written into an inline style, so it stays paused at 0.
+- `ShadowRoots` has a fade-in, a spinner and a transition `play` starts in an open shadow root and in a closed one, and the snapshot shows both as they'd be in the document. visual-check reaches the closed one through `attachShadow`, which its page script wraps.
+- `LeftAlone` has an `element.animate()` with `fill: 'forwards'` that the page paused halfway itself, and a scroll-driven animation from red to green at scroll 0. visual-check leaves both alone, so the snapshot shows the box halfway, 150 px to the right, and the other one red. Finished, the box would be 300 px to the right, and put on its first keyframe, back on the left; finishing the scroll-driven one would turn it green.
+- `Video` plays a muted clip in a loop, and `play` waits until it plays, so it's playing at capture on any machine. The snapshot shows its first frame. Vite inlines the small clip into the build as a `data:` URL, as it does any asset under 4 KiB.
+- `InlineSvgAnimation` has an inline SVG with two SMIL animations, one infinite and one frozen at its end, and the snapshot shows it at time 0.
+- `Gifs` shows a GIF from a file URL, whose path ends in `.gif`, and from a `data:image/gif` URL, imported with Vite's `?no-inline` and `?inline`. The snapshot shows both on their first frame.
+
+On the test path, Storybook 9.1 and 10 add two stylesheets that pause every animation after `play`, which visual-check empties, so the stories keep running until visual-check finishes them. Storybook 11 itself finishes finite CSS animations and transitions after `play`, and parks infinite ones on their first frame, but leaves script animations alone. visual-check's end state then takes what's left. Each animation story's snapshot is byte-identical on 9.1, 10 and 11.
+
+visual-check leaves some motion to the project, so no story has it: SVG in `<img>`, GIFs as CSS backgrounds or cross-origin without CORS, APNG, animated WebP, canvas, Lottie and other script-driven motion.
 
 ## Running the end-to-end check
 
