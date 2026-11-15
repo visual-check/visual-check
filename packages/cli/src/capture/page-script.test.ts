@@ -1,8 +1,15 @@
 import { type Context, createContext, runInContext } from 'node:vm'
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest'
+import { animationClasses, fakeAnimation } from '../storybook/preview-script.fixture.js'
 import { readStoryWait, storyWaitExpression } from '../storybook/preview-script.js'
+import {
+  animationsTimedOutAnswer,
+  FakeFrames,
+  fakeDocument as fakeAnimatedDocument,
+  settledAnswer,
+} from './end-state.fixture.js'
 import { fontsTimedOutAnswer, imagesTimedOutAnswer, readyAnswer } from './page-script.fixture.js'
-import { assetsReadyExpression, pageInitScript, readAssetsReadiness } from './page-script.js'
+import { assetsReadyExpression, endStateExpression, pageInitScript, readAssetsReadiness } from './page-script.js'
 
 /**
  * The console methods the fake page has, each a mock standing for the browser's own.
@@ -519,10 +526,12 @@ describe('the page script', () => {
     expect(readStoryWait(await wait)).toHaveProperty('outcome', 'timed-out')
   })
 
-  it('keeps its state out of enumeration', () => {
+  it('keeps its state out of enumeration, frozen, with the end state in it', () => {
     const page = openPage()
 
     expect(page.run("Object.keys(globalThis).includes('__visualCheck')")).toBe(false)
+    expect(page.run('Object.isFrozen(globalThis.__visualCheck)')).toBe(true)
+    expect(page.run('typeof globalThis.__visualCheck.bringToEndState')).toBe('function')
   })
 
   it('does nothing when it runs again in the same page', () => {
@@ -830,5 +839,58 @@ describe('readAssetsReadiness', () => {
     expect(() => readAssetsReadiness(value)).toThrow(
       `The wait for images and fonts in the page gave an answer visual-check doesn't know: ${JSON.stringify(value)}.`,
     )
+  })
+})
+
+describe('the end state', () => {
+  it('brings the animations in the document and in every recorded shadow root to their end state', async () => {
+    const frames = new FakeFrames()
+    const running = fakeAnimation()
+    const parkedByStorybook = fakeAnimation({ kind: 'css-animation', playState: 'paused' })
+    const document = fakeAnimatedDocument({ animations: [running] })
+    const page = openPage({ ...animationClasses, document, requestAnimationFrame: frames.requestFrame })
+    const root = new page.Element().attachShadow({ mode: 'closed' })
+
+    Object.assign(root, { getAnimations: () => [parkedByStorybook], querySelectorAll: () => [] })
+
+    const answer = page.evaluate(endStateExpression(1000))
+
+    await vi.runAllTimersAsync()
+    expect(await answer).toEqual(settledAnswer(true))
+    expect(running.actions).toEqual(['finish'])
+    expect(parkedByStorybook.actions).toEqual(['commitStyles', 'cancel'])
+    expect(frames.requestFrame).toHaveBeenCalled()
+  })
+
+  it('rounds its time limit up to whole ms', async () => {
+    const document = fakeAnimatedDocument({ animations: [fakeAnimation()] })
+    const page = openPage({ ...animationClasses, document, requestAnimationFrame: () => 0 })
+    let settled = false
+    const answer = page.evaluate(endStateExpression(999.2)).finally(() => {
+      settled = true
+    })
+
+    await vi.advanceTimersByTimeAsync(999)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await answer).toEqual(animationsTimedOutAnswer())
+  })
+
+  it("keeps the browser's own frames and timers when the story replaced them", async () => {
+    const frames = new FakeFrames()
+    const document = fakeAnimatedDocument({ animations: [fakeAnimation()] })
+    const page = openPage({ ...animationClasses, document, requestAnimationFrame: frames.requestFrame })
+
+    page.run('globalThis.requestAnimationFrame = () => 0')
+    page.run('globalThis.setTimeout = () => 0; globalThis.clearTimeout = () => undefined')
+
+    const answer = page.evaluate(endStateExpression(1000))
+
+    await vi.runAllTimersAsync()
+    expect(await answer).toEqual(settledAnswer(true))
+  })
+
+  it("gives script-missing in a page where the page script didn't run", async () => {
+    expect(await blankPage().evaluate(endStateExpression(1000))).toEqual({ outcome: 'script-missing' })
   })
 })

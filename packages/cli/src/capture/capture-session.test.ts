@@ -9,9 +9,10 @@ import {
   PageNavigatedAwayError,
   PageTimeoutError,
 } from './driver/driver.js'
+import { animationsTimedOutAnswer, settledAnswer } from './end-state.fixture.js'
 import { defaultSnapshot, FakeDriver, type FakePageBehaviour } from './fake-driver.fixture.js'
-import { fontsTimedOutAnswer, imagesTimedOutAnswer } from './page-script.fixture.js'
-import { assetsReadyExpression, pageInitScript } from './page-script.js'
+import { fontsTimedOutAnswer, imagesTimedOutAnswer, readyAnswer } from './page-script.fixture.js'
+import { assetsReadyExpression, endStateExpression, pageInitScript } from './page-script.js'
 
 /**
  * The settings every session in these tests captures with.
@@ -87,7 +88,7 @@ describe('openCaptureSession', () => {
 })
 
 describe('a capture', () => {
-  it('sets the viewport, loads the story, waits for it to finish and for its images and fonts, and captures the full page', async () => {
+  it('sets the viewport, loads the story, waits for it to finish and for its images and fonts, brings it to its end state and captures the full page', async () => {
     const driver = new FakeDriver()
 
     await openCaptureSession(driver, settings).capture(primary)
@@ -95,6 +96,19 @@ describe('a capture', () => {
       { page: 1, method: 'setViewport', args: [{ width: 1280, height: 720, deviceScaleFactor: 2 }] },
       { page: 1, method: 'goto', args: [primary.url, 10_000] },
       { page: 1, method: 'evaluate', args: [storyWaitExpression('button--primary', 10_000), 11_000] },
+      { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
+      { page: 1, method: 'evaluate', args: [endStateExpression(10_000), 11_000] },
+      { page: 1, method: 'captureFullPage', args: [] },
+    ])
+  })
+
+  it('checks images and fonts again before the capture when the end state changed anything', async () => {
+    const driver = new FakeDriver({ pages: [{ endStateWait: async () => settledAnswer(true) }] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({ snapshot: defaultSnapshot })
+    expect(driver.calls.slice(3)).toEqual([
+      { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
+      { page: 1, method: 'evaluate', args: [endStateExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
       { page: 1, method: 'captureFullPage', args: [] },
     ])
@@ -111,6 +125,16 @@ describe('a capture', () => {
 
             return finishedAnswer()
           },
+          assetsWait: async () => {
+            pass(1000)
+
+            return readyAnswer()
+          },
+          endStateWait: async () => {
+            pass(1500)
+
+            return settledAnswer(true)
+          },
         },
       ],
     })
@@ -119,6 +143,8 @@ describe('a capture', () => {
     expect(driver.calls[1]?.args).toEqual([primary.url, 9500])
     expect(driver.calls[2]?.args).toEqual([storyWaitExpression('button--primary', 6500), 7500])
     expect(driver.calls[3]?.args).toEqual([assetsReadyExpression(4500), 5500])
+    expect(driver.calls[4]?.args).toEqual([endStateExpression(3500), 4500])
+    expect(driver.calls[5]?.args).toEqual([assetsReadyExpression(2000), 3000])
   })
 
   it('rounds the time left up to whole ms', async () => {
@@ -134,7 +160,7 @@ describe('a capture', () => {
 
     await session.capture(primary)
     await session.capture(secondary)
-    expect(driver.calls[7]).toEqual({ page: 1, method: 'goto', args: [secondary.url, 10_000] })
+    expect(driver.calls[8]).toEqual({ page: 1, method: 'goto', args: [secondary.url, 10_000] })
   })
 
   it('gives the snapshot exactly as the browser made it', async () => {
@@ -178,16 +204,19 @@ describe("clearing the previous story's storage", () => {
       '1:goto',
       '1:evaluate',
       '1:evaluate',
+      '1:evaluate',
       '1:captureFullPage',
       '1:clearStorage',
       '1:setViewport',
       '1:goto',
       '1:evaluate',
       '1:evaluate',
+      '1:evaluate',
       '1:captureFullPage',
       '1:clearStorage',
       '1:setViewport',
       '1:goto',
+      '1:evaluate',
       '1:evaluate',
       '1:evaluate',
       '1:captureFullPage',
@@ -209,6 +238,7 @@ describe("clearing the previous story's storage", () => {
       '2:goto',
       '2:evaluate',
       '2:evaluate',
+      '2:evaluate',
       '2:captureFullPage',
     ])
   })
@@ -219,7 +249,7 @@ describe("clearing the previous story's storage", () => {
 
     await session.capture(primary)
     await session.capture(secondary)
-    expect(driver.calls[7]).toEqual({ page: 1, method: 'goto', args: [secondary.url, 10_000] })
+    expect(driver.calls[8]).toEqual({ page: 1, method: 'goto', args: [secondary.url, 10_000] })
   })
 
   it.each([
@@ -240,11 +270,12 @@ describe("clearing the previous story's storage", () => {
 
     await session.capture(primary)
     expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot })
-    expect(driver.methods().slice(5)).toEqual([
+    expect(driver.methods().slice(6)).toEqual([
       '1:clearStorage',
       '1:close',
       '2:setViewport',
       '2:goto',
+      '2:evaluate',
       '2:evaluate',
       '2:evaluate',
       '2:captureFullPage',
@@ -424,6 +455,88 @@ describe('a broken story', () => {
     })
   })
 
+  it('is a timeout when visual-check was still finishing its animations at the time limit, saying so', async () => {
+    const driver = new FakeDriver({ pages: [{ endStateWait: async () => animationsTimedOutAnswer() }] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'timeout',
+        message:
+          "The story wasn't ready within readyTimeout (10000 ms): visual-check was still finishing its animations.",
+      },
+    })
+    expect(driver.methods()).not.toContain('1:captureFullPage')
+  })
+
+  it("is one whose page didn't run the page script when bringing it to its end state", async () => {
+    const driver = new FakeDriver({ pages: [{ endStateWait: async () => ({ outcome: 'script-missing' }) }] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'error',
+        message: "visual-check's page script didn't run in the story's page, so it couldn't bring it to its end state.",
+      },
+    })
+  })
+
+  it("is one whose page doesn't answer the end state in time, naming that step", async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          endStateWait: async (timeoutMs) => {
+            pass(timeoutMs)
+
+            throw new PageTimeoutError("The expression evaluated in the page didn't finish within 11 s.", timeoutMs)
+          },
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'timeout',
+        message:
+          "The story wasn't ready within readyTimeout (10000 ms): its page stopped answering while visual-check brought it to its end state.",
+      },
+    })
+  })
+
+  it("is one whose end state gives an answer visual-check doesn't know", async () => {
+    const driver = new FakeDriver({ pages: [{ endStateWait: async () => 42 }] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'error',
+        message:
+          "Bringing the story to its end state failed: The end state in the page gave an answer visual-check doesn't know: 42.",
+      },
+    })
+  })
+
+  it('is one whose images were still loading after the end state changed anything, saying so', async () => {
+    let assetsWaits = 0
+    const driver = new FakeDriver({
+      pages: [
+        {
+          assetsWait: async () => {
+            assetsWaits += 1
+
+            return assetsWaits === 1 ? readyAnswer() : imagesTimedOutAnswer(1)
+          },
+          endStateWait: async () => settledAnswer(true),
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'timeout',
+        message: "The story wasn't ready within readyTimeout (10000 ms): 1 of its images was still loading.",
+      },
+    })
+    expect(driver.methods()).not.toContain('1:captureFullPage')
+  })
+
   it("is one whose page doesn't load in time, naming that step", async () => {
     const driver = new FakeDriver({
       pages: [
@@ -530,6 +643,7 @@ describe('a broken story', () => {
     ['setViewport', 'Setting the viewport'],
     ['storyWait', 'Waiting for the story to finish'],
     ['assetsWait', 'Waiting for images and fonts'],
+    ['endStateWait', 'Bringing the story to its end state'],
     ['captureFullPage', 'Capturing the snapshot'],
   ] as const)('is one whose %s fails, naming that step and why', async (method, step) => {
     const driver = new FakeDriver({
@@ -697,6 +811,7 @@ describe('a broken story', () => {
       '2:goto',
       '2:evaluate',
       '2:evaluate',
+      '2:evaluate',
       '2:captureFullPage',
     ])
   })
@@ -769,6 +884,7 @@ describe('a story that navigates away', () => {
   const capturedOn = (page: number): string[] => [
     `${page}:setViewport`,
     `${page}:goto`,
+    `${page}:evaluate`,
     `${page}:evaluate`,
     `${page}:evaluate`,
     `${page}:captureFullPage`,

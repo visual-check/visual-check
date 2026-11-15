@@ -1,4 +1,5 @@
-import { storybookPageScript } from '../storybook/preview-script.js'
+import { parkedByStorybookSource, storybookPageScript } from '../storybook/preview-script.js'
+import { endStateFunction } from './end-state.js'
 
 /**
  * The non-enumerable global the page script keeps its state under, in every document of a page.
@@ -16,10 +17,10 @@ const keptMessages = 50
 const keptCharacters = 500
 
 /**
- * The script that runs at the start of every document of a page, before the page's own scripts, in every driver. It
- * changes no styles except emptying Storybook 9.1 and 10's pause stylesheets. It reads the document only once the story
- * finished: in the Storybook adapter's part, and in the wait for images and fonts, which also makes lazy images eager.
- * It does only this, keeping its own state under one non-enumerable global:
+ * The script that runs at the start of every document of a page, before the page's own scripts, in every driver. Until
+ * capture, it changes no styles except emptying Storybook 9.1 and 10's pause stylesheets. It reads the document only
+ * once the story finished: in the Storybook adapter's part, in the wait for images and fonts, which also makes lazy
+ * images eager, and in the end state. It does only this, keeping its own state under one non-enumerable global:
  *
  * - wraps `Element.prototype.attachShadow` to record every shadow root it creates, closed ones included, in
  *   `shadowRoots`;
@@ -39,11 +40,14 @@ const keptCharacters = 500
  *   the images still in the document and incomplete, until none are left. A broken image is complete, so it isn't
  *   decoded again. Then it forces layout, so the fonts the layout needs start loading, and waits for
  *   `document.fonts.ready`. One time limit covers both. A page without an API it uses, such as `document.fonts`, has
- *   nothing to wait for there.
+ *   nothing to wait for there;
+ * - gives `bringToEndState`, which the end state expression calls at capture. It brings every animation in the
+ *   document and in every shadow root to its end state, as `endStateFunction` says, telling the animations Storybook
+ *   11 parked apart with the Storybook adapter's predicate.
  *
- * It keeps the browser's own `setTimeout` and `clearTimeout`, so a story that fakes or replaces timers doesn't stall
- * the wait. The adapter's script runs first, so a failure in the rest can't keep the story wait from running and show
- * as a page script that didn't run.
+ * It keeps the browser's own `setTimeout`, `clearTimeout` and `requestAnimationFrame`, so a story that fakes or
+ * replaces timers or frames doesn't stall the wait or the end state. The adapter's script runs first, so a failure in
+ * the rest can't keep the story wait from running and show as a page script that didn't run.
  */
 export const pageInitScript = `${storybookPageScript};
 (() => {
@@ -53,6 +57,10 @@ export const pageInitScript = `${storybookPageScript};
 
   const setTimer = globalThis.setTimeout.bind(globalThis)
   const clearTimer = globalThis.clearTimeout.bind(globalThis)
+  const requestFrame =
+    typeof globalThis.requestAnimationFrame === 'function'
+      ? globalThis.requestAnimationFrame.bind(globalThis)
+      : undefined
   const shadowRoots = []
   const messages = []
 
@@ -267,8 +275,18 @@ export const pageInitScript = `${storybookPageScript};
     }
   }
 
+  // The end state, brought about only at capture.
+
+  const bringToEndState = (${endStateFunction})({
+    shadowRoots,
+    setTimer,
+    clearTimer,
+    requestFrame,
+    parkedByStorybook: ${parkedByStorybookSource},
+  })
+
   Object.defineProperty(globalThis, '${stateGlobal}', {
-    value: Object.freeze({ shadowRoots, messages, waitForAssets }),
+    value: Object.freeze({ shadowRoots, messages, waitForAssets, bringToEndState }),
   })
 })()`
 
@@ -329,6 +347,19 @@ export function assetsReadyExpression(timeoutMs: number): string {
   return `(async () => {
   const state = globalThis.${stateGlobal}
   return state === undefined ? { outcome: 'script-missing' } : state.waitForAssets(${limit})
+})()`
+}
+
+/**
+ * Builds the expression that brings the page to its end state at capture, or gives up once `timeoutMs` passes, rounded
+ * up to whole ms. Its value is the page's answer, which `readEndState` reads.
+ */
+export function endStateExpression(timeoutMs: number): string {
+  const limit = Math.max(0, Math.ceil(timeoutMs))
+
+  return `(async () => {
+  const state = globalThis.${stateGlobal}
+  return state === undefined ? { outcome: 'script-missing' } : state.bringToEndState(${limit})
 })()`
 }
 

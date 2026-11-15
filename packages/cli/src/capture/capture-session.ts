@@ -10,7 +10,14 @@ import {
   PageTimeoutError,
   type PageViewport,
 } from './driver/driver.js'
-import { type AssetsReadiness, assetsReadyExpression, pageInitScript, readAssetsReadiness } from './page-script.js'
+import { type EndState, readEndState } from './end-state.js'
+import {
+  type AssetsReadiness,
+  assetsReadyExpression,
+  endStateExpression,
+  pageInitScript,
+  readAssetsReadiness,
+} from './page-script.js'
 
 /**
  * How much longer than a wait in the page the driver waits for its answer, in ms. The wait in the page gives up first
@@ -31,9 +38,10 @@ export interface CaptureSettings {
   /**
    * The config's `readyTimeout`, in ms, per attempt: a story that navigates away is captured again, up to 2 more times,
    * each with the whole of it. It's counted from just before the viewport is set. Loading the story (`goto`), waiting
-   * for Storybook to report it finished and waiting for its images and fonts share it, each getting what's left, in
-   * whole ms rounded up. Each wait in the page gives up when it runs out, and the driver allows up to 1 s more for the
-   * page's answer. Setting the viewport and the capture are bound by the driver's own fixed limits instead.
+   * for Storybook to report it finished, waiting for its images and fonts, bringing it to its end state and checking
+   * its images and fonts again share it, each getting what's left, in whole ms rounded up. Each wait in the page gives
+   * up when it runs out, and the driver allows up to 1 s more for the page's answer. Setting the viewport and the
+   * capture are bound by the driver's own fixed limits instead.
    */
   readyTimeoutMs: number
   /**
@@ -186,7 +194,7 @@ export interface CaptureSession {
 /**
  * A step of one capture.
  */
-type Step = 'viewport' | 'load' | 'story' | 'assets' | 'capture'
+type Step = 'viewport' | 'load' | 'story' | 'assets' | 'end-state' | 'capture'
 
 /**
  * What each step does, as a phrase that follows "while".
@@ -196,6 +204,7 @@ const stepNames: Record<Step, string> = {
   load: 'loading the story',
   story: 'waiting for the story to finish',
   assets: 'waiting for images and fonts',
+  'end-state': 'bringing the story to its end state',
   capture: 'capturing the snapshot',
 }
 
@@ -206,6 +215,7 @@ const stepTimeouts: Partial<Record<Step, string>> = {
   load: 'its page was still loading',
   story: 'its page stopped answering while visual-check waited for the story to finish',
   assets: 'its page stopped answering while visual-check waited for its images and fonts',
+  'end-state': 'its page stopped answering while visual-check brought it to its end state',
 }
 
 /**
@@ -326,6 +336,20 @@ function describeAssetsWait(
 }
 
 /**
+ * Says why a story isn't ready to capture, from what bringing it to its end state found.
+ */
+function describeEndState(endState: Exclude<EndState, { outcome: 'settled' }>, readyTimeoutMs: number): BrokenStory {
+  if (endState.outcome === 'script-missing') {
+    return {
+      reason: 'error',
+      message: "visual-check's page script didn't run in the story's page, so it couldn't bring it to its end state.",
+    }
+  }
+
+  return { reason: 'timeout', message: notReady(readyTimeoutMs, 'visual-check was still finishing its animations') }
+}
+
+/**
  * Says why a story couldn't be captured, from the error a step failed with. A `PageTimeoutError` from loading the story
  * or from a wait in the page means readyTimeout ran out. `story` shows a URL on the story's own origin as a path.
  */
@@ -358,9 +382,10 @@ function describeFailure(error: unknown, step: Step, story: StoryToCapture, read
 
 /**
  * Captures a story on an open page: sets the viewport, loads the story, waits until Storybook reports it finished with
- * nothing gone wrong, waits for its images and fonts and captures the full page. Loading and both waits share
- * readyTimeout, each getting only what's left of it. A story that can't be captured comes back as a broken story.
- * Rejects only with a `BrowserExitedError`.
+ * nothing gone wrong, waits for its images and fonts, brings it to its end state and captures the full page. When the
+ * end state changed anything, it checks the images and fonts again before the capture. Loading, the waits and the end
+ * state share readyTimeout, each getting only what's left of it. A story that can't be captured comes back as a broken
+ * story. Rejects only with a `BrowserExitedError`.
  */
 async function captureOnPage(page: Page, story: StoryToCapture, settings: CaptureSettings): Promise<StoryCapture> {
   const deadline = performance.now() + settings.readyTimeoutMs
@@ -377,6 +402,15 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
     return await page.evaluate(expressionFor(limit), limit + waitMarginMs)
   }
 
+  /**
+   * Waits in the page for the story's images and fonts, as the `assets` step.
+   */
+  const waitForAssets = async (): Promise<AssetsReadiness> => {
+    step = 'assets'
+
+    return readAssetsReadiness(await waitInPage(assetsReadyExpression))
+  }
+
   try {
     await page.setViewport(settings.viewport)
     step = 'load'
@@ -389,12 +423,26 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
       return { broken: describeStoryWait(wait, settings.readyTimeoutMs) }
     }
 
-    step = 'assets'
-
-    const assets = readAssetsReadiness(await waitInPage(assetsReadyExpression))
+    const assets = await waitForAssets()
 
     if (assets.outcome !== 'ready') {
       return { broken: describeAssetsWait(assets, settings.readyTimeoutMs) }
+    }
+
+    step = 'end-state'
+
+    const endState = readEndState(await waitInPage(endStateExpression))
+
+    if (endState.outcome !== 'settled') {
+      return { broken: describeEndState(endState, settings.readyTimeoutMs) }
+    }
+
+    if (endState.changed) {
+      const assetsAgain = await waitForAssets()
+
+      if (assetsAgain.outcome !== 'ready') {
+        return { broken: describeAssetsWait(assetsAgain, settings.readyTimeoutMs) }
+      }
     }
 
     step = 'capture'

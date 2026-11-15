@@ -387,6 +387,37 @@ export const storybookPageScript = `(() => {
 })()`
 
 /**
+ * The source of a function, evaluated in the page, that says whether an animation is one Storybook 11 parked on its
+ * first frame. On the test path, after `play`, Storybook 11 takes every CSS animation and transition on a
+ * `DocumentTimeline`, in the document and in every open shadow root. It calls `finish()` on a finite one, and
+ * `pause()` then `currentTime = 0` on an infinite one or on a finite one whose `finish()` throws. It does the same to
+ * every one that starts later, until the story is cleaned up, and leaves script animations (`element.animate()`)
+ * running.
+ *
+ * So the function is true for a CSS animation or transition on a `DocumentTimeline`, paused at 0. Each kind is
+ * checked only where the page has its class. It matches by behaviour, not by version: on 9.1 and 10 nothing is
+ * parked, and a CSS animation the page itself paused at 0 matches too, which pinning leaves looking the same. It never
+ * throws: an animation it can't read isn't parked.
+ *
+ * @public
+ */
+export const parkedByStorybookSource = `(animation) => {
+  try {
+    const cssAnimation = typeof CSSAnimation === 'function' && animation instanceof CSSAnimation
+    const cssTransition = typeof CSSTransition === 'function' && animation instanceof CSSTransition
+    return (
+      (cssAnimation || cssTransition) &&
+      typeof DocumentTimeline === 'function' &&
+      animation.timeline instanceof DocumentTimeline &&
+      animation.playState === 'paused' &&
+      animation.currentTime === 0
+    )
+  } catch {
+    return false
+  }
+}`
+
+/**
  * One of Storybook's error events, as the page recorded it.
  */
 interface RecordedError {

@@ -1,7 +1,16 @@
 import { type Context, createContext, runInContext } from 'node:vm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { finishedAnswer, timedOutAnswer } from './preview-script.fixture.js'
-import { readStoryWait, storybookPageScript, storyWaitExpression } from './preview-script.js'
+import {
+  type AnimationKind,
+  animationClasses,
+  type FakeAnimation,
+  type FakeAnimationOptions,
+  FakeScrollTimeline,
+  fakeAnimation,
+  finishedAnswer,
+  timedOutAnswer,
+} from './preview-script.fixture.js'
+import { parkedByStorybookSource, readStoryWait, storybookPageScript, storyWaitExpression } from './preview-script.js'
 
 /**
  * A stand-in for Storybook's channel: it keeps the listeners `on` adds and calls them on `emit`.
@@ -878,6 +887,67 @@ describe("the test path's pause stylesheets", () => {
 
     channel.emit('storyFinished', { storyId: 'button--primary', status: 'success' })
     expect(await wait).toEqual(finishedAnswer())
+  })
+})
+
+/**
+ * Evaluates the predicate's source in a fake page with these globals, and gives back the predicate.
+ */
+function parkedByStorybookIn(globals: Record<string, unknown> = animationClasses): (animation: object) => unknown {
+  return runInContext(parkedByStorybookSource, createContext({ ...globals })) as (animation: object) => unknown
+}
+
+/**
+ * Builds an animation of this kind, paused at 0 on the document's timeline unless `options` says otherwise.
+ */
+function pausedAnimation(kind: AnimationKind, options: FakeAnimationOptions = {}): FakeAnimation {
+  return fakeAnimation({ kind, playState: 'paused', ...options })
+}
+
+describe('the predicate for animations Storybook 11 parked', () => {
+  it.each([
+    ['a CSS animation', 'css-animation'],
+    ['a CSS transition', 'css-transition'],
+  ] as const)('is true for %s paused at 0 on the document timeline', (_kind, kind) => {
+    expect(parkedByStorybookIn()(pausedAnimation(kind))).toBe(true)
+  })
+
+  it.each([
+    ['a CSS animation running at 0', fakeAnimation({ kind: 'css-animation' })],
+    ['a finished CSS animation', fakeAnimation({ kind: 'css-animation', playState: 'finished', currentTime: 1000 })],
+    ['a CSS animation paused at another time', pausedAnimation('css-animation', { currentTime: 500 })],
+    ['a script animation paused at 0', pausedAnimation('script')],
+    ['a CSS animation on a scroll timeline', pausedAnimation('css-animation', { timeline: new FakeScrollTimeline() })],
+    ['a CSS transition without a timeline', pausedAnimation('css-transition', { timeline: null })],
+  ])('is false for %s', (_what, animation) => {
+    expect(parkedByStorybookIn()(animation)).toBe(false)
+  })
+
+  it('checks each kind only where the page has its class', () => {
+    const { CSSTransition, DocumentTimeline } = animationClasses
+
+    expect(parkedByStorybookIn({ CSSTransition, DocumentTimeline })(pausedAnimation('css-transition'))).toBe(true)
+  })
+
+  it.each([
+    ['CSSAnimation and CSSTransition', { DocumentTimeline: animationClasses.DocumentTimeline }],
+    [
+      'DocumentTimeline',
+      { CSSAnimation: animationClasses.CSSAnimation, CSSTransition: animationClasses.CSSTransition },
+    ],
+  ])('is false in a page without %s', (_classes, globals) => {
+    expect(parkedByStorybookIn(globals)(pausedAnimation('css-animation'))).toBe(false)
+  })
+
+  it('is false for an animation it cannot read, without throwing', () => {
+    const animation = pausedAnimation('css-animation')
+
+    Object.defineProperty(animation, 'playState', {
+      get: () => {
+        throw new Error('unreadable')
+      },
+    })
+    expect(parkedByStorybookIn()(animation)).toBe(false)
   })
 })
 
