@@ -5,6 +5,7 @@ import { readStoryWait, storyWaitExpression } from '../storybook/preview-script.
 import { animationsTimedOutAnswer, FakeFrames, fakeDocument, settledAnswer } from './end-state.fixture.js'
 import { fontsTimedOutAnswer, imagesTimedOutAnswer, readyAnswer } from './page-script.fixture.js'
 import { assetsReadyExpression, endStateExpression, pageInitScript, readAssetsReadiness } from './page-script.js'
+import { fakeImg, fakePageDocument } from './remote-content.fixture.js'
 
 /**
  * The console methods the fake page has, each a mock standing for the browser's own.
@@ -526,12 +527,25 @@ describe('the page script', () => {
     expect(readStoryWait(await wait)).toHaveProperty('outcome', 'timed-out')
   })
 
-  it('keeps its state out of enumeration, frozen, with the end state in it', () => {
+  it('keeps its state out of enumeration, frozen, with the end state and the remote content search in it', () => {
     const page = openPage()
 
     expect(page.run("Object.keys(globalThis).includes('__visualCheck')")).toBe(false)
     expect(page.run('Object.isFrozen(globalThis.__visualCheck)')).toBe(true)
     expect(page.run('typeof globalThis.__visualCheck.bringToEndState')).toBe('function')
+    expect(page.run('typeof globalThis.__visualCheck.findRemoteContent')).toBe('function')
+  })
+
+  it('creates the remote content search without reading the document, which it searches once called', async () => {
+    const { document } = fakePageDocument({ elements: [fakeImg({ src: 'https://images.example.com/a.jpg' })] })
+    const page = openPage({ document, URL })
+
+    expect(page.documentReads()).toBe(0)
+    expect(await page.evaluate('globalThis.__visualCheck.findRemoteContent(1000)')).toEqual({
+      outcome: 'found',
+      items: [{ host: 'images.example.com', hostname: 'images.example.com', x: 10, y: 20, width: 100, height: 50 }],
+    })
+    expect(page.documentReads()).toBeGreaterThan(0)
   })
 
   it('does nothing when it runs again in the same page', () => {

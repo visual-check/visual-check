@@ -1,5 +1,6 @@
 import { parkedByStorybookSource, storybookPageScript } from '../storybook/preview-script.js'
 import { endStateFunction } from './end-state.js'
+import { remoteContentFunction } from './remote-content.js'
 
 /**
  * The non-enumerable global the page script keeps its state under, in every document of a page.
@@ -46,11 +47,15 @@ const keptCharacters = 500
  * - gives `bringToEndState`, which the end state expression calls at capture. It brings every animation in the
  *   document and in every shadow root to its end state, then freezes their videos, inline SVGs and GIFs, then brings
  *   the animations that freezing them started to their end state too, as `endStateFunction` says, telling the
- *   animations Storybook 11 parked apart with the Storybook adapter's predicate.
+ *   animations Storybook 11 parked apart with the Storybook adapter's predicate;
+ * - gives `findRemoteContent`, which finds the remote content the page shows: images, CSS images and cross-origin
+ *   frames from an origin other than Storybook's, in the document, in every shadow root and in same-origin frames, as
+ *   `remoteContentFunction` says.
  *
  * It keeps the browser's own `setTimeout`, `clearTimeout` and `requestAnimationFrame`, so a story that fakes or
- * replaces timers or frames doesn't stall the wait or the end state. The adapter's script runs first, so a failure in
- * the rest can't keep the story wait from running and show as a page script that didn't run.
+ * replaces timers or frames doesn't stall the wait, the end state or the remote content search. The adapter's script
+ * runs first, so a failure in the rest can't keep the story wait from running and show as a page script that didn't
+ * run.
  */
 export const pageInitScript = `${storybookPageScript};
 (() => {
@@ -288,8 +293,12 @@ export const pageInitScript = `${storybookPageScript};
     parkedByStorybook: ${parkedByStorybookSource},
   })
 
+  // The remote content search, run only when a step needs it.
+
+  const findRemoteContent = (${remoteContentFunction})({ shadowRoots, setTimer, clearTimer })
+
   Object.defineProperty(globalThis, '${stateGlobal}', {
-    value: Object.freeze({ shadowRoots, messages, waitForAssets, bringToEndState }),
+    value: Object.freeze({ shadowRoots, messages, waitForAssets, bringToEndState, findRemoteContent }),
   })
 })()`
 

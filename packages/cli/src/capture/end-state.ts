@@ -1,3 +1,5 @@
+import { pageRootsFunction } from './page-roots.js'
+
 /**
  * How many rounds of finishing animations the end state runs at most.
  */
@@ -133,36 +135,7 @@ export const endStateFunction = `(context) => {
 
   // Collecting the animations: every root, then every animation on the document's timeline in them, each once.
 
-  const elementsOf = (root, selector) => {
-    try {
-      return Array.from(root.querySelectorAll(selector))
-    } catch {
-      return []
-    }
-  }
-
-  const openShadowRootOf = (element) => {
-    try {
-      const root = element.shadowRoot
-      return typeof root === 'object' && root !== null ? root : undefined
-    } catch {
-      return undefined
-    }
-  }
-
-  const rootsOf = () => {
-    const roots = new Set([document, ...shadowRoots])
-    // A Set's iteration visits the roots added during it, so the open roots inside open roots are walked too.
-    for (const root of roots) {
-      for (const element of elementsOf(root, '*')) {
-        const openRoot = openShadowRootOf(element)
-        if (openRoot !== undefined) {
-          roots.add(openRoot)
-        }
-      }
-    }
-    return roots
-  }
+  const { elementsOf, rootsOf } = (${pageRootsFunction})()
 
   const animationsIn = (root) => {
     try {
@@ -485,7 +458,7 @@ export const endStateFunction = `(context) => {
       let quietChecks = 0
       let roots
       for (;;) {
-        roots = rootsOf()
+        roots = rootsOf(document, shadowRoots)
         const running = animationsOf(roots).filter(
           (animation) =>
             !unfinishable.has(animation) && playStateOf(animation) === 'running' && isFiniteAnimation(animation),
