@@ -7,7 +7,7 @@ import {
   PageNavigatedAwayError,
   PageTimeoutError,
 } from './driver/driver.js'
-import { defaultSnapshot, FakeDriver } from './fake-driver.fixture.js'
+import { defaultSnapshot, FakeDriver, type FakePageBehaviour } from './fake-driver.fixture.js'
 import { pageInitScript, storyReadinessExpression } from './page-script.js'
 
 /**
@@ -219,8 +219,11 @@ describe('a broken story', () => {
     const driver = new FakeDriver({ pages: [{ evaluate: async () => ({ outcome: 'finished', status: 'error' }) }] })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken:
-        'Storybook reported the story finished with status "error", as it does when a loader, beforeEach or the render throws, when play leaves unhandled errors, or when a check such as accessibility fails.',
+      broken: {
+        reason: 'error',
+        message:
+          'Storybook reported the story finished with status "error", as it does when a loader, beforeEach or the render throws, when play leaves unhandled errors, or when a check such as accessibility fails.',
+      },
     })
     expect(driver.methods()).not.toContain('1:captureFullPage')
   })
@@ -229,7 +232,10 @@ describe('a broken story', () => {
     const driver = new FakeDriver({ pages: [{ evaluate: async () => ({ outcome: 'timed-out', channel: true }) }] })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: "The story wasn't ready within readyTimeout (10000 ms): Storybook never sent storyFinished for it.",
+      broken: {
+        reason: 'timeout',
+        message: "The story wasn't ready within readyTimeout (10000 ms): Storybook never sent storyFinished for it.",
+      },
     })
   })
 
@@ -237,7 +243,11 @@ describe('a broken story', () => {
     const driver = new FakeDriver({ pages: [{ evaluate: async () => ({ outcome: 'timed-out', channel: false }) }] })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: "The story wasn't ready within readyTimeout (10000 ms): Storybook's preview never started in its page.",
+      broken: {
+        reason: 'timeout',
+        message:
+          "The story wasn't ready within readyTimeout (10000 ms): Storybook's preview never started in its page.",
+      },
     })
   })
 
@@ -245,7 +255,11 @@ describe('a broken story', () => {
     const driver = new FakeDriver({ pages: [{ evaluate: async () => ({ outcome: 'script-missing' }) }] })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: "visual-check's page script didn't run in the story's page, so it couldn't wait for the story to finish.",
+      broken: {
+        reason: 'error',
+        message:
+          "visual-check's page script didn't run in the story's page, so it couldn't wait for the story to finish.",
+      },
     })
   })
 
@@ -263,7 +277,10 @@ describe('a broken story', () => {
     })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: "The story wasn't ready within readyTimeout (10000 ms): its page was still loading.",
+      broken: {
+        reason: 'timeout',
+        message: "The story wasn't ready within readyTimeout (10000 ms): its page was still loading.",
+      },
     })
   })
 
@@ -281,8 +298,11 @@ describe('a broken story', () => {
     })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken:
-        "The story wasn't ready within readyTimeout (10000 ms): its page stopped answering while visual-check waited for it to finish.",
+      broken: {
+        reason: 'timeout',
+        message:
+          "The story wasn't ready within readyTimeout (10000 ms): its page stopped answering while visual-check waited for it to finish.",
+      },
     })
   })
 
@@ -300,7 +320,10 @@ describe('a broken story', () => {
     })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: `Loading the story failed: The page couldn't load ${primary.url}: net::ERR_CONNECTION_RESET.`,
+      broken: {
+        reason: 'error',
+        message: `Loading the story failed: The page couldn't load ${primary.url}: net::ERR_CONNECTION_RESET.`,
+      },
     })
   })
 
@@ -316,7 +339,10 @@ describe('a broken story', () => {
     })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: "Setting the viewport failed: The page didn't set its viewport within 30 s.",
+      broken: {
+        reason: 'error',
+        message: "Setting the viewport failed: The page didn't set its viewport within 30 s.",
+      },
     })
   })
 
@@ -332,7 +358,10 @@ describe('a broken story', () => {
     })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: `Loading the story failed: The page couldn't load ${primary.url}: net::ERR_CONNECTION_REFUSED.`,
+      broken: {
+        reason: 'error',
+        message: `Loading the story failed: The page couldn't load ${primary.url}: net::ERR_CONNECTION_REFUSED.`,
+      },
     })
   })
 
@@ -352,7 +381,7 @@ describe('a broken story', () => {
     })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: `${step} failed: The browser said no.`,
+      broken: { reason: 'error', message: `${step} failed: The browser said no.` },
     })
   })
 
@@ -360,8 +389,11 @@ describe('a broken story', () => {
     const driver = new FakeDriver({ pages: [{ evaluate: async () => 42 }] })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken:
-        "Waiting for the story to finish failed: The readiness wait in the page gave an answer visual-check doesn't know: 42.",
+      broken: {
+        reason: 'error',
+        message:
+          "Waiting for the story to finish failed: The readiness wait in the page gave an answer visual-check doesn't know: 42.",
+      },
     })
   })
 
@@ -377,26 +409,92 @@ describe('a broken story', () => {
     })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: 'The page crashed while loading the story, usually because it ran out of memory.',
+      broken: {
+        reason: 'crashed',
+        message:
+          'The page crashed while loading the story, usually because it ran out of memory. Fewer workers leave each page more memory.',
+      },
     })
   })
 
-  it('is one that navigated away, naming where it went', async () => {
+  it.each([
+    [
+      "the story's own origin, as a path",
+      'http://localhost:6006/categories/burgers?tab=a#top',
+      '/categories/burgers?tab=a#top',
+    ],
+    ['another origin, in full', 'https://example.com/x', 'https://example.com/x'],
+    ['a URL that cannot be parsed, as it is', 'not a url', 'not a url'],
+    ["a blob URL of the story's origin, in full", 'blob:http://localhost:6006/abc', 'blob:http://localhost:6006/abc'],
+  ])('is one that navigated away to %s, naming where it went', async (_where, url, shown) => {
+    const page: FakePageBehaviour = {
+      goto: async (storyUrl) => {
+        throw new PageNavigatedAwayError(url, `The page navigated to ${url} before ${storyUrl} loaded.`)
+      },
+    }
+    // The story navigates away on every attempt, the retries included.
+    const driver = new FakeDriver({ pages: [page, page, page] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'navigated-away',
+        message: `The story navigated away to ${shown}. Await the new page before clicking.`,
+        url,
+      },
+    })
+  })
+
+  it('is one that navigated away while waiting for the story to finish', async () => {
+    const page: FakePageBehaviour = {
+      evaluate: async () => {
+        throw new PageNavigatedAwayError('http://localhost:6006/next', 'The page navigated to /next.')
+      },
+    }
+    // The story navigates away on every attempt, the retries included.
+    const driver = new FakeDriver({ pages: [page, page, page] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'navigated-away',
+        message: 'The story navigated away to /next. Await the new page before clicking.',
+        url: 'http://localhost:6006/next',
+      },
+    })
+  })
+
+  it('is one whose page crashed while waiting for the story to finish, naming that step', async () => {
     const driver = new FakeDriver({
       pages: [
         {
-          goto: async (url) => {
-            throw new PageNavigatedAwayError(
-              'https://example.com/',
-              `The page navigated to https://example.com/ before ${url} loaded.`,
-            )
+          evaluate: async () => {
+            throw new PageCrashedError()
           },
         },
       ],
     })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: 'The story navigated away to https://example.com/, and a story has to stay on its page to be captured.',
+      broken: {
+        reason: 'crashed',
+        message:
+          'The page crashed while waiting for the story to finish, usually because it ran out of memory. Fewer workers leave each page more memory.',
+      },
+    })
+  })
+
+  it("is one whose capture hits the driver's own time limit, as an error and not a timeout", async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          captureFullPage: async () => {
+            throw new PageTimeoutError("The page didn't capture within 30 s.", 30_000)
+          },
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: { reason: 'error', message: "Capturing the snapshot failed: The page didn't capture within 30 s." },
     })
   })
 
@@ -408,7 +506,10 @@ describe('a broken story', () => {
     })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: "visual-check couldn't open a page for the story: The browser didn't open a page within 30 s.",
+      broken: {
+        reason: 'error',
+        message: "visual-check couldn't open a page for the story: The browser didn't open a page within 30 s.",
+      },
     })
   })
 
@@ -462,7 +563,7 @@ describe('a broken story', () => {
     })
     const session = openCaptureSession(driver, settings)
 
-    expect(await session.capture(primary)).toHaveProperty('broken')
+    expect(await session.capture(primary)).toHaveProperty('broken.reason', 'crashed')
     expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot })
   })
 
@@ -481,6 +582,164 @@ describe('a broken story', () => {
 
     await session.capture(primary)
     expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot })
+  })
+})
+
+describe('a story that navigates away', () => {
+  /**
+   * A page whose story navigates away to `url` as it loads.
+   */
+  const navigatesAway = (url: string): FakePageBehaviour => ({
+    goto: async () => {
+      throw new PageNavigatedAwayError(url, `The page navigated to ${url}.`)
+    },
+  })
+
+  /**
+   * The methods a page that navigated away at its load received: it was set up, failed to load and was closed.
+   */
+  const navigatedAwayAt = (page: number): string[] => [`${page}:setViewport`, `${page}:goto`, `${page}:close`]
+
+  /**
+   * The methods a page that captured well received.
+   */
+  const capturedOn = (page: number): string[] => [
+    `${page}:setViewport`,
+    `${page}:goto`,
+    `${page}:evaluate`,
+    `${page}:captureFullPage`,
+  ]
+
+  it('is broken with the last attempt after 2 retries, each on a fresh page', async () => {
+    const driver = new FakeDriver({
+      pages: [
+        navigatesAway('http://localhost:6006/one'),
+        navigatesAway('http://localhost:6006/two'),
+        navigatesAway('http://localhost:6006/three'),
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'navigated-away',
+        message: 'The story navigated away to /three. Await the new page before clicking.',
+        url: 'http://localhost:6006/three',
+      },
+    })
+    expect(driver.setups).toHaveLength(3)
+    expect(driver.methods()).toEqual([...navigatedAwayAt(1), ...navigatedAwayAt(2), ...navigatedAwayAt(3)])
+  })
+
+  it('gives the snapshot of a retry that captured, keeping that page', async () => {
+    const driver = new FakeDriver({ pages: [navigatesAway('http://localhost:6006/one')] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({ snapshot: defaultSnapshot })
+    expect(driver.methods()).toEqual([...navigatedAwayAt(1), ...capturedOn(2)])
+  })
+
+  it('clears the kept page of a retry before the next story, as after any story that captured', async () => {
+    const driver = new FakeDriver({ pages: [navigatesAway('http://localhost:6006/one')] })
+    const session = openCaptureSession(driver, settings)
+
+    await session.capture(primary)
+    expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot })
+    expect(driver.setups).toHaveLength(2)
+    expect(driver.methods()).toEqual([...navigatedAwayAt(1), ...capturedOn(2), '2:clearStorage', ...capturedOn(2)])
+  })
+
+  /**
+   * Each outcome other than navigating away, as the reason it gives and a page that has it as it loads.
+   */
+  const otherOutcomes: [string, FakePageBehaviour][] = [
+    [
+      'crashed',
+      {
+        goto: async () => {
+          throw new PageCrashedError()
+        },
+      },
+    ],
+    [
+      'error',
+      {
+        goto: async () => {
+          throw new Error('The page broke.')
+        },
+      },
+    ],
+    ['timeout', { evaluate: async () => ({ outcome: 'timed-out', channel: true }) }],
+  ]
+
+  it.each(otherOutcomes)('is not retried when the first attempt is %s', async (reason, behaviour) => {
+    const driver = new FakeDriver({ pages: [behaviour] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toHaveProperty('broken.reason', reason)
+    expect(driver.setups).toHaveLength(1)
+  })
+
+  it.each(otherOutcomes)('gives the outcome of a retry that is %s, retrying no more', async (reason, behaviour) => {
+    const driver = new FakeDriver({ pages: [navigatesAway('http://localhost:6006/one'), behaviour] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toHaveProperty('broken.reason', reason)
+    expect(driver.setups).toHaveLength(2)
+  })
+
+  it('gives each retry the whole readyTimeout', async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          goto: async () => {
+            pass(4_000)
+            throw new PageNavigatedAwayError('http://localhost:6006/one', 'The page navigated to /one.')
+          },
+        },
+      ],
+    })
+
+    await openCaptureSession(driver, settings).capture(primary)
+    expect(driver.calls.filter((call) => call.method === 'goto').map((call) => call.args[1])).toEqual([
+      settings.readyTimeoutMs,
+      settings.readyTimeoutMs,
+    ])
+  })
+
+  it('gives the error of a page that cannot be opened for a retry', async () => {
+    let openings = 0
+    const driver = new FakeDriver({
+      pages: [navigatesAway('http://localhost:6006/one')],
+      newPage: async () => {
+        openings += 1
+
+        if (openings === 2) {
+          throw new Error("The browser didn't open a page within 30 s.")
+        }
+      },
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'error',
+        message: "visual-check couldn't open a page for the story: The browser didn't open a page within 30 s.",
+      },
+    })
+    expect(driver.methods()).toEqual(navigatedAwayAt(1))
+  })
+
+  it('rejects when the browser exits during a retry', async () => {
+    const exited = new BrowserExitedError({ code: 1, signal: null, error: undefined }, [])
+    const driver = new FakeDriver({
+      pages: [
+        navigatesAway('http://localhost:6006/one'),
+        {
+          goto: async () => {
+            throw exited
+          },
+        },
+      ],
+    })
+
+    await expect(openCaptureSession(driver, settings).capture(primary)).rejects.toBe(exited)
+    expect(driver.methods()).toEqual([...navigatedAwayAt(1), '2:setViewport', '2:goto'])
   })
 })
 

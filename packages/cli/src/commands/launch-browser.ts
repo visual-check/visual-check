@@ -1,16 +1,9 @@
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { type CheckedBrowser, checkBrowserVersion, runImageOf } from '../browser/browser-version.js'
 import type { ChromeForTestingPlatform } from '../browser/chrome-for-testing-platform.js'
-import type { BrowserPackage } from '../browser/read-browser-package.js'
-import {
-  headlessShellPathsOf,
-  type InstallHeadlessShellOptions,
-  installHeadlessShell,
-} from '../browser-download/install-headless-shell.js'
+import { type InstallHeadlessShellOptions, installHeadlessShell } from '../browser-download/install-headless-shell.js'
 import { startBrowserProcess } from '../browser-process/start-browser-process.js'
-import { type CaptureSession, type CaptureSettings, openCaptureSession } from '../capture/capture-session.js'
 import { type CdpDriverOptions, launchCdpDriver } from '../capture/driver/cdp/cdp-driver.js'
 import { BrowserLaunchError, type BrowserSystem, type Driver } from '../capture/driver/driver.js'
 import {
@@ -20,7 +13,7 @@ import {
 } from '../container/browser-container.js'
 import { pullMissingImage } from '../container/image-pull.js'
 import { launchThroughProxy } from '../container/launch-through-proxy.js'
-import type { BrowserPlace, ContainerRoute } from './browser-route.js'
+import type { ContainerRoute } from './browser-route.js'
 
 /**
  * The folder Chromium keeps its profile in, inside the container. The container is removed when the browser exits, and
@@ -278,154 +271,5 @@ export function createLaunchBrowser(seams: LauncherSeams = {}): LaunchBrowser {
       case 'host':
         return await launchOnHost(launch)
     }
-  }
-}
-
-/**
- * What a run's browser is launched and set up with.
- */
-interface RunBrowserOptions {
-  /**
-   * The browser package, which names the image, the headless shell, its downloads and the build the browser must be.
-   */
-  browserPackage: BrowserPackage
-  /**
-   * The config's `image`, which replaces the browser package's, or `undefined`.
-   */
-  configImage: string | undefined
-  /**
-   * Where the browser runs.
-   */
-  place: BrowserPlace
-  /**
-   * How each session captures every story.
-   */
-  settings: CaptureSettings
-  /**
-   * The environment, for where the headless shell is downloaded to on the host, and through which mirror and proxy.
-   */
-  environment: Record<string, string | undefined>
-  /**
-   * Writes the progress of a pull or a download as it happens.
-   */
-  progress: (text: string) => void
-}
-
-/**
- * The browser a run captures in, launched at the first story that needs it, with one capture session for each worker.
- */
-export interface RunBrowser {
-  /**
-   * The capture session of a worker. The first call launches the browser and checks that it is the browser package's
-   * build, and every call shares that one browser. A worker's first call opens its session, which keeps its own page.
-   *
-   * @throws {ContainerError} When Docker can't be run, the image can't be pulled, or the browser can't reach the proxy.
-   * @throws {BrowserDownloadError} When the headless shell can't be downloaded to the host.
-   * @throws {BrowserLaunchError} When the browser doesn't connect, or fails any other way while it is checked to reach
-   * the proxy.
-   * @throws {BrowserExitedError} When the browser exits while it is checked to reach the proxy.
-   * @throws {BrowserMismatchError} When the browser isn't the browser package's build.
-   */
-  session: (worker: number) => Promise<CaptureSession>
-  /**
-   * Closes every session's page and the browser, if they were opened. Waits for a launch still in flight, so no
-   * browser is left running, and doesn't throw when the launch failed.
-   */
-  close: () => Promise<void>
-}
-
-/**
- * Gives what launching the browser needs where it runs: the headless shell's path inside the image; the image, the
- * platform, the route and the path for the container; or the browser package's version and checksum of the download
- * for the host.
- */
-function browserLaunchOf(options: RunBrowserOptions): BrowserLaunch {
-  const { browserPackage, place } = options
-
-  switch (place.in) {
-    case 'image':
-      return { in: 'image', executable: browserPackage.headlessShell }
-    case 'container':
-      return {
-        in: 'container',
-        image: runImageOf(browserPackage, options.configImage),
-        platform: place.platform,
-        route: place.route,
-        executable: browserPackage.headlessShell,
-        progress: options.progress,
-      }
-    case 'host':
-      return {
-        in: 'host',
-        platform: place.platform,
-        version: browserPackage.chromium,
-        sha256: browserPackage.sha256[place.platform],
-        packageVersion: browserPackage.packageVersion,
-        environment: options.environment,
-        progress: options.progress,
-      }
-  }
-}
-
-/**
- * Gives where the browser that answered runs, as the version check names it.
- */
-function checkedBrowserOf(options: RunBrowserOptions): CheckedBrowser {
-  switch (options.place.in) {
-    case 'image':
-      return { in: 'image' }
-    case 'container':
-      return { in: 'container', configImage: options.configImage }
-    case 'host': {
-      const { environment, browserPackage, place } = options
-      const { folder } = headlessShellPathsOf(environment, browserPackage.chromium, place.platform)
-
-      return { in: 'host', folder }
-    }
-  }
-}
-
-/**
- * Prepares a run's browser, which `launcher` launches. Nothing is launched until the first `session()`.
- */
-export function runBrowserOf(launcher: LaunchBrowser, options: RunBrowserOptions): RunBrowser {
-  let launched: Promise<Driver> | undefined
-  const sessions = new Map<number, CaptureSession>()
-
-  const launch = async (): Promise<Driver> => {
-    const driver = await launcher(browserLaunchOf(options))
-
-    try {
-      checkBrowserVersion(driver.version, options.browserPackage, checkedBrowserOf(options))
-    } catch (error) {
-      await driver.close()
-
-      throw error
-    }
-
-    return driver
-  }
-
-  return {
-    session: async (worker) => {
-      launched ??= launch()
-
-      const driver = await launched
-      let session = sessions.get(worker)
-
-      if (session === undefined) {
-        session = openCaptureSession(driver, options.settings)
-        sessions.set(worker, session)
-      }
-
-      return session
-    },
-    close: async () => {
-      await Promise.all([...sessions.values()].map((session) => session.close()))
-
-      const driver = await launched?.catch(() => undefined)
-
-      await driver?.close()
-    },
   }
 }

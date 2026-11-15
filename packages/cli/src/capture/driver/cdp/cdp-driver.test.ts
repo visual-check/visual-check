@@ -173,7 +173,7 @@ describe('launchCdpDriver', () => {
 
     await expect(launch(browser, { launchTimeoutMs: 50 })).rejects.toMatchObject({
       name: 'BrowserLaunchError',
-      message: "The browser didn't answer within 0.05 s.",
+      message: "The browser didn't answer its version call within 0.05 s.",
       output: ['still starting'],
       exited: false,
     })
@@ -197,7 +197,7 @@ describe('launchCdpDriver', () => {
     await flush()
     expect(failed).toBe(false)
     await vi.advanceTimersByTimeAsync(1)
-    await expect(launching).rejects.toMatchObject({ message: "The browser didn't answer within 1 s." })
+    await expect(launching).rejects.toMatchObject({ message: "The browser didn't answer its version call within 1 s." })
   })
 
   it("kills the browser and fails to launch with the browser's message when it answers the version call with an error", async () => {
@@ -212,6 +212,58 @@ describe('launchCdpDriver', () => {
       name: 'BrowserLaunchError',
       message: 'The browser answered its version call with an error: Internal error',
       exited: false,
+    })
+    expect(browser.killed).toBe(true)
+  })
+
+  it('turns on target discovery for pages, at the browser level, after the version call', async () => {
+    const browser = new FakeBrowser()
+
+    await launch(browser)
+    expect(browser.received.map(({ method, params, sessionId }) => ({ method, params, sessionId }))).toEqual([
+      { method: 'Browser.getVersion', params: {}, sessionId: undefined },
+      {
+        method: 'Target.setDiscoverTargets',
+        params: { discover: true, filter: [{ type: 'page' }] },
+        sessionId: undefined,
+      },
+    ])
+  })
+
+  it("kills the browser and fails to launch with the browser's message when target discovery fails", async () => {
+    const browser = new FakeBrowser({
+      handlers: {
+        'Target.setDiscoverTargets': (command: ReceivedCommand, fake: FakeBrowser) =>
+          fake.fail(command, -32000, 'Discovery failed'),
+      },
+    })
+
+    await expect(launch(browser)).rejects.toMatchObject({
+      name: 'BrowserLaunchError',
+      message: 'The browser answered its target discovery call with an error: Discovery failed',
+    })
+    expect(browser.killed).toBe(true)
+  })
+
+  it('fails to launch when the browser exits during target discovery', async () => {
+    const browser = new FakeBrowser({
+      handlers: {
+        'Target.setDiscoverTargets': (_command: ReceivedCommand, fake: FakeBrowser) => fake.exit({ code: 1 }),
+      },
+    })
+
+    await expect(launch(browser)).rejects.toMatchObject({
+      name: 'BrowserLaunchError',
+      message: 'The browser exited with code 1 before it answered.',
+    })
+  })
+
+  it("kills the browser and fails to launch when target discovery isn't answered in time", async () => {
+    const browser = new FakeBrowser({ handlers: { 'Target.setDiscoverTargets': () => undefined } })
+
+    await expect(launch(browser, { launchTimeoutMs: 50 })).rejects.toMatchObject({
+      name: 'BrowserLaunchError',
+      message: "The browser didn't answer its target discovery call within 0.05 s.",
     })
     expect(browser.killed).toBe(true)
   })
@@ -317,7 +369,11 @@ describe('Driver.newPage', () => {
 
     await expect(driver.newPage(pageSetup)).rejects.toThrow("The browser is closing, so it can't open a page.")
     await closing
-    expect(browser.received.map((command) => command.method)).toEqual(['Browser.getVersion', 'Browser.close'])
+    expect(browser.received.map((command) => command.method)).toEqual([
+      'Browser.getVersion',
+      'Target.setDiscoverTargets',
+      'Browser.close',
+    ])
   })
 })
 
@@ -339,7 +395,11 @@ describe('Driver.close', () => {
     })
 
     await flush()
-    expect(browser.received.map((command) => command.method)).toEqual(['Browser.getVersion', 'Browser.close'])
+    expect(browser.received.map((command) => command.method)).toEqual([
+      'Browser.getVersion',
+      'Target.setDiscoverTargets',
+      'Browser.close',
+    ])
     expect(closed).toBe(false)
     browser.exit({ code: 0 })
     await closing
@@ -428,6 +488,9 @@ describe('Driver.close', () => {
     browser.exit({ code: 1 })
     await driver.exited
     await driver.close()
-    expect(browser.received.map((command) => command.method)).toEqual(['Browser.getVersion'])
+    expect(browser.received.map((command) => command.method)).toEqual([
+      'Browser.getVersion',
+      'Target.setDiscoverTargets',
+    ])
   })
 })

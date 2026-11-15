@@ -156,7 +156,18 @@ interface FakeStory {
    */
   browserExits?: boolean
   /**
-   * The browser's last output lines when it exits while capturing. `Out of memory` and `bye` when not given.
+   * Whether the browser exits once it has captured the story, before the worker takes its next story, so no capture is
+   * in flight.
+   */
+  browserExitsAfter?: boolean
+  /**
+   * The IDs of stories whose captures this one's capture waits for until they are capturing, so they are in flight
+   * when it goes on. Those stories must reach their capture on other workers, or the test times out.
+   */
+  waitsForCapturing?: string[]
+  /**
+   * The browser's last output lines when it exits while capturing. `Out of memory` and `bye from browser <n>` when
+   * not given.
    */
   exitOutput?: readonly string[]
   /**
@@ -209,10 +220,11 @@ interface FakeBrowserRecord {
    */
   driverCloses: number
   /**
-   * The ID of every story whose capture finished, in the order they finished, whether they captured or the browser
-   * exited.
+   * What happened to each browser, in order, each browser numbered by its launch from 1: `<id> on <n>` as a story's
+   * capture finishes on browser n, whether it captured or the browser exited, `close page on <n>` as a page of browser n
+   * closes, and `close <n>` as browser n closes.
    */
-  finished: string[]
+  events: string[]
 }
 
 /**
@@ -227,87 +239,159 @@ function newRecord(): FakeBrowserRecord {
     pageCloses: 0,
     closed: false,
     driverCloses: 0,
-    finished: [],
+    events: [],
   }
 }
 
 /**
- * Builds a fake driver whose pages answer each story, by ID, as `stories` says.
+ * The gates stories wait on: `capturing <id>`, opened once that story's capture has reached the capture step, and
+ * `settled <id>`, opened once it has settled. Every browser of a run shares them, so a story can wait for one captured
+ * in another browser.
  */
-function fakeDriverOf(stories: Record<string, FakeStory>, record: FakeBrowserRecord, driverVersion: string): Driver {
-  const settled = new Map<string, { promise: Promise<void>; resolve: () => void }>()
-  const settledOf = (id: string) => {
-    let gate = settled.get(id)
+type StoryGates = Map<string, { promise: Promise<void>; resolve: () => void }>
 
-    if (gate === undefined) {
-      let resolve: () => void = () => undefined
-      const promise = new Promise<void>((resolvePromise) => {
-        resolve = resolvePromise
-      })
+/**
+ * Gives a gate, such as `settled a`, making it when it doesn't exist yet.
+ */
+function gateOf(gates: StoryGates, name: string): { promise: Promise<void>; resolve: () => void } {
+  let gate = gates.get(name)
 
-      gate = { promise, resolve }
-      settled.set(id, gate)
+  if (gate === undefined) {
+    let resolve: () => void = () => undefined
+    const promise = new Promise<void>((resolvePromise) => {
+      resolve = resolvePromise
+    })
+
+    gate = { promise, resolve }
+    gates.set(name, gate)
+  }
+
+  return gate
+}
+
+/**
+ * What a fake driver answers with, and where it records what it saw.
+ */
+interface FakeDriverOptions {
+  /**
+   * How its pages answer each story, by ID.
+   */
+  stories: Record<string, FakeStory>
+  /**
+   * Where it records what it saw.
+   */
+  record: FakeBrowserRecord
+  /**
+   * The browser version it reports.
+   */
+  version: string
+  /**
+   * Which of the run's launches it is, counting from 1. 1 when not given.
+   */
+  browser?: number
+  /**
+   * The gates its stories wait on, which the run's other browsers share. Gates of its own when not given.
+   */
+  gates?: StoryGates
+}
+
+/**
+ * Builds a fake driver whose pages answer each story, by ID, as the options say. Once the browser exits, `exited`
+ * settles and every call fails with the exit, whose output names the browser.
+ */
+function fakeDriverOf({ stories, record, version, browser = 1, gates = new Map() }: FakeDriverOptions): Driver {
+  let settleExited: (error: BrowserExitedError) => void = () => undefined
+  let gone: BrowserExitedError | undefined
+  const exit = (exiting: FakeStory = {}): BrowserExitedError => {
+    gone ??= new BrowserExitedError(
+      { code: null, signal: 'SIGKILL', error: undefined },
+      exiting.exitOutput ?? ['Out of memory', `bye from browser ${browser}`],
+      exiting.graphicsFailed === true,
+    )
+    settleExited(gone)
+
+    return gone
+  }
+  const failIfGone = (): void => {
+    if (gone !== undefined) {
+      throw gone
     }
-
-    return gate
   }
 
   return {
-    version: driverVersion,
-    exited: new Promise(() => undefined),
+    version,
+    exited: new Promise((resolve) => {
+      settleExited = resolve
+    }),
     newPage: async (setup) => {
       let story: FakeStory = {}
       let id = ''
 
+      failIfGone()
       record.setups.push(setup)
 
       return {
-        clearStorage: async () => undefined,
+        clearStorage: async () => {
+          failIfGone()
+        },
         setViewport: async (viewport) => {
+          failIfGone()
           record.viewports.push(viewport)
         },
         goto: async (url) => {
+          failIfGone()
           record.urls.push(url)
           id = new URL(url).searchParams.get('id') ?? ''
           story = stories[id] ?? {}
         },
-        evaluate: async () => ({ outcome: 'finished', status: story.broken === true ? 'error' : 'success' }),
+        evaluate: async () => {
+          failIfGone()
+
+          return { outcome: 'finished', status: story.broken === true ? 'error' : 'success' }
+        },
         captureFullPage: async () => {
+          gateOf(gates, `capturing ${id}`).resolve()
+          await Promise.all((story.waitsForCapturing ?? []).map((other) => gateOf(gates, `capturing ${other}`).promise))
+
           if (story.waitsFor !== undefined) {
-            await settledOf(story.waitsFor).promise
+            await gateOf(gates, `settled ${story.waitsFor}`).promise
             await new Promise((resolve) => setTimeout(resolve, 0))
           }
 
           try {
+            failIfGone()
+
             if (story.browserExits === true) {
-              throw new BrowserExitedError(
-                { code: null, signal: 'SIGKILL', error: undefined },
-                story.exitOutput ?? ['Out of memory', 'bye'],
-                story.graphicsFailed === true,
-              )
+              throw exit(story)
             }
 
             return story.snapshot ?? defaultSnapshot
           } finally {
-            record.finished.push(id)
-            settledOf(id).resolve()
+            record.events.push(`${id} on ${browser}`)
+            gateOf(gates, `settled ${id}`).resolve()
+
+            if (story.browserExitsAfter === true) {
+              exit()
+            }
           }
         },
         close: async () => {
           record.pageCloses += 1
+          record.events.push(`close page on ${browser}`)
         },
       }
     },
     close: async () => {
       record.closed = true
       record.driverCloses += 1
+      record.events.push(`close ${browser}`)
     },
   }
 }
 
 /**
- * Builds options whose launch writes pull progress and gives a fake driver of the given version, answering each story
- * as `stories` says. Returns them with what the fake browser saw.
+ * Builds options whose every launch writes pull progress and gives a fresh fake driver of the given version, answering
+ * each story as `stories` says. Returns them with what the fake browsers saw.
  */
 function fakeBrowser(
   stories: Record<string, FakeStory> = {},
@@ -315,6 +399,7 @@ function fakeBrowser(
 ): { options: Required<RunCliOptions>; record: FakeBrowserRecord; progress: string[] } {
   const record = newRecord()
   const progress: string[] = []
+  const gates: StoryGates = new Map()
   const launchBrowser: LaunchBrowser = async (launch) => {
     record.launches.push(launch)
 
@@ -326,7 +411,7 @@ function fakeBrowser(
       launch.progress(`Downloading Chromium ${launch.version}\n`)
     }
 
-    return fakeDriverOf(stories, record, driverVersion)
+    return fakeDriverOf({ stories, record, version: driverVersion, browser: record.launches.length, gates })
   }
 
   return {
@@ -774,6 +859,35 @@ const brokenDetail =
   'render throws, when play leaves unhandled errors, or when a check such as accessibility fails.'
 
 /**
+ * The detail of a story in flight when the fake browser exited.
+ */
+const browserExitedDetail =
+  'broken: The browser exited while visual-check captured this story: The browser was killed by signal SIGKILL while ' +
+  'in use.'
+
+/**
+ * What a run prints on stderr when the first fake browser exited and visual-check relaunches it for the stories left.
+ */
+const relaunchNotice = printed(
+  'The browser was killed by signal SIGKILL while in use.',
+  'visual-check relaunches it once for the stories left.',
+  "The browser's last output:",
+  '  Out of memory',
+  '  bye from browser 1',
+)
+
+/**
+ * What a run prints on stderr, after `relaunchNotice`, when the relaunched fake browser exits too.
+ */
+const secondExitMessage = printed(
+  'The browser was killed by signal SIGKILL while in use.',
+  "The browser's output below may say why. Running out of memory is a common cause. Run visual-check again.",
+  "The browser's last output:",
+  '  Out of memory',
+  '  bye from browser 2',
+)
+
+/**
  * Starts a Storybook with the given stories and makes a project for it whose baselines folder holds `baselines`, each
  * a story ID mapped to its baseline's bytes. `config` adds keys to the config. Returns the project, the Storybook's
  * URL and the baselines folder.
@@ -1121,11 +1235,13 @@ describe('runCli launching the browser', () => {
 
   it("names the config's platform in the next step when the browser fails to launch without output", async () => {
     const { project } = await createRun(['a'], { a: defaultSnapshot }, "platform: 'linux/arm64'")
-    const error = new BrowserLaunchError("The browser didn't answer within 30 s.", [], { exited: false })
+    const error = new BrowserLaunchError("The browser didn't answer its version call within 30 s.", [], {
+      exited: false,
+    })
 
     expect((await runCli(['test'], {}, project, failingLaunch(error))).stderr).toBe(
       printed(
-        "The browser didn't answer within 30 s.",
+        "The browser didn't answer its version call within 30 s.",
         'Check that Docker can run images for linux/arm64, then run visual-check again.',
       ),
     )
@@ -1223,7 +1339,7 @@ describe('runCli launching the browser', () => {
     })
   })
 
-  it('exits 2 when the browser exits mid-run, keeping the lines printed so far', async () => {
+  it('breaks the story in flight when the browser exits, relaunches it for the rest, and exits 1', async () => {
     const { project } = await createRun(
       ['a', 'b', 'c'],
       { a: defaultSnapshot, b: defaultSnapshot, c: defaultSnapshot },
@@ -1232,19 +1348,240 @@ describe('runCli launching the browser', () => {
     const { options, record } = fakeBrowser({ b: { browserExits: true } })
     const result = await runCli(['test'], {}, project, options)
 
-    expect(result.exitCode).toBe(2)
-    expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 3, 1), '✓ web  a  N ms'))
+    expect(result.exitCode).toBe(1)
+    expect(withoutTimes(result.stdout)).toBe(
+      printed(
+        headerOf('test', 3, 1),
+        '✓ web  a  N ms',
+        `! web  b  ${browserExitedDetail}`,
+        '✓ web  c  N ms',
+        '2 passed · 1 broken',
+      ),
+    )
+    expect(result.stderr).toBe(relaunchNotice)
+    expect(record.launches).toHaveLength(2)
+    expect(record.events).toEqual(['a on 1', 'b on 1', 'c on 2', 'close page on 2', 'close 1', 'close 2'])
+  })
+
+  it('breaks every story in flight when the browser exits, and captures the rest in one relaunched browser', async () => {
+    const { project } = await createRun(
+      ['a', 'b', 'c', 'd'],
+      { a: defaultSnapshot, b: defaultSnapshot, c: defaultSnapshot, d: defaultSnapshot },
+      'workers: 2',
+    )
+    const { options, record } = fakeBrowser({
+      a: { waitsFor: 'b' },
+      b: { browserExits: true, waitsForCapturing: ['a'] },
+    })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(1)
+    expect(withoutTimes(result.stdout)).toBe(
+      printed(
+        headerOf('test', 4, 2),
+        `! web  a  ${browserExitedDetail}`,
+        `! web  b  ${browserExitedDetail}`,
+        '✓ web  c  N ms',
+        '✓ web  d  N ms',
+        '2 passed · 2 broken',
+      ),
+    )
+    expect(result.stderr).toBe(relaunchNotice)
+    expect(record.launches).toHaveLength(2)
+    expect(record.events.filter((event) => !event.startsWith('close')).sort()).toEqual([
+      'a on 1',
+      'b on 1',
+      'c on 2',
+      'd on 2',
+    ])
+    expect(record.events.slice(-2)).toEqual(['close 1', 'close 2'])
+    expect(record.driverCloses).toBe(2)
+  })
+
+  it('launches the browser twice in all when several workers are capturing as it exits', async () => {
+    const { project } = await createRun(['a', 'b', 'c', 'd', 'e', 'f'], {}, 'workers: 3')
+    const { options, record } = fakeBrowser({
+      a: { waitsFor: 'b' },
+      b: { browserExits: true, waitsForCapturing: ['a', 'c'] },
+      c: { waitsFor: 'b' },
+    })
+    const result = await runCli(['update'], {}, project, options)
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toBe(
+      printed(
+        headerOf('update', 6, 3),
+        `! web  a  ${browserExitedDetail}`,
+        `! web  b  ${browserExitedDetail}`,
+        `! web  c  ${browserExitedDetail}`,
+        '✓ web  d  written .visual-check/baselines/d.png',
+        '✓ web  e  written .visual-check/baselines/e.png',
+        '✓ web  f  written .visual-check/baselines/f.png',
+        '3 written · 3 broken',
+      ),
+    )
+    expect(record.launches).toHaveLength(2)
+    expect(record.driverCloses).toBe(2)
+  })
+
+  it('relaunches the browser at the next story when it exits between stories, breaking none', async () => {
+    const { project } = await createRun(
+      ['a', 'b', 'c'],
+      { a: defaultSnapshot, b: defaultSnapshot, c: defaultSnapshot },
+      'workers: 1',
+    )
+    const { options, record } = fakeBrowser({ a: { browserExitsAfter: true } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(0)
+    expect(withoutTimes(result.stdout)).toBe(
+      printed(headerOf('test', 3, 1), '✓ web  a  N ms', '✓ web  b  N ms', '✓ web  c  N ms', '3 passed'),
+    )
+    expect(result.stderr).toBe(relaunchNotice)
+    expect(record.events).toEqual([
+      'a on 1',
+      'close page on 1',
+      'b on 2',
+      'c on 2',
+      'close page on 2',
+      'close 1',
+      'close 2',
+    ])
+  })
+
+  it("says the browser wasn't relaunched when it exits after the last story", async () => {
+    const { project } = await createRun(['a', 'b'], {}, 'workers: 1')
+    const { options, record } = fakeBrowser({ b: { browserExitsAfter: true } })
+    const result = await runCli(['update'], {}, project, options)
+
+    expect(result.exitCode).toBe(0)
     expect(result.stderr).toBe(
       printed(
         'The browser was killed by signal SIGKILL while in use.',
-        "The browser's output below may say why. Running out of memory is a common cause. Run visual-check again.",
+        "No story left needed a capture, so visual-check didn't relaunch the browser.",
         "The browser's last output:",
         '  Out of memory',
-        '  bye',
+        '  bye from browser 1',
       ),
     )
+    expect(record.launches).toHaveLength(1)
+  })
+
+  it('exits 2 when the relaunched browser exits too, keeping the lines of the snapshots that finished', async () => {
+    const { project } = await createRun(
+      ['a', 'b', 'c', 'd', 'e'],
+      { a: defaultSnapshot, b: defaultSnapshot, c: defaultSnapshot, d: defaultSnapshot, e: defaultSnapshot },
+      'workers: 1',
+    )
+    const { options, record } = fakeBrowser({ b: { browserExits: true }, d: { browserExits: true } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(2)
+    expect(withoutTimes(result.stdout)).toBe(
+      printed(headerOf('test', 5, 1), '✓ web  a  N ms', `! web  b  ${browserExitedDetail}`, '✓ web  c  N ms'),
+    )
+    expect(result.stderr).toBe(`${relaunchNotice}${secondExitMessage}`)
+    expect(record.launches).toHaveLength(2)
+    expect(record.urls).toHaveLength(4)
+    expect(record.driverCloses).toBe(2)
+  })
+
+  it('exits 2 when the relaunched browser exits with several workers capturing, keeping the lines that finished', async () => {
+    const { project } = await createRun(
+      ['a', 'b', 'c', 'd', 'e'],
+      { a: defaultSnapshot, b: defaultSnapshot, c: defaultSnapshot, d: defaultSnapshot, e: defaultSnapshot },
+      'workers: 2',
+    )
+    const { options, record } = fakeBrowser({
+      a: { waitsFor: 'b' },
+      b: { browserExits: true, waitsForCapturing: ['a'] },
+      d: { browserExits: true, waitsForCapturing: ['e'] },
+      e: { waitsFor: 'd' },
+    })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(2)
+    expect(withoutTimes(result.stdout)).toBe(
+      printed(
+        headerOf('test', 5, 2),
+        `! web  a  ${browserExitedDetail}`,
+        `! web  b  ${browserExitedDetail}`,
+        '✓ web  c  N ms',
+      ),
+    )
+    expect(result.stderr).toBe(`${relaunchNotice}${secondExitMessage}`)
+    expect(record.events.filter((event) => !event.startsWith('close')).sort()).toEqual([
+      'a on 1',
+      'b on 1',
+      'c on 2',
+      'd on 2',
+      'e on 2',
+    ])
+    expect(record.launches).toHaveLength(2)
+    expect(record.driverCloses).toBe(2)
+  })
+
+  it('exits 2 when the relaunched browser has exited before the next story', async () => {
+    const { project } = await createRun(
+      ['a', 'b', 'c'],
+      { a: defaultSnapshot, b: defaultSnapshot, c: defaultSnapshot },
+      'workers: 1',
+    )
+    const { options, record } = fakeBrowser({ a: { browserExitsAfter: true }, b: { browserExitsAfter: true } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(2)
+    expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 3, 1), '✓ web  a  N ms', '✓ web  b  N ms'))
+    expect(result.stderr).toBe(`${relaunchNotice}${secondExitMessage}`)
+    expect(record.launches).toHaveLength(2)
     expect(record.urls).toHaveLength(2)
-    expect(record.closed).toBe(true)
+  })
+
+  it('exits 2 when the relaunch fails with several workers waiting, keeping the lines that finished', async () => {
+    const { project } = await createRun(
+      ['a', 'b', 'c', 'd'],
+      { a: defaultSnapshot, b: defaultSnapshot, c: defaultSnapshot, d: defaultSnapshot },
+      'workers: 2',
+    )
+    const record = newRecord()
+    const error = new BrowserLaunchError('The browser exited with code 127 before it answered.', ['exec: not found'], {
+      exited: true,
+    })
+    const launchBrowser: LaunchBrowser = async (launch) => {
+      record.launches.push(launch)
+
+      if (record.launches.length > 1) {
+        throw error
+      }
+
+      return fakeDriverOf({
+        stories: { a: { waitsFor: 'b' }, b: { browserExits: true, waitsForCapturing: ['a'] } },
+        record,
+        version: browserPackage.chromium,
+      })
+    }
+    const result = await runCli(['test'], {}, project, {
+      ...hostOptions,
+      launchBrowser,
+      imageMarkerPath: absentMarkerPath,
+    })
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stdout).toBe(
+      printed(headerOf('test', 4, 2), `! web  a  ${browserExitedDetail}`, `! web  b  ${browserExitedDetail}`),
+    )
+    expect(result.stderr).toBe(
+      relaunchNotice +
+        printed(
+          'The browser exited with code 127 before it answered.',
+          "The browser's output below may say why. Check that Docker can run images for linux/amd64, then run " +
+            'visual-check again.',
+          "The browser's last output:",
+          '  exec: not found',
+        ),
+    )
+    expect(record.launches).toHaveLength(2)
+    expect(record.driverCloses).toBe(1)
   })
 
   describe("when the browser exits because the machine can't run the platform", () => {
@@ -1297,14 +1634,41 @@ describe('runCli launching the browser', () => {
       expect(result.stderr).toBe(`${amd64Problem}${outputBlock}`)
     })
 
-    it('gives the usual message when the browser exits after another capture finished', async () => {
-      const { project } = await createRun(['a', 'b'], { a: defaultSnapshot, b: defaultSnapshot }, 'workers: 1')
-      const { options } = fakeBrowser({ b: emulatedExit })
+    it('breaks the story and relaunches as for any exit when the browser exits after another capture finished', async () => {
+      const { project } = await createRun(
+        ['a', 'b', 'c'],
+        { a: defaultSnapshot, b: defaultSnapshot, c: defaultSnapshot },
+        'workers: 1',
+      )
+      const { options, record } = fakeBrowser({ b: emulatedExit })
+      const result = await runCli(['test'], {}, project, options)
+
+      expect(result.exitCode).toBe(1)
+      expect(withoutTimes(result.stdout)).toBe(
+        printed(
+          headerOf('test', 3, 1),
+          '✓ web  a  N ms',
+          `! web  b  ${browserExitedDetail}`,
+          '✓ web  c  N ms',
+          '2 passed · 1 broken',
+        ),
+      )
+      expect(result.stderr).toContain('visual-check relaunches it once for the stories left.')
+      expect(result.stderr).not.toContain("this machine can't run")
+      expect(record.launches).toHaveLength(2)
+    })
+
+    it("doesn't relaunch the browser when it exits before any capture saying this machine can't run the platform", async () => {
+      const { project } = await createRun(['a', 'b'], { a: defaultSnapshot, b: defaultSnapshot }, 'workers: 2')
+      const { options, record } = fakeBrowser({
+        a: { ...emulatedExit, waitsForCapturing: ['b'] },
+        b: { ...emulatedExit, waitsForCapturing: ['a'] },
+      })
       const result = await runCli(['test'], {}, project, options)
 
       expect(result.exitCode).toBe(2)
-      expect(result.stderr).toContain('The browser was killed by signal SIGKILL while in use.')
-      expect(result.stderr).not.toContain("this machine can't run")
+      expect(result.stderr).toBe(`${amd64Problem}${outputBlock}`)
+      expect(record.launches).toHaveLength(1)
     })
 
     it("gives the platform problem for the config's platform inside visual-check's image", async () => {
@@ -1391,8 +1755,9 @@ describe('runCli launching the browser', () => {
     expect(withoutTimes(result.stdout)).toBe(
       printed(headerOf('test', 3, 2), '✓ web  a  N ms', '✓ web  b  N ms', '✓ web  c  N ms', '3 passed'),
     )
+    expect(result.stderr).toBe('')
     expect(record.urls.map((storyUrl) => new URL(storyUrl).searchParams.get('id')).sort()).toEqual(['a', 'b', 'c'])
-    expect(record.finished).toEqual(['b', 'c', 'a'])
+    expect(record.events.filter((event) => !event.startsWith('close'))).toEqual(['b on 1', 'c on 1', 'a on 1'])
     expect(record.launches).toHaveLength(1)
     expect(record.setups).toHaveLength(2)
     expect(record.pageCloses).toBe(2)
@@ -1405,22 +1770,6 @@ describe('runCli launching the browser', () => {
 
     await runCli(['test'], {}, project, options)
     expect(record.setups).toHaveLength(1)
-  })
-
-  it('exits 2 when the browser exits with several workers, keeping the lines of the snapshots that finished', async () => {
-    const { project } = await createRun(
-      ['a', 'b', 'c'],
-      { a: defaultSnapshot, b: defaultSnapshot, c: defaultSnapshot },
-      'workers: 2',
-    )
-    const { options, record } = fakeBrowser({ a: { waitsFor: 'b' }, b: { browserExits: true } })
-    const result = await runCli(['test'], {}, project, options)
-
-    expect(result.exitCode).toBe(2)
-    expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 3, 2), '✓ web  a  N ms'))
-    expect(result.stderr).toContain('The browser was killed by signal SIGKILL while in use.')
-    expect(record.urls).toHaveLength(2)
-    expect(record.closed).toBe(true)
   })
 
   it("exits 2 for platform 'host' on Windows on Arm before any Storybook, pointing to linux/arm64", async () => {
@@ -1646,7 +1995,9 @@ describe('runCli launching the browser', () => {
 
   it("names the headless shell in the next step when the browser fails to launch inside visual-check's image", async () => {
     const { project } = await createRun(['a'], { a: defaultSnapshot })
-    const error = new BrowserLaunchError("The browser didn't answer within 30 s.", [], { exited: false })
+    const error = new BrowserLaunchError("The browser didn't answer its version call within 30 s.", [], {
+      exited: false,
+    })
     const result = await runCli(['test'], {}, project, {
       ...failingLaunch(error),
       imageMarkerPath: writeMarker(markerOf('amd64')),
@@ -1654,7 +2005,7 @@ describe('runCli launching the browser', () => {
 
     expect(result.stderr).toBe(
       printed(
-        "The browser didn't answer within 30 s.",
+        "The browser didn't answer its version call within 30 s.",
         `Check that ${browserPackage.headlessShell} starts in this container, then run visual-check again.`,
       ),
     )
@@ -1705,7 +2056,7 @@ describe('runCli launching the browser', () => {
   it('rethrows an error that is a bug, after closing the browser', async () => {
     const { project } = await createRun(['a'])
     const record = newRecord()
-    const driver = fakeDriverOf({}, record, browserPackage.chromium)
+    const driver = fakeDriverOf({ stories: {}, record, version: browserPackage.chromium })
 
     Object.defineProperty(driver, 'version', {
       get: () => {

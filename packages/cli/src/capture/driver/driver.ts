@@ -147,9 +147,10 @@ export interface PageViewport {
  * A page in a browser context of its own, set up once, that stories are loaded and captured in. It emulates
  * `prefers-reduced-motion: no-preference` and keeps focus as if its window were focused.
  *
- * Handling the page's hazards is part of the contract every driver will meet, each inside itself and the same way in
- * every driver, so none of them fails a capture: dialogs, popups, downloads and permission requests. It comes with
- * #62; until then, no driver handles them.
+ * Handling the page's hazards is part of the contract every driver meets, each inside itself and the same way in every
+ * driver, so none of them fails or hangs a capture: `alert()` and `beforeunload` dialogs are accepted, `confirm()` and
+ * `prompt()` dialogs are dismissed, popups are closed as soon as they open, downloads and permission requests are
+ * denied, and iframes, `srcdoc` ones included, are captured as part of the page.
  *
  * Once the page can no longer be used, every call in flight and every later call fails at once, with an error that
  * says why:
@@ -158,10 +159,17 @@ export interface PageViewport {
  * - the browser closed the page without a crash: a plain error, "The browser closed the page.";
  * - the browser exited: a `BrowserExitedError`;
  * - `close()` on the driver closed the browser: a plain error, "The browser was closed.";
- * - `close()` on the page: a plain error, "The page was closed.".
+ * - `close()` on the page: a plain error, "The page was closed.";
+ * - the page navigated away from the document the last `goto` loaded: a `PageNavigatedAwayError`.
  *
- * A story that navigates its document away is retried by the engine (#62). For now only `goto` reports it, with a
- * `PageNavigatedAwayError`; #62 makes every page call report it.
+ * A story that navigates its document away is retried by the engine, so the page reports it with a
+ * `PageNavigatedAwayError` naming where it went. `goto` fails with it at once when another navigation of the main frame
+ * overtakes it. Once a `goto` has loaded, the page can no longer be used from the moment its main frame commits a new
+ * document, and a call the browser fails as that document comes, while a navigation of the main frame to a new
+ * document is pending, such as a link the story follows or its `history.back()`, fails with it too. Only new documents
+ * of the main frame count: not a same-document navigation, such as `history.replaceState`, `pushState` or a fragment
+ * link, not an iframe's navigation, and not a navigation that ends without a new document, such as a download or a
+ * `204 No Content` answer.
  *
  * After any call on a page fails, the page may still be in the middle of a navigation, or stuck, and a later call on it
  * can fail because of that. So the caller closes a page once a call on it fails, and opens a fresh page for its next
@@ -202,10 +210,10 @@ export interface Page {
    * its document's origin is opaque, such as that of `about:blank`, a `data:` URL or an error page. Keeps Cache Storage
    * and service workers.
    *
-   * Fails at once, clearing nothing, when the main frame has committed another document since that `goto`, such as one
-   * the page navigated to on its own, because the storage the page left can then be in more than one origin: the caller
-   * replaces the page, as after any failed call. Fails with a `PageTimeoutError` when the browser doesn't answer within
-   * the driver's own fixed limit.
+   * Like every call, fails at once with a `PageNavigatedAwayError`, clearing nothing, once the page has navigated away
+   * from the document that `goto` loaded, because the storage the page left can then be in more than one origin: the
+   * caller replaces the page, as after any failed call. Fails with a `PageTimeoutError` when the browser doesn't answer
+   * within the driver's own fixed limit.
    */
   clearStorage: () => Promise<void>
   /**
@@ -360,7 +368,7 @@ export class PageLoadError extends Error {
 
 /**
  * The page's main frame went to another document than the one asked for, on the page's own initiative, such as a
- * story's script following a link.
+ * story's script following a link: before that document loaded, or after.
  *
  * @public
  */
@@ -376,7 +384,7 @@ export class PageNavigatedAwayError extends Error {
   readonly url: string
 
   /**
-   * Keeps the URL the main frame went to, with the message saying what it overtook.
+   * Keeps the URL the main frame went to, with the message saying when it went there.
    */
   constructor(url: string, message: string) {
     super(message)
@@ -386,8 +394,8 @@ export class PageNavigatedAwayError extends Error {
 
 /**
  * The browser didn't connect, or failed the checks visual-check runs on it before capturing: it exited, or couldn't
- * start, before answering its version call, didn't answer in time, answered with an error or without a version, or
- * failed a check.
+ * start, before answering its launch calls, the version call and the target discovery call, didn't answer one in
+ * time, answered one with an error, answered the version call without a version, or failed a check.
  *
  * @public
  */
@@ -404,8 +412,8 @@ export class BrowserLaunchError extends Error {
   readonly output: readonly string[]
 
   /**
-   * True only when the browser exited, or couldn't start, before it answered its version call. False when it didn't
-   * answer in time, answered with an error or without a version, or failed a check.
+   * True only when the browser exited, or couldn't start, before it answered its launch calls. False when it didn't
+   * answer one in time, answered one with an error, answered the version call without a version, or failed a check.
    */
   readonly exited: boolean
 
