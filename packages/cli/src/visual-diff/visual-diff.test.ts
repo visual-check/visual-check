@@ -25,6 +25,16 @@ const threadScript = new URL('./diff-thread.ts', import.meta.url)
 const crashingScript = new URL('data:text/javascript,process.exit(1)')
 
 /**
+ * A thread script that answers every task with a comparison's `passed`, as no decode check may.
+ */
+const passingScript = new URL(
+  `data:text/javascript,${encodeURIComponent(
+    "import { parentPort } from 'node:worker_threads'\n" +
+      "parentPort.on('message', () => parentPort.postMessage({ result: { outcome: 'passed' } }))\n",
+  )}`,
+)
+
+/**
  * Gives each settled comparison's error message, or its outcome when it resolved.
  */
 function messagesOf(results: PromiseSettledResult<VisualDiffResult>[]): string[] {
@@ -115,6 +125,27 @@ describe('createVisualDiff', () => {
 
     await expect(comparison).rejects.toThrow(ImageDecodeError)
     await expect(comparison).rejects.toMatchObject({ image: 'baseline' })
+  })
+
+  it('checks on its threads that a baseline decodes, giving the reason when it does not', async () => {
+    visualDiff = createVisualDiff()
+
+    const garbage = new TextEncoder().encode('not a PNG file')
+    const [decodable, undecodable] = await Promise.all([
+      visualDiff.undecodableReasonOf(await greyPng(4, 4, 128)),
+      visualDiff.undecodableReasonOf(garbage),
+    ])
+
+    expect(decodable).toBeUndefined()
+    expect(undecodable).toBe('Input buffer contains unsupported image format')
+    expect(new TextDecoder().decode(garbage)).toBe('not a PNG file')
+  })
+
+  it('rejects a decode check once closed', async () => {
+    visualDiff = createVisualDiff()
+    await visualDiff.close()
+
+    await expect(visualDiff.undecodableReasonOf(await greyPng(4, 4, 128))).rejects.toThrow('The visual diff is closed.')
   })
 
   it('closes, and rejects any comparison after that, identical files included', async () => {
@@ -212,6 +243,14 @@ describe('createThreadPool', () => {
     ])
     expect(loads).toBe(1)
     expect(await pool.compare({ ...request, snapshot: Uint8Array.of(1) })).toEqual({ outcome: 'passed' })
+  })
+
+  it("rejects a decode check whose thread gives a comparison's result", async () => {
+    pool = createThreadPool(passingScript, 1)
+
+    await expect(pool.undecodableReasonOf(Uint8Array.of(1))).rejects.toThrow(
+      "A visual diff thread gave a comparison's result for a decode check.",
+    )
   })
 
   it('rejects the comparison of a thread that stops, and starts another for the next one', async () => {

@@ -92,8 +92,9 @@ export async function clearReport(folder: string): Promise<void> {
 }
 
 /**
- * Writes a differing snapshot's images to `images/<storybook>/<key>.baseline.png`, `.snapshot.png` and `.diff.png` in
- * the report folder, each exactly as given, creating the folders first.
+ * Writes a differing snapshot's images to `images/<storybook>/<stem>.baseline.png`, `.snapshot.png` and `.diff.png` in
+ * the report folder, each exactly as given, creating the folders first. The stem is its baseline's: the snapshot's key,
+ * shortened when long.
  *
  * @throws {ReportError} When a folder or an image can't be written.
  *
@@ -102,7 +103,7 @@ export async function clearReport(folder: string): Promise<void> {
 export async function writeFailureImages(
   folder: string,
   storybook: string,
-  key: string,
+  stem: string,
   images: FailureImages,
 ): Promise<void> {
   const imagesFolder = join(folder, 'images', storybook)
@@ -114,7 +115,7 @@ export async function writeFailureImages(
   }
 
   for (const kind of imageKinds) {
-    const path = join(imagesFolder, `${key}.${kind}.png`)
+    const path = join(imagesFolder, `${stem}.${kind}.png`)
 
     try {
       await writeFile(path, images[kind])

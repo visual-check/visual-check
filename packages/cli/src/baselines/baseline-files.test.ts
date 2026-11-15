@@ -1,9 +1,32 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { BaselineError } from './baseline-error.js'
-import { baselinePathOf, isByteIdentical, readBaseline, snapshotKeyOf, writeBaseline } from './baseline-files.js'
+import {
+  baselineFileNameOf,
+  baselinePathOf,
+  baselineStemOf,
+  deleteOrphans,
+  foldedFileNameOf,
+  hasBaseline,
+  listBaselines,
+  readBaseline,
+  snapshotKeyOf,
+  writeBaseline,
+} from './baseline-files.js'
 
 /**
  * The temporary folders the tests made, removed after each test.
@@ -42,6 +65,125 @@ describe('snapshotKeyOf', () => {
   })
 })
 
+/**
+ * Gives the first 16 hex characters of the key's SHA-256, over its UTF-8 bytes, which a shortened name ends with.
+ */
+function hashOf(key: string): string {
+  return createHash('sha256').update(key, 'utf8').digest('hex').slice(0, 16)
+}
+
+/**
+ * Gives the length of the text in UTF-8 bytes.
+ */
+function bytesOf(text: string): number {
+  return Buffer.byteLength(text, 'utf8')
+}
+
+describe('baselineStemOf', () => {
+  it('keeps a key of up to 240 bytes as it is', () => {
+    expect(baselineStemOf('components-button--primary.dark')).toBe('components-button--primary.dark')
+    expect(baselineStemOf('a'.repeat(240))).toBe('a'.repeat(240))
+  })
+
+  it("shortens a longer key to its first 223 bytes, -, and 16 hex characters of the full key's SHA-256", () => {
+    const key = 'a'.repeat(241)
+
+    expect(baselineStemOf(key)).toBe(`${'a'.repeat(223)}-${hashOf(key)}`)
+    expect(bytesOf(baselineStemOf(key))).toBe(240)
+  })
+
+  it('encodes an accented letter as NFC, however the key encodes it', () => {
+    const composed = 'café--primary'
+
+    expect(baselineStemOf(composed.normalize('NFD'))).toBe(composed)
+  })
+
+  it('shortens a long key the same way, however the key encodes its accented letters', () => {
+    const composed = 'é'.repeat(121)
+
+    expect(baselineStemOf(composed.normalize('NFD'))).toBe(baselineStemOf(composed))
+    expect(baselineStemOf(composed)).toBe(`${'é'.repeat(111)}-${hashOf(composed)}`)
+  })
+})
+
+describe('foldedFileNameOf', () => {
+  it('folds case and how an accented letter is encoded', () => {
+    expect(foldedFileNameOf('CAFÉ.png')).toBe(foldedFileNameOf('café.png'))
+  })
+
+  it('folds ß as SS and a final sigma as a sigma, as macOS does', () => {
+    expect(foldedFileNameOf('straße.png')).toBe(foldedFileNameOf('STRASSE.png'))
+    expect(foldedFileNameOf('straße.png')).toBe(foldedFileNameOf('strasse.png'))
+    expect(foldedFileNameOf('ς.png')).toBe(foldedFileNameOf('σ.png'))
+  })
+
+  it('keeps names apart that differ in more than case or encoding', () => {
+    expect(foldedFileNameOf('cafe.png')).not.toBe(foldedFileNameOf('café.png'))
+  })
+})
+
+describe('baselineFileNameOf', () => {
+  it('names a short key <key>.png', () => {
+    expect(baselineFileNameOf('components-button--primary.dark')).toBe('components-button--primary.dark.png')
+  })
+
+  it('keeps a key of exactly 240 bytes as it is', () => {
+    const key = 'a'.repeat(240)
+
+    expect(baselineFileNameOf(key)).toBe(`${key}.png`)
+  })
+
+  it("shortens a key of 241 bytes to its first 223 bytes, -, and 16 hex characters of the full key's SHA-256", () => {
+    const key = `${'a'.repeat(223)}${'b'.repeat(18)}`
+
+    expect(baselineFileNameOf(key)).toBe(`${'a'.repeat(223)}-${hashOf(key)}.png`)
+    expect(baselineFileNameOf(key)).toMatch(/^a{223}-[0-9a-f]{16}\.png$/)
+  })
+
+  it('never splits a character of two bytes', () => {
+    const key = '\u00e9'.repeat(121)
+    const name = baselineFileNameOf(key)
+
+    expect(name).toBe(`${'\u00e9'.repeat(111)}-${hashOf(key)}.png`)
+    expect(bytesOf('\u00e9'.repeat(111))).toBe(222)
+  })
+
+  it('never splits a surrogate pair', () => {
+    const key = '\u{1f600}'.repeat(61)
+
+    expect(baselineFileNameOf(key)).toBe(`${'\u{1f600}'.repeat(55)}-${hashOf(key)}.png`)
+  })
+
+  it('keeps a character that ends exactly at 223 bytes', () => {
+    const key = `a${'\u00e9'.repeat(120)}`
+
+    expect(baselineFileNameOf(key)).toBe(`a${'\u00e9'.repeat(111)}-${hashOf(key)}.png`)
+  })
+
+  it("keeps every name, with the report's longest image suffix, within 255 bytes", () => {
+    const keys = [
+      'a'.repeat(241),
+      'a'.repeat(1000),
+      '\u00e9'.repeat(500),
+      '\u{1f600}'.repeat(300),
+      `a${'\u00e9'.repeat(120)}`,
+    ]
+
+    for (const key of keys) {
+      const name = baselineFileNameOf(key)
+
+      expect(bytesOf(name)).toBeLessThanOrEqual(255)
+      expect(bytesOf(`${baselineStemOf(key)}.snapshot.png`)).toBeLessThanOrEqual(255)
+    }
+  })
+
+  it('gives two long keys that share their first 223 bytes names of their own', () => {
+    const start = 'a'.repeat(223)
+
+    expect(baselineFileNameOf(`${start}${'b'.repeat(30)}`)).not.toBe(baselineFileNameOf(`${start}${'c'.repeat(30)}`))
+  })
+})
+
 describe('baselinePathOf', () => {
   it("names the default capture's baseline after its key, the story ID, in the baselines folder", () => {
     expect(baselinePathOf('/project/.visual-check/baselines', 'components-button--primary')).toBe(
@@ -52,6 +194,13 @@ describe('baselinePathOf', () => {
   it("names a mode's baseline after its key, in the baselines folder", () => {
     expect(baselinePathOf('/project/.visual-check/baselines', 'components-button--primary.dark')).toBe(
       join('/project/.visual-check/baselines', 'components-button--primary.dark.png'),
+    )
+  })
+  it("names a long key's baseline by its shortened name", () => {
+    const key = 'a'.repeat(300)
+
+    expect(baselinePathOf('/project/.visual-check/baselines', key)).toBe(
+      join('/project/.visual-check/baselines', `${'a'.repeat(223)}-${hashOf(key)}.png`),
     )
   })
 })
@@ -123,6 +272,15 @@ describe('writeBaseline', () => {
     expect(readdirSync(folder)).toEqual(['button--primary.png'])
   })
 
+  it('writes a baseline whose name is near the 255 bytes a file name can take', async () => {
+    const folder = createFolder()
+    const name = baselineFileNameOf('a'.repeat(300))
+
+    await writeBaseline(join(folder, name), snapshot)
+
+    expect(readdirSync(folder)).toEqual([name])
+  })
+
   it('writes only the bytes of a view, not the rest of its buffer', async () => {
     const path = join(createFolder(), 'button--primary.png')
 
@@ -157,29 +315,156 @@ describe('writeBaseline', () => {
   })
 })
 
-describe('isByteIdentical', () => {
-  it('is true for the same bytes', () => {
-    expect(isByteIdentical(snapshot, new Uint8Array(snapshot))).toBe(true)
+describe('hasBaseline', () => {
+  it('says a baseline is there', async () => {
+    const path = join(createFolder(), 'button--primary.png')
+
+    writeFileSync(path, snapshot)
+    expect(await hasBaseline(path)).toBe(true)
   })
 
-  it('is true for two empty images', () => {
-    expect(isByteIdentical(new Uint8Array(), new Uint8Array())).toBe(true)
+  it('says a baseline is missing, with or without its folder', async () => {
+    const folder = createFolder()
+
+    expect(await hasBaseline(join(folder, 'button--primary.png'))).toBe(false)
+    expect(await hasBaseline(join(folder, 'baselines', 'button--primary.png'))).toBe(false)
   })
 
-  it('is false when one byte differs', () => {
-    const changed = new Uint8Array(snapshot)
+  it("throws a BaselineError when the path can't be followed", async () => {
+    const folder = createFolder()
 
-    changed[9] = 0xfe
+    writeFileSync(join(folder, 'baselines'), '')
+    await expect(hasBaseline(join(folder, 'baselines', 'button--primary.png'))).rejects.toMatchObject({
+      action: 'read',
+      reason: 'ENOTDIR: not a directory',
+    })
+  })
+})
 
-    expect(isByteIdentical(snapshot, changed)).toBe(false)
+describe('listBaselines', () => {
+  it('lists the PNG files by name, leaving out other files, temporary files and subfolders', async () => {
+    const folder = createFolder()
+
+    for (const name of ['b.png', 'a.dark.png', 'notes.txt', '.visual-check-0a1b2c.tmp', 'upper.PNG', 'a.png']) {
+      writeFileSync(join(folder, name), snapshot)
+    }
+
+    mkdirSync(join(folder, 'folder.png'))
+    expect(await listBaselines(folder)).toEqual(['a.dark.png', 'a.png', 'b.png'])
   })
 
-  it('is false when one is a prefix of the other', () => {
-    expect(isByteIdentical(snapshot, snapshot.subarray(0, 9))).toBe(false)
-    expect(isByteIdentical(snapshot.subarray(0, 9), snapshot)).toBe(false)
+  it.skipIf(process.platform === 'win32')(
+    'lists a link that leads to a file, leaving out a broken link and a link to a folder',
+    async () => {
+      const folder = createFolder()
+      const elsewhere = createFolder()
+
+      writeFileSync(join(elsewhere, 'target.png'), snapshot)
+      mkdirSync(join(elsewhere, 'folder'))
+      symlinkSync(join(elsewhere, 'target.png'), join(folder, 'linked.png'))
+      symlinkSync(join(elsewhere, 'missing.png'), join(folder, 'broken.png'))
+      symlinkSync(join(elsewhere, 'folder'), join(folder, 'folder.png'))
+      symlinkSync(join(elsewhere, 'target.png'), join(folder, 'linked.txt'))
+      expect(await listBaselines(folder)).toEqual(['linked.png'])
+    },
+  )
+
+  it('gives no baselines for a missing folder', async () => {
+    expect(await listBaselines(join(createFolder(), 'baselines'))).toEqual([])
   })
 
-  it('compares only the bytes of a view, not the rest of its buffer', () => {
-    expect(isByteIdentical(snapshot.subarray(2, 6), new Uint8Array([0x4e, 0x47, 0x0d, 0x0a]))).toBe(true)
+  it("throws a BaselineError naming the folder when it can't be listed", async () => {
+    const folder = join(createFolder(), 'baselines')
+
+    writeFileSync(folder, '')
+
+    const error = await listBaselines(folder).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(BaselineError)
+    expect(error).toMatchObject({
+      action: 'list',
+      path: folder,
+      reason: 'ENOTDIR: not a directory',
+      message: `Couldn't list the baselines folder ${folder}: ENOTDIR: not a directory.`,
+    })
+  })
+})
+
+describe('deleteOrphans', () => {
+  it('deletes the orphans in the order given and nothing else, giving their paths', async () => {
+    const folder = createFolder()
+
+    for (const name of ['a.png', 'b.png', 'c.png']) {
+      writeFileSync(join(folder, name), snapshot)
+    }
+
+    const orphans = [join(folder, 'c.png'), join(folder, 'a.png')]
+
+    expect(await deleteOrphans(orphans, [join(folder, 'b.png'), join(folder, 'missing.png')])).toEqual(orphans)
+    expect(readdirSync(folder)).toEqual(['b.png'])
+  })
+
+  it('leaves out an orphan that is already gone', async () => {
+    const folder = createFolder()
+
+    expect(await deleteOrphans([join(folder, 'gone.png')], [])).toEqual([])
+  })
+
+  it('keeps an orphan that is another name of an expected baseline', async () => {
+    const folder = createFolder()
+
+    writeFileSync(join(folder, 'a.png'), snapshot)
+    linkSync(join(folder, 'a.png'), join(folder, 'other-name.png'))
+
+    expect(await deleteOrphans([join(folder, 'other-name.png')], [join(folder, 'a.png')])).toEqual([])
+    expect(readdirSync(folder).sort()).toEqual(['a.png', 'other-name.png'])
+  })
+
+  it.skipIf(process.platform === 'win32')(
+    'deletes only the link of an orphan that links to another file, and keeps one that links to an expected one',
+    async () => {
+      const folder = createFolder()
+      const elsewhere = createFolder()
+
+      writeFileSync(join(folder, 'a.png'), snapshot)
+      writeFileSync(join(elsewhere, 'target.png'), snapshot)
+      symlinkSync(join(elsewhere, 'target.png'), join(folder, 'linked.png'))
+      symlinkSync(join(folder, 'a.png'), join(folder, 'to-a.png'))
+
+      const orphans = [join(folder, 'linked.png'), join(folder, 'to-a.png')]
+
+      expect(await deleteOrphans(orphans, [join(folder, 'a.png')])).toEqual([join(folder, 'linked.png')])
+      expect(readdirSync(folder).sort()).toEqual(['a.png', 'to-a.png'])
+      expect(readFileSync(join(elsewhere, 'target.png'))).toEqual(Buffer.from(snapshot))
+    },
+  )
+
+  it.skipIf(process.platform !== 'darwin')(
+    "keeps an orphan the file system takes for an expected baseline, as macOS does for 'ς' and 'σ'",
+    async (context) => {
+      const folder = createFolder()
+
+      writeFileSync(join(folder, 'ς.png'), snapshot)
+
+      if (!existsSync(join(folder, 'σ.png'))) {
+        context.skip('This folder is on a file system that tells the two names apart.')
+      }
+
+      expect(await deleteOrphans([join(folder, 'ς.png')], [join(folder, 'σ.png')])).toEqual([])
+      expect(readdirSync(folder)).toEqual(['ς.png'])
+    },
+  )
+
+  it("throws a BaselineError with the path and the system's reason when an orphan can't be deleted", async () => {
+    const folder = createFolder()
+    const path = join(folder, 'folder.png')
+
+    mkdirSync(path)
+
+    const error = await deleteOrphans([path], []).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(BaselineError)
+    expect(error).toMatchObject({ action: 'delete', path })
+    expect(existsSync(path)).toBe(true)
   })
 })

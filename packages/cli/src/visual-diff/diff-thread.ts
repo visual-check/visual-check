@@ -4,7 +4,7 @@ import { isMainThread, parentPort, workerData } from 'node:worker_threads'
 import pixelmatch from 'pixelmatch'
 import sharp from 'sharp'
 import type { Tolerance } from '../config/define-config.js'
-import type { ImageSize, ThreadReply, ThreadResult, VisualDiffRequest } from './visual-diff.js'
+import type { ImageSize, ThreadReply, ThreadResult, ThreadTask, VisualDiffRequest } from './visual-diff.js'
 
 /**
  * What the pool starts a thread with. It repeats the pool's own, because this file imports no file of its own.
@@ -200,6 +200,26 @@ export async function compareImages(request: VisualDiffRequest): Promise<ThreadR
   }
 }
 
+/**
+ * Decodes a baseline as a comparison decodes it, to check that it can be.
+ */
+export async function checkDecodable(file: Uint8Array): Promise<ThreadResult> {
+  try {
+    await decode(file)
+
+    return { outcome: 'decodable' }
+  } catch (error) {
+    return { outcome: 'undecodable', image: 'baseline', reason: reasonOf(error) }
+  }
+}
+
+/**
+ * Runs one task the pool sent: a comparison or a decode check.
+ */
+async function runTask(task: ThreadTask): Promise<ThreadResult> {
+  return task.kind === 'compare' ? await compareImages(task.request) : await checkDecodable(task.file)
+}
+
 if (!isMainThread && workerData === threadMarker && parentPort !== null) {
   const port = parentPort
 
@@ -207,9 +227,9 @@ if (!isMainThread && workerData === threadMarker && parentPort !== null) {
   sharp.cache(false)
 
   // Each reply is copied back: sharp's buffers can't be moved to another thread.
-  port.on('message', async (request: VisualDiffRequest) => {
+  port.on('message', async (task: ThreadTask) => {
     try {
-      port.postMessage({ result: await compareImages(request) } satisfies ThreadReply)
+      port.postMessage({ result: await runTask(task) } satisfies ThreadReply)
     } catch (error) {
       port.postMessage({ error: reasonOf(error) } satisfies ThreadReply)
     }

@@ -12,7 +12,7 @@ const maximumThreads = 4
 
 /**
  * What a thread is started with, so the thread script answers only the pool and stays quiet when a test imports it.
- * The thread script repeats it, because it imports no file of its own.
+ * The thread script repeats it, because it can't import this file.
  */
 const threadMarker = 'visual-check:visual-diff'
 
@@ -110,12 +110,42 @@ export interface VisualDiffFailure {
 export type VisualDiffResult = { outcome: 'passed' } | VisualDiffFailure
 
 /**
- * What a thread gives for one comparison: the result, or the image it couldn't decode and the decoder's reason.
+ * What the pool asks a thread to do: compare a snapshot with its baseline, or decode a baseline to check that it
+ * can be.
  */
-export type ThreadResult = VisualDiffResult | { outcome: 'undecodable'; image: 'baseline' | 'snapshot'; reason: string }
+export type ThreadTask =
+  | {
+      /**
+       * Marks a comparison.
+       */
+      kind: 'compare'
+      /**
+       * What to compare.
+       */
+      request: VisualDiffRequest
+    }
+  | {
+      /**
+       * Marks a decode check.
+       */
+      kind: 'decode'
+      /**
+       * The baseline's PNG file, as stored.
+       */
+      file: Uint8Array
+    }
 
 /**
- * What a thread answers for one comparison: its result, or the error the thread failed with.
+ * What a thread gives for one task: a comparison's result, a decode check's `decodable`, or the image it couldn't
+ * decode and the decoder's reason.
+ */
+export type ThreadResult =
+  | VisualDiffResult
+  | { outcome: 'decodable' }
+  | { outcome: 'undecodable'; image: 'baseline' | 'snapshot'; reason: string }
+
+/**
+ * What a thread answers for one task: its result, or the error the thread failed with.
  */
 export type ThreadReply = { result: ThreadResult } | { error: string }
 
@@ -164,31 +194,38 @@ export interface VisualDiff {
    */
   compare: (request: VisualDiffRequest) => Promise<VisualDiffResult>
   /**
-   * Stops every thread. A comparison still waiting or running is rejected.
+   * Decodes a baseline on a thread, as a comparison decodes it, to check that it can be. Gives the decoder's reason
+   * when it can't, such as `Input buffer contains unsupported image format`, or `undefined` when it can.
+   *
+   * @throws {Error} When the visual diff is closed.
+   */
+  undecodableReasonOf: (file: Uint8Array) => Promise<string | undefined>
+  /**
+   * Stops every thread. A comparison or decode check still waiting or running is rejected.
    */
   close: () => Promise<void>
 }
 
 /**
- * A comparison waiting for a thread, or running on one.
+ * A comparison or decode check waiting for a thread, or running on one.
  */
 interface Job {
   /**
-   * What to compare.
+   * What the thread does.
    */
-  request: VisualDiffRequest
+  task: ThreadTask
   /**
-   * Settles the comparison with its result.
+   * Settles the job with the thread's result.
    */
-  resolve: (result: VisualDiffResult) => void
+  resolve: (result: ThreadResult) => void
   /**
-   * Settles the comparison with an error.
+   * Settles the job with an error.
    */
   reject: (error: Error) => void
 }
 
 /**
- * A thread of the pool and the comparison it runs, if any.
+ * A thread of the pool and the job it runs, if any.
  */
 interface Thread {
   /**
@@ -196,7 +233,7 @@ interface Thread {
    */
   worker: Worker
   /**
-   * The comparison it runs, or `undefined` while it's idle.
+   * The job it runs, or `undefined` while it's idle.
    */
   job?: Job
   /**
@@ -218,11 +255,58 @@ export function diffThreadCount(cpus: number): number {
 function settle(job: Job, reply: ThreadReply): void {
   if ('error' in reply) {
     job.reject(new Error(reply.error))
-  } else if (reply.result.outcome === 'undecodable') {
-    job.reject(new ImageDecodeError(reply.result.image, reply.result.reason))
   } else {
     job.resolve(reply.result)
   }
+}
+
+/**
+ * Gives the message that sends a task to a thread, with only the task's own fields, so nothing else of the caller's
+ * objects is copied.
+ */
+function messageOf(task: ThreadTask): ThreadTask {
+  if (task.kind === 'decode') {
+    return { kind: 'decode', file: task.file }
+  }
+
+  const { baseline, snapshot, tolerance, scale } = task.request
+
+  return { kind: 'compare', request: { baseline, snapshot, tolerance, scale } }
+}
+
+/**
+ * Gives a comparison's result from what its thread gave.
+ *
+ * @throws {ImageDecodeError} When the thread couldn't decode one of the files.
+ * @throws {Error} When the thread gave a decode check's result, which a comparison rules out.
+ */
+function comparisonOf(result: ThreadResult): VisualDiffResult {
+  if (result.outcome === 'undecodable') {
+    throw new ImageDecodeError(result.image, result.reason)
+  }
+
+  if (result.outcome === 'decodable') {
+    throw new Error("A visual diff thread gave a decode check's result for a comparison.")
+  }
+
+  return result
+}
+
+/**
+ * Gives a decode check's result from what its thread gave: the decoder's reason, or `undefined` when the file decodes.
+ *
+ * @throws {Error} When the thread gave a comparison's result, which a decode check rules out.
+ */
+function decodeCheckOf(result: ThreadResult): string | undefined {
+  if (result.outcome === 'undecodable') {
+    return result.reason
+  }
+
+  if (result.outcome !== 'decodable') {
+    throw new Error("A visual diff thread gave a comparison's result for a decode check.")
+  }
+
+  return undefined
 }
 
 /**
@@ -241,7 +325,7 @@ async function loadSharp(): Promise<void> {
 }
 
 /**
- * Makes a visual diff that runs `script` in up to `threadLimit` threads, started only when a comparison needs one.
+ * Makes a visual diff that runs `script` in up to `threadLimit` threads, started only when a task needs one.
  * Before the first thread starts, `load` loads sharp on the main thread, once. `createVisualDiff` gives it the thread
  * script, the machine's thread count and the real load. Tests give it others.
  */
@@ -254,16 +338,14 @@ export function createThreadPool(script: URL, threadLimit: number, load: () => P
 
   /**
    * Runs `job` on `thread`. Files are copied to the thread rather than moved, so the caller's buffers stay usable. A
-   * request that can't be sent rejects the job, and the thread takes the next one.
+   * task that can't be sent rejects the job, and the thread takes the next one.
    */
   const run = (thread: Thread, job: Job): void => {
-    const { baseline, snapshot, tolerance, scale } = job.request
-
     thread.job = job
     thread.worker.ref()
 
     try {
-      thread.worker.postMessage({ baseline, snapshot, tolerance, scale } satisfies VisualDiffRequest)
+      thread.worker.postMessage(messageOf(job.task))
     } catch (error) {
       runNext(thread)
       job.reject(asError(error))
@@ -345,18 +427,10 @@ export function createThreadPool(script: URL, threadLimit: number, load: () => P
   }
 
   /**
-   * Passes identical files at once, and otherwise runs the comparison on an idle thread, a new one or the next one
-   * free. Once sharp is loaded, a comparison takes its thread or its place in the queue at once.
+   * Runs the task on an idle thread, a new one or the next one free. Once sharp is loaded, a task takes its thread or
+   * its place in the queue at once.
    */
-  const compare = async (request: VisualDiffRequest): Promise<VisualDiffResult> => {
-    if (closed) {
-      throw new Error('The visual diff is closed.')
-    }
-
-    if (Buffer.compare(request.baseline, request.snapshot) === 0) {
-      return { outcome: 'passed' }
-    }
-
+  const runTask = async (task: ThreadTask): Promise<ThreadResult> => {
     if (!loaded) {
       await loadOnce()
 
@@ -366,7 +440,7 @@ export function createThreadPool(script: URL, threadLimit: number, load: () => P
     }
 
     return new Promise((resolve, reject) => {
-      const job: Job = { request, resolve, reject }
+      const job: Job = { task, resolve, reject }
       const idle = threads.find((thread) => thread.job === undefined)
 
       if (idle !== undefined) {
@@ -377,6 +451,32 @@ export function createThreadPool(script: URL, threadLimit: number, load: () => P
         queue.push(job)
       }
     })
+  }
+
+  /**
+   * Passes identical files at once, and otherwise runs the comparison on a thread.
+   */
+  const compare = async (request: VisualDiffRequest): Promise<VisualDiffResult> => {
+    if (closed) {
+      throw new Error('The visual diff is closed.')
+    }
+
+    if (Buffer.compare(request.baseline, request.snapshot) === 0) {
+      return { outcome: 'passed' }
+    }
+
+    return comparisonOf(await runTask({ kind: 'compare', request }))
+  }
+
+  /**
+   * Runs the decode check on a thread.
+   */
+  const undecodableReasonOf = async (file: Uint8Array): Promise<string | undefined> => {
+    if (closed) {
+      throw new Error('The visual diff is closed.')
+    }
+
+    return decodeCheckOf(await runTask({ kind: 'decode', file }))
   }
 
   /**
@@ -392,7 +492,7 @@ export function createThreadPool(script: URL, threadLimit: number, load: () => P
     await Promise.all(threads.map((thread) => thread.worker.terminate()))
   }
 
-  return { compare, close }
+  return { compare, undecodableReasonOf, close }
 }
 
 /**

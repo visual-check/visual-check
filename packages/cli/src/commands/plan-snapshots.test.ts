@@ -113,13 +113,14 @@ const config = {
 
 /**
  * Builds the planned default capture of a story with the given options, at the config's tolerance under the story's,
- * and at the config's viewport unless `viewport` replaces it.
+ * and at the config's viewport unless `viewport` replaces it. It is selected unless `selected` says otherwise.
  */
 function defaultCaptureOf(
   storybook: ResolvedStorybook,
   story: Story | undefined,
   options: StoryOptions,
   viewport = config.viewport,
+  selected = true,
 ): PlannedSnapshot {
   if (story === undefined) {
     throw new Error('The test asks for a story it has none of.')
@@ -127,18 +128,24 @@ function defaultCaptureOf(
 
   const tolerance = { ...config.tolerance, ...options.tolerance }
 
-  return { storybook, story, mode: undefined, key: story.id, options, tolerance, viewport, globals: {} }
+  return { storybook, story, mode: undefined, key: story.id, selected, options, tolerance, viewport, globals: {} }
 }
 
 /**
- * Builds the planned broken snapshot of a story whose stories file didn't load.
+ * Builds the planned broken snapshot of a story whose stories file didn't load. It is selected unless `selected` says
+ * otherwise.
  */
-function brokenOf(storybook: ResolvedStorybook, story: Story | undefined, broken: BrokenStory): PlannedSnapshot {
+function brokenOf(
+  storybook: ResolvedStorybook,
+  story: Story | undefined,
+  broken: BrokenStory,
+  selected = true,
+): PlannedSnapshot {
   if (story === undefined) {
     throw new Error('The test asks for a story it has none of.')
   }
 
-  return { storybook, story, mode: undefined, key: story.id, broken }
+  return { storybook, story, mode: undefined, key: story.id, selected, broken }
 }
 
 /**
@@ -199,7 +206,7 @@ describe('planSnapshots', () => {
     expect(reader.requests.map(({ storybookName }) => storybookName)).toEqual(['docs'])
   })
 
-  it('plans the selected stories in order with their validated options, leaving out the disabled ones', async () => {
+  it('plans the stories in index.json order with their validated options, leaving out the disabled ones', async () => {
     const stories = [storyOf('a'), storyOf('b'), storyOf('c'), storyOf('d')]
     const reader = readerOf({
       a: { tolerance: { pixels: 3 }, extra: undefined },
@@ -211,7 +218,7 @@ describe('planSnapshots', () => {
     expect(
       await planSnapshots(
         [
-          { storybook: web, stories: [storyOf('d'), storyOf('c'), storyOf('b'), storyOf('a')], allStories: stories },
+          { storybook: web, stories: [storyOf('a'), storyOf('b'), storyOf('c'), storyOf('d')], allStories: stories },
           allSelected(docs, [storyOf('x')]),
         ],
         reader.read,
@@ -219,9 +226,61 @@ describe('planSnapshots', () => {
       ),
     ).toEqual({
       snapshots: [
-        defaultCaptureOf(web, storyOf('d'), {}),
-        defaultCaptureOf(web, storyOf('c'), { disable: false }),
         defaultCaptureOf(web, storyOf('a'), { tolerance: { pixels: 3 } }),
+        defaultCaptureOf(web, storyOf('c'), { disable: false }),
+        defaultCaptureOf(web, storyOf('d'), {}),
+      ],
+    })
+  })
+
+  it('plans a story the selection leaves out with selected false, in index.json order', async () => {
+    const stories = [storyOf('a'), storyOf('b'), storyOf('c')]
+    const plan = await planSnapshots(
+      [{ storybook: web, stories: [storyOf('a'), storyOf('c')], allStories: stories }],
+      readerOf({ b: { tolerance: { pixels: 3 } } }).read,
+      config,
+    )
+
+    expect(plan).toEqual({
+      snapshots: [
+        defaultCaptureOf(web, storyOf('a'), {}),
+        defaultCaptureOf(web, storyOf('b'), { tolerance: { pixels: 3 } }, config.viewport, false),
+        defaultCaptureOf(web, storyOf('c'), {}),
+      ],
+    })
+  })
+
+  it('plans no snapshot of a disabled story the selection leaves out', async () => {
+    const stories = [storyOf('a'), storyOf('b')]
+    const plan = await planSnapshots(
+      [{ storybook: web, stories: [storyOf('a')], allStories: stories }],
+      readerOf({ b: { disable: true } }).read,
+      config,
+    )
+
+    expect(plan).toEqual({ snapshots: [defaultCaptureOf(web, storyOf('a'), {})] })
+  })
+
+  it("plans a broken snapshot with selected false for a story the selection leaves out of a file that didn't load", async () => {
+    const stories = [storyOf('a', './a.stories.tsx'), storyOf('b', './b.stories.tsx')]
+    const files: FileOptions[] = [
+      { importPath: './a.stories.tsx', outcome: 'timed-out' },
+      { importPath: './b.stories.tsx', outcome: 'timed-out' },
+    ]
+    const broken: BrokenStory = {
+      reason: 'load-failed',
+      message: "Its stories file ./b.stories.tsx didn't load within readyTimeout (5000 ms).",
+    }
+    const plan = await planSnapshots(
+      [{ storybook: web, stories: [stories[0] as Story], allStories: stories }],
+      readerOf({}, { web: { declaredGlobals: null, files } }).read,
+      config,
+    )
+
+    expect(plan).toEqual({
+      snapshots: [
+        brokenOf(web, stories[0], { ...broken, message: broken.message.replace('./b.', './a.') }),
+        brokenOf(web, stories[1], broken, false),
       ],
     })
   })
@@ -322,6 +381,40 @@ describe('planSnapshots', () => {
 
     expect('problem' in plan && plan.problem.split('\n')).toHaveLength(22)
     expect('problem' in plan && plan.problem).not.toContain('more.')
+  })
+
+  it('gives a block for each Storybook with two snapshots whose baselines would be one file, selected or not', async () => {
+    const reader = readerOf({ a: { modes: { dark: {} } } })
+    const plan = await planSnapshots(
+      [
+        { storybook: web, stories: [storyOf('b')], allStories: [storyOf('a'), storyOf('b'), storyOf('a.dark')] },
+        allSelected(storybookOf('quick'), [storyOf('c')]),
+        allSelected(docs, [storyOf('d'), storyOf('D')]),
+      ],
+      reader.read,
+      config,
+    )
+
+    expect(plan).toEqual({
+      problem:
+        'Storybook web has two snapshots whose baselines would be one file, a.dark.png: a in mode dark and a.dark.\n' +
+        'Storybook docs has two snapshots whose baselines would be one file, d.png: d and D.\n' +
+        'Their names differ only in letter case or in how an accented letter is encoded.\n' +
+        'Rename one of the stories or modes, then run visual-check again.',
+    })
+  })
+
+  it('gives invalid options before two snapshots whose baselines would be one file', async () => {
+    const reader = readerOf({ c: { disable: 1 } })
+    const plan = await planSnapshots(
+      [allSelected(web, [storyOf('a'), storyOf('A'), storyOf('c')])],
+      reader.read,
+      config,
+    )
+
+    expect(plan).toEqual({
+      problem: `Storybook web has invalid per-story options:\n  - c: ${disableIssue}\n${fixLine}`,
+    })
   })
 
   it("gives a read's problem as it is, without reading the Storybooks after it", async () => {
@@ -569,6 +662,7 @@ describe('planSnapshots modes', () => {
         story: storyOf('a'),
         mode: 'dark',
         key: 'a.dark',
+        selected: true,
         options,
         tolerance: config.tolerance,
         viewport: config.viewport,
@@ -579,6 +673,7 @@ describe('planSnapshots modes', () => {
         story: storyOf('a'),
         mode: 'mobile',
         key: 'a.mobile',
+        selected: true,
         options,
         tolerance: config.tolerance,
         viewport: { width: 375, height: 667, deviceScaleFactor: 2, touch: true },
