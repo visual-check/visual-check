@@ -73,7 +73,7 @@ function fakeDriverOf(proxyPort: () => number, behaviour: FakeBehaviour = {}): F
       }
     },
     evaluate: async () => undefined,
-    captureFullPage: async () => new Uint8Array(),
+    capture: async () => new Uint8Array(),
     clearStorage: async () => undefined,
     close: async () => undefined,
   }

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Service worker frame</title>
+    <style>
+      body {
+        display: flex;
+        gap: 16px;
+        margin: 0;
+        padding: 8px;
+        font: 14px sans-serif;
+      }
+
+      figure {
+        margin: 0;
+      }
+
+      img {
+        display: block;
+        width: 48px;
+        height: 48px;
+      }
+    </style>
+  </head>
+  <body>
+    <script>
+      // Shows the remote square twice, from localhost on this page's port, a remote origin for a page on 127.0.0.1.
+      // The service worker answers the first, whose URL has the mocked marker, with its own orange square, and passes
+      // the second through. The images are added while the page parses, so its load event waits for both.
+      const remoteSquare = `${location.protocol}//localhost:${location.port}/remote-content/square.png`
+
+      for (const [label, url] of [
+        ['Mocked', `${remoteSquare}?visual-check-e2e-mocked`],
+        ['Passed through', remoteSquare],
+      ]) {
+        const figure = document.createElement('figure')
+        const image = document.createElement('img')
+        const caption = document.createElement('figcaption')
+
+        image.src = url
+        image.alt = ''
+        caption.textContent = label
+        figure.append(image, caption)
+        document.body.append(figure)
+      }
+    </script>
+  </body>
+</html>

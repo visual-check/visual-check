@@ -1,5 +1,9 @@
 import {
   type BrowserSystem,
+  type CaptureArea,
+  type CaptureBox,
+  CaptureTooLargeError,
+  maxCaptureSide,
   type Page,
   PageCrashedError,
   type PageSetup,
@@ -42,17 +46,36 @@ function readString(reply: Record<string, unknown>, field: string, method: strin
 }
 
 /**
- * Reads the page's content size out of a `Page.getLayoutMetrics` answer, in whole CSS pixels rounded up, so a capture
- * of that size takes in the whole content.
+ * Reads the full page's box out of a `Page.getLayoutMetrics` answer: the layout viewport's width by the content's
+ * height, in whole CSS pixels rounded up, so a capture of that box takes in the whole content at the viewport's width.
+ * Throws, naming the field, when the answer lacks either.
  */
-function readContentSize(reply: Record<string, unknown>): { width: number; height: number } {
-  const size = reply.cssContentSize
+function readFullPageBox(reply: Record<string, unknown>): CaptureBox {
+  const viewport = reply.cssLayoutViewport
+  const content = reply.cssContentSize
 
-  if (!isRecord(size) || typeof size.width !== 'number' || typeof size.height !== 'number') {
+  if (!isRecord(viewport) || typeof viewport.clientWidth !== 'number' || !Number.isFinite(viewport.clientWidth)) {
+    throw new Error("The browser's answer to Page.getLayoutMetrics has no cssLayoutViewport.")
+  }
+
+  if (!isRecord(content) || typeof content.height !== 'number' || !Number.isFinite(content.height)) {
     throw new Error("The browser's answer to Page.getLayoutMetrics has no cssContentSize.")
   }
 
-  return { width: Math.ceil(size.width), height: Math.ceil(size.height) }
+  return { x: 0, y: 0, width: Math.ceil(viewport.clientWidth), height: Math.ceil(content.height) }
+}
+
+/**
+ * Throws a `CaptureTooLargeError` when a capture of the box at this device scale factor would be over 32,767 device
+ * pixels on a side, each side rounded up to whole device pixels.
+ */
+function checkCaptureSize(box: CaptureBox, deviceScaleFactor: number): void {
+  const deviceWidth = Math.ceil(box.width * deviceScaleFactor)
+  const deviceHeight = Math.ceil(box.height * deviceScaleFactor)
+
+  if (deviceWidth > maxCaptureSide || deviceHeight > maxCaptureSide) {
+    throw new CaptureTooLargeError(deviceWidth, deviceHeight)
+  }
 }
 
 /**
@@ -322,7 +345,8 @@ class CdpPage implements Page {
   /**
    * Overrides the device metrics with the viewport, which also serves as the screen size, and turns touch emulation on
    * or off with it. A touch viewport is a mobile one too. The page is reused across captures, so both are set either
-   * way. The commands go in parallel.
+   * way. The commands go in parallel. Keeps the viewport once the browser has taken it, so captures are sized in its
+   * device pixels and a touch viewport's emulation holds in them.
    */
   async setViewport(viewport: PageViewport): Promise<void> {
     this.throwIfFailed()
@@ -399,14 +423,16 @@ class CdpPage implements Page {
   }
 
   /**
-   * Captures the page's whole content as PNG, beyond the viewport, and resolves with the bytes as the browser sent
-   * them.
+   * Captures the area as PNG, beyond the viewport, and resolves with the bytes as the browser sent them. The full page
+   * is the layout viewport's width by the content's height. A touch viewport's emulation holds in the capture and is
+   * still on afterwards. A capture over 32,767 device pixels on a side fails with a `CaptureTooLargeError` before the
+   * browser is asked for it.
    */
-  async captureFullPage(): Promise<Uint8Array> {
+  async capture(area: CaptureArea): Promise<Uint8Array> {
     this.throwIfFailed()
 
     return this.guarded(
-      this.capture(),
+      this.captureBox(area),
       commandTimeLimitMs,
       `The page wasn't captured within ${commandTimeLimitMs / 1000} s.`,
     )
@@ -531,7 +557,8 @@ class CdpPage implements Page {
   }
 
   /**
-   * Reads the content size, then captures that much of the page, beyond the viewport.
+   * Captures the area: a box as given, or, for the full page, the box the layout gives. Checks its size in device
+   * pixels, with the last viewport's device scale factor, or 1 before any, before sending anything for it.
    *
    * A capture beyond the viewport, even one whose content fits it, swaps the page's web preferences for its own while
    * it runs, and puts them back once it's done. Each swap resets the hover and pointer media that touch emulation
@@ -542,17 +569,18 @@ class CdpPage implements Page {
    * once the capture is done. The next `setViewport` would turn it on anyway, but this keeps the page's contract: a
    * touch viewport's emulation is still on after a capture, for later calls on the same page.
    */
-  private async capture(): Promise<Uint8Array> {
-    const { width, height } = readContentSize(await this.send('Page.getLayoutMetrics'))
+  private async captureBox(area: CaptureArea): Promise<Uint8Array> {
+    const box = area === 'full-page' ? readFullPageBox(await this.send('Page.getLayoutMetrics')) : area
 
     this.throwIfFailed()
+    checkCaptureSize(box, this.viewport?.deviceScaleFactor ?? 1)
 
     const touch = this.viewport?.touch === true
     const [reply] = await Promise.all([
       this.send('Page.captureScreenshot', {
         format: 'png',
         captureBeyondViewport: true,
-        clip: { x: 0, y: 0, width, height, scale: 1 },
+        clip: { x: box.x, y: box.y, width: box.width, height: box.height, scale: 1 },
       }),
       ...(touch ? [this.setTouchEmulation(true)] : []),
     ])

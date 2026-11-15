@@ -500,10 +500,10 @@ class FakeImage extends FakeEventTarget implements FakeMedia {
 }
 
 /**
- * A fake of an image a script creates with `document.createElement('img')`, which loads its `src` as the server gives
- * it.
+ * A fake of an image a script creates with `document.createElement('img')` or `new Image()`, which loads its `src` as
+ * the server gives it.
  */
-class FakeImageCopy extends FakeEventTarget {
+export class FakeImageCopy extends FakeEventTarget {
   /**
    * The image's `crossorigin`, `null` without one. It must be set before `src` to take effect.
    */
@@ -594,6 +594,34 @@ class FakeImageCopy extends FakeEventTarget {
 }
 
 /**
+ * An image a fake canvas can draw: one a script created, or an `<img>` in the page.
+ */
+interface FakeDrawable {
+  /**
+   * Whether drawing the image on a canvas taints it, as an opaque response does.
+   */
+  readonly tainted: boolean
+  /**
+   * The image's `src`.
+   */
+  readonly src?: string
+}
+
+/**
+ * The 2D context of a fake canvas.
+ */
+interface FakeCanvasContext {
+  /**
+   * Draws an image on the canvas.
+   */
+  drawImage: (image: FakeDrawable) => void
+  /**
+   * Reads the canvas's pixels back. Throws when a drawn image tainted it.
+   */
+  getImageData: () => object
+}
+
+/**
  * A fake of the page's `HTMLCanvasElement`, whose data URL tells which image was drawn on it, and at what size.
  */
 class FakeCanvas {
@@ -610,12 +638,12 @@ class FakeCanvas {
   /**
    * The image last drawn on the canvas.
    */
-  private drawn: FakeImageCopy | undefined
+  private drawn: FakeDrawable | undefined
 
   /**
-   * Gives the canvas's 2D context, which draws an image, or `null` for another kind.
+   * Gives the canvas's 2D context, which draws an image and reads pixels back, or `null` for another kind.
    */
-  getContext(kind: string): { drawImage: (image: FakeImageCopy) => void } | null {
+  getContext(kind: string): FakeCanvasContext | null {
     if (kind !== '2d') {
       return null
     }
@@ -623,6 +651,13 @@ class FakeCanvas {
     return {
       drawImage: (image) => {
         this.drawn = image
+      },
+      getImageData: () => {
+        if (this.drawn?.tainted === true) {
+          throw new Error('SecurityError: The canvas has been tainted by cross-origin data.')
+        }
+
+        return {}
       },
     }
   }

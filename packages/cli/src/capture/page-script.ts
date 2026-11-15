@@ -1,5 +1,7 @@
 import { parkedByStorybookSource, storybookPageScript } from '../storybook/preview-script.js'
 import { endStateFunction } from './end-state.js'
+import { type CapturePrepRequest, prepareCaptureFunction } from './prepare-capture.js'
+import { remoteContentFunction } from './remote-content.js'
 
 /**
  * The non-enumerable global the page script keeps its state under, in every document of a page.
@@ -20,7 +22,8 @@ const keptCharacters = 500
  * The script that runs at the start of every document of a page, before the page's own scripts, in every driver. Until
  * capture, it changes no styles except emptying Storybook 9.1 and 10's pause stylesheets. It reads the document only
  * once the story finished: in the Storybook adapter's part, in the wait for images and fonts, which also makes lazy
- * images eager, and in the end state. It does only this, keeping its own state under one non-enumerable global:
+ * images eager, in the end state, in the remote content search and in the capture preparation, which paints the masks
+ * and hides the caret. It does only this, keeping its own state under one non-enumerable global:
  *
  * - wraps `Element.prototype.attachShadow` to record every shadow root it creates, closed ones included, in
  *   `shadowRoots`;
@@ -46,11 +49,19 @@ const keptCharacters = 500
  * - gives `bringToEndState`, which the end state expression calls at capture. It brings every animation in the
  *   document and in every shadow root to its end state, then freezes their videos, inline SVGs and GIFs, then brings
  *   the animations that freezing them started to their end state too, as `endStateFunction` says, telling the
- *   animations Storybook 11 parked apart with the Storybook adapter's predicate.
+ *   animations Storybook 11 parked apart with the Storybook adapter's predicate;
+ * - gives `findRemoteContent`, which finds the remote content the page shows: images, CSS images and cross-origin
+ *   frames from an origin other than Storybook's, in the document, in every shadow root and in same-origin frames, as
+ *   `remoteContentFunction` says;
+ * - gives `prepareCapture`, which the capture preparation expression calls at capture, after the end state. It measures
+ *   the element to capture, paints the masks over the page in the top layer, the host masks by what `findRemoteContent`
+ *   finds, and hides the text caret in the document, in every shadow root and in same-origin frames, as
+ *   `prepareCaptureFunction` says.
  *
  * It keeps the browser's own `setTimeout`, `clearTimeout` and `requestAnimationFrame`, so a story that fakes or
- * replaces timers or frames doesn't stall the wait or the end state. The adapter's script runs first, so a failure in
- * the rest can't keep the story wait from running and show as a page script that didn't run.
+ * replaces timers or frames doesn't stall the wait, the end state or the remote content search. The adapter's script
+ * runs first, so a failure in the rest can't keep the story wait from running and show as a page script that didn't
+ * run.
  */
 export const pageInitScript = `${storybookPageScript};
 (() => {
@@ -288,8 +299,25 @@ export const pageInitScript = `${storybookPageScript};
     parkedByStorybook: ${parkedByStorybookSource},
   })
 
+  // The remote content search, run only when a step needs it.
+
+  const findRemoteContent = (${remoteContentFunction})({
+    shadowRoots,
+    setTimer,
+    clearTimer,
+    stateGlobal: '${stateGlobal}',
+  })
+
+  // The capture preparation: masks painted and the caret hidden, only at capture.
+
+  const prepareCapture = (${prepareCaptureFunction})({
+    shadowRoots,
+    findRemoteContent,
+    stateGlobal: '${stateGlobal}',
+  })
+
   Object.defineProperty(globalThis, '${stateGlobal}', {
-    value: Object.freeze({ shadowRoots, messages, waitForAssets, bringToEndState }),
+    value: Object.freeze({ shadowRoots, messages, waitForAssets, bringToEndState, findRemoteContent, prepareCapture }),
   })
 })()`
 
@@ -363,6 +391,23 @@ export function endStateExpression(timeoutMs: number): string {
   return `(async () => {
   const state = globalThis.${stateGlobal}
   return state === undefined ? { outcome: 'script-missing' } : state.bringToEndState(${limit})
+})()`
+}
+
+/**
+ * Builds the expression that prepares the page for its capture as `request` says, at capture, after the end state: it
+ * measures the element, paints the masks and hides the caret. The host masks' remote content search gives up once
+ * `timeoutMs` passes, rounded up to whole ms. The request goes into the expression as JSON, so any selector survives.
+ * Its value is the page's answer, which `readCapturePrep` reads.
+ */
+export function prepareCaptureExpression(request: CapturePrepRequest, timeoutMs: number): string {
+  const limit = Math.max(0, Math.ceil(timeoutMs))
+
+  return `(async () => {
+  const state = globalThis.${stateGlobal}
+  return state === undefined
+    ? { outcome: 'script-missing' }
+    : state.prepareCapture(${JSON.stringify(request)}, ${limit})
 })()`
 }
 

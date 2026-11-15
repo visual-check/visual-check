@@ -89,7 +89,7 @@ function fakeBrowserOf(version: string = browserPackage.chromium): FakeBrowser {
 
         return await answerEvaluate({}, expression, timeoutMs)
       },
-      captureFullPage: async () => {
+      capture: async () => {
         await holds.get(id)
         failIfGone()
         fake.captured.push(id)
@@ -195,6 +195,7 @@ function runBrowserWith(...browsers: (FakeBrowser | Promise<FakeBrowser> | Error
         timezone: 'UTC',
         locale: 'en-US',
         colorScheme: 'light',
+        maskColor: '#FF00FF',
       },
       progress: () => undefined,
     },

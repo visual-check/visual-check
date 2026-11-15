@@ -7,8 +7,10 @@ import { BrowserDownloadError } from '../browser-download/browser-download-error
 import { headlessShellPathsOf } from '../browser-download/install-headless-shell.js'
 import type { BrokenStory, CaptureSettings, StoryCapture, StoryToCapture } from '../capture/capture-session.js'
 import { BrowserExitedError, BrowserLaunchError } from '../capture/driver/driver.js'
+import type { StoryMask } from '../capture/prepare-capture.js'
 import { runWorkerPool } from '../capture/worker-pool.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
+import type { StoryOptions } from '../config/story-options.js'
 import { ContainerError } from '../container/container-error.js'
 import { clearReport, ReportError, reportFolderOf, writeFailureImages } from '../report/report-folder.js'
 import { type Story, storyUrlOf } from '../storybook/read-stories.js'
@@ -277,14 +279,34 @@ function captureSettingsOf(config: ResolvedConfig): CaptureSettings {
     timezone: config.timezone,
     locale: config.locale,
     colorScheme: config.colorScheme,
+    maskColor: config.maskColor,
   }
 }
 
 /**
- * Gives the story's ID, the URL of its own page with the snapshot's globals, and the snapshot's viewport.
+ * Gives the masks a story's options set, in the order they are named, with the ones set to `null` dropped. Gives
+ * nothing when the options set no masks or set them to `null`.
  */
-function storyToCaptureOf({ storybook, story, globals, viewport }: SnapshotToCapture): StoryToCapture {
-  return { id: story.id, url: storyUrlOf(storybook.url, story.id, globals), viewport }
+function masksOf(masks: StoryOptions['masks']): StoryMask[] {
+  return Object.entries(masks ?? {}).flatMap(([name, mask]) => (mask === null ? [] : [{ name, ...mask }]))
+}
+
+/**
+ * Gives the story's ID, the URL of its own page with the snapshot's globals, the snapshot's viewport, and the element
+ * and the masks the story's options set. A story with no element, or with `null`, is captured in full, and one with no
+ * masks is captured with none.
+ */
+function storyToCaptureOf({ storybook, story, options, globals, viewport }: SnapshotToCapture): StoryToCapture {
+  const { element } = options
+  const masks = masksOf(options.masks)
+
+  return {
+    id: story.id,
+    url: storyUrlOf(storybook.url, story.id, globals),
+    viewport,
+    ...(typeof element === 'string' ? { element } : {}),
+    ...(masks.length === 0 ? {} : { masks }),
+  }
 }
 
 /**
