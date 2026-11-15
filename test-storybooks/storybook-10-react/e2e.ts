@@ -266,6 +266,17 @@ const perStoryOptionsLines: [storyId: string, says: string][] = [
 ]
 
 /**
+ * What the line of each broken capture area story says, in its reason's own wording: that the element selector matched
+ * nothing or a box of zero size, and that the full page is over the most a capture can be, with the hint to set
+ * `element`.
+ */
+const captureAreaLines: [storyId: string, says: string][] = [
+  ['capture-area--element-missing', 'matched nothing'],
+  ['capture-area--element-zero-size', 'box of zero size'],
+  ['capture-area--too-tall', 'over 32,767 on a side. Set element'],
+]
+
+/**
  * The stories that `disable: true` leaves out, which `index.json` lists but no run prints a line for or counts.
  */
 const disabledStories = ['disabled--skipped', 'options--disabled-on-its-own']
@@ -1186,11 +1197,11 @@ async function waitUntil(condition: () => boolean, timeoutMilliseconds: number):
 }
 
 /**
- * `test` against the committed baselines, with 2 workers, gives exactly the expected outcomes. Each broken readiness
- * and per-story options story's line says why, and standard error has no test-path warning, since every page is on
- * Storybook's test path. The disabled stories, which `index.json` lists, have no line, and the header counts exactly
- * the stories with an expected outcome. Outside the Storybook 10 test Storybook, the committed animation baselines are
- * byte-identical to its own.
+ * `test` against the committed baselines, with 2 workers, gives exactly the expected outcomes. Each broken readiness,
+ * per-story options and capture area story's line says why, and standard error has no test-path warning, since every
+ * page is on Storybook's test path. The disabled stories, which `index.json` lists, have no line, and the header
+ * counts exactly the stories with an expected outcome. Outside the Storybook 10 test Storybook, the committed
+ * animation baselines are byte-identical to its own.
  */
 async function checkCommittedBaselines(expected: Outcomes): Promise<string[]> {
   return await withStorybookServer({}, async (server) => {
@@ -1198,7 +1209,7 @@ async function checkCommittedBaselines(expected: Outcomes): Promise<string[]> {
 
     return [
       ...expectedRunProblems('test', run, expected),
-      ...[...readinessLines, ...perStoryOptionsLines].flatMap(([storyId, says]) =>
+      ...[...readinessLines, ...perStoryOptionsLines, ...captureAreaLines].flatMap(([storyId, says]) =>
         lineSaysProblems(run, storyId, says),
       ),
       ...noTestPathWarningProblems(run.stderr),
@@ -1958,7 +1969,7 @@ if (setupProblems.length > 0) {
   const expected = JSON.parse(readFileSync(join(packageDir, 'expected-outcomes.json'), 'utf8')) as Outcomes
   const passed = await runCases([
     {
-      name: "committed baselines: test gives the expected outcomes, each broken readiness and per-story options story's line says why, no line for a disabled story, the header counts the expected outcomes, no test-path warning, the animation baselines are byte-identical to storybook-10-react's",
+      name: "committed baselines: test gives the expected outcomes, each broken readiness, per-story options and capture area story's line says why, no line for a disabled story, the header counts the expected outcomes, no test-path warning, the animation baselines are byte-identical to storybook-10-react's",
       run: () => checkCommittedBaselines(expected),
     },
     {
