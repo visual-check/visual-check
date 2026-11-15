@@ -8,8 +8,10 @@ import { BrowserDownloadError } from '../browser-download/browser-download-error
 import { headlessShellPathsOf } from '../browser-download/install-headless-shell.js'
 import type { CaptureSettings, StoryCapture, StoryToCapture } from '../capture/capture-session.js'
 import { BrowserExitedError, BrowserLaunchError } from '../capture/driver/driver.js'
+import type { StoryMask } from '../capture/prepare-capture.js'
 import { runWorkerPool } from '../capture/worker-pool.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
+import type { StoryOptions } from '../config/story-options.js'
 import { ContainerError } from '../container/container-error.js'
 import { type Story, storyUrlOf } from '../storybook/read-stories.js'
 import { testPathWarningOf } from '../storybook/test-path.js'
@@ -218,10 +220,27 @@ function captureSettingsOf(config: ResolvedConfig): CaptureSettings {
 }
 
 /**
- * Gives the story's ID and the URL of its own page.
+ * Gives the masks a story's options set, in the order they are named, with the ones set to `null` dropped. Gives
+ * nothing when the options set no masks or set them to `null`.
  */
-function storyToCaptureOf(storybook: ResolvedStorybook, story: Story): StoryToCapture {
-  return { id: story.id, url: storyUrlOf(storybook.url, story.id) }
+function masksOf(masks: StoryOptions['masks']): StoryMask[] {
+  return Object.entries(masks ?? {}).flatMap(([name, mask]) => (mask === null ? [] : [{ name, ...mask }]))
+}
+
+/**
+ * Gives the story's ID and the URL of its own page, with the element and the masks its options set. A story with no
+ * element, or with `null`, is captured in full, and one with no masks is captured with none.
+ */
+function storyToCaptureOf(storybook: ResolvedStorybook, story: Story, options: StoryOptions): StoryToCapture {
+  const { element } = options
+  const masks = masksOf(options.masks)
+
+  return {
+    id: story.id,
+    url: storyUrlOf(storybook.url, story.id),
+    ...(typeof element === 'string' ? { element } : {}),
+    ...(masks.length === 0 ? {} : { masks }),
+  }
 }
 
 /**
@@ -238,6 +257,11 @@ function displayPathOf(cwd: string, path: string): string {
 type CaptureStory = (story: StoryToCapture, started?: () => void) => Promise<StoryCapture>
 
 /**
+ * A planned snapshot whose stories file loaded, so it has its options.
+ */
+type PlannedWithOptions = Extract<PlannedSnapshot, { options: StoryOptions }>
+
+/**
  * Takes one snapshot as the command says. A story whose stories file didn't load is broken, with no capture and no
  * baseline read.
  */
@@ -251,8 +275,8 @@ async function snapshotOf(
   }
 
   return run.command === 'test'
-    ? await testSnapshot(item.storybook, item.story, captureStory)
-    : await updateSnapshot(item.storybook, item.story, captureStory, run.cwd)
+    ? await testSnapshot(item, captureStory)
+    : await updateSnapshot(item, captureStory, run.cwd)
 }
 
 /**
@@ -260,11 +284,8 @@ async function snapshotOf(
  * baseline's bytes. It asks for a capture only once it has read the baseline. A pass's time leaves out the browser's
  * launch.
  */
-async function testSnapshot(
-  storybook: ResolvedStorybook,
-  story: Story,
-  captureStory: CaptureStory,
-): Promise<SnapshotResult> {
+async function testSnapshot(item: PlannedWithOptions, captureStory: CaptureStory): Promise<SnapshotResult> {
+  const { storybook, story, options } = item
   const baseline = await readBaseline(baselinePathOf(storybook.baselines, story.id))
 
   if (baseline === undefined) {
@@ -272,7 +293,7 @@ async function testSnapshot(
   }
 
   let started = performance.now()
-  const capture = await captureStory(storyToCaptureOf(storybook, story), () => {
+  const capture = await captureStory(storyToCaptureOf(storybook, story, options), () => {
     started = performance.now()
   })
 
@@ -294,12 +315,12 @@ async function testSnapshot(
  * baseline untouched. A broken story writes nothing.
  */
 async function updateSnapshot(
-  storybook: ResolvedStorybook,
-  story: Story,
+  item: PlannedWithOptions,
   captureStory: CaptureStory,
   cwd: string,
 ): Promise<SnapshotResult> {
-  const capture = await captureStory(storyToCaptureOf(storybook, story))
+  const { storybook, story, options } = item
+  const capture = await captureStory(storyToCaptureOf(storybook, story, options))
 
   if ('broken' in capture) {
     return { status: 'broken', detail: `broken: ${capture.broken.message}` }

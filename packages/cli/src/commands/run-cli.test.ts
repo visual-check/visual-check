@@ -274,6 +274,11 @@ interface FakeBrowserRecord {
    */
   reads: ReadRecord[]
   /**
+   * The capture preparation each story's page was asked for, in order: the story's ID with the element and the masks
+   * it was sent.
+   */
+  preparations: { id: string; element: unknown; masks: unknown }[]
+  /**
    * The setup of every page opened.
    */
   setups: PageSetup[]
@@ -309,6 +314,7 @@ function newRecord(): FakeBrowserRecord {
     launches: [],
     urls: [],
     reads: [],
+    preparations: [],
     setups: [],
     viewports: [],
     pageCloses: 0,
@@ -451,6 +457,13 @@ function fakeDriverOf({
 
           const status = story.broken === true ? 'error' : 'success'
           const completingMs = story.completingMs ?? null
+          const request = /\.prepareCapture\((.*), \d+\)\n\}\)\(\)$/s.exec(expression)?.[1]
+
+          if (request !== undefined) {
+            const { element, masks } = JSON.parse(request) as { element: unknown; masks: unknown }
+
+            record.preparations.push({ id, element, masks })
+          }
 
           return await answerEvaluate(
             {
@@ -1637,6 +1650,53 @@ function testPathWarningOf(name: string, storybookVersion: string, medianMs: num
     'Snapshots stay correct.\n'
   )
 }
+
+describe('runCli capture area and masks', () => {
+  const options = {
+    a: {
+      element: '#card',
+      masks: {
+        clock: { selector: '.clock' },
+        ads: { host: 'ads.example.com' },
+        gone: null,
+        ghost: { selector: '.ghost' },
+      },
+    },
+    b: { element: null, masks: null },
+  }
+
+  it('captures each story with its element and its masks, leaving out one set to null', async () => {
+    const { project } = await createRun(['a', 'b'], { a: defaultSnapshot, b: defaultSnapshot })
+    const { options: run, record } = fakeBrowser({}, { read: { options } })
+    const result = await runCli(['test'], {}, project, run)
+
+    expect(result.exitCode).toBe(0)
+    expect(record.preparations.sort((one, other) => one.id.localeCompare(other.id))).toEqual([
+      {
+        id: 'a',
+        element: '#card',
+        masks: [
+          { name: 'clock', selector: '.clock' },
+          { name: 'ads', host: 'ads.example.com' },
+          { name: 'ghost', selector: '.ghost' },
+        ],
+      },
+      { id: 'b', element: null, masks: [] },
+    ])
+  })
+
+  it('does the same in update', async () => {
+    const { project } = await createRun(['a', 'b'])
+    const { options: run, record } = fakeBrowser({}, { read: { options } })
+    const result = await runCli(['update'], {}, project, run)
+
+    expect(result.exitCode).toBe(0)
+    expect(record.preparations.map(({ id, element }) => [id, element]).sort()).toEqual([
+      ['a', '#card'],
+      ['b', null],
+    ])
+  })
+})
 
 describe('runCli warning when a Storybook ignores the test path', () => {
   it('warns once at the end, naming the Storybook and its version, when the median is 50 ms or more', async () => {
