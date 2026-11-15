@@ -30,6 +30,13 @@ describe('findBaselineClash', () => {
     expect(findBaselineClash([first, second])).toEqual({ first, second, fileName: 'button--primary.png' })
   })
 
+  it('finds two keys that macOS takes for one file although they are both lower case', () => {
+    const first = { key: 'straße--primary' }
+    const second = { key: 'strasse--primary' }
+
+    expect(findBaselineClash([first, second])).toEqual({ first, second, fileName: 'straße--primary.png' })
+  })
+
   it("finds two keys that are the same text, as a mode's and another story's can be", () => {
     const first = { key: 'button.dark' }
     const second = { key: 'button.dark' }

@@ -22,8 +22,9 @@ export interface BaselineClash<Snapshot> {
 
 /**
  * Finds the first two snapshots of one Storybook whose baselines would be one file: their file names, shortened when
- * long, are equal once folded to NFC and lower case. Gives the clash whose later snapshot comes first in the order
- * given, or `undefined` when every snapshot has a file of its own.
+ * long, are equal once folded for case and for how an accented letter is encoded, as macOS and Windows fold them. Gives
+ * the clash whose later snapshot comes first in the order given, or `undefined` when every snapshot has a file of its
+ * own.
  *
  * @public
  */

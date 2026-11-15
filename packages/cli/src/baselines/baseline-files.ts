@@ -57,20 +57,23 @@ function startWithinBytes(text: string, limit: number): string {
 
 /**
  * Gives the stem a snapshot's files are named after: its baseline, `<stem>.png`, and its report images,
- * `<stem>.<kind>.png`. That's the key, or, for a key over 240 UTF-8 bytes, its first 223 bytes in whole characters,
- * then `-`, then the first 16 hex characters of the full key's SHA-256. The stem is at most 240 bytes, which leaves
- * room for the report's longest image suffix, `.snapshot.png`, within the 255 bytes a file name can take.
+ * `<stem>.<kind>.png`. That's the key in Unicode NFC, so an accented letter is encoded the same way on every OS and git
+ * sees one name for one baseline. A key over 240 UTF-8 bytes keeps its first 223 bytes in whole characters, then `-`,
+ * then the first 16 hex characters of the full key's SHA-256, all taken in NFC too. The stem is at most 240 bytes,
+ * which leaves room for the report's longest image suffix, `.snapshot.png`, within the 255 bytes a file name can take.
  *
  * @public
  */
 export function baselineStemOf(key: string): string {
-  if (Buffer.byteLength(key, 'utf8') <= longestKeptKeyBytes) {
-    return key
+  const composed = key.normalize('NFC')
+
+  if (Buffer.byteLength(composed, 'utf8') <= longestKeptKeyBytes) {
+    return composed
   }
 
-  const hash = createHash('sha256').update(key, 'utf8').digest('hex').slice(0, shortenedHashLength)
+  const hash = createHash('sha256').update(composed, 'utf8').digest('hex').slice(0, shortenedHashLength)
 
-  return `${startWithinBytes(key, shortenedPrefixBytes)}-${hash}`
+  return `${startWithinBytes(composed, shortenedPrefixBytes)}-${hash}`
 }
 
 /**
@@ -81,12 +84,14 @@ export function baselineFileNameOf(key: string): string {
 }
 
 /**
- * Folds a file name into the form two names share when a file system takes them for one file: Unicode NFC, then lower
- * case. macOS ignores both how an accented letter is encoded and case, and baselines are committed and checked out on
- * every OS.
+ * Folds a file name into the form two names share when some file system takes them for one file, since baselines are
+ * committed and checked out on every OS. macOS ignores how an accented letter is encoded and folds case fully, so
+ * `straße` and `STRASSE`, or `σ` and `ς`, are one file there. So the name goes to Unicode NFC, then upper case, which
+ * turns `ß` into `SS` and `ς` into `Σ`, then lower case, then NFC again, since a case change can leave a letter and its
+ * accent apart. That folds at least as much as macOS and Windows do.
  */
 export function foldedFileNameOf(name: string): string {
-  return name.normalize('NFC').toLowerCase()
+  return name.normalize('NFC').toUpperCase().toLowerCase().normalize('NFC')
 }
 
 /**

@@ -20,6 +20,7 @@ import {
   baselinePathOf,
   baselineStemOf,
   deleteOrphans,
+  foldedFileNameOf,
   hasBaseline,
   listBaselines,
   readBaseline,
@@ -89,6 +90,35 @@ describe('baselineStemOf', () => {
 
     expect(baselineStemOf(key)).toBe(`${'a'.repeat(223)}-${hashOf(key)}`)
     expect(bytesOf(baselineStemOf(key))).toBe(240)
+  })
+
+  it('encodes an accented letter as NFC, however the key encodes it', () => {
+    const composed = 'café--primary'
+
+    expect(baselineStemOf(composed.normalize('NFD'))).toBe(composed)
+  })
+
+  it('shortens a long key the same way, however the key encodes its accented letters', () => {
+    const composed = 'é'.repeat(121)
+
+    expect(baselineStemOf(composed.normalize('NFD'))).toBe(baselineStemOf(composed))
+    expect(baselineStemOf(composed)).toBe(`${'é'.repeat(111)}-${hashOf(composed)}`)
+  })
+})
+
+describe('foldedFileNameOf', () => {
+  it('folds case and how an accented letter is encoded', () => {
+    expect(foldedFileNameOf('CAFÉ.png')).toBe(foldedFileNameOf('café.png'))
+  })
+
+  it('folds ß as SS and a final sigma as a sigma, as macOS does', () => {
+    expect(foldedFileNameOf('straße.png')).toBe(foldedFileNameOf('STRASSE.png'))
+    expect(foldedFileNameOf('straße.png')).toBe(foldedFileNameOf('strasse.png'))
+    expect(foldedFileNameOf('ς.png')).toBe(foldedFileNameOf('σ.png'))
+  })
+
+  it('keeps names apart that differ in more than case or encoding', () => {
+    expect(foldedFileNameOf('cafe.png')).not.toBe(foldedFileNameOf('café.png'))
   })
 })
 
