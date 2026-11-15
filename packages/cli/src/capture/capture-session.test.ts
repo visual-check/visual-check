@@ -18,7 +18,6 @@ import { assetsReadyExpression, pageInitScript } from './page-script.js'
  * The settings every session in these tests captures with.
  */
 const settings: CaptureSettings = {
-  viewport: { width: 1280, height: 720, deviceScaleFactor: 2, touch: false },
   readyTimeoutMs: 10_000,
   timezone: 'Europe/Warsaw',
   locale: 'pl-PL',
@@ -28,7 +27,11 @@ const settings: CaptureSettings = {
 /**
  * The story most tests capture.
  */
-const primary = { id: 'button--primary', url: 'http://localhost:6006/iframe.html?id=button--primary&viewMode=story' }
+const primary = {
+  id: 'button--primary',
+  url: 'http://localhost:6006/iframe.html?id=button--primary&viewMode=story',
+  viewport: { width: 1280, height: 720, deviceScaleFactor: 2, touch: false },
+}
 
 /**
  * Another story, for tests that capture twice.
@@ -36,6 +39,7 @@ const primary = { id: 'button--primary', url: 'http://localhost:6006/iframe.html
 const secondary = {
   id: 'button--secondary',
   url: 'http://localhost:6006/iframe.html?id=button--secondary&viewMode=story',
+  viewport: { width: 375, height: 667, deviceScaleFactor: 3, touch: true },
 }
 
 /**
@@ -99,6 +103,18 @@ describe('a capture', () => {
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [waitHookExpression('button--primary', 10_000), 11_000] },
       { page: 1, method: 'captureFullPage', args: [] },
+    ])
+  })
+
+  it("sets each story's own viewport", async () => {
+    const driver = new FakeDriver()
+    const session = openCaptureSession(driver, settings)
+
+    await session.capture(primary)
+    await session.capture(secondary)
+    expect(driver.calls.filter(({ method }) => method === 'setViewport').map(({ args }) => args)).toEqual([
+      [{ width: 1280, height: 720, deviceScaleFactor: 2, touch: false }],
+      [{ width: 375, height: 667, deviceScaleFactor: 3, touch: true }],
     ])
   })
 

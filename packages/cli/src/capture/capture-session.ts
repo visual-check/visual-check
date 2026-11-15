@@ -26,10 +26,6 @@ export const waitMarginMs = 1_000
  */
 export interface CaptureSettings {
   /**
-   * The size every story is laid out and captured at.
-   */
-  viewport: PageViewport
-  /**
    * The config's `readyTimeout`, in ms, per attempt: a story that navigates away is captured again, up to 2 more times,
    * each with the whole of it. It's counted from just before the viewport is set. Loading the story (`goto`), waiting
    * for Storybook to report it finished, waiting for its images and fonts, running its wait hook and checking its
@@ -53,7 +49,7 @@ export interface CaptureSettings {
 }
 
 /**
- * A story to capture.
+ * A snapshot to capture: a story's URL, with a mode's globals in it, and the viewport to capture it at.
  *
  * @public
  */
@@ -63,9 +59,14 @@ export interface StoryToCapture {
    */
   id: string
   /**
-   * The URL of the story on its own, such as `http://localhost:6006/iframe.html?id=button--primary&viewMode=story`.
+   * The URL of the story on its own, such as `http://localhost:6006/iframe.html?id=button--primary&viewMode=story`. A
+   * mode's snapshot adds the mode's globals to it.
    */
   url: string
+  /**
+   * The size the snapshot is laid out and captured at: the default capture's, or its mode's merged over it.
+   */
+  viewport: PageViewport
 }
 
 /**
@@ -417,11 +418,11 @@ function describeFailure(error: unknown, step: Step, story: StoryToCapture, read
 }
 
 /**
- * Captures a story on an open page: sets the viewport, loads the story, waits until Storybook reports it finished with
- * nothing gone wrong, waits for its images and fonts, runs its wait hook and captures the full page. When the story
- * has a wait hook, its images and fonts are checked again after it. Loading, the waits, the hook and that second check
- * share readyTimeout, each getting only what's left of it. A story that can't be captured comes back as a broken
- * story. Rejects only with a `BrowserExitedError`.
+ * Captures a story on an open page: sets the story's viewport, loads the story, waits until Storybook reports it
+ * finished with nothing gone wrong, waits for its images and fonts, runs its wait hook and captures the full page. When
+ * the story has a wait hook, its images and fonts are checked again after it. Loading, the waits, the hook and that
+ * second check share readyTimeout, each getting only what's left of it. A story that can't be captured comes back as a
+ * broken story. Rejects only with a `BrowserExitedError`.
  */
 async function captureOnPage(page: Page, story: StoryToCapture, settings: CaptureSettings): Promise<StoryCapture> {
   const deadline = performance.now() + settings.readyTimeoutMs
@@ -473,7 +474,7 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
   }
 
   try {
-    await page.setViewport(settings.viewport)
+    await page.setViewport(story.viewport)
     step = 'load'
     await page.goto(story.url, timeLeft())
     step = 'story'

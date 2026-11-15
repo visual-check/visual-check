@@ -21,6 +21,8 @@ import type { Tolerance, Viewport } from './define-config.js'
 
 /**
  * A mode's definition: the globals and the viewport it sets.
+ *
+ * @public
  */
 export interface ModeDefinition {
   /**

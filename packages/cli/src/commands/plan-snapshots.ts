@@ -1,8 +1,10 @@
+import { snapshotKeyOf } from '../baselines/baseline-files.js'
 import { type BrokenStory, failureReasonOf } from '../capture/capture-session.js'
 import type { OptionsRequest, StorybookOptions, StorybookOptionsRead } from '../capture/read-options.js'
+import type { Viewport } from '../config/define-config.js'
 import { checkModeRules, type ModeRulesStory } from '../config/mode-rules.js'
-import type { ResolvedStorybook } from '../config/resolve-config.js'
-import { checkStoryOptions, type StoryOptions } from '../config/story-options.js'
+import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
+import { checkStoryOptions, type ModeDefinition, type StoryOptions } from '../config/story-options.js'
 import type { FileOptions, StoriesFile } from '../storybook/options-read.js'
 import { previewUrlOf, type Story } from '../storybook/read-stories.js'
 
@@ -48,10 +50,15 @@ type StoryOptionsOf =
     }
 
 /**
- * One snapshot the run takes: a selected story that isn't disabled, with its Storybook, and its options or, when its
- * stories file didn't load, the broken story it makes.
+ * What planning needs of the config: its readyTimeout, in ms, and its viewport.
  */
-export type PlannedSnapshot = {
+type PlanConfig = Pick<ResolvedConfig, 'readyTimeout' | 'viewport'>
+
+/**
+ * A snapshot the run captures: the default capture or a listed mode of a selected story that isn't disabled, with its
+ * Storybook, its key, the story's options, and the snapshot's viewport and globals.
+ */
+export interface SnapshotToCapture {
   /**
    * The story's Storybook.
    */
@@ -60,7 +67,60 @@ export type PlannedSnapshot = {
    * The story.
    */
   story: Story
-} & StoryOptionsOf
+  /**
+   * The snapshot's mode, `undefined` for the default capture.
+   */
+  mode: string | undefined
+  /**
+   * The snapshot's key, which names its baseline: `<story-id>` for the default capture, `<story-id>.<mode>` for a mode.
+   */
+  key: string
+  /**
+   * The story's validated options.
+   */
+  options: StoryOptions
+  /**
+   * The size the snapshot is laid out and captured at.
+   */
+  viewport: Required<Viewport>
+  /**
+   * The globals the snapshot's story URL sets, in order: its mode's, none for the default capture.
+   */
+  globals: NonNullable<ModeDefinition['globals']>
+}
+
+/**
+ * The one snapshot of a selected story whose stories file didn't load: broken, with no mode, since its options and so
+ * its modes are unknown.
+ */
+interface BrokenSnapshot {
+  /**
+   * The story's Storybook.
+   */
+  storybook: ResolvedStorybook
+  /**
+   * The story.
+   */
+  story: Story
+  /**
+   * No mode, since the story's modes are unknown.
+   */
+  mode: undefined
+  /**
+   * The snapshot's key, the story ID.
+   */
+  key: string
+  /**
+   * Why the story can't be captured: `load-failed`, with a message naming its stories file.
+   */
+  broken: BrokenStory
+}
+
+/**
+ * One snapshot the run takes: one it captures or, when the story's stories file didn't load, the broken one the story
+ * makes.
+ */
+export type PlannedSnapshot = SnapshotToCapture | BrokenSnapshot
 
 /**
  * What the page read of one story of a file that loaded: its options and the globals it pins.
@@ -270,6 +330,49 @@ function checkedOf(checkedById: ReadonlyMap<string, CheckedStory>, story: Story)
 }
 
 /**
+ * Plans a taken story's snapshots: its default capture, at the config's viewport under the story's, key by key, with
+ * no globals, then each mode it lists, in the order its options hold them, at the default capture's viewport under the
+ * mode's, with the mode's globals. A mode the story leaves out, `null`, isn't planned. A story whose stories file
+ * didn't load gives one broken snapshot with no mode, since its modes are unknown.
+ */
+function storySnapshotsOf(
+  storybook: ResolvedStorybook,
+  story: Story,
+  checked: StoryOptionsOf,
+  configViewport: Required<Viewport>,
+): PlannedSnapshot[] {
+  if ('broken' in checked) {
+    return [{ storybook, story, mode: undefined, key: snapshotKeyOf(story.id), broken: checked.broken }]
+  }
+
+  const { options } = checked
+  const defaultCapture: SnapshotToCapture = {
+    storybook,
+    story,
+    mode: undefined,
+    key: snapshotKeyOf(story.id),
+    options,
+    viewport: { ...configViewport, ...options.viewport },
+    globals: {},
+  }
+  const modes = Object.entries(options.modes ?? {}).flatMap(([mode, definition]): SnapshotToCapture[] =>
+    definition === null
+      ? []
+      : [
+          {
+            ...defaultCapture,
+            mode,
+            key: snapshotKeyOf(story.id, mode),
+            viewport: { ...defaultCapture.viewport, ...definition.viewport },
+            globals: definition.globals ?? {},
+          },
+        ],
+  )
+
+  return [defaultCapture, ...modes]
+}
+
+/**
  * Plans one Storybook's snapshots from what the page read: every story its `index.json` lists is checked, and each
  * selected story that isn't disabled is planned. Gives its planned snapshots and its issues: the type issues of every
  * story in `index.json` order, then the mode rules' issues of the stories whose options are valid, checked in
@@ -278,11 +381,11 @@ function checkedOf(checkedById: ReadonlyMap<string, CheckedStory>, story: Story)
 function planStorybook(
   selection: StorybookStories,
   { declaredGlobals, files }: StorybookOptions,
-  readyTimeoutMs: number,
+  config: PlanConfig,
 ): { snapshots: PlannedSnapshot[]; issues: string[] } {
   const { storybook, stories, allStories } = selection
   const storybookRead = storybookReadOf(files)
-  const checkedStories = allStories.map((story) => checkedStoryOf(storybookRead, story, readyTimeoutMs))
+  const checkedStories = allStories.map((story) => checkedStoryOf(storybookRead, story, config.readyTimeout))
   const checkedById = new Map(checkedStories.map((checkedStory) => [checkedStory.story.id, checkedStory]))
   const typeIssues = checkedStories.flatMap(({ story, checked }) =>
     'issues' in checked ? checked.issues.map((issue) => `${story.id}: ${issue}`) : [],
@@ -295,7 +398,7 @@ function planStorybook(
   const snapshots = stories.flatMap((story): PlannedSnapshot[] => {
     const checked = checkedOf(checkedById, story)
 
-    return isTaken(checked) ? [{ storybook, story, ...checked }] : []
+    return isTaken(checked) ? storySnapshotsOf(storybook, story, checked, config.viewport) : []
   })
 
   return { snapshots, issues: [...typeIssues, ...modeIssues] }
@@ -329,12 +432,13 @@ function invalidOptionsProblemOf(storybooks: readonly StorybookIssues[]): string
  * Plans the snapshots of a run from each Storybook's per-story options, which it reads with `readOptions`, one read per
  * Storybook with stories, in the order given. A read covers every story the Storybook's `index.json` lists whatever
  * the selection, and every story's options are checked. Gives the snapshots in the order given and then selection
- * order: each selected story that isn't disabled, with its options, or, when its stories file failed to load or didn't
- * load within readyTimeout, the broken story it makes, `load-failed`. A read's problem stops the planning at once, and
- * the Storybooks after it aren't read. Invalid options stop it once every Storybook is read, with one block of issues
- * per Storybook: each story's type issues, then the mode rules' issues of the stories whose options are valid, checked
- * against the globals the Storybook declares and the globals each story pins. Either way, it gives the problem, with
- * no trailing newline.
+ * order. Each selected story that isn't disabled gives its default capture, then one snapshot per mode it lists, in
+ * the order its options hold them, each with its key, its options, its viewport over the config's and its globals.
+ * When its stories file failed to load or didn't load within readyTimeout, it gives one snapshot, the broken story it
+ * makes, `load-failed`, with no mode. A read's problem stops the planning at once, and the Storybooks after it aren't
+ * read. Invalid options stop it once every Storybook is read, with one block of issues per Storybook: each story's
+ * type issues, then the mode rules' issues of the stories whose options are valid, checked against the globals the
+ * Storybook declares and the globals each story pins. Either way, it gives the problem, with no trailing newline.
  *
  * @throws {Error} What `readOptions` throws, when a read leaves out a stories file or a story it was asked for, and
  * when the selection holds a story `index.json` doesn't list.
@@ -342,7 +446,7 @@ function invalidOptionsProblemOf(storybooks: readonly StorybookIssues[]): string
 export async function planSnapshots(
   selections: readonly StorybookStories[],
   readOptions: ReadOptions,
-  readyTimeoutMs: number,
+  config: PlanConfig,
 ): Promise<{ snapshots: PlannedSnapshot[] } | { problem: string }> {
   const snapshots: PlannedSnapshot[] = []
   const invalid: StorybookIssues[] = []
@@ -354,7 +458,7 @@ export async function planSnapshots(
       return read
     }
 
-    const planned = planStorybook(selection, read, readyTimeoutMs)
+    const planned = planStorybook(selection, read, config)
 
     snapshots.push(...planned.snapshots)
     invalid.push({ name: selection.storybook.name, issues: planned.issues })

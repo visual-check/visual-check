@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
+import type { BrokenStory } from '../capture/capture-session.js'
 import type { OptionsRequest, StorybookOptionsRead } from '../capture/read-options.js'
 import type { ResolvedStorybook } from '../config/resolve-config.js'
+import type { StoryOptions } from '../config/story-options.js'
 import type { FileOptions } from '../storybook/options-read.js'
 import type { Story } from '../storybook/read-stories.js'
-import { planSnapshots } from './plan-snapshots.js'
+import { type PlannedSnapshot, planSnapshots } from './plan-snapshots.js'
 
 /**
  * Builds a Storybook with the given name, served at `http://<name>.test`.
@@ -101,6 +103,42 @@ const fixLine =
 const disableIssue = 'visualCheck.disable: must be true or false. Got 1.'
 
 /**
+ * The config most cases plan with: its readyTimeout and its viewport.
+ */
+const config = {
+  readyTimeout: 5_000,
+  viewport: { width: 1280, height: 720, deviceScaleFactor: 1, touch: false },
+}
+
+/**
+ * Builds the planned default capture of a story with the given options, at the config's viewport unless `viewport`
+ * replaces it.
+ */
+function defaultCaptureOf(
+  storybook: ResolvedStorybook,
+  story: Story | undefined,
+  options: StoryOptions,
+  viewport = config.viewport,
+): PlannedSnapshot {
+  if (story === undefined) {
+    throw new Error('The test asks for a story it has none of.')
+  }
+
+  return { storybook, story, mode: undefined, key: story.id, options, viewport, globals: {} }
+}
+
+/**
+ * Builds the planned broken snapshot of a story whose stories file didn't load.
+ */
+function brokenOf(storybook: ResolvedStorybook, story: Story | undefined, broken: BrokenStory): PlannedSnapshot {
+  if (story === undefined) {
+    throw new Error('The test asks for a story it has none of.')
+  }
+
+  return { storybook, story, mode: undefined, key: story.id, broken }
+}
+
+/**
  * The Storybook most cases plan.
  */
 const web = storybookOf('web')
@@ -126,7 +164,7 @@ describe('planSnapshots', () => {
         allSelected(docs, [storyOf('e')]),
       ],
       reader.read,
-      5_000,
+      config,
     )
 
     expect(reader.requests).toEqual([
@@ -150,9 +188,11 @@ describe('planSnapshots', () => {
   it("doesn't read a Storybook with no stories", async () => {
     const reader = readerOf()
 
-    expect(await planSnapshots([allSelected(web, []), allSelected(docs, [storyOf('a')])], reader.read, 5_000)).toEqual({
-      snapshots: [{ storybook: docs, story: storyOf('a'), options: {} }],
-    })
+    expect(await planSnapshots([allSelected(web, []), allSelected(docs, [storyOf('a')])], reader.read, config)).toEqual(
+      {
+        snapshots: [defaultCaptureOf(docs, storyOf('a'), {})],
+      },
+    )
     expect(reader.requests.map(({ storybookName }) => storybookName)).toEqual(['docs'])
   })
 
@@ -172,13 +212,13 @@ describe('planSnapshots', () => {
           allSelected(docs, [storyOf('x')]),
         ],
         reader.read,
-        5_000,
+        config,
       ),
     ).toEqual({
       snapshots: [
-        { storybook: web, story: storyOf('d'), options: {} },
-        { storybook: web, story: storyOf('c'), options: { disable: false } },
-        { storybook: web, story: storyOf('a'), options: { tolerance: { pixels: 3 } } },
+        defaultCaptureOf(web, storyOf('d'), {}),
+        defaultCaptureOf(web, storyOf('c'), { disable: false }),
+        defaultCaptureOf(web, storyOf('a'), { tolerance: { pixels: 3 } }),
       ],
     })
   })
@@ -192,29 +232,20 @@ describe('planSnapshots', () => {
     ]
     const reader = readerOf({}, { web: { declaredGlobals: null, files } })
 
-    expect(await planSnapshots([allSelected(web, stories)], reader.read, 5_000)).toEqual({
+    expect(await planSnapshots([allSelected(web, stories)], reader.read, config)).toEqual({
       snapshots: [
-        {
-          storybook: web,
-          story: stories[0],
-          broken: {
-            reason: 'load-failed',
-            message: "Its stories file ./a.stories.tsx failed to load: SyntaxError: Unexpected token '<'.",
-          },
-        },
-        {
-          storybook: web,
-          story: stories[1],
-          broken: {
-            reason: 'load-failed',
-            message: 'Its stories file ./b.stories.tsx failed to load: TypeError: x is not a function.',
-          },
-        },
-        {
-          storybook: web,
-          story: stories[2],
-          broken: { reason: 'load-failed', message: 'Its stories file ./c.stories.tsx failed to load.' },
-        },
+        brokenOf(web, stories[0], {
+          reason: 'load-failed',
+          message: "Its stories file ./a.stories.tsx failed to load: SyntaxError: Unexpected token '<'.",
+        }),
+        brokenOf(web, stories[1], {
+          reason: 'load-failed',
+          message: 'Its stories file ./b.stories.tsx failed to load: TypeError: x is not a function.',
+        }),
+        brokenOf(web, stories[2], {
+          reason: 'load-failed',
+          message: 'Its stories file ./c.stories.tsx failed to load.',
+        }),
       ],
     })
   })
@@ -224,16 +255,18 @@ describe('planSnapshots', () => {
       {},
       { web: { declaredGlobals: null, files: [{ importPath: './button.stories.tsx', outcome: 'timed-out' }] } },
     )
-    const broken = {
+    const broken: BrokenStory = {
       reason: 'load-failed',
       message: "Its stories file ./button.stories.tsx didn't load within readyTimeout (7500 ms).",
     }
 
-    expect(await planSnapshots([allSelected(web, [storyOf('a'), storyOf('b')])], reader.read, 7_500)).toEqual({
-      snapshots: [
-        { storybook: web, story: storyOf('a'), broken },
-        { storybook: web, story: storyOf('b'), broken },
-      ],
+    expect(
+      await planSnapshots([allSelected(web, [storyOf('a'), storyOf('b')])], reader.read, {
+        ...config,
+        readyTimeout: 7_500,
+      }),
+    ).toEqual({
+      snapshots: [brokenOf(web, storyOf('a'), broken), brokenOf(web, storyOf('b'), broken)],
     })
   })
 
@@ -246,7 +279,7 @@ describe('planSnapshots', () => {
         allSelected(docs, [storyOf('d')]),
       ],
       reader.read,
-      5_000,
+      config,
     )
 
     expect(plan).toEqual({
@@ -267,7 +300,7 @@ describe('planSnapshots', () => {
     const stories = Array.from({ length: 23 }, (_, index) => storyOf(`s${index + 1}`))
     const reader = readerOf(Object.fromEntries(stories.map(({ id }) => [id, { disable: 1 }])))
 
-    expect(await planSnapshots([allSelected(web, stories)], reader.read, 5_000)).toEqual({
+    expect(await planSnapshots([allSelected(web, stories)], reader.read, config)).toEqual({
       problem:
         'Storybook web has invalid per-story options:\n' +
         stories
@@ -282,7 +315,7 @@ describe('planSnapshots', () => {
   it('shows all 20 issues of a Storybook that has exactly 20', async () => {
     const stories = Array.from({ length: 20 }, (_, index) => storyOf(`s${index + 1}`))
     const reader = readerOf(Object.fromEntries(stories.map(({ id }) => [id, { disable: 1 }])))
-    const plan = await planSnapshots([allSelected(web, stories)], reader.read, 5_000)
+    const plan = await planSnapshots([allSelected(web, stories)], reader.read, config)
 
     expect('problem' in plan && plan.problem.split('\n')).toHaveLength(22)
     expect('problem' in plan && plan.problem).not.toContain('more.')
@@ -299,7 +332,7 @@ describe('planSnapshots', () => {
           allSelected(storybookOf('quick'), [storyOf('b')]),
         ],
         reader.read,
-        5_000,
+        config,
       ),
     ).toEqual({ problem: "Storybook docs's preview never started." })
     expect(reader.requests.map(({ storybookName }) => storybookName)).toEqual(['web', 'docs'])
@@ -308,7 +341,7 @@ describe('planSnapshots', () => {
   it('throws when a read leaves out a stories file it was asked for', async () => {
     const reader = readerOf({}, { web: { declaredGlobals: null, files: [] } })
 
-    await expect(planSnapshots([allSelected(web, [storyOf('a')])], reader.read, 5_000)).rejects.toThrow(
+    await expect(planSnapshots([allSelected(web, [storyOf('a')])], reader.read, config)).rejects.toThrow(
       'The options read left out ./button.stories.tsx, the stories file of a.',
     )
   })
@@ -317,7 +350,7 @@ describe('planSnapshots', () => {
     const reader = readerOf()
 
     await expect(
-      planSnapshots([{ storybook: web, stories: [storyOf('b')], allStories: [storyOf('a')] }], reader.read, 5_000),
+      planSnapshots([{ storybook: web, stories: [storyOf('b')], allStories: [storyOf('a')] }], reader.read, config),
     ).rejects.toThrow("The selection holds b, which the Storybook's index.json doesn't list.")
   })
 
@@ -327,7 +360,7 @@ describe('planSnapshots', () => {
       { web: { declaredGlobals: null, files: [loadedFile('./button.stories.tsx', { a: undefined })] } },
     )
 
-    await expect(planSnapshots([allSelected(web, [storyOf('a'), storyOf('b')])], reader.read, 5_000)).rejects.toThrow(
+    await expect(planSnapshots([allSelected(web, [storyOf('a'), storyOf('b')])], reader.read, config)).rejects.toThrow(
       'The options read left out b, a story of ./button.stories.tsx.',
     )
   })
@@ -341,7 +374,7 @@ describe('planSnapshots', () => {
         async () => {
           throw error
         },
-        5_000,
+        config,
       ),
     ).rejects.toBe(error)
   })
@@ -366,7 +399,7 @@ function badNameOf(storyId: string): string {
  * none.
  */
 async function problemLinesOf(stories: Story[], reader: ReturnType<typeof readerOf>): Promise<string[]> {
-  const plan = await planSnapshots([allSelected(web, stories)], reader.read, 5_000)
+  const plan = await planSnapshots([allSelected(web, stories)], reader.read, config)
 
   return 'problem' in plan ? plan.problem.split('\n') : expect.fail(`The plan has no problem: ${JSON.stringify(plan)}`)
 }
@@ -429,12 +462,9 @@ describe('planSnapshots mode rules', () => {
 
   it("skips the declared-globals rule for a Storybook whose declared globals the page couldn't read", async () => {
     const reader = readerOf({ a: { modes: { dark: { globals: { theme: 'dark' } } } } })
+    const plan = await planSnapshots([allSelected(web, [storyOf('a')])], reader.read, config)
 
-    expect(await planSnapshots([allSelected(web, [storyOf('a')])], reader.read, 5_000)).toEqual({
-      snapshots: [
-        { storybook: web, story: storyOf('a'), options: { modes: { dark: { globals: { theme: 'dark' } } } } },
-      ],
-    })
+    expect('snapshots' in plan && plan.snapshots.map(({ key }) => key)).toEqual(['a', 'a.dark'])
   })
 
   it('checks each Storybook against its own declared globals', async () => {
@@ -447,7 +477,7 @@ describe('planSnapshots mode rules', () => {
     const plan = await planSnapshots(
       [allSelected(web, [storyOf('a')]), allSelected(docs, [storyOf('b')])],
       reader.read,
-      5_000,
+      config,
     )
 
     expect(plan).toEqual({
@@ -498,9 +528,118 @@ describe('planSnapshots mode rules', () => {
     const plan = await planSnapshots(
       [{ storybook: web, stories: [storyOf('b')], allStories: [storyOf('a'), storyOf('b')] }],
       reader.read,
-      5_000,
+      config,
     )
 
     expect('problem' in plan && plan.problem).toContain('  - b: visualCheck.modes.dark: sets')
+  })
+})
+
+/**
+ * The mode most cases plan: a dark theme.
+ */
+const dark = { globals: { theme: 'dark', density: 2, animated: false } }
+
+/**
+ * A second mode: a phone's viewport.
+ */
+const mobile = { viewport: { width: 375, height: 667, deviceScaleFactor: 2, touch: true } }
+
+/**
+ * Plans `web` with every story selected, read by a reader that answers with `options`, and gives its snapshots, or
+ * fails when the plan has a problem.
+ */
+async function snapshotsOf(stories: Story[], options: Record<string, unknown>): Promise<PlannedSnapshot[]> {
+  const plan = await planSnapshots([allSelected(web, stories)], readerOf(options).read, config)
+
+  return 'snapshots' in plan ? plan.snapshots : expect.fail(`The plan has a problem: ${plan.problem}`)
+}
+
+describe('planSnapshots modes', () => {
+  it('plans the default capture, then each listed mode in order, each with its key, viewport and globals', async () => {
+    const options = { modes: { dark, mobile } }
+
+    expect(await snapshotsOf([storyOf('a'), storyOf('b')], { a: options })).toEqual([
+      defaultCaptureOf(web, storyOf('a'), options),
+      {
+        storybook: web,
+        story: storyOf('a'),
+        mode: 'dark',
+        key: 'a.dark',
+        options,
+        viewport: config.viewport,
+        globals: { theme: 'dark', density: 2, animated: false },
+      },
+      {
+        storybook: web,
+        story: storyOf('a'),
+        mode: 'mobile',
+        key: 'a.mobile',
+        options,
+        viewport: { width: 375, height: 667, deviceScaleFactor: 2, touch: true },
+        globals: {},
+      },
+      defaultCaptureOf(web, storyOf('b'), {}),
+    ])
+  })
+
+  it("keeps the other snapshots' keys when a story drops a mode", async () => {
+    const snapshots = await snapshotsOf([storyOf('a')], { a: { modes: { dark: null, mobile } } })
+
+    expect(snapshots.map(({ key, mode }) => [key, mode])).toEqual([
+      ['a', undefined],
+      ['a.mobile', 'mobile'],
+    ])
+  })
+
+  it.each([
+    ['no modes', {}],
+    ['empty modes', { modes: {} }],
+    ['every mode left out', { modes: { dark: null, mobile: null } }],
+  ])('plans the default capture alone for a story with %s', async (_, options) => {
+    expect(await snapshotsOf([storyOf('a')], { a: options })).toEqual([defaultCaptureOf(web, storyOf('a'), options)])
+  })
+
+  it("lays the default capture out at the config's viewport under the story's, key by key", async () => {
+    const options = { viewport: { width: 375 } }
+
+    expect(await snapshotsOf([storyOf('a')], { a: options })).toEqual([
+      defaultCaptureOf(web, storyOf('a'), options, { width: 375, height: 720, deviceScaleFactor: 1, touch: false }),
+    ])
+  })
+
+  it("lays a mode out at the default capture's viewport under the mode's, key by key", async () => {
+    const snapshots = await snapshotsOf([storyOf('a')], {
+      a: {
+        viewport: { width: 1024, deviceScaleFactor: 2 },
+        modes: { dark, narrow: { viewport: { width: 320, touch: true } } },
+      },
+    })
+
+    expect(snapshots.map(({ key, ...snapshot }) => [key, 'viewport' in snapshot ? snapshot.viewport : null])).toEqual([
+      ['a', { width: 1024, height: 720, deviceScaleFactor: 2, touch: false }],
+      ['a.dark', { width: 1024, height: 720, deviceScaleFactor: 2, touch: false }],
+      ['a.narrow', { width: 320, height: 720, deviceScaleFactor: 2, touch: true }],
+    ])
+  })
+
+  it('plans no snapshot of a disabled story, whatever modes it lists', async () => {
+    expect(await snapshotsOf([storyOf('a')], { a: { disable: true, modes: { dark, mobile } } })).toEqual([])
+  })
+
+  it("plans one broken snapshot, with no mode, for a story whose stories file didn't load", async () => {
+    const reader = readerOf(
+      {},
+      { web: { declaredGlobals: null, files: [{ importPath: './button.stories.tsx', outcome: 'timed-out' }] } },
+    )
+
+    expect(await planSnapshots([allSelected(web, [storyOf('a')])], reader.read, config)).toEqual({
+      snapshots: [
+        brokenOf(web, storyOf('a'), {
+          reason: 'load-failed',
+          message: "Its stories file ./button.stories.tsx didn't load within readyTimeout (5000 ms).",
+        }),
+      ],
+    })
   })
 })

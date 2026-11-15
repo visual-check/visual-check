@@ -21,7 +21,7 @@ An interaction state, such as hover or keyboard focus, that a cell of a grid sto
 _Avoid_: Pseudo state, simulated hover
 
 **Baseline**:
-The approved image of a story, the reference every comparison is made against.
+The approved image of a story in its default capture or one of its modes, the reference every comparison is made against.
 _Avoid_: Reference image, golden, expected
 
 **Missing baseline**:
@@ -41,7 +41,7 @@ One of several CI jobs a test run is split across, and the share of snapshots it
 _Avoid_: Worker, partition, chunk
 
 **Snapshot**:
-The image of a story captured during the current run.
+The image of a story in its default capture or one of its modes, captured during the current run.
 _Avoid_: Screenshot, visual, current image
 
 **End state**:

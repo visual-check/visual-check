@@ -2,6 +2,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -188,6 +189,12 @@ interface FakeStory {
    * and the test times out. It doesn't wait when not given.
    */
   waitsFor?: string
+  /**
+   * How the story answers instead when its URL sets globals, as a mode's snapshot does, by the URL's `globals`
+   * parameter, such as `theme:dark`. What it gives replaces the story's own answers. The story answers as it does
+   * without globals when not given.
+   */
+  byGlobals?: Record<string, FakeStory>
 }
 
 /**
@@ -443,8 +450,15 @@ function fakeDriverOf({
           failIfGone()
           pageUrl = url
           record.urls.push(url)
-          id = new URL(url).searchParams.get('id') ?? ''
+          const { searchParams } = new URL(url)
+          const globals = searchParams.get('globals')
+
+          id = searchParams.get('id') ?? ''
           story = stories[id] ?? {}
+
+          if (globals !== null) {
+            story = { ...story, ...story.byGlobals?.[globals] }
+          }
         },
         evaluate: async (expression, timeoutMs) => {
           failIfGone()
@@ -1633,6 +1647,120 @@ describe('runCli per-story options', () => {
       stdout: printed(headerOf('test', 0), '0 passed'),
       stderr: '',
     })
+  })
+})
+
+/**
+ * The options of a story that lists two modes: `dark`, which sets a global, and `mobile`, which sets a viewport, over
+ * a viewport of its own.
+ */
+const twoModes = {
+  viewport: { height: 900 },
+  modes: {
+    dark: { globals: { theme: 'dark' } },
+    mobile: { viewport: { width: 375, deviceScaleFactor: 2, touch: true } },
+  },
+}
+
+/**
+ * The snapshot story `a` captures in its `dark` mode, which differs from `defaultSnapshot`.
+ */
+const darkSnapshot = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 3])
+
+/**
+ * How story `a` answers: its `dark` mode, whose URL sets `theme:dark`, captures `darkSnapshot`.
+ */
+const darkStory: FakeStory = { byGlobals: { 'theme:dark': { snapshot: darkSnapshot } } }
+
+describe('runCli modes', () => {
+  it('tests each mode as its own snapshot against its own baseline, the mode in its own column', async () => {
+    const { project } = await createRun(['a', 'b'], { a: defaultSnapshot, 'a.dark': darkSnapshot, b: otherSnapshot })
+    const { options, record } = fakeBrowser({ a: darkStory }, { read: { options: { a: twoModes } } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toBe('')
+    expect(withoutTimes(result.stdout)).toBe(
+      printed(
+        headerOf('test', 4),
+        '✓ web  a  N ms',
+        '✓ web  a  dark  N ms',
+        '✗ web  a  mobile  missing: no baseline yet; run visual-check update to write it',
+        "✗ web  b  differs: the snapshot isn't byte-identical to its baseline",
+        '2 passed · 1 differs · 1 missing',
+      ),
+    )
+    expect(storyIdsOf(record.urls).sort()).toEqual(['a', 'a', 'b'])
+  })
+
+  it("reports a mode's snapshot that breaks as broken, on its own line, and takes the others", async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot, 'a.dark': defaultSnapshot })
+    const { options } = fakeBrowser(
+      { a: { byGlobals: { 'theme:dark': { broken: true } } } },
+      { read: { options: { a: { modes: { dark: twoModes.modes.dark } } } } },
+    )
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(1)
+    expect(withoutTimes(result.stdout)).toBe(
+      printed(headerOf('test', 2), '✓ web  a  N ms', `! web  a  dark  ${brokenDetail}`, '1 passed · 1 broken'),
+    )
+  })
+
+  it("captures each snapshot at its own viewport, loading a mode's story URL with the mode's globals", async () => {
+    const { project, url } = await createRun(['a'], {}, 'workers: 1')
+    const { options, record } = fakeBrowser({}, { read: { options: { a: twoModes } } })
+
+    await runCli(['update'], {}, project, options)
+
+    expect(record.viewports).toEqual([
+      { width: 1280, height: 900, deviceScaleFactor: 1, touch: false },
+      { width: 1280, height: 900, deviceScaleFactor: 1, touch: false },
+      { width: 375, height: 900, deviceScaleFactor: 2, touch: true },
+    ])
+    expect(record.urls).toEqual([
+      previewOf(url),
+      `${url}/iframe.html?id=a&viewMode=story`,
+      `${url}/iframe.html?id=a&viewMode=story&globals=theme%3Adark`,
+      `${url}/iframe.html?id=a&viewMode=story`,
+    ])
+  })
+
+  it("writes each mode's baseline as <story-id>.<mode>.png in update, with the mode's own capture", async () => {
+    const { project, folder } = await createRun(['a'])
+    const { options } = fakeBrowser({ a: darkStory }, { read: { options: { a: twoModes } } })
+    const result = await runCli(['update'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 0,
+      stdout: printed(
+        headerOf('update', 3),
+        '✓ web  a  written .visual-check/baselines/a.png',
+        '✓ web  a  dark  written .visual-check/baselines/a.dark.png',
+        '✓ web  a  mobile  written .visual-check/baselines/a.mobile.png',
+        '3 written',
+      ),
+      stderr: '',
+    })
+    expect(readdirSync(folder).sort()).toEqual(['a.dark.png', 'a.mobile.png', 'a.png'])
+    expect(new Uint8Array(readFileSync(join(folder, 'a.dark.png')))).toEqual(darkSnapshot)
+    expect(new Uint8Array(readFileSync(join(folder, 'a.png')))).toEqual(defaultSnapshot)
+  })
+
+  it('takes every snapshot of a story --filter selects', async () => {
+    const { project } = await createRun(['a', 'b'])
+    const { options } = fakeBrowser({}, { read: { options: { a: twoModes, b: twoModes } } })
+    const result = await runCli(['update', '--filter', '^a$'], {}, project, options)
+
+    expect(result.stdout).toBe(
+      printed(
+        headerOf('update', 3),
+        '✓ web  a  written .visual-check/baselines/a.png',
+        '✓ web  a  dark  written .visual-check/baselines/a.dark.png',
+        '✓ web  a  mobile  written .visual-check/baselines/a.mobile.png',
+        '3 written',
+      ),
+    )
   })
 })
 

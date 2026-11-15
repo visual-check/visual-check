@@ -191,7 +191,6 @@ function runBrowserWith(...browsers: (FakeBrowser | Promise<FakeBrowser> | Error
       place: { in: 'image' },
       environment: {},
       settings: {
-        viewport: { width: 1280, height: 720, deviceScaleFactor: 1, touch: false },
         readyTimeoutMs: 15_000,
         timezone: 'UTC',
         locale: 'en-US',
@@ -208,7 +207,11 @@ function runBrowserWith(...browsers: (FakeBrowser | Promise<FakeBrowser> | Error
  * Gives the story with the given ID and the URL of its own page.
  */
 function storyOf(id: string): StoryToCapture {
-  return { id, url: `http://127.0.0.1:6006/iframe.html?id=${id}&viewMode=story` }
+  return {
+    id,
+    url: `http://127.0.0.1:6006/iframe.html?id=${id}&viewMode=story`,
+    viewport: { width: 1280, height: 720, deviceScaleFactor: 1, touch: false },
+  }
 }
 
 /**
