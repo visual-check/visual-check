@@ -69,7 +69,7 @@ What a story shows from an origin other than its Storybook's: images and embedde
 _Avoid_: External assets, third-party content, CDN images
 
 **Broken story**:
-A story that can't be captured: its stories file fails to load, or it errors, crashes the browser, never becomes ready, navigates away, or doesn't render the same way twice.
+A story that can't be captured: its stories file fails to load, or it errors, crashes its page, is in flight when the browser exits, never becomes ready, navigates away, or doesn't render the same way twice.
 _Avoid_: Failed story, errored story
 
 **Flaky snapshot**:

@@ -121,7 +121,7 @@ One line per snapshot as it finishes:
 
 - `✓ web  button--primary  142 ms` for a pass;
 - `✗ web  button--primary  dark  differs: 84 differ, 80 allowed (20 at scale 2)` for a visual diff;
-- `! web  checkout--flow  broken: navigated away to /categories/burgers. Await the new page before clicking.` for a broken story.
+- `! web  checkout--flow  broken: The story navigated away to /categories/burgers. Await the new page before clicking.` for a broken story.
 
 ### `live`
 
@@ -145,6 +145,7 @@ Both `log` and `live` end with the same block:
 - **Remote content:** a failure that differs only inside remote content carries a hint that names the hosts, shows the mask line and links the docs page.
 - **No changed files:** a hint about `--all`.
 - **Selection couldn't be worked out:** a warning that every story was selected.
+- **Browser exited mid-run:** the run's stderr says so, says that visual-check relaunches it once for the stories left (or that no story left needed it), and prints the browser's last output. On exit 2 it comes before the stop message.
 - **Storybook's test path is off:** one warning per Storybook at the end of the run.
 - **`update`'s warnings** are in [Baselines and update](10-baselines-and-update.md).
 
