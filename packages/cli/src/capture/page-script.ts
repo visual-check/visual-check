@@ -396,9 +396,9 @@ export function endStateExpression(timeoutMs: number): string {
 
 /**
  * Builds the expression that prepares the page for its capture as `request` says, at capture, after the end state: it
- * measures the element, paints the masks and hides the caret. The host masks' remote content search gives up once
- * `timeoutMs` passes, rounded up to whole ms. The request goes into the expression as JSON, so any selector survives.
- * Its value is the page's answer, which `readCapturePrep` reads.
+ * measures the element, paints the masks and hides the caret. The remote content search, run for the host masks or
+ * when `findRemote` is true, gives up once `timeoutMs` passes, rounded up to whole ms. The request goes into the
+ * expression as JSON, so any selector survives. Its value is the page's answer, which `readCapturePrep` reads.
  */
 export function prepareCaptureExpression(request: CapturePrepRequest, timeoutMs: number): string {
   const limit = Math.max(0, Math.ceil(timeoutMs))

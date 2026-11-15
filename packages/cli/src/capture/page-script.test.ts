@@ -550,7 +550,9 @@ describe('the page script', () => {
 
     expect(page.documentReads()).toBe(0)
     expect(
-      await page.evaluate(prepareCaptureExpression({ element: null, masks: [], maskColor: '#FF00FF' }, 1000)),
+      await page.evaluate(
+        prepareCaptureExpression({ element: null, masks: [], maskColor: '#FF00FF', findRemote: false }, 1000),
+      ),
     ).toEqual({ outcome: 'ready', box: null })
     expect(page.documentReads()).toBeGreaterThan(0)
   })
@@ -958,7 +960,9 @@ describe('the capture preparation', () => {
     const page = openPage({ document })
 
     expect(
-      await page.evaluate(prepareCaptureExpression({ element: selector, masks: [], maskColor: '#FF00FF' }, 1000)),
+      await page.evaluate(
+        prepareCaptureExpression({ element: selector, masks: [], maskColor: '#FF00FF', findRemote: false }, 1000),
+      ),
     ).toEqual({ outcome: 'ready', box: { x: 10, y: 20, width: 30, height: 40 } })
   })
 
@@ -970,7 +974,12 @@ describe('the capture preparation', () => {
       responses: { 'https://images.example.com/a.jpg': 'stalls' },
     })
     const page = openPage({ document, URL })
-    const request = { element: null, masks: [{ name: 'images', host: 'images.example.com' }], maskColor: '#FF00FF' }
+    const request = {
+      element: null,
+      masks: [{ name: 'images', host: 'images.example.com' }],
+      maskColor: '#FF00FF',
+      findRemote: false,
+    }
     let settled = false
     const answer = page.evaluate(prepareCaptureExpression(request, 999.2)).finally(() => {
       settled = true
@@ -982,8 +991,20 @@ describe('the capture preparation', () => {
     expect(await answer).toEqual({ outcome: 'timed-out' })
   })
 
+  it('brings back the remote content the page shows when the request asks for it', async () => {
+    const { document } = fakePageDocument({ elements: [fakeImg({ src: 'https://images.example.com/a.jpg' })] })
+    const page = openPage({ document, URL })
+    const request = { element: null, masks: [], maskColor: '#FF00FF', findRemote: true }
+
+    expect(await page.evaluate(prepareCaptureExpression(request, 1000))).toEqual({
+      outcome: 'ready',
+      box: null,
+      remote: [{ host: 'images.example.com', x: 10, y: 20, width: 100, height: 50 }],
+    })
+  })
+
   it("gives script-missing in a page where the page script didn't run", async () => {
-    const request = { element: '#card', masks: [], maskColor: '#FF00FF' }
+    const request = { element: '#card', masks: [], maskColor: '#FF00FF', findRemote: false }
 
     expect(await blankPage().evaluate(prepareCaptureExpression(request, 1000))).toEqual({ outcome: 'script-missing' })
   })

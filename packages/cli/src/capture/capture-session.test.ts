@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { finishedAnswer, timedOutAnswer } from '../storybook/preview-script.fixture.js'
 import { storyWaitExpression } from '../storybook/preview-script.js'
 import { waitHookExpression } from '../storybook/wait-hook.js'
-import { type CaptureSettings, openCaptureSession } from './capture-session.js'
+import { type CaptureSettings, openCaptureSession, remoteContentBoxesOf } from './capture-session.js'
 import {
   BrowserExitedError,
   CaptureTooLargeError,
@@ -49,7 +49,7 @@ const secondary = {
  * Builds the capture preparation expression for a story without element or masks, with this time limit.
  */
 function plainPrepExpression(timeoutMs: number): string {
-  return prepareCaptureExpression({ element: null, masks: [], maskColor: '#00FF00' }, timeoutMs)
+  return prepareCaptureExpression({ element: null, masks: [], maskColor: '#00FF00', findRemote: false }, timeoutMs)
 }
 
 /**
@@ -512,7 +512,13 @@ describe('the masks', () => {
       {
         page: 1,
         method: 'evaluate',
-        args: [prepareCaptureExpression({ element: '#card', masks: card.masks, maskColor: '#00FF00' }, 10_000), 11_000],
+        args: [
+          prepareCaptureExpression(
+            { element: '#card', masks: card.masks, maskColor: '#00FF00', findRemote: false },
+            10_000,
+          ),
+          11_000,
+        ],
       },
       { page: 1, method: 'capture', args: ['full-page'] },
     ])
@@ -673,6 +679,101 @@ describe('the masks', () => {
           'The page crashed while painting its masks and hiding the caret, usually because it ran out of memory. Fewer workers leave each page more memory.',
       },
     })
+  })
+})
+
+describe('the remote content', () => {
+  /**
+   * The primary story, asking for the remote content its snapshot shows.
+   */
+  const retried = { ...primary, findRemoteContent: true }
+
+  it('is asked of the page when the story asks for it', async () => {
+    const driver = new FakeDriver()
+
+    await openCaptureSession(driver, settings).capture(retried)
+    expect(driver.calls[6]?.args).toEqual([
+      prepareCaptureExpression({ element: null, masks: [], maskColor: '#00FF00', findRemote: true }, 10_000),
+      11_000,
+    ])
+  })
+
+  it('is not asked of the page, nor given, when the story does not ask for it', async () => {
+    const remote = [{ host: 'images.example.com', x: 1, y: 2, width: 3, height: 4 }]
+    const driver = new FakeDriver({ pages: [{ capturePrep: async () => ({ outcome: 'ready', box: null, remote }) }] })
+    const capture = await openCaptureSession(driver, settings).capture(primary)
+
+    expect(driver.calls[6]?.args).toEqual([plainPrepExpression(10_000), 11_000])
+    expect(capture).toEqual({ snapshot: defaultSnapshot })
+    expect(capture).not.toHaveProperty('remoteContent')
+  })
+
+  it('is not given when the story asks for it but the page gives none, as when its search timed out', async () => {
+    const capture = await openCaptureSession(new FakeDriver(), settings).capture(retried)
+
+    expect(capture).toEqual({ snapshot: defaultSnapshot })
+    expect(capture).not.toHaveProperty('remoteContent')
+  })
+
+  it('is given in pixels of the image for the full page', async () => {
+    const remote = [{ host: 'images.example.com:8443', x: 10.5, y: 20.25, width: 30, height: 40 }]
+    const driver = new FakeDriver({ pages: [{ capturePrep: async () => ({ outcome: 'ready', box: null, remote }) }] })
+    const story = { ...retried, viewport: { ...primary.viewport, deviceScaleFactor: 1 } }
+
+    expect(await openCaptureSession(driver, settings).capture(story)).toEqual({
+      snapshot: defaultSnapshot,
+      completingMs: undefined,
+      remoteContent: [{ host: 'images.example.com:8443', x: 10, y: 20, width: 31, height: 41 }],
+    })
+  })
+
+  it("is given in pixels of the image for the element's box, at the viewport's scale", async () => {
+    const box = { x: 8, y: 16, width: 320, height: 200 }
+    const remote = [{ host: 'images.example.com', x: 10.3, y: 20.75, width: 5.2, height: 3.1 }]
+    const driver = new FakeDriver({ pages: [{ capturePrep: async () => ({ outcome: 'ready', box, remote }) }] })
+
+    expect(await openCaptureSession(driver, settings).capture({ ...retried, element: '#card' })).toEqual({
+      snapshot: defaultSnapshot,
+      completingMs: undefined,
+      remoteContent: [{ host: 'images.example.com', x: 4, y: 9, width: 11, height: 7 }],
+    })
+    expect(driver.calls.at(-1)).toEqual({ page: 1, method: 'capture', args: [box] })
+  })
+})
+
+describe('remoteContentBoxesOf', () => {
+  it('moves each box to the full page origin and rounds it out to whole pixels at scale 1', () => {
+    expect(
+      remoteContentBoxesOf([{ host: 'a.example.com', x: 10.5, y: 20.25, width: 30, height: 40.5 }], 'full-page', 1),
+    ).toEqual([{ host: 'a.example.com', x: 10, y: 20, width: 31, height: 41 }])
+  })
+
+  it("moves each box to the element's box and scales it, rounding the left and top down and the right and bottom up", () => {
+    const area = { x: 8, y: 16, width: 320, height: 200 }
+
+    expect(
+      remoteContentBoxesOf(
+        [
+          { host: 'a.example.com', x: 10.3, y: 20.75, width: 5.2, height: 3.1 },
+          { host: 'b.example.com:8443', x: 0, y: 10, width: 20, height: 10 },
+        ],
+        area,
+        2,
+      ),
+    ).toEqual([
+      { host: 'a.example.com', x: 4, y: 9, width: 11, height: 7 },
+      { host: 'b.example.com:8443', x: -16, y: -12, width: 40, height: 20 },
+    ])
+  })
+
+  it('scales whole pixels exactly at a fractional scale', () => {
+    expect(
+      remoteContentBoxesOf([{ host: 'a.example.com', x: 4, y: 2, width: 2, height: 2 }], 'full-page', 1.5),
+    ).toEqual([{ host: 'a.example.com', x: 6, y: 3, width: 3, height: 3 }])
+  })
+
+  it('gives none for no remote content', () => {
+    expect(remoteContentBoxesOf([], 'full-page', 2)).toEqual([])
   })
 })
 
