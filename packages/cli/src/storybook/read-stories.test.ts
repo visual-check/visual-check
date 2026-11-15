@@ -461,10 +461,27 @@ describe('storyUrlOf', () => {
     ['a string value with a slash', { theme: 'dark/blue' }, 'theme'],
     ['NaN', { zoom: Number.NaN }, 'zoom'],
     ['Infinity', { zoom: Number.POSITIVE_INFINITY }, 'zoom'],
+    ['a number with an exponent', { zoom: 1e21 }, 'zoom'],
+    ['a small number with an exponent', { zoom: 1e-7 }, 'zoom'],
   ])('throws for %s, naming the key', (_name, globals, key) => {
     expect(() => storyUrlOf('http://127.0.0.1:6006', 'button--primary', globals)).toThrow(
       `Storybook can't take the global "${key}" from the URL:`,
     )
+  })
+
+  it('names a number that is not in plain decimal digits', () => {
+    expect(() => storyUrlOf('http://127.0.0.1:6006', 'a', { zoom: 1e21 })).toThrow(
+      `Storybook can't take the global "zoom" from the URL: its value 1e+21 isn't a number in plain decimal digits.`,
+    )
+    expect(() => storyUrlOf('http://127.0.0.1:6006', 'a', { zoom: 1e-7 })).toThrow(
+      `Storybook can't take the global "zoom" from the URL: its value 1e-7 isn't a number in plain decimal digits.`,
+    )
+  })
+
+  it('keeps plain decimal numbers', () => {
+    const url = storyUrlOf('http://127.0.0.1:6006', 'a', { zoom: 1.5, offset: -2, none: 0 })
+
+    expect(new URL(url).searchParams.get('globals')).toBe('zoom:1.5;offset:-2;none:0')
   })
 
   it("names the value when it can't go in the URL", () => {

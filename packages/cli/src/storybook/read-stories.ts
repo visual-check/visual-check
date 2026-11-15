@@ -176,6 +176,12 @@ type GlobalValue = string | number | boolean
 const urlSafeGlobalPattern = /^[a-zA-Z0-9 _-]*$/
 
 /**
+ * What Storybook reads back from the URL as a number: digits with an optional leading `-` and an optional fraction. It
+ * reads an exponent, such as `1e+21` or `1e-7`, as a string.
+ */
+const plainDecimalPattern = /^-?\d+(\.\d+)?$/
+
+/**
  * Builds the error for a global Storybook would drop from the URL.
  */
 function unusableGlobalErrorOf(key: string, reason: string): Error {
@@ -187,7 +193,7 @@ function unusableGlobalErrorOf(key: string, reason: string): Error {
  * `!false`, a number in plain digits.
  *
  * @throws {Error} Naming the key when the key is empty or holds a character Storybook drops, a string value holds one,
- * or a number isn't finite.
+ * or a number isn't finite or isn't written in plain decimal digits, such as `1e21` or `1e-7`.
  */
 function encodeGlobal(key: string, value: GlobalValue): string {
   if (key === '' || !urlSafeGlobalPattern.test(key)) {
@@ -203,7 +209,13 @@ function encodeGlobal(key: string, value: GlobalValue): string {
       throw unusableGlobalErrorOf(key, `its value ${value} isn't a finite number`)
     }
 
-    return `${key}:${value}`
+    const digits = String(value)
+
+    if (!plainDecimalPattern.test(digits)) {
+      throw unusableGlobalErrorOf(key, `its value ${digits} isn't a number in plain decimal digits`)
+    }
+
+    return `${key}:${digits}`
   }
 
   if (!urlSafeGlobalPattern.test(value)) {
