@@ -145,7 +145,7 @@ CI's "Inside the image" job does this on every PR.
 
 ## Running it on the host
 
-`--host` checks `platform: 'host'` on your machine, in place of all the cases above. It needs no `TEST_STORYBOOK_IMAGE` and no Docker. Two cases capture `card--default` against baselines the run writes, since the committed ones need the image's fonts:
+`--host` checks `platform: 'host'` on your machine, in place of all the cases above. It needs no `TEST_STORYBOOK_IMAGE` and no Docker. Two cases capture `card--default` against baselines the run writes, since the committed ones need the image's fonts. Their server's `index.json` lists only `card--default`, since `update` writes every missing baseline whatever the selection, so `update` writes only that baseline:
 
 - With an empty cache, `update` (with `CI` unset) downloads the headless shell, says so, writes the baseline, and leaves the cache's marker for this machine's build.
 - `test` then downloads nothing and passes.
