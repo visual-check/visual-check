@@ -12,6 +12,7 @@
         "$TURBO_ROOT$/test-storybooks/storybook-10-react/.storybook/shared-preview.ts",
         "$TURBO_ROOT$/test-storybooks/storybook-10-react/.storybook/visual-check.ts",
         "$TURBO_ROOT$/test-storybooks/storybook-10-react/stories/**",
+        "$TURBO_ROOT$/test-storybooks/storybook-10-react/static/**",
         "$TURBO_ROOT$/test-storybooks/storybook-10-react/tsconfig.json"
       ],
       "outputs": ["storybook-static/**"]

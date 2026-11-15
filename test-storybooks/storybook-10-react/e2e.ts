@@ -181,6 +181,17 @@ const deliberateChange = {
 }
 
 /**
+ * The grow case: the masked story it widens, by the pattern its ID matches, and the script it adds to every
+ * `iframe.html`, which runs before Storybook imports any stories file and widens the story's masked element from 200 to
+ * 300 px, so its mask grows with it.
+ */
+const growingMask = {
+  storyId: 'masks--grows',
+  filter: /^masks--grows$/,
+  script: '<script>globalThis.__visualCheckE2eGrow = true</script>',
+}
+
+/**
  * How many workers every case that captures in parallel uses, through `--workers` or the config it writes, so each
  * captures in parallel on any machine.
  */
@@ -1487,6 +1498,21 @@ async function checkDeliberateChange(expected: Outcomes): Promise<string[]> {
 }
 
 /**
+ * A masked element that grows, and its mask with it, fails `test` with that story's snapshot differing: the mask
+ * covers the element's box as it is at capture, not the baseline's.
+ */
+async function checkGrowingMask(): Promise<string[]> {
+  return await withStorybookServer({ injectIntoIframe: growingMask.script }, async (server) => {
+    const run = await runCli(['test', '--filter', growingMask.filter.source, '--url', server.url])
+
+    return [
+      ...exitCodeProblems('test', run, 1),
+      ...outcomeProblems('test', run.outcomes, { [growingMask.storyId]: 'differs' }),
+    ]
+  })
+}
+
+/**
  * With every `iframe.html`'s `navigator.userAgent` its own without `StorybookTestRunner`, Storybook takes the path it
  * takes off the test path, waiting about 100 ms as each story completes. `test` with 2 workers gives the button
  * stories their expected outcomes, so it exits 0, and standard error warns once that the Storybook seems to ignore the
@@ -1991,6 +2017,10 @@ if (setupProblems.length > 0) {
     {
       name: `deliberate change: test exits 1 and ${deliberateChange.storyId} differs`,
       run: () => checkDeliberateChange(expected),
+    },
+    {
+      name: `a masked element that grows: test exits 1 and ${growingMask.storyId} differs`,
+      run: checkGrowingMask,
     },
     {
       name: "test path: a Storybook that ignores the test path's user agent triggers the warning once, and the run passes",
