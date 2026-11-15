@@ -16,6 +16,7 @@
     "@types/react-dom": "19.3.0",
     "@visual-check/chromium": "workspace:*",
     "@visual-check/cli": "workspace:*",
+    "@visual-check/storybook": "workspace:*",
     "@visual-check/typescript-config": "workspace:*",
     "react": "19.3.1",
     "react-dom": "19.3.1",

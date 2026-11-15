@@ -25,6 +25,8 @@ import {
 } from '../capture/driver/driver.js'
 import { answerEvaluate } from '../capture/fake-driver.fixture.js'
 import { ContainerError } from '../container/container-error.js'
+import { answerOptionsReadExpression, optionsReadAnswer } from '../storybook/options-read.fixture.js'
+import type { StoriesFile } from '../storybook/options-read.js'
 import { finishedAnswer } from '../storybook/preview-script.fixture.js'
 import type { ContainerRoute } from './browser-route.js'
 import type { BrowserLaunch, LaunchBrowser } from './launch-browser.js'
@@ -189,6 +191,68 @@ interface FakeStory {
 }
 
 /**
+ * How the fake browser answers the options read. By default every stories file loads and no story has options.
+ */
+interface FakeRead {
+  /**
+   * Each story's merged `parameters.visualCheck`, by ID, as the page gives it. A story left out has none.
+   */
+  options?: Record<string, unknown>
+  /**
+   * The stories files that fail to load, by import path, each with the message the page gives.
+   */
+  failed?: Record<string, string>
+  /**
+   * The stories files whose stories don't load within readyTimeout.
+   */
+  timedOut?: string[]
+  /**
+   * The page's answer to the read of each preview, by its URL, in place of one built from the files, such as one whose
+   * preview never started.
+   */
+  answers?: Record<string, unknown>
+  /**
+   * The browsers, by launch number counting from 1, that exit as a read is made in them.
+   */
+  exitingBrowsers?: number[]
+}
+
+/**
+ * What one options read asked for.
+ */
+interface ReadRecord {
+  /**
+   * Which of the run's launches the read was made in, counting from 1.
+   */
+  browser: number
+  /**
+   * The URL of the page the read was made on.
+   */
+  url: string
+  /**
+   * The stories files the read asked for.
+   */
+  files: StoriesFile[]
+}
+
+/**
+ * Builds what the fake page read of one stories file, as `read` says.
+ */
+function fileReadOf({ importPath, storyIds }: StoriesFile, read: FakeRead) {
+  const failed = read.failed?.[importPath]
+
+  if (failed !== undefined) {
+    return { importPath, outcome: 'failed' as const, message: failed }
+  }
+
+  if (read.timedOut?.includes(importPath) === true) {
+    return { importPath, outcome: 'timed-out' as const }
+  }
+
+  return { importPath, stories: storyIds.map((id) => ({ id, options: read.options?.[id] })) }
+}
+
+/**
  * The snapshot a fake story captures when it gives none.
  */
 const defaultSnapshot = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1])
@@ -202,9 +266,13 @@ interface FakeBrowserRecord {
    */
   launches: BrowserLaunch[]
   /**
-   * The URL of every story loaded, in order.
+   * The URL of every page loaded, in order: each options read's preview and each story.
    */
   urls: string[]
+  /**
+   * Every options read, in order.
+   */
+  reads: ReadRecord[]
   /**
    * The setup of every page opened.
    */
@@ -240,6 +308,7 @@ function newRecord(): FakeBrowserRecord {
   return {
     launches: [],
     urls: [],
+    reads: [],
     setups: [],
     viewports: [],
     pageCloses: 0,
@@ -299,13 +368,24 @@ interface FakeDriverOptions {
    * The gates its stories wait on, which the run's other browsers share. Gates of its own when not given.
    */
   gates?: StoryGates
+  /**
+   * How its pages answer the options read. Every file loads and no story has options when not given.
+   */
+  read?: FakeRead
 }
 
 /**
- * Builds a fake driver whose pages answer each story, by ID, as the options say. Once the browser exits, `exited`
- * settles and every call fails with the exit, whose output names the browser.
+ * Builds a fake driver whose pages answer each story, by ID, and the options read as the options say. Once the
+ * browser exits, `exited` settles and every call fails with the exit, whose output names the browser.
  */
-function fakeDriverOf({ stories, record, version, browser = 1, gates = new Map() }: FakeDriverOptions): Driver {
+function fakeDriverOf({
+  stories,
+  record,
+  version,
+  browser = 1,
+  gates = new Map(),
+  read = {},
+}: FakeDriverOptions): Driver {
   let settleExited: (error: BrowserExitedError) => void = () => undefined
   let gone: BrowserExitedError | undefined
   const exit = (exiting: FakeStory = {}): BrowserExitedError => {
@@ -332,6 +412,21 @@ function fakeDriverOf({ stories, record, version, browser = 1, gates = new Map()
     newPage: async (setup) => {
       let story: FakeStory = {}
       let id = ''
+      let pageUrl = ''
+
+      /**
+       * Answers the options read of the files it asks for, as `read` says, recording it. The browser exits instead
+       * when `read` says so.
+       */
+      const answerRead = (files: StoriesFile[]): unknown => {
+        record.reads.push({ browser, url: pageUrl, files: JSON.parse(JSON.stringify(files)) as StoriesFile[] })
+
+        if (read.exitingBrowsers?.includes(browser) === true) {
+          throw exit()
+        }
+
+        return read.answers?.[pageUrl] ?? optionsReadAnswer(files.map((file) => fileReadOf(file, read)))
+      }
 
       failIfGone()
       record.setups.push(setup)
@@ -346,6 +441,7 @@ function fakeDriverOf({ stories, record, version, browser = 1, gates = new Map()
         },
         goto: async (url) => {
           failIfGone()
+          pageUrl = url
           record.urls.push(url)
           id = new URL(url).searchParams.get('id') ?? ''
           story = stories[id] ?? {}
@@ -357,7 +453,10 @@ function fakeDriverOf({ stories, record, version, browser = 1, gates = new Map()
           const completingMs = story.completingMs ?? null
 
           return await answerEvaluate(
-            { storyWait: async () => finishedAnswer({ status, completingMs }) },
+            {
+              storyWait: async () => finishedAnswer({ status, completingMs }),
+              optionsRead: async () => await answerOptionsReadExpression(expression, answerRead),
+            },
             expression,
             timeoutMs,
           )
@@ -403,12 +502,26 @@ function fakeDriverOf({ stories, record, version, browser = 1, gates = new Map()
 }
 
 /**
+ * What a fake browser answers besides its stories.
+ */
+interface FakeBrowserOptions {
+  /**
+   * The browser version every launch reports. The browser package's when not given.
+   */
+  version?: string
+  /**
+   * How the pages answer the options read. Every file loads and no story has options when not given.
+   */
+  read?: FakeRead
+}
+
+/**
  * Builds options whose every launch writes pull progress and gives a fresh fake driver of the given version, answering
- * each story as `stories` says. Returns them with what the fake browsers saw.
+ * each story as `stories` says and the options read as `read` says. Returns them with what the fake browsers saw.
  */
 function fakeBrowser(
   stories: Record<string, FakeStory> = {},
-  driverVersion: string = browserPackage.chromium,
+  { version: driverVersion = browserPackage.chromium, read = {} }: FakeBrowserOptions = {},
 ): { options: Required<RunCliOptions>; record: FakeBrowserRecord; progress: string[] } {
   const record = newRecord()
   const progress: string[] = []
@@ -424,7 +537,7 @@ function fakeBrowser(
       launch.progress(`Downloading Chromium ${launch.version}\n`)
     }
 
-    return fakeDriverOf({ stories, record, version: driverVersion, browser: record.launches.length, gates })
+    return fakeDriverOf({ stories, record, version: driverVersion, browser: record.launches.length, gates, read })
   }
 
   return {
@@ -491,7 +604,7 @@ const projects: string[] = []
  * Makes a temporary project holding a `.git` folder, which ends the config search there, and `files`, each a path
  * relative to the project mapped to its content. Returns the project's real path.
  */
-function createProject(files: Record<string, string>): string {
+function createProject(files: Record<string, string | Uint8Array>): string {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'visual-check-run-')))
 
   projects.push(root)
@@ -540,13 +653,21 @@ async function listen(server: Server): Promise<string> {
 }
 
 /**
- * Starts a server on a free port that answers every request with an index of the given stories. Returns its URL.
+ * Starts a server on a free port that answers every request with an index of the given stories, each in its stories
+ * file from `importPaths` by ID, else in `./button.stories.tsx`. Returns its URL.
  */
-async function startStorybook(storyIds: string[]): Promise<string> {
+async function startStorybook(storyIds: string[], importPaths: Record<string, string> = {}): Promise<string> {
   const entries = Object.fromEntries(
     storyIds.map((id) => [
       id,
-      { id, title: 'Button', name: id, importPath: './button.stories.tsx', type: 'story', subtype: 'story' },
+      {
+        id,
+        title: 'Button',
+        name: id,
+        importPath: importPaths[id] ?? './button.stories.tsx',
+        type: 'story',
+        subtype: 'story',
+      },
     ]),
   )
 
@@ -693,7 +814,9 @@ Other options:
       'button.stories.tsx': '',
     })
 
-    expect(firstLineOf((await runCli(['test', '--all'], {}, project, noLaunch)).stdout)).toBe(headerOf('test', 2))
+    expect(firstLineOf((await runCli(['test', '--all'], {}, project, fakeBrowser().options)).stdout)).toBe(
+      headerOf('test', 2),
+    )
     expect(
       firstLineOf((await runCli(['update', '--filter', 'secondary$'], {}, project, fakeBrowser().options)).stdout),
     ).toBe(headerOf('update', 1))
@@ -707,8 +830,9 @@ Other options:
       'web/button.stories.tsx': '',
       'docs/button.stories.tsx': '',
     })
+    const { options, record } = fakeBrowser()
 
-    expect(await runCli(['test'], {}, project, noLaunch)).toEqual({
+    expect(await runCli(['test'], {}, project, options)).toEqual({
       exitCode: 1,
       stdout: printed(
         headerOf('test', 4),
@@ -720,6 +844,7 @@ Other options:
       ),
       stderr: '',
     })
+    expect(record.urls).toEqual([`${web}/iframe.html?viewMode=story`, `${docs}/iframe.html?viewMode=story`])
   })
 
   it('suggests --storybook when one of several Storybooks is down', async () => {
@@ -854,7 +979,7 @@ Other options:
         ['test', '--config', 'other.config.mjs', '--storybook', 'web', '--url', url],
         { CI: 'true' },
         project,
-        noLaunch,
+        fakeBrowser().options,
       ),
     ).toEqual({
       exitCode: 1,
@@ -879,11 +1004,12 @@ const browserExitedDetail =
   'in use.'
 
 /**
- * What a run prints on stderr when the first fake browser exited and visual-check relaunches it for the stories left.
+ * What a run prints on stderr when the first fake browser exited and visual-check relaunches it for the rest of the
+ * run.
  */
 const relaunchNotice = printed(
   'The browser was killed by signal SIGKILL while in use.',
-  'visual-check relaunches it once for the stories left.',
+  'visual-check relaunches it once for the rest of the run.',
   "The browser's last output:",
   '  Out of memory',
   '  bye from browser 1',
@@ -902,18 +1028,21 @@ const secondExitMessage = printed(
 
 /**
  * Starts a Storybook with the given stories and makes a project for it whose baselines folder holds `baselines`, each
- * a story ID mapped to its baseline's bytes. `config` adds keys to the config. Returns the project, the Storybook's
- * URL and the baselines folder.
+ * a story ID mapped to its baseline's bytes. `config` adds keys to the config. Each story is in its stories file from
+ * `importPaths` by ID, else in `./button.stories.tsx`. Returns the project, the Storybook's URL and the baselines
+ * folder.
  */
 async function createRun(
   storyIds: string[],
   baselines: Record<string, Uint8Array> = {},
   config = '',
+  importPaths: Record<string, string> = {},
 ): Promise<{ project: string; url: string; folder: string }> {
-  const url = await startStorybook(storyIds)
+  const url = await startStorybook(storyIds, importPaths)
+  const storiesFiles = storyIds.map((id) => importPaths[id] ?? './button.stories.tsx')
   const project = createProject({
     'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } }, ${config} }\n`,
-    'button.stories.tsx': '',
+    ...Object.fromEntries(storiesFiles.map((path) => [path, ''])),
   })
   const folder = join(project, '.visual-check', 'baselines')
 
@@ -933,6 +1062,13 @@ function withoutTimes(text: string): string {
 }
 
 /**
+ * Gives the story ID of each story's URL in `urls`, in order, leaving out the options reads' previews.
+ */
+function storyIdsOf(urls: readonly string[]): string[] {
+  return urls.flatMap((url) => new URL(url).searchParams.get('id') ?? [])
+}
+
+/**
  * Bytes that differ from `defaultSnapshot`.
  */
 const otherSnapshot = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 2])
@@ -946,8 +1082,11 @@ describe('runCli test', () => {
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBe('')
     expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 1), '✓ web  button--primary  N ms', '1 passed'))
-    expect(record.urls).toEqual([`${url}/iframe.html?id=button--primary&viewMode=story`])
-    expect(record.pageCloses).toBe(1)
+    expect(record.urls).toEqual([
+      `${url}/iframe.html?viewMode=story`,
+      `${url}/iframe.html?id=button--primary&viewMode=story`,
+    ])
+    expect(record.pageCloses).toBe(2)
     expect(record.closed).toBe(true)
   })
 
@@ -974,7 +1113,7 @@ describe('runCli test', () => {
         '2 passed · 1 differs · 1 broken · 1 missing',
       ),
     )
-    expect(record.urls.map((storyUrl) => new URL(storyUrl).searchParams.get('id')).sort()).toEqual(['a', 'b', 'd', 'e'])
+    expect(storyIdsOf(record.urls).sort()).toEqual(['a', 'b', 'd', 'e'])
   })
 
   it('prints the configured number of workers in the header, the noun in the right number', async () => {
@@ -982,31 +1121,35 @@ describe('runCli test', () => {
     const { project: one } = await createRun(['a'], {}, 'workers: 1')
     const { project: pair } = await createRun(['a'], {}, 'workers: { local: 5, ci: 2 }')
 
-    expect(firstLineOf((await runCli(['test'], {}, three, noLaunch)).stdout)).toBe(headerOf('test', 1, 3))
-    expect(firstLineOf((await runCli(['test'], {}, one, noLaunch)).stdout)).toBe(headerOf('test', 1, 1))
-    expect(firstLineOf((await runCli(['test'], { CI: 'true' }, pair, noLaunch)).stdout)).toBe(headerOf('test', 1, 2))
+    const { options } = fakeBrowser()
+
+    expect(firstLineOf((await runCli(['test'], {}, three, options)).stdout)).toBe(headerOf('test', 1, 3))
+    expect(firstLineOf((await runCli(['test'], {}, one, options)).stdout)).toBe(headerOf('test', 1, 1))
+    expect(firstLineOf((await runCli(['test'], { CI: 'true' }, pair, options)).stdout)).toBe(headerOf('test', 1, 2))
   })
 
   it('lets --workers beat the config, whether a number or auto', async () => {
     const { project: five } = await createRun(['a'], {}, 'workers: 5')
     const { project: auto } = await createRun(['a'], {}, "workers: 'auto'")
+    const { options } = fakeBrowser()
 
-    expect(firstLineOf((await runCli(['test', '--workers', '2'], {}, five, noLaunch)).stdout)).toBe(
+    expect(firstLineOf((await runCli(['test', '--workers', '2'], {}, five, options)).stdout)).toBe(
       headerOf('test', 1, 2),
     )
-    expect(firstLineOf((await runCli(['test', '--workers', '3'], {}, auto, noLaunch)).stdout)).toBe(
+    expect(firstLineOf((await runCli(['test', '--workers', '3'], {}, auto, options)).stdout)).toBe(
       headerOf('test', 1, 3),
     )
-    expect(firstLineOf((await runCli(['test', '--workers', '1'], {}, auto, noLaunch)).stdout)).toBe(
+    expect(firstLineOf((await runCli(['test', '--workers', '1'], {}, auto, options)).stdout)).toBe(
       headerOf('test', 1, 1),
     )
   })
 
   it("sizes 'auto' workers from the Docker host the probe finds", async () => {
     const { project } = await createRun(['a'], {}, "workers: 'auto'")
-    const smallHost = { ...noLaunch, probeDocker: async () => ({ cpus: 2, memoryBytes: 7e9, desktop: false }) }
+    const { options } = fakeBrowser()
+    const smallHost = { ...options, probeDocker: async () => ({ cpus: 2, memoryBytes: 7e9, desktop: false }) }
 
-    expect(firstLineOf((await runCli(['test'], {}, project, noLaunch)).stdout)).toBe(headerOf('test', 1, 4))
+    expect(firstLineOf((await runCli(['test'], {}, project, options)).stdout)).toBe(headerOf('test', 1, 4))
     expect(firstLineOf((await runCli(['test'], {}, project, smallHost)).stdout)).toBe(headerOf('test', 1, 2))
   })
 
@@ -1014,7 +1157,7 @@ describe('runCli test', () => {
     const { project } = await createRun(['a'], {}, "workers: 'auto'")
     const { project: host } = await createRun(['a'], {}, "workers: 'auto', platform: 'host'")
     const inImage = {
-      ...noLaunch,
+      ...fakeBrowser().options,
       machine: { cpus: 2, memoryBytes: 7e9 },
       imageMarkerPath: writeMarker(markerOf('amd64')),
     }
@@ -1023,8 +1166,8 @@ describe('runCli test', () => {
     expect(firstLineOf((await runCli(['test'], {}, host, inImage)).stdout)).toBe(headerOf('test', 1, 2))
   })
 
-  it('launches no browser when every selected baseline is missing', async () => {
-    const { project } = await createRun(['a', 'b'])
+  it('captures nothing when every selected baseline is missing, after reading the options', async () => {
+    const { project, url } = await createRun(['a', 'b'])
     const { options, record } = fakeBrowser()
     const result = await runCli(['test'], {}, project, options)
 
@@ -1038,13 +1181,15 @@ describe('runCli test', () => {
       ),
       stderr: '',
     })
-    expect(record.launches).toEqual([])
+    expect(record.launches).toHaveLength(1)
+    expect(record.urls).toEqual([`${url}/iframe.html?viewMode=story`])
+    expect(record.viewports).toEqual([])
   })
 
   it('prints only the header and the counts when the selection is empty', async () => {
     const { project } = await createRun(['a'])
 
-    expect(await runCli(['test', '--filter', 'nothing'], {}, project, noLaunch)).toEqual({
+    expect(await runCli(['test', '--filter', 'nothing'], {}, project, fakeBrowser().options)).toEqual({
       exitCode: 0,
       stdout: printed(headerOf('test', 0), '0 passed'),
       stderr: '',
@@ -1110,6 +1255,367 @@ describe('runCli update', () => {
 
     expect(result.stdout).toContain('✓ web  a  written web/.visual-check/baselines/a.png\n')
     expect(existsSync(join(project, 'packages', 'web', '.visual-check', 'baselines', 'a.png'))).toBe(true)
+  })
+})
+
+/**
+ * Gives the URL of the preview page an options read loads for the Storybook at `url`.
+ */
+function previewOf(url: string): string {
+  return `${url}/iframe.html?viewMode=story`
+}
+
+/**
+ * The fix the problem for invalid per-story options ends with.
+ */
+const invalidOptionsFix =
+  'Fix parameters.visualCheck where the preview, the stories file or the story sets it, then run visual-check again.\n'
+
+/**
+ * The issue of a story whose `disable` is `1`.
+ */
+const disableIssue = 'visualCheck.disable: must be true or false. Got 1.'
+
+describe('runCli per-story options', () => {
+  it('reads each Storybook once, before any capture, with every story grouped by file, even with --filter', async () => {
+    const web = await startStorybook(['a', 'b', 'c'], {
+      a: './a.stories.tsx',
+      b: './b.stories.tsx',
+      c: './a.stories.tsx',
+    })
+    const docs = await startStorybook(['d'])
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${web}' }, docs: { dir: 'docs', url: '${docs}' } } }\n`,
+      'web/a.stories.tsx': '',
+      'web/b.stories.tsx': '',
+      'docs/button.stories.tsx': '',
+      'web/.visual-check/baselines/a.png': defaultSnapshot,
+      'docs/.visual-check/baselines/d.png': defaultSnapshot,
+    })
+    const { options, record } = fakeBrowser()
+    const result = await runCli(['test', '--filter', '^[ad]$'], {}, project, options)
+
+    expect(result.exitCode).toBe(0)
+    expect(withoutTimes(result.stdout)).toBe(
+      printed(headerOf('test', 2), '✓ web  a  N ms', '✓ docs  d  N ms', '2 passed'),
+    )
+    expect(record.reads).toEqual([
+      {
+        browser: 1,
+        url: previewOf(web),
+        files: [
+          { importPath: './a.stories.tsx', storyIds: ['a', 'c'] },
+          { importPath: './b.stories.tsx', storyIds: ['b'] },
+        ],
+      },
+      { browser: 1, url: previewOf(docs), files: [{ importPath: './button.stories.tsx', storyIds: ['d'] }] },
+    ])
+    expect(record.urls.slice(0, 2)).toEqual([previewOf(web), previewOf(docs)])
+    expect(storyIdsOf(record.urls).sort()).toEqual(['a', 'd'])
+  })
+
+  it('exits 2 for invalid options, naming each story and key, and captures nothing', async () => {
+    const { project } = await createRun(['a', 'b', 'c'], { a: defaultSnapshot, b: defaultSnapshot, c: defaultSnapshot })
+    const { options, record } = fakeBrowser(
+      {},
+      {
+        read: { options: { a: { tolerance: { pixels: -1 } }, b: { tolerance: { pixels: 3 } }, c: { disable: 'yes' } } },
+      },
+    )
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr:
+        'Storybook web has invalid per-story options:\n' +
+        "  - a: visualCheck.tolerance.pixels: must be a whole number of 0 or more, or a string from '0%' to '100%'. Got -1.\n" +
+        '  - c: visualCheck.disable: must be true or false. Got "yes".\n' +
+        invalidOptionsFix,
+    })
+    expect(storyIdsOf(record.urls)).toEqual([])
+    expect(record.closed).toBe(true)
+  })
+
+  it('validates the options of stories the selection leaves out', async () => {
+    const { project } = await createRun(['a', 'b'], { a: defaultSnapshot })
+    const { options } = fakeBrowser({}, { read: { options: { b: { disable: 1 } } } })
+    const result = await runCli(['test', '--filter', '^a$'], {}, project, options)
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stderr).toBe(
+      `Storybook web has invalid per-story options:\n  - b: ${disableIssue}\n${invalidOptionsFix}`,
+    )
+  })
+
+  it('gives a block for each Storybook with invalid options, in config order', async () => {
+    const web = await startStorybook(['a'])
+    const quick = await startStorybook(['b'])
+    const docs = await startStorybook(['c'])
+    const project = createProject({
+      'visual-check.config.mjs':
+        `export default { storybooks: { web: { dir: 'web', url: '${web}' }, ` +
+        `quick: { dir: 'quick', url: '${quick}' }, docs: { dir: 'docs', url: '${docs}' } } }\n`,
+      'web/button.stories.tsx': '',
+      'quick/button.stories.tsx': '',
+      'docs/button.stories.tsx': '',
+    })
+    const { options, record } = fakeBrowser({}, { read: { options: { a: { disable: 1 }, c: { disable: 1 } } } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr:
+        `Storybook web has invalid per-story options:\n  - a: ${disableIssue}\n` +
+        `Storybook docs has invalid per-story options:\n  - c: ${disableIssue}\n` +
+        invalidOptionsFix,
+    })
+    expect(record.reads.map(({ url }) => url)).toEqual([previewOf(web), previewOf(quick), previewOf(docs)])
+  })
+
+  it("exits 2 with the read's problem, without reading the Storybooks after it", async () => {
+    const web = await startStorybook(['a'])
+    const docs = await startStorybook(['b'])
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${web}' }, docs: { dir: 'docs', url: '${docs}' } }, readyTimeout: 4000 }\n`,
+      'web/button.stories.tsx': '',
+      'docs/button.stories.tsx': '',
+    })
+    const { options, record } = fakeBrowser(
+      {},
+      { read: { answers: { [previewOf(web)]: { outcome: 'timed-out', step: 'preview-start' } } } },
+    )
+    const result = await runCli(['update'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr: printed(
+        `Storybook web's preview never started at ${previewOf(web)} within readyTimeout (4000 ms). Open it to see ` +
+          'why, or raise readyTimeout.',
+      ),
+    })
+    expect(record.reads.map(({ url }) => url)).toEqual([previewOf(web)])
+    expect(storyIdsOf(record.urls)).toEqual([])
+    expect(record.closed).toBe(true)
+  })
+
+  it('reads again in the relaunched browser when the browser exits during the read, and goes on', async () => {
+    const { project, url } = await createRun(['a', 'b'], { a: defaultSnapshot, b: defaultSnapshot }, 'workers: 1')
+    const { options, record } = fakeBrowser({}, { read: { exitingBrowsers: [1] } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(0)
+    expect(withoutTimes(result.stdout)).toBe(
+      printed(headerOf('test', 2, 1), '✓ web  a  N ms', '✓ web  b  N ms', '2 passed'),
+    )
+    expect(result.stderr).toBe(relaunchNotice)
+    expect(record.launches).toHaveLength(2)
+    expect(record.reads.map(({ browser, url: readUrl }) => [browser, readUrl])).toEqual([
+      [1, previewOf(url)],
+      [2, previewOf(url)],
+    ])
+    expect(record.events).toEqual(['close page on 2', 'a on 2', 'b on 2', 'close page on 2', 'close 1', 'close 2'])
+  })
+
+  it('says the browser relaunched before the problem of a later read, and closes both browsers', async () => {
+    const web = await startStorybook(['a'])
+    const docs = await startStorybook(['b'])
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${web}' }, docs: { dir: 'docs', url: '${docs}' } }, readyTimeout: 4000 }\n`,
+      'web/button.stories.tsx': '',
+      'docs/button.stories.tsx': '',
+    })
+    const { options, record } = fakeBrowser(
+      {},
+      {
+        read: {
+          exitingBrowsers: [1],
+          answers: { [previewOf(docs)]: { outcome: 'timed-out', step: 'preview-ready' } },
+        },
+      },
+    )
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr:
+        relaunchNotice +
+        printed(
+          `Storybook docs's preview started at ${previewOf(docs)} but never became ready within readyTimeout ` +
+            '(4000 ms). Open it to see why, or raise readyTimeout.',
+        ),
+    })
+    expect(record.reads.map(({ browser, url }) => [browser, url])).toEqual([
+      [1, previewOf(web)],
+      [2, previewOf(web)],
+      [2, previewOf(docs)],
+    ])
+    expect(record.driverCloses).toBe(2)
+  })
+
+  it('exits 2 when the relaunched browser exits too as it reads the options again', async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot })
+    const { options, record } = fakeBrowser({}, { read: { exitingBrowsers: [1, 2] } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result).toEqual({ exitCode: 2, stdout: '', stderr: `${relaunchNotice}${secondExitMessage}` })
+    expect(record.launches).toHaveLength(2)
+    expect(storyIdsOf(record.urls)).toEqual([])
+    expect(record.driverCloses).toBe(2)
+  })
+
+  it('takes no snapshot when every selected story is disabled, after one read', async () => {
+    const { project } = await createRun(['a', 'b'], { a: defaultSnapshot, b: defaultSnapshot })
+    const { options, record } = fakeBrowser({}, { read: { options: { a: { disable: true }, b: { disable: true } } } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result).toEqual({ exitCode: 0, stdout: printed(headerOf('test', 0), '0 passed'), stderr: '' })
+    expect(record.reads).toHaveLength(1)
+    expect(storyIdsOf(record.urls)).toEqual([])
+    expect(record.viewports).toEqual([])
+  })
+
+  it("leaves out a disabled story, and keeps one whose merged options say it isn't", async () => {
+    const { project } = await createRun(['a', 'b', 'c'], { a: defaultSnapshot, b: defaultSnapshot, c: defaultSnapshot })
+    const { options, record } = fakeBrowser({}, { read: { options: { b: { disable: true }, c: { disable: false } } } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.exitCode).toBe(0)
+    expect(withoutTimes(result.stdout)).toBe(
+      printed(headerOf('test', 2), '✓ web  a  N ms', '✓ web  c  N ms', '2 passed'),
+    )
+    expect(storyIdsOf(record.urls).sort()).toEqual(['a', 'c'])
+  })
+
+  it('writes no baseline for a disabled story in update', async () => {
+    const { project, folder } = await createRun(['a', 'b'])
+    const { options } = fakeBrowser({}, { read: { options: { b: { disable: true } } } })
+    const result = await runCli(['update'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 0,
+      stdout: printed(headerOf('update', 1), '✓ web  a  written .visual-check/baselines/a.png', '1 written'),
+      stderr: '',
+    })
+    expect(existsSync(join(folder, 'b.png'))).toBe(false)
+  })
+
+  it('breaks the selected stories of a file that failed to load, captures the others, and exits 1', async () => {
+    const { project, url } = await createRun(
+      ['a', 'b', 'c'],
+      { a: defaultSnapshot, b: defaultSnapshot, c: defaultSnapshot },
+      '',
+      { a: './a.stories.tsx', b: './b.stories.tsx', c: './a.stories.tsx' },
+    )
+    const { options, record } = fakeBrowser(
+      {},
+      { read: { failed: { './a.stories.tsx': "SyntaxError: Unexpected token '<'" } } },
+    )
+    const result = await runCli(['test'], {}, project, options)
+    const broken = "broken: Its stories file ./a.stories.tsx failed to load: SyntaxError: Unexpected token '<'."
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toBe('')
+    expect(withoutTimes(result.stdout)).toBe(
+      printed(
+        headerOf('test', 3),
+        `! web  a  ${broken}`,
+        '✓ web  b  N ms',
+        `! web  c  ${broken}`,
+        '1 passed · 2 broken',
+      ),
+    )
+    expect(record.urls).toEqual([previewOf(url), `${url}/iframe.html?id=b&viewMode=story`])
+  })
+
+  it('says only that the file failed to load when the page gives no message', async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot })
+    const { options } = fakeBrowser({}, { read: { failed: { './button.stories.tsx': '' } } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result.stdout).toBe(
+      printed(
+        headerOf('test', 1),
+        '! web  a  broken: Its stories file ./button.stories.tsx failed to load.',
+        '0 passed · 1 broken',
+      ),
+    )
+  })
+
+  it("breaks the stories of a file that didn't load within readyTimeout", async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot }, 'readyTimeout: 4000')
+    const { options } = fakeBrowser({}, { read: { timedOut: ['./button.stories.tsx'] } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: printed(
+        headerOf('test', 1),
+        "! web  a  broken: Its stories file ./button.stories.tsx didn't load within readyTimeout (4000 ms).",
+        '0 passed · 1 broken',
+      ),
+      stderr: '',
+    })
+  })
+
+  it('reports a story whose file failed to load as broken in test, not missing, when it has no baseline', async () => {
+    const { project, url } = await createRun(['a'])
+    const { options, record } = fakeBrowser({}, { read: { failed: { './button.stories.tsx': 'Error: boom' } } })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: printed(
+        headerOf('test', 1),
+        '! web  a  broken: Its stories file ./button.stories.tsx failed to load: Error: boom.',
+        '0 passed · 1 broken',
+      ),
+      stderr: '',
+    })
+    expect(record.urls).toEqual([previewOf(url)])
+  })
+
+  it('writes nothing in update for a story whose file failed to load, and keeps its old baseline', async () => {
+    const { project, folder } = await createRun(['a', 'b'], { a: otherSnapshot })
+    const { options, record } = fakeBrowser({}, { read: { failed: { './button.stories.tsx': 'Error: boom' } } })
+    const result = await runCli(['update'], {}, project, options)
+    const broken = 'broken: Its stories file ./button.stories.tsx failed to load: Error: boom.'
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: printed(headerOf('update', 2), `! web  a  ${broken}`, `! web  b  ${broken}`, '0 written · 2 broken'),
+      stderr: '',
+    })
+    expect(new Uint8Array(readFileSync(join(folder, 'a.png')))).toEqual(otherSnapshot)
+    expect(existsSync(join(folder, 'b.png'))).toBe(false)
+    expect(storyIdsOf(record.urls)).toEqual([])
+  })
+
+  it("doesn't read a Storybook with no stories", async () => {
+    const web = await startStorybook(['a'])
+    const docs = await startStorybook([])
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${web}' }, docs: { dir: 'docs', url: '${docs}' } } }\n`,
+      'web/button.stories.tsx': '',
+    })
+    const { options, record } = fakeBrowser()
+    const result = await runCli(['update'], {}, project, options)
+
+    expect(result.exitCode).toBe(0)
+    expect(record.reads.map(({ url }) => url)).toEqual([previewOf(web)])
+  })
+
+  it('launches no browser when no Storybook has stories', async () => {
+    const { project } = await createRun([])
+
+    expect(await runCli(['test'], {}, project, noLaunch)).toEqual({
+      exitCode: 0,
+      stdout: printed(headerOf('test', 0), '0 passed'),
+      stderr: '',
+    })
   })
 })
 
@@ -1332,17 +1838,20 @@ describe('runCli launching the browser', () => {
     await runCli(['update'], {}, project, options)
 
     expect(record.viewports).toEqual([{ width: 800, height: 600, deviceScaleFactor: 2 }])
-    expect(record.setups).toMatchObject([{ timezone: 'Europe/Warsaw', locale: 'pl-PL', colorScheme: 'dark' }])
+    expect(record.setups).toMatchObject([
+      { timezone: 'Europe/Warsaw', locale: 'pl-PL', colorScheme: 'dark' },
+      { timezone: 'Europe/Warsaw', locale: 'pl-PL', colorScheme: 'dark' },
+    ])
   })
 
   it("exits 2 when the browser isn't the browser package's build, naming both versions", async () => {
     const { project } = await createRun(['a', 'b', 'c'])
-    const { options, record } = fakeBrowser({}, '156.0.7000.1')
+    const { options, record } = fakeBrowser({}, { version: '156.0.7000.1' })
     const result = await runCli(['update'], {}, project, options)
 
     expect(result).toEqual({
       exitCode: 2,
-      stdout: printed(headerOf('update', 3)),
+      stdout: '',
       stderr: printed(
         `The browser in ${browserPackage.imageReference} is Chromium 156.0.7000.1, but the browser package ` +
           `@visual-check/chromium ${browserPackage.packageVersion} names Chromium ${browserPackage.chromium}.`,
@@ -1356,7 +1865,7 @@ describe('runCli launching the browser', () => {
 
   it("says to rebuild a custom image FROM the browser package's image when its browser is another build", async () => {
     const { project } = await createRun(['a'], {}, "image: 'example.com/chromium:custom'")
-    const result = await runCli(['update'], {}, project, fakeBrowser({}, '156.0.7000.1').options)
+    const result = await runCli(['update'], {}, project, fakeBrowser({}, { version: '156.0.7000.1' }).options)
 
     expect(result.exitCode).toBe(2)
     expect(result.stderr).toBe(
@@ -1391,7 +1900,7 @@ describe('runCli launching the browser', () => {
 
     expect(await runCli(['test'], {}, project, options)).toEqual({
       exitCode: 2,
-      stdout: printed(headerOf('test', 3)),
+      stdout: '',
       stderr: printed(
         'The browser exited with code 127 before it answered.',
         "The browser's output below may say why. Check that Docker can run images for linux/amd64, then run " +
@@ -1490,7 +1999,7 @@ describe('runCli launching the browser', () => {
 
     expect(await runCli(['update'], {}, project, failingLaunch(error))).toEqual({
       exitCode: 2,
-      stdout: printed(headerOf('update', 1)),
+      stdout: '',
       stderr: printed(
         'docker pull of example.com/chromium for linux/amd64 failed with exit code 1.',
         "Start or install Docker, or set platform: 'host' in the config.",
@@ -1505,7 +2014,7 @@ describe('runCli launching the browser', () => {
 
     expect(await runCli(['update'], {}, project, { ...failingLaunch(error), insideContainer: true })).toEqual({
       exitCode: 2,
-      stdout: printed(headerOf('update', 1)),
+      stdout: '',
       stderr: `${message}\n`,
     })
   })
@@ -1531,7 +2040,15 @@ describe('runCli launching the browser', () => {
     )
     expect(result.stderr).toBe(relaunchNotice)
     expect(record.launches).toHaveLength(2)
-    expect(record.events).toEqual(['a on 1', 'b on 1', 'c on 2', 'close page on 2', 'close 1', 'close 2'])
+    expect(record.events).toEqual([
+      'close page on 1',
+      'a on 1',
+      'b on 1',
+      'c on 2',
+      'close page on 2',
+      'close 1',
+      'close 2',
+    ])
   })
 
   it('breaks every story in flight when the browser exits, and captures the rest in one relaunched browser', async () => {
@@ -1610,6 +2127,7 @@ describe('runCli launching the browser', () => {
     )
     expect(result.stderr).toBe(relaunchNotice)
     expect(record.events).toEqual([
+      'close page on 1',
       'a on 1',
       'close page on 1',
       'b on 2',
@@ -1653,7 +2171,7 @@ describe('runCli launching the browser', () => {
     )
     expect(result.stderr).toBe(`${relaunchNotice}${secondExitMessage}`)
     expect(record.launches).toHaveLength(2)
-    expect(record.urls).toHaveLength(4)
+    expect(storyIdsOf(record.urls)).toEqual(['a', 'b', 'c', 'd'])
     expect(record.driverCloses).toBe(2)
   })
 
@@ -1705,7 +2223,7 @@ describe('runCli launching the browser', () => {
     expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 3, 1), '✓ web  a  N ms', '✓ web  b  N ms'))
     expect(result.stderr).toBe(`${relaunchNotice}${secondExitMessage}`)
     expect(record.launches).toHaveLength(2)
-    expect(record.urls).toHaveLength(2)
+    expect(storyIdsOf(record.urls)).toEqual(['a', 'b'])
   })
 
   it('exits 2 when the relaunch fails with several workers waiting, keeping the lines that finished', async () => {
@@ -1824,7 +2342,7 @@ describe('runCli launching the browser', () => {
           '2 passed · 1 broken',
         ),
       )
-      expect(result.stderr).toContain('visual-check relaunches it once for the stories left.')
+      expect(result.stderr).toContain('visual-check relaunches it once for the rest of the run.')
       expect(result.stderr).not.toContain("this machine can't run")
       expect(record.launches).toHaveLength(2)
     })
@@ -1927,11 +2445,11 @@ describe('runCli launching the browser', () => {
       printed(headerOf('test', 3, 2), '✓ web  a  N ms', '✓ web  b  N ms', '✓ web  c  N ms', '3 passed'),
     )
     expect(result.stderr).toBe('')
-    expect(record.urls.map((storyUrl) => new URL(storyUrl).searchParams.get('id')).sort()).toEqual(['a', 'b', 'c'])
+    expect(storyIdsOf(record.urls).sort()).toEqual(['a', 'b', 'c'])
     expect(record.events.filter((event) => !event.startsWith('close'))).toEqual(['b on 1', 'c on 1', 'a on 1'])
     expect(record.launches).toHaveLength(1)
-    expect(record.setups).toHaveLength(2)
-    expect(record.pageCloses).toBe(2)
+    expect(record.setups).toHaveLength(3)
+    expect(record.pageCloses).toBe(3)
     expect(record.closed).toBe(true)
   })
 
@@ -1940,7 +2458,8 @@ describe('runCli launching the browser', () => {
     const { options, record } = fakeBrowser()
 
     await runCli(['test'], {}, project, options)
-    expect(record.setups).toHaveLength(1)
+    expect(record.setups).toHaveLength(2)
+    expect(record.reads).toHaveLength(1)
   })
 
   it("exits 2 for platform 'host' on Windows on Arm before any Storybook, pointing to linux/arm64", async () => {
@@ -2007,7 +2526,7 @@ describe('runCli launching the browser', () => {
 
     expect(await runCli(['update'], hostEnvironment, project, failingLaunch(error))).toEqual({
       exitCode: 2,
-      stdout: printed(headerOf('update', 1)),
+      stdout: '',
       stderr: printed(error.message),
     })
   })
@@ -2077,7 +2596,7 @@ describe('runCli launching the browser', () => {
 
   it("names the download's folder and says to remove it when the browser on the host is another build", async () => {
     const { project } = await createRun(['a'], {}, "platform: 'host'")
-    const { options } = fakeBrowser({}, '156.0.7000.1')
+    const { options } = fakeBrowser({}, { version: '156.0.7000.1' })
     const result = await runCli(['update'], hostEnvironment, project, options)
 
     expect(result.exitCode).toBe(2)
@@ -2184,7 +2703,7 @@ describe('runCli launching the browser', () => {
 
   it("names this container when the browser inside visual-check's image is another build", async () => {
     const { project } = await createRun(['a'])
-    const { options } = fakeBrowser({}, '156.0.7000.1')
+    const { options } = fakeBrowser({}, { version: '156.0.7000.1' })
     const result = await runCli(['update'], {}, project, {
       ...options,
       imageMarkerPath: writeMarker(markerOf('amd64')),
@@ -2220,7 +2739,7 @@ describe('runCli launching the browser', () => {
           "directory. Check that it's a file visual-check can read.",
       ),
     )
-    expect(record.pageCloses).toBe(1)
+    expect(record.pageCloses).toBe(2)
     expect(record.closed).toBe(true)
   })
 

@@ -205,20 +205,12 @@ function entryOf(id: string, fields: Record<string, unknown> = {}): Record<strin
 }
 
 /**
- * Builds what `test` prints when none of the stories has a baseline: the header, a missing line for each story and the
- * counts. Such a run captures nothing, so it never launches a browser.
+ * What a run prints on standard error once it reaches the browser, which it launches in a container to read the
+ * per-story options of a Storybook with stories: the stub `docker` fails the image's pull, so the run exits 2 with the
+ * pull's failure and both fixes, before printing anything on standard output.
  */
-function allMissingOutputOf(storybook: string, storyIds: string[]): string {
-  const count = storyIds.length
-
-  return [
-    `visual-check ${version} · test · ${count} ${count === 1 ? 'snapshot' : 'snapshots'} · 4 workers`,
-    ...storyIds.map((id) => `✗ ${storybook}  ${id}  missing: no baseline yet; run visual-check update to write it`),
-    `0 passed · ${count} missing`,
-  ]
-    .map((line) => `${line}\n`)
-    .join('')
-}
+const pullFailure =
+  /^docker pull of \S+ for linux\/amd64 failed with exit code 1\.[^\n]*\nStart or install Docker, or set platform: 'host' in the config\.\n$/
 
 afterAll(() => {
   rmSync(stubDockerDir, { recursive: true, force: true })
@@ -455,10 +447,8 @@ describe('visual-check binary reaching Storybooks', () => {
     expect(result.stderr).toContain("lists stories files that aren't on disk: button.stories.tsx")
   })
 
-  it('counts stories only, not docs or test entries, and reports each missing baseline without a browser', async () => {
+  it('counts stories only, not docs or test entries, and launches no browser for an index without stories', async () => {
     const url = await startStorybookServer({
-      a: entryOf('button--primary'),
-      b: entryOf('button--secondary'),
       c: entryOf('button--primary:test', { subtype: 'test' }),
       d: entryOf('button--docs', { type: 'docs', subtype: undefined }),
     })
@@ -468,21 +458,22 @@ describe('visual-check binary reaching Storybooks', () => {
     })
     const result = await runAsynchronously({ cwd: project }, 'test')
 
-    expect(result.status).toBe(1)
-    expect(result.stdout).toBe(allMissingOutputOf('web', ['button--primary', 'button--secondary']))
+    expect(result.status).toBe(0)
+    expect(result.stdout).toBe(`visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed\n`)
     expect(result.stderr).toBe('')
   })
 
-  it('narrows the count with --filter', async () => {
+  it('reaches the browser to read the per-story options of every story, even when --filter selects none', async () => {
     const url = await startStorybookServer({ a: entryOf('button--primary'), b: entryOf('button--secondary') })
     const project = createProject({
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
       'button.stories.tsx': '',
     })
-    const result = await runAsynchronously({ cwd: project }, 'test', '--filter', 'primary$')
+    const result = await runAsynchronously({ cwd: project }, 'test', '--filter', 'nothing')
 
-    expect(result.status).toBe(1)
-    expect(result.stdout).toBe(allMissingOutputOf('web', ['button--primary']))
+    expect(result.status).toBe(2)
+    expect(result.stdout).toBe('')
+    expect(result.stderr).toMatch(pullFailure)
   })
 
   it('narrows the run to one Storybook with --storybook, which --url points at a server', async () => {
@@ -494,8 +485,9 @@ describe('visual-check binary reaching Storybooks', () => {
     })
     const result = await runAsynchronously({ cwd: project }, 'test', '--storybook', 'web', '--url', url)
 
-    expect(result.status).toBe(1)
-    expect(result.stdout).toBe(allMissingOutputOf('web', ['button--primary']))
+    expect(result.status).toBe(2)
+    expect(result.stdout).toBe('')
+    expect(result.stderr).toMatch(pullFailure)
   })
 
   it('exits 2 for a storybook older than 9.1, naming the version, and leaves its index unread', async () => {
@@ -520,12 +512,13 @@ describe('visual-check binary reaching Storybooks', () => {
       'node_modules/storybook/package.json': JSON.stringify({ version: '12.0.0' }),
     })
     const result = await runAsynchronously({ cwd: project }, 'test')
+    const warning =
+      'Warning: Storybook web runs storybook 12.0.0, and visual-check supports 9.1 to 11. The run carries on.\n'
 
-    expect(result.status).toBe(1)
-    expect(result.stderr).toBe(
-      'Warning: Storybook web runs storybook 12.0.0, and visual-check supports 9.1 to 11. The run carries on.\n',
-    )
-    expect(result.stdout).toBe(allMissingOutputOf('web', ['button--primary']))
+    expect(result.status).toBe(2)
+    expect(result.stderr.startsWith(warning)).toBe(true)
+    expect(result.stderr.slice(warning.length)).toMatch(pullFailure)
+    expect(result.stdout).toBe('')
   })
 
   it('skips the version check when no storybook is installed', async () => {
@@ -536,7 +529,7 @@ describe('visual-check binary reaching Storybooks', () => {
     })
     const result = await runAsynchronously({ cwd: project }, 'test')
 
-    expect(result.status).toBe(1)
-    expect(result.stderr).toBe('')
+    expect(result.status).toBe(2)
+    expect(result.stderr).toMatch(pullFailure)
   })
 })

@@ -9,6 +9,7 @@ import {
   type StoryToCapture,
 } from '../capture/capture-session.js'
 import { BrowserExitedError, type Driver } from '../capture/driver/driver.js'
+import { type OptionsRequest, readStoryOptions, type StorybookOptionsRead } from '../capture/read-options.js'
 import type { BrowserPlace } from './browser-route.js'
 import type { BrowserLaunch, LaunchBrowser } from './launch-browser.js'
 
@@ -51,27 +52,27 @@ export interface FirstBrowserExit {
    */
   error: BrowserExitedError
   /**
-   * Whether a capture came after the exit, so that visual-check relaunched the browser for it, whether or not the
-   * relaunch then worked.
+   * Whether a read or a capture came after the exit, so that visual-check relaunched the browser for it, whether or
+   * not the relaunch then worked.
    */
   relaunched: boolean
 }
 
 /**
- * The browser a run captures in, launched at the first story that needs it, with one capture session for each worker.
- * When it exits, it's relaunched once, at the next story that needs it.
+ * The browser a run reads options and captures in, launched at the first read or story that needs it, with one capture
+ * session for each worker. When it exits, it's relaunched once, at the next read or story that needs it.
  */
 export interface RunBrowser {
   /**
-   * Captures a story in the worker's capture session, which keeps its own page. The first call launches the browser and
-   * checks that it is the browser package's build, and every call shares that one browser. A worker's first call on a
-   * browser opens its session there.
+   * Captures a story in the worker's capture session, which keeps its own page. The first call of either method
+   * launches the browser and checks that it is the browser package's build, and every call shares that one browser. A
+   * worker's first call on a browser opens its session there.
    *
    * When the first browser exits, each capture in flight on it gives a broken story, `browser-exited`, even when it
    * fails after the relaunch. The browser counts as exited from the first capture that fails with the exit, or from
    * its `exited`, so an exit seen between captures breaks no story. The next call relaunches the browser and checks it
-   * the same way, and every call after shares the relaunched one. A worker's session in the first browser is closed when
-   * the worker opens one in the relaunched browser. The first browser itself stays open until `close()`.
+   * the same way, and every call after shares the relaunched one. A worker's session in the first browser is closed
+   * when the worker opens one in the relaunched browser. The first browser itself stays open until `close()`.
    *
    * An exit of the first browser whose output says its graphics process couldn't start, before any capture gave a
    * snapshot, means this machine can't run the platform: a relaunch would fail the same way, so every capture that
@@ -91,6 +92,27 @@ export interface RunBrowser {
    * can't run the platform.
    */
   capture: (worker: number, story: StoryToCapture, started?: () => void) => Promise<StoryCapture>
+  /**
+   * Reads the per-story options of a Storybook's stories on a page of its own, in the browser the next capture would
+   * use. The first call of either method launches the browser and checks it the way `capture` does, and a failed launch
+   * throws the same errors. The page is closed afterwards. Whatever goes wrong with the read other than the browser
+   * exiting comes back as a problem.
+   *
+   * When the first browser exits during the read, the read is made once more in the relaunched browser, as the next
+   * capture would be, and the first browser counts as exited. A read in the relaunched browser that exits, or in a
+   * first browser whose exit says this machine can't run the platform, throws the exit.
+   *
+   * @throws {ContainerError} When Docker can't be run, the image can't be pulled, or the browser can't reach the proxy,
+   * at the launch or the relaunch.
+   * @throws {BrowserDownloadError} When the headless shell can't be downloaded to the host.
+   * @throws {BrowserLaunchError} When the browser doesn't connect, or fails any other way while it is checked to reach
+   * the proxy, at the launch or the relaunch.
+   * @throws {BrowserMismatchError} When the browser, launched or relaunched, isn't the browser package's build.
+   * @throws {BrowserExitedError} When the relaunched browser exits during the read or has exited before it, when the
+   * browser exits while it is checked to reach the proxy, and when the first browser's exit says this machine can't
+   * run the platform.
+   */
+  readOptions: (request: OptionsRequest) => Promise<StorybookOptionsRead>
   /**
    * How the first browser exited, once it has exited other than through `close()` and the run went on, or `undefined`.
    * An exit saying this machine can't run the platform gives `undefined`, since it stops the run.
@@ -175,7 +197,8 @@ function checkedBrowserOf(options: RunBrowserOptions): CheckedBrowser {
 }
 
 /**
- * Prepares a run's browser, which `launcher` launches. Nothing is launched until the first `capture()`.
+ * Prepares a run's browser, which `launcher` launches. Nothing is launched until the first `capture()` or
+ * `readOptions()`.
  */
 export function runBrowserOf(launcher: LaunchBrowser, options: RunBrowserOptions): RunBrowser {
   let first: LaunchedBrowser | undefined
@@ -223,13 +246,13 @@ export function runBrowserOf(launcher: LaunchBrowser, options: RunBrowserOptions
   }
 
   /**
-   * Gives the browser the next capture runs in: the first one, launching it at the first call, or once it has exited,
-   * the relaunched one, relaunching it at the first call after the exit.
+   * Gives the browser the next read or capture runs in: the first one, launching it at the first call, or once it has
+   * exited, the relaunched one, relaunching it at the first call after the exit.
    *
    * @throws {BrowserExitedError} When the relaunched browser has exited too, or the first one's exit says this machine
    * can't run the platform.
    */
-  const browserForCapture = (): LaunchedBrowser => {
+  const browserForNextUse = (): LaunchedBrowser => {
     first ??= startLaunch()
 
     if (first.exit === undefined) {
@@ -277,9 +300,34 @@ export function runBrowserOf(launcher: LaunchBrowser, options: RunBrowserOptions
     return session
   }
 
+  /**
+   * Reads the options in `browser` once it is up. When the browser exits during the read, marks it exited and gives the
+   * exit instead.
+   *
+   * @throws {Error} The launch's error, when the browser failed to launch.
+   */
+  const readIn = async (
+    browser: LaunchedBrowser,
+    request: OptionsRequest,
+  ): Promise<StorybookOptionsRead | BrowserExitedError> => {
+    const driver = await browser.driver
+
+    try {
+      return await readStoryOptions(driver, options.settings, request)
+    } catch (error) {
+      if (!(error instanceof BrowserExitedError)) {
+        throw error
+      }
+
+      browser.exit ??= error
+
+      return error
+    }
+  }
+
   return {
     capture: async (worker, story, started) => {
-      const browser = browserForCapture()
+      const browser = browserForNextUse()
       const session = await sessionOf(browser, worker)
 
       started?.()
@@ -310,6 +358,26 @@ export function runBrowserOf(launcher: LaunchBrowser, options: RunBrowserOptions
           },
         }
       }
+    },
+    readOptions: async (request) => {
+      const browser = browserForNextUse()
+      const read = await readIn(browser, request)
+
+      if (!(read instanceof BrowserExitedError)) {
+        return read
+      }
+
+      if (browser !== first || cannotRunPlatform(read)) {
+        throw read
+      }
+
+      const reread = await readIn(browserForNextUse(), request)
+
+      if (reread instanceof BrowserExitedError) {
+        throw reread
+      }
+
+      return reread
     },
     firstExit: () => {
       if (first?.exit === undefined || cannotRunPlatform(first.exit)) {

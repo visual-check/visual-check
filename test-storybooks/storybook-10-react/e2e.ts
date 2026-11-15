@@ -250,12 +250,48 @@ const readinessLines: [storyId: string, says: string][] = [
 ]
 
 /**
+ * The stories of the stories file that throws as the browser imports it, by the pattern their IDs match. They're
+ * broken, `load-failed`, before any baseline is read, so they have none and stay broken in every `test`.
+ */
+const loadFailsFilter = /^load-fails--/
+
+/**
+ * What the line of each broken per-story options story says, in its reason's own wording: what the `wait` hook threw,
+ * and that the story's file failed to load, with what the file threw.
+ */
+const perStoryOptionsLines: [storyId: string, says: string][] = [
+  ['wait--throws', "The story's wait hook threw Error: visual-check: wait threw"],
+  ['load-fails--first', 'failed to load: Error: visual-check: this stories file fails to load'],
+  ['load-fails--second', 'failed to load: Error: visual-check: this stories file fails to load'],
+]
+
+/**
+ * The stories that `disable: true` leaves out, which `index.json` lists but no run prints a line for or counts.
+ */
+const disabledStories = ['disabled--skipped', 'options--disabled-on-its-own']
+
+/**
+ * The invalid-options case: the script it adds to every `iframe.html`, which runs before Storybook imports any
+ * stories file and asks `InvalidWhenAsked` for a `tolerance.pixels` of `'120%'`, and what `test`'s message must name.
+ */
+const invalidOptions = {
+  script: '<script>globalThis.__visualCheckE2eInvalidOptions = true</script>',
+  storyId: 'options--invalid-when-asked',
+  key: 'visualCheck.tolerance.pixels',
+}
+
+/**
+ * The header's count of the snapshots a run takes.
+ */
+const headerCountPattern = /^visual-check \S+ · \S+ · (\d+) snapshots? · /m
+
+/**
  * What the warning for a Storybook that ignores the test path's user agent says, wherever it names the Storybook.
  */
 const testPathWarning = 'StorybookTestRunner user agent'
 
 /**
- * The test-path case: the script it adds to every story page, which makes `navigator.userAgent` the page's own without
+ * The test-path case: the script it adds to every `iframe.html`, which makes `navigator.userAgent` the page's own without
  * ` StorybookTestRunner`, as a Storybook that ignores visual-check's user agent sees it, and the stories it captures,
  * by the pattern their IDs match.
  */
@@ -284,7 +320,7 @@ const killTimeouts = { capturing: 60_000, removed: 10_000 }
  */
 const browserExits = {
   storyLineSays: 'The browser exited',
-  relaunched: ['The browser exited', 'visual-check relaunches it once for the stories left.'],
+  relaunched: ['The browser exited', 'visual-check relaunches it once for the rest of the run.'],
   stopped: ['The browser exited', 'Run visual-check again.'],
 }
 
@@ -325,16 +361,18 @@ const contentTypes: Record<string, string> = {
 }
 
 /**
- * How the static server changes what it serves.
+ * How the static server changes what it serves. A story page is an `iframe.html` with an `id`, the page of the story
+ * the browser captures. The page visual-check reads every story's options on, `iframe.html?viewMode=story`, has none.
  */
 interface ServeOptions {
   /**
-   * Markup added to the end of every `iframe.html`'s `<head>`.
+   * Markup added to the end of every `iframe.html`'s `<head>`, the options-reading page's included. Storybook's own
+   * scripts there are modules, which run after the document is parsed, so a classic `<script>` here runs first.
    */
-  injectIntoStoryPage?: string
+  injectIntoIframe?: string
   /**
-   * Leaves every `iframe.html` request unanswered until `releaseStoryPages()` or the server stops, so a run can't
-   * finish a capture meanwhile.
+   * Leaves every story page request unanswered until `releaseStoryPages()` or the server stops, so a run can't finish
+   * a capture meanwhile. The options-reading page is answered at once.
    */
   holdStoryPages?: boolean
 }
@@ -349,7 +387,7 @@ interface StorybookServer {
   url: string
   /**
    * The ID of the story each request for a story page was for, the `id` of its `iframe.html`, in the order they came,
-   * held or not. A request means the browser is capturing that story.
+   * held or not. A request means the browser is capturing that story. The options-reading page isn't a story page.
    */
   storyPageRequests: () => string[]
   /**
@@ -396,6 +434,10 @@ interface CliRun {
    * Whether the time limit ended it.
    */
   timedOut: boolean
+  /**
+   * Its standard output.
+   */
+  stdout: string
   /**
    * Its standard error.
    */
@@ -705,8 +747,8 @@ function withMarkup(page: Buffer, markup: string | undefined): Buffer | string {
 }
 
 /**
- * Answers a request for a URL path with the static build's file, or 404 when it names no file there. A story page
- * gets the markup `injectIntoStoryPage` gives.
+ * Answers a request for a URL path with the static build's file, or 404 when it names no file there. Every
+ * `iframe.html`, the options-reading page included, gets the markup `injectIntoIframe` gives.
  */
 function serveFile(pathname: string, response: ServerResponse, options: ServeOptions): void {
   const filePath = staticFileOf(pathname)
@@ -721,20 +763,22 @@ function serveFile(pathname: string, response: ServerResponse, options: ServeOpt
 
   response
     .writeHead(200, { 'content-type': contentTypes[extname(filePath)] ?? 'application/octet-stream' })
-    .end(pathname === '/iframe.html' ? withMarkup(body, options.injectIntoStoryPage) : body)
+    .end(pathname === '/iframe.html' ? withMarkup(body, options.injectIntoIframe) : body)
 }
 
 /**
- * Records a request for a story's page under the story's ID, the `id` search parameter of its `iframe.html`.
+ * Gives the ID of the story a request is for when it asks for a story page, an `iframe.html` with an `id`, or
+ * `undefined` for any other request, the options-reading page's included.
  */
-function recordStoryPageRequest(storyPageRequests: string[], searchParams: URLSearchParams): void {
-  storyPageRequests.push(searchParams.get('id') ?? '')
+function storyPageIdOf(pathname: string, searchParams: URLSearchParams): string | undefined {
+  return pathname === '/iframe.html' ? (searchParams.get('id') ?? undefined) : undefined
 }
 
 /**
  * Serves the static build on a free port of 127.0.0.1, changed as the options say, and records the requests for story
- * pages. While it holds them, it keeps each one's answer until they're released. It never answers a request for the
- * font file the font readiness story asks for, until it stops.
+ * pages. While it holds them, it keeps each one's answer until they're released. The options-reading page is never
+ * held or recorded, so a run reads every story's options before it asks for a story page. It never answers a request
+ * for the font file the font readiness story asks for, until it stops.
  */
 async function serveStorybook(options: ServeOptions = {}): Promise<StorybookServer> {
   const storyPageRequests: string[] = []
@@ -744,8 +788,8 @@ async function serveStorybook(options: ServeOptions = {}): Promise<StorybookServ
   /**
    * Records a request for a story page, then answers it, or keeps the answer while the server holds story pages.
    */
-  const answerStoryPage = (searchParams: URLSearchParams, answer: () => void): void => {
-    recordStoryPageRequest(storyPageRequests, searchParams)
+  const answerStoryPage = (storyId: string, answer: () => void): void => {
+    storyPageRequests.push(storyId)
 
     if (holding) {
       heldAnswers.push(answer)
@@ -759,13 +803,14 @@ async function serveStorybook(options: ServeOptions = {}): Promise<StorybookServ
   const server = createServer((request, response) => {
     const { pathname, searchParams } = new URL(request.url ?? '/', 'http://127.0.0.1')
     const answer = (): void => serveFile(pathname, response, options)
+    const storyId = storyPageIdOf(pathname, searchParams)
 
     if (pathname === neverAnsweredPath) {
       return
     }
 
-    if (pathname === '/iframe.html') {
-      answerStoryPage(searchParams, answer)
+    if (storyId !== undefined) {
+      answerStoryPage(storyId, answer)
 
       return
     }
@@ -875,11 +920,11 @@ async function runCli(args: string[], env: NodeJS.ProcessEnv = process.env): Pro
  *
  * @throws {Error} When a snapshot line ends in a detail no outcome has.
  */
-function cliRunOf(stdout: string, ended: Omit<CliRun, 'snapshots' | 'outcomes'>): CliRun {
+function cliRunOf(stdout: string, ended: Omit<CliRun, 'stdout' | 'snapshots' | 'outcomes'>): CliRun {
   const snapshots = parseSnapshots(stdout)
   const outcomes = Object.fromEntries(snapshots.map((snapshot) => [snapshot.storyId, snapshot.outcome]))
 
-  return { ...ended, snapshots, outcomes }
+  return { ...ended, stdout, snapshots, outcomes }
 }
 
 /**
@@ -970,10 +1015,10 @@ function exitCodeOf(outcomes: Outcomes): number {
 }
 
 /**
- * Changes each story's outcome with `change`.
+ * Changes each story's outcome with `change`, which gets the outcome and the story's ID.
  */
-function mapOutcomes(outcomes: Outcomes, change: (outcome: Outcome) => Outcome): Outcomes {
-  return Object.fromEntries(Object.entries(outcomes).map(([storyId, outcome]) => [storyId, change(outcome)]))
+function mapOutcomes(outcomes: Outcomes, change: (outcome: Outcome, storyId: string) => Outcome): Outcomes {
+  return Object.fromEntries(Object.entries(outcomes).map(([storyId, outcome]) => [storyId, change(outcome, storyId)]))
 }
 
 /**
@@ -985,11 +1030,16 @@ function updateOutcomeOf(outcome: Outcome): Outcome {
 }
 
 /**
- * What `test` gives a story right after `update` into an empty folder: a broken story has no baseline, so it's missing,
- * because `test` never captures a story without one, and any other passes.
+ * What `test` gives a story with this expected `test` outcome right after `update` into an empty folder: a broken
+ * story has no baseline, so it's missing, because `test` never captures a story without one, and any other passes.
+ * The stories of the stories file that fails to load stay broken, since they're broken before any baseline is read.
  */
-function retestOutcomeOf(outcome: Outcome): Outcome {
-  return outcome === 'broken' ? 'missing' : 'passed'
+function retestOutcomeOf(outcome: Outcome, storyId: string): Outcome {
+  if (outcome !== 'broken') {
+    return 'passed'
+  }
+
+  return loadFailsFilter.test(storyId) ? 'broken' : 'missing'
 }
 
 /**
@@ -1137,8 +1187,10 @@ async function waitUntil(condition: () => boolean, timeoutMilliseconds: number):
 
 /**
  * `test` against the committed baselines, with 2 workers, gives exactly the expected outcomes. Each broken readiness
- * story's line says why, and standard error has no test-path warning, since every page is on Storybook's test path.
- * Outside the Storybook 10 test Storybook, the committed animation baselines are byte-identical to its own.
+ * and per-story options story's line says why, and standard error has no test-path warning, since every page is on
+ * Storybook's test path. The disabled stories, which `index.json` lists, have no line, and the header counts exactly
+ * the stories with an expected outcome. Outside the Storybook 10 test Storybook, the committed animation baselines are
+ * byte-identical to its own.
  */
 async function checkCommittedBaselines(expected: Outcomes): Promise<string[]> {
   return await withStorybookServer({}, async (server) => {
@@ -1146,9 +1198,13 @@ async function checkCommittedBaselines(expected: Outcomes): Promise<string[]> {
 
     return [
       ...expectedRunProblems('test', run, expected),
-      ...readinessLines.flatMap(([storyId, says]) => lineSaysProblems(run, storyId, says)),
+      ...[...readinessLines, ...perStoryOptionsLines].flatMap(([storyId, says]) =>
+        lineSaysProblems(run, storyId, says),
+      ),
       ...noTestPathWarningProblems(run.stderr),
       ...storybook10AnimationProblems(),
+      ...disabledStoryProblems(run),
+      ...headerCountProblems(run, Object.keys(expected).length),
     ]
   })
 }
@@ -1236,9 +1292,43 @@ async function checkEndStateRuns(expected: Outcomes): Promise<string[]> {
 }
 
 /**
+ * Gives the problems with the disabled stories: one that `index.json` doesn't list, so its missing line proves nothing,
+ * or one the run printed a line for. None when `index.json` lists each of them and none has a line.
+ */
+function disabledStoryProblems(run: CliRun): string[] {
+  const indexed = readIndexedStoryIds()
+
+  return disabledStories.flatMap((storyId) => [
+    ...(indexed.includes(storyId) ? [] : [`index.json doesn't list ${storyId}`]),
+    ...(run.snapshots.some((snapshot) => snapshot.storyId === storyId)
+      ? [`test printed a line for ${storyId}, which is disabled`]
+      : []),
+  ])
+}
+
+/**
+ * Reads the ID of every entry the static build's `index.json` lists.
+ */
+function readIndexedStoryIds(): string[] {
+  const { entries } = JSON.parse(readFileSync(join(staticDir, 'index.json'), 'utf8')) as { entries: object }
+
+  return Object.keys(entries)
+}
+
+/**
+ * Gives the problem with a run's header when it doesn't count this many snapshots, or none when it does.
+ */
+function headerCountProblems(run: CliRun, count: number): string[] {
+  const counted = headerCountPattern.exec(run.stdout)?.[1]
+
+  return counted === String(count) ? [] : [`test's header counts ${counted ?? 'no'} snapshots, expected ${count}`]
+}
+
+/**
  * `update` into an empty folder writes every story that isn't broken, `test` then passes them and finds the broken
- * ones missing, and the baselines of the stories expected to pass are byte-identical to the committed ones. Only those
- * have a committed baseline the written one must equal. Both commands take 2 workers from the config.
+ * ones missing, apart from the stories of the file that fails to load, which stay broken, and the baselines of the
+ * stories expected to pass are byte-identical to the committed ones. Only those have a committed baseline the written
+ * one must equal. Both commands take 2 workers from the config.
  */
 async function checkUpdateThenTest(expected: Outcomes): Promise<string[]> {
   rmSync(diagnosticsDir, { recursive: true, force: true })
@@ -1375,7 +1465,7 @@ async function checkHazards(expected: Outcomes): Promise<string[]> {
  * A visible change to one story fails `test` with that story's snapshot differing, and every other story as expected.
  */
 async function checkDeliberateChange(expected: Outcomes): Promise<string[]> {
-  return await withStorybookServer({ injectIntoStoryPage: deliberateChange.style }, async (server) => {
+  return await withStorybookServer({ injectIntoIframe: deliberateChange.style }, async (server) => {
     const run = await runCli(['test', '--all', '--url', server.url])
 
     return [
@@ -1386,7 +1476,7 @@ async function checkDeliberateChange(expected: Outcomes): Promise<string[]> {
 }
 
 /**
- * With every story page's `navigator.userAgent` its own without `StorybookTestRunner`, Storybook takes the path it
+ * With every `iframe.html`'s `navigator.userAgent` its own without `StorybookTestRunner`, Storybook takes the path it
  * takes off the test path, waiting about 100 ms as each story completes. `test` with 2 workers gives the button
  * stories their expected outcomes, so it exits 0, and standard error warns once that the Storybook seems to ignore the
  * user agent, naming it and the version of the `storybook` package installed here. The case writes its own config
@@ -1395,7 +1485,7 @@ async function checkDeliberateChange(expected: Outcomes): Promise<string[]> {
 async function checkTestPathWarning(expected: Outcomes): Promise<string[]> {
   const { version } = readStorybookPackage()
 
-  return await withStorybookServer({ injectIntoStoryPage: userAgentIgnored.script }, (server) =>
+  return await withStorybookServer({ injectIntoIframe: userAgentIgnored.script }, (server) =>
     withTemporaryFolder(async (folder) => {
       const config = writeConfig(folder, server.url, committedBaselines)
       const run = await runCli(['test', '--filter', userAgentIgnored.filter.source, '--config', config])
@@ -1446,6 +1536,23 @@ async function testWithPlatform(
       return check(await runCli(['test', '--all', '--config', config]), server)
     }),
   )
+}
+
+/**
+ * With every page of the Storybook asking `InvalidWhenAsked` for a `tolerance.pixels` of `'120%'`, `test` exits 2
+ * before any capture, its message naming the story and the key, and prints nothing on standard output.
+ */
+async function checkInvalidOptions(): Promise<string[]> {
+  return await withStorybookServer({ injectIntoIframe: invalidOptions.script }, async (server) => {
+    const run = await runCli(['test', '--all', '--url', server.url])
+
+    return [
+      ...exitCodeProblems('test', run, 2),
+      ...missingTextProblems(run.stderr, [invalidOptions.storyId, invalidOptions.key]),
+      ...(run.stdout === '' ? [] : [`test printed on standard output: ${run.stdout.trim()}`]),
+      ...capturedProblems(server),
+    ]
+  })
 }
 
 /**
@@ -1851,7 +1958,7 @@ if (setupProblems.length > 0) {
   const expected = JSON.parse(readFileSync(join(packageDir, 'expected-outcomes.json'), 'utf8')) as Outcomes
   const passed = await runCases([
     {
-      name: "committed baselines: test gives the expected outcomes, each broken readiness story's line says why, no test-path warning, the animation baselines are byte-identical to storybook-10-react's",
+      name: "committed baselines: test gives the expected outcomes, each broken readiness and per-story options story's line says why, no line for a disabled story, the header counts the expected outcomes, no test-path warning, the animation baselines are byte-identical to storybook-10-react's",
       run: () => checkCommittedBaselines(expected),
     },
     {
@@ -1859,7 +1966,7 @@ if (setupProblems.length > 0) {
       run: () => checkEndStateRuns(expected),
     },
     {
-      name: "update then test: update writes every story that isn't broken, test passes them and finds the broken ones missing, the baselines match the committed ones",
+      name: "update then test: update writes every story that isn't broken, test passes them and finds the broken ones missing, apart from the ones whose file fails to load, the baselines match the committed ones",
       run: () => checkUpdateThenTest(expected),
     },
     {
@@ -1877,6 +1984,10 @@ if (setupProblems.length > 0) {
     {
       name: "test path: a Storybook that ignores the test path's user agent triggers the warning once, and the run passes",
       run: () => checkTestPathWarning(expected),
+    },
+    {
+      name: 'invalid per-story options: test exits 2 naming the story and the key, before any capture',
+      run: checkInvalidOptions,
     },
     ...(insideImage ? insideImageCases(expected) : outsideImageCases(expected)),
   ])

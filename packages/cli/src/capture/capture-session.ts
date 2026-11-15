@@ -1,5 +1,6 @@
 import { readStoryWait, type StoryWait, storyWaitExpression } from '../storybook/preview-script.js'
 import { testPathUserAgentSuffix } from '../storybook/test-path.js'
+import { readWaitHookRun, type WaitHookRun, waitHookExpression } from '../storybook/wait-hook.js'
 import {
   BrowserExitedError,
   type Driver,
@@ -23,7 +24,7 @@ import {
  * How much longer than a wait in the page the driver waits for its answer, in ms. The wait in the page gives up first
  * and says why; this catches a page that stopped answering.
  */
-const waitMarginMs = 1_000
+export const waitMarginMs = 1_000
 
 /**
  * How a session captures every story.
@@ -38,10 +39,11 @@ export interface CaptureSettings {
   /**
    * The config's `readyTimeout`, in ms, per attempt: a story that navigates away is captured again, up to 2 more times,
    * each with the whole of it. It's counted from just before the viewport is set. Loading the story (`goto`), waiting
-   * for Storybook to report it finished, waiting for its images and fonts, bringing it to its end state and checking
-   * its images and fonts again share it, each getting what's left, in whole ms rounded up. Each wait in the page gives
-   * up when it runs out, and the driver allows up to 1 s more for the page's answer. Setting the viewport and the
-   * capture are bound by the driver's own fixed limits instead.
+   * for Storybook to report it finished, waiting for its images and fonts, running its wait hook, checking its images
+   * and fonts again after the hook, bringing it to its end state and checking its images and fonts again after that
+   * share it, each getting what's left, in whole ms rounded up. Each wait in the page gives up when it runs out, and the
+   * driver allows up to 1 s more for the page's answer. Setting the viewport and the capture are bound by the driver's
+   * own fixed limits instead.
    */
   readyTimeoutMs: number
   /**
@@ -77,11 +79,14 @@ export interface StoryToCapture {
 /**
  * Why a story can't be captured, as a code a report can group by.
  *
+ * - `load-failed`: its stories file failed to load, or didn't load within readyTimeout, so every story of that file is
+ *   broken. The run's options read gives it, before any capture; a capture session never does.
  * - `error`: the story, Storybook or the browser failed it: Storybook reported an error or showed its error display,
- *   the story threw, the page script didn't run, or a step of the capture failed.
+ *   the story threw, the page script didn't run, the story's wait hook couldn't run, or a step of the capture failed.
  * - `play-threw`: the story's `play` function threw or left unhandled errors.
  * - `timeout`: the story wasn't ready within readyTimeout.
  * - `fonts-not-loaded`: a font face the story's page uses was still loading when readyTimeout ran out.
+ * - `wait-threw`: the story's `wait` hook threw or rejected.
  * - `navigated-away`: the story's page went to another document.
  * - `crashed`: the page crashed, usually from running out of memory.
  * - `browser-exited`: the browser exited while the story was in flight. The run's browser gives it; a capture session
@@ -90,17 +95,21 @@ export interface StoryToCapture {
  * @public
  */
 export type BrokenReason =
+  | 'load-failed'
   | 'error'
   | 'play-threw'
   | 'timeout'
   | 'fonts-not-loaded'
+  | 'wait-threw'
   | 'navigated-away'
   | 'crashed'
   | 'browser-exited'
 
 /**
- * A story that can't be captured: why, and a one-line message for people saying so. A story whose fonts didn't load
- * also keeps the faces still loading, and a story that navigated away keeps where it went.
+ * A story that can't be captured: why, and a one-line message for people saying so. A capture session gives one for a
+ * story it can't capture, and the run gives one for a story in flight when its browser exits and for each story of a
+ * stories file that didn't load. A story whose fonts didn't load also keeps the faces still loading, and a story that
+ * navigated away keeps where it went.
  *
  * @public
  */
@@ -194,7 +203,22 @@ export interface CaptureSession {
 /**
  * A step of one capture.
  */
-type Step = 'viewport' | 'load' | 'story' | 'assets' | 'end-state' | 'capture'
+type Step =
+  | 'viewport'
+  | 'load'
+  | 'story'
+  | 'assets'
+  | 'wait'
+  | 'assets-after-wait'
+  | 'end-state'
+  | 'assets-after-end-state'
+  | 'capture'
+
+/**
+ * A check of the story's images and fonts: the one once the story finished, the one after its wait hook ran, or the one
+ * after its end state changed the page.
+ */
+type AssetsStep = Extract<Step, 'assets' | 'assets-after-wait' | 'assets-after-end-state'>
 
 /**
  * What each step does, as a phrase that follows "while".
@@ -204,7 +228,10 @@ const stepNames: Record<Step, string> = {
   load: 'loading the story',
   story: 'waiting for the story to finish',
   assets: 'waiting for images and fonts',
+  wait: "running the story's wait hook",
+  'assets-after-wait': 'waiting for images and fonts after its wait hook',
   'end-state': 'bringing the story to its end state',
+  'assets-after-end-state': 'waiting for images and fonts after its end state',
   capture: 'capturing the snapshot',
 }
 
@@ -215,7 +242,21 @@ const stepTimeouts: Partial<Record<Step, string>> = {
   load: 'its page was still loading',
   story: 'its page stopped answering while visual-check waited for the story to finish',
   assets: 'its page stopped answering while visual-check waited for its images and fonts',
+  wait: 'its page stopped answering while its wait hook ran',
+  'assets-after-wait':
+    'its page stopped answering while visual-check waited for its images and fonts after its wait hook',
   'end-state': 'its page stopped answering while visual-check brought it to its end state',
+  'assets-after-end-state':
+    'its page stopped answering while visual-check waited for its images and fonts after its end state',
+}
+
+/**
+ * What each check of images and fonts adds to what a message says the story was doing, so the message names the check.
+ */
+const assetsCheckSuffixes: Record<AssetsStep, string> = {
+  assets: '',
+  'assets-after-wait': ' after its wait hook',
+  'assets-after-end-state': ' after its end state',
 }
 
 /**
@@ -235,8 +276,10 @@ function notReady(readyTimeoutMs: number, doing: string): string {
 
 /**
  * Gives an error's message, or the thrown value as text, ending with a period.
+ *
+ * @public
  */
-function reasonOf(error: unknown): string {
+export function failureReasonOf(error: unknown): string {
   const reason = error instanceof Error ? error.message : String(error)
 
   return reason.endsWith('.') ? reason : `${reason}.`
@@ -312,33 +355,34 @@ function imagesStillLoading(pending: number): string {
 }
 
 /**
- * Says why a story isn't ready to capture, from what the wait for its images and fonts found.
+ * Says why a story isn't ready to capture, from what a check of its images and fonts found. `suffix` follows what the
+ * message says the story was doing, so it names the check.
  */
 function describeAssetsWait(
   assets: Exclude<AssetsReadiness, { outcome: 'ready' }>,
   readyTimeoutMs: number,
+  suffix: string,
 ): BrokenStory {
   if (assets.outcome === 'script-missing') {
     return {
       reason: 'error',
-      message:
-        "visual-check's page script didn't run in the story's page, so it couldn't wait for its images and fonts.",
+      message: `visual-check's page script didn't run in the story's page, so it couldn't wait for its images and fonts${suffix}.`,
     }
   }
 
   if (assets.step === 'images') {
-    return { reason: 'timeout', message: notReady(readyTimeoutMs, imagesStillLoading(assets.pending)) }
+    return { reason: 'timeout', message: notReady(readyTimeoutMs, `${imagesStillLoading(assets.pending)}${suffix}`) }
   }
 
   const faces = assets.pendingFaces
 
   if (faces.length === 0) {
-    return { reason: 'timeout', message: notReady(readyTimeoutMs, "document.fonts.ready hadn't resolved") }
+    return { reason: 'timeout', message: notReady(readyTimeoutMs, `document.fonts.ready hadn't resolved${suffix}`) }
   }
 
   return {
     reason: 'fonts-not-loaded',
-    message: `The story's fonts hadn't loaded within readyTimeout (${readyTimeoutMs} ms). Still loading: ${faces.join(', ')}.`,
+    message: `The story's fonts hadn't loaded within readyTimeout (${readyTimeoutMs} ms)${suffix}. Still loading: ${faces.join(', ')}.`,
     faces,
   }
 }
@@ -355,6 +399,33 @@ function describeEndState(endState: Exclude<EndState, { outcome: 'settled' }>, r
   }
 
   return { reason: 'timeout', message: notReady(readyTimeoutMs, endStateTimeouts[endState.step]) }
+}
+
+/**
+ * Says why a story isn't ready to capture, from what running its wait hook found.
+ */
+function describeWaitHookRun(
+  run: Exclude<WaitHookRun, { outcome: 'none' | 'done' }>,
+  readyTimeoutMs: number,
+): BrokenStory {
+  switch (run.outcome) {
+    case 'threw':
+      return { reason: 'wait-threw', message: run.message }
+    case 'context-failed':
+      return { reason: 'error', message: run.message }
+    case 'timed-out':
+      return { reason: 'timeout', message: notReady(readyTimeoutMs, "its wait hook hadn't finished") }
+    case 'no-render':
+      return {
+        reason: 'error',
+        message: "Storybook's preview had no render of the story to run its wait hook with.",
+      }
+    case 'script-missing':
+      return {
+        reason: 'error',
+        message: "visual-check's page script didn't run in the story's page, so it couldn't run its wait hook.",
+      }
+  }
 }
 
 /**
@@ -385,14 +456,18 @@ function describeFailure(error: unknown, step: Step, story: StoryToCapture, read
 
   const name = stepNames[step]
 
-  return { reason: 'error', message: `${name.charAt(0).toUpperCase()}${name.slice(1)} failed: ${reasonOf(error)}` }
+  return {
+    reason: 'error',
+    message: `${name.charAt(0).toUpperCase()}${name.slice(1)} failed: ${failureReasonOf(error)}`,
+  }
 }
 
 /**
  * Captures a story on an open page: sets the viewport, loads the story, waits until Storybook reports it finished with
- * nothing gone wrong, waits for its images and fonts, brings it to its end state and captures the full page. When the
- * end state changed anything, it checks the images and fonts again before the capture. Loading, the waits and the end
- * state share readyTimeout, each getting only what's left of it. A story that can't be captured comes back as a broken
+ * nothing gone wrong, waits for its images and fonts, runs its wait hook, brings it to its end state and captures the
+ * full page. When the story has a wait hook, its images and fonts are checked again after it, and when the end state
+ * changed anything, they're checked again before the capture. Loading, the waits, the hook, the end state and those
+ * checks share readyTimeout, each getting only what's left of it. A story that can't be captured comes back as a broken
  * story. Rejects only with a `BrowserExitedError`.
  */
 async function captureOnPage(page: Page, story: StoryToCapture, settings: CaptureSettings): Promise<StoryCapture> {
@@ -411,12 +486,37 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
   }
 
   /**
-   * Waits in the page for the story's images and fonts, as the `assets` step.
+   * Waits for the story's images and fonts, as the check `assetsStep` names. Gives why the story isn't ready when they
+   * didn't load in time, or nothing when they did.
    */
-  const waitForAssets = async (): Promise<AssetsReadiness> => {
-    step = 'assets'
+  const checkAssets = async (assetsStep: AssetsStep): Promise<BrokenStory | undefined> => {
+    step = assetsStep
 
-    return readAssetsReadiness(await waitInPage(assetsReadyExpression))
+    const assets = readAssetsReadiness(await waitInPage(assetsReadyExpression))
+
+    if (assets.outcome === 'ready') {
+      return undefined
+    }
+
+    return describeAssetsWait(assets, settings.readyTimeoutMs, assetsCheckSuffixes[assetsStep])
+  }
+
+  /**
+   * Runs the story's wait hook, if it has one, and checks its images and fonts again once it ran. Gives why the story
+   * isn't ready, or nothing when it is.
+   */
+  const runWaitHook = async (): Promise<BrokenStory | undefined> => {
+    step = 'wait'
+
+    const run = readWaitHookRun(await waitInPage((limit) => waitHookExpression(story.id, limit)))
+
+    if (run.outcome === 'none') {
+      return undefined
+    }
+
+    return run.outcome === 'done'
+      ? await checkAssets('assets-after-wait')
+      : describeWaitHookRun(run, settings.readyTimeoutMs)
   }
 
   try {
@@ -431,10 +531,10 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
       return { broken: describeStoryWait(wait, settings.readyTimeoutMs) }
     }
 
-    const assets = await waitForAssets()
+    const broken = (await checkAssets('assets')) ?? (await runWaitHook())
 
-    if (assets.outcome !== 'ready') {
-      return { broken: describeAssetsWait(assets, settings.readyTimeoutMs) }
+    if (broken !== undefined) {
+      return { broken }
     }
 
     step = 'end-state'
@@ -446,10 +546,10 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
     }
 
     if (endState.changed) {
-      const assetsAgain = await waitForAssets()
+      const brokenAfterEndState = await checkAssets('assets-after-end-state')
 
-      if (assetsAgain.outcome !== 'ready') {
-        return { broken: describeAssetsWait(assetsAgain, settings.readyTimeoutMs) }
+      if (brokenAfterEndState !== undefined) {
+        return { broken: brokenAfterEndState }
       }
     }
 
@@ -479,6 +579,20 @@ function navigatedAway(capture: StoryCapture): boolean {
 }
 
 /**
+ * Gives how a page is set up for the settings: a user agent ending in `StorybookTestRunner`, the settings' time zone,
+ * locale and colour scheme, and the page script. A capture page and a page that reads options are set up the same way.
+ */
+export function pageSetupOf(settings: CaptureSettings): PageSetup {
+  return {
+    userAgentSuffix: testPathUserAgentSuffix,
+    timezone: settings.timezone,
+    locale: settings.locale,
+    colorScheme: settings.colorScheme,
+    initScript: pageInitScript,
+  }
+}
+
+/**
  * Starts a session that captures stories on `driver`, one at a time, on one page. It opens the page at its first
  * capture, set up with the settings, a user agent ending in `StorybookTestRunner` and the page script. After a broken
  * story, it closes the page and opens a fresh one, in a fresh browser context, for the next story.
@@ -497,13 +611,7 @@ function navigatedAway(capture: StoryCapture): boolean {
  * @public
  */
 export function openCaptureSession(driver: Driver, settings: CaptureSettings): CaptureSession {
-  const setup: PageSetup = {
-    userAgentSuffix: testPathUserAgentSuffix,
-    timezone: settings.timezone,
-    locale: settings.locale,
-    colorScheme: settings.colorScheme,
-    initScript: pageInitScript,
-  }
+  const setup = pageSetupOf(settings)
   let page: Page | undefined
 
   const closePage = async (): Promise<void> => {
@@ -546,7 +654,10 @@ export function openCaptureSession(driver: Driver, settings: CaptureSettings): C
       }
 
       return {
-        broken: { reason: 'error', message: `visual-check couldn't open a page for the story: ${reasonOf(error)}` },
+        broken: {
+          reason: 'error',
+          message: `visual-check couldn't open a page for the story: ${failureReasonOf(error)}`,
+        },
       }
     }
 
