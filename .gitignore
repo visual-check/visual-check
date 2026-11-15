@@ -7,3 +7,5 @@ node_modules
 .fallow/
 
 lefthook-local.yml
+
+**/.visual-check/report/

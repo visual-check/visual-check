@@ -181,6 +181,27 @@ const deliberateChange = {
 }
 
 /**
+ * The one-pixel change: the story it changes, by its ID and the pattern that matches only it, the stylesheet that
+ * changes it and the detail its line must hold with `pixels: 0`, `differs:` included so a larger count can't match.
+ * The stylesheet draws one black CSS pixel at (1000, 600) through a fixed `body::after`, which takes no space in the
+ * layout. The story is captured in the default 1280 × 720 viewport at scale 1, so that spot is inside the snapshot, on
+ * the white page far from the card, and exactly one pixel of the snapshot changes.
+ */
+const onePixelChange = {
+  storyId: 'card--default',
+  filter: /^card--default$/,
+  style:
+    '<style>body::after { content: ""; position: fixed; left: 1000px; top: 600px; width: 1px; height: 1px; ' +
+    'background: #000; }</style>',
+  says: 'differs: 1 differ, 0 allowed',
+}
+
+/**
+ * The images `test` writes to the report for a differing snapshot, `<key>.<kind>.png` each.
+ */
+const reportImageKinds = ['baseline', 'snapshot', 'diff'] as const
+
+/**
  * How many workers every case that captures in parallel uses, through `--workers` or the config it writes, so each
  * captures in parallel on any machine.
  */
@@ -1146,11 +1167,17 @@ interface ConfigOptions {
    * How many more times a failing snapshot is captured before it fails. The config's default when not given.
    */
   retries?: number
+  /**
+   * The project's tolerance, which each story's own overrides key by key. The config's default when not given. It's
+   * the subset of the CLI's `Tolerance` this check writes: counts of pixels, not shares.
+   */
+  tolerance?: { color?: number; pixels?: number }
 }
 
 /**
  * Writes a config for this Storybook, served at the URL, with its baselines in the given folder, that captures with 2
- * workers, and the platform, `readyTimeout` and `retries` the options give. Gives its path.
+ * workers, and the platform, `readyTimeout`, `retries` and `tolerance` the options give. Gives its path. `test`'s report
+ * goes into `.visual-check/report` in that folder.
  */
 function writeConfig(folder: string, url: string, baselines: string, options: ConfigOptions = {}): string {
   const path = join(folder, 'visual-check.config.mjs')
@@ -1288,7 +1315,7 @@ function absentModeProblems(run: CliRun, storyId: string, mode: string): string[
  * Lists how the committed animation baselines differ from the Storybook 10 test Storybook's, or none when this is that
  * Storybook. Both folders must hold the same `animations--*.png` files, byte for byte. `test` passes each animation
  * story here against its baseline, so on Storybook 11 this checks that its own pause of animations, then visual-check's
- * end state, gives Storybook 10's snapshots.
+ * end state, gives Storybook 10's snapshots within the tolerance.
  */
 function storybook10AnimationProblems(): string[] {
   if (committedBaselines === storybook10Baselines) {
@@ -1333,18 +1360,18 @@ function storybook10MatchProblems(name: string): string[] {
 
 /**
  * On one server, `test` runs the animation stories against the committed baselines 10 times, one run after the
- * other, with a config that sets 2 workers and `retries: 0`, and each run gives every one of them its expected outcome.
- * With no retries, and `test` comparing byte for byte, a run that passes captured each snapshot byte-identical to its
- * baseline. Every run's problems are kept, each led by its run's number, so a story whose snapshot changes shows how
- * often it did. A run that a signal ended, as the time limit does, stops the case: that's a broken setup, not a
- * snapshot that changed, and 10 of them would outlast CI's job.
+ * other, with a config that sets 2 workers, `retries: 0` and `tolerance: { pixels: 0 }`, and each run gives every one
+ * of them its expected outcome. With no retries and no pixel allowed to differ, a run that passes captured each snapshot
+ * with every pixel within the preview's color tolerance, 0.01, of its baseline. Every run's problems are kept, each led
+ * by its run's number, so a story whose snapshot changes shows how often it did. A run that a signal ended, as the time
+ * limit does, stops the case: that's a broken setup, not a snapshot that changed, and 10 of them would outlast CI's job.
  */
 async function checkEndStateRuns(expected: Outcomes): Promise<string[]> {
   const expectedAnimations = outcomesMatching(expected, animationFilter)
 
   return await withStorybookServer({}, (server) =>
     withTemporaryFolder(async (folder) => {
-      const config = writeConfig(folder, server.url, committedBaselines, { retries: 0 })
+      const config = writeConfig(folder, server.url, committedBaselines, { retries: 0, tolerance: { pixels: 0 } })
       const problems: string[] = []
 
       for (let runNumber = 1; runNumber <= endStateRuns; runNumber += 1) {
@@ -1548,6 +1575,51 @@ async function checkDeliberateChange(expected: Outcomes): Promise<string[]> {
       ...outcomeProblems('test', run.outcomes, { ...expected, [deliberateChange.storyId]: 'differs' }),
     ]
   })
+}
+
+/**
+ * With one pixel of the card story changed, `test` on that story against the committed baselines fails with a config
+ * that sets `tolerance: { pixels: 0 }`: the story differs, its line says `1 differ, 0 allowed`, and the report beside
+ * the config holds its baseline, snapshot and diff. With the default tolerance, the same `test` gives the story its
+ * expected outcome, passed. Each problem starts with the tolerance its run had.
+ */
+async function checkOnePixelChange(expected: Outcomes): Promise<string[]> {
+  const { storyId, filter, style, says } = onePixelChange
+  const defaultExpected = outcomesMatching(expected, filter)
+
+  return await withStorybookServer({ injectIntoIframe: style }, (server) =>
+    withTemporaryFolder(async (folder) => {
+      const testArgs = ['test', '--filter', filter.source]
+      const noPixelsConfig = writeConfig(folder, server.url, committedBaselines, { tolerance: { pixels: 0 } })
+      const noPixelsRun = await runCli([...testArgs, '--config', noPixelsConfig])
+      // Every `test` clears the report first, so its images are checked before the default run.
+      const noPixelsProblems = [
+        ...expectedRunProblems('test', noPixelsRun, { [storyId]: 'differs' }),
+        ...lineSaysProblems(noPixelsRun, storyId, says),
+        ...reportImageProblems(folder, storyId),
+      ]
+      const defaultConfig = writeConfig(folder, server.url, committedBaselines)
+      const defaultRun = await runCli([...testArgs, '--config', defaultConfig])
+
+      return [
+        ...noPixelsProblems.map((problem) => `pixels: 0: ${problem}`),
+        ...expectedRunProblems('test', defaultRun, defaultExpected).map((problem) => `default tolerance: ${problem}`),
+      ]
+    }),
+  )
+}
+
+/**
+ * Lists each image of a snapshot that the report beside a config in this folder doesn't hold for the Storybook
+ * `react`, or none when it holds them all.
+ */
+function reportImageProblems(configFolder: string, key: string): string[] {
+  const imagesFolder = join(configFolder, '.visual-check', 'report', 'images', 'react')
+
+  return reportImageKinds
+    .map((kind) => join(imagesFolder, `${key}.${kind}.png`))
+    .filter((path) => !isFile(path))
+    .map((path) => `test wrote no ${path}`)
 }
 
 /**
@@ -2062,7 +2134,7 @@ if (setupProblems.length > 0) {
       run: () => checkCommittedBaselines(expected),
     },
     {
-      name: `end state: ${endStateRuns} runs of test give every animation story its expected outcome, byte-identical to its baseline`,
+      name: `end state: ${endStateRuns} runs of test with pixels: 0 give every animation story its expected outcome`,
       run: () => checkEndStateRuns(expected),
     },
     {
@@ -2080,6 +2152,10 @@ if (setupProblems.length > 0) {
     {
       name: `deliberate change: test exits 1 and ${deliberateChange.storyId} differs`,
       run: () => checkDeliberateChange(expected),
+    },
+    {
+      name: `one-pixel change: with pixels: 0, test exits 1, ${onePixelChange.storyId} differs saying "1 differ, 0 allowed" and the report holds its images; with the default tolerance, test passes it`,
+      run: () => checkOnePixelChange(expected),
     },
     {
       name: "test path: a Storybook that ignores the test path's user agent triggers the warning once, and the run passes",
