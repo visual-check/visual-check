@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Service worker fetch frame</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 8px;
+        font: 14px sans-serif;
+      }
+
+      p {
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <p id="result">Fetching</p>
+    <script>
+      // Fetches the remote square, from localhost on this page's port, a remote origin for a page on 127.0.0.1,
+      // with the mocked marker in its URL. The service worker answers it with a response of its own, so nothing goes
+      // over the network. The server sends no CORS headers, so the fetch fails unless the worker answers it. The page
+      // writes what came back, or why it failed, and sets `data-result` on the body to `answered` or `failed`, which
+      // the story's `play` waits for.
+      const remoteSquare = `${location.protocol}//localhost:${location.port}/remote-content/square.png`
+      const mockedUrl = `${remoteSquare}?visual-check-e2e-mocked`
+      const result = document.getElementById('result')
+
+      fetch(mockedUrl).then(
+        (response) => {
+          result.textContent = `Mocked fetch answered ${response.status}, ${response.headers.get('content-type')}`
+          document.body.dataset.result = 'answered'
+        },
+        (error) => {
+          result.textContent = `Mocked fetch failed: ${error.message}`
+          document.body.dataset.result = 'failed'
+        },
+      )
+    </script>
+  </body>
+</html>

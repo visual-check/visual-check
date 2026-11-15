@@ -377,6 +377,28 @@ const headerCountPattern = /^visual-check \S+ · \S+ · (\d+) snapshots? · /m
 const testPathWarning = 'StorybookTestRunner user agent'
 
 /**
+ * What the warning that ends a finished `update` says about the network stories, each line led by the remote origin's
+ * host, `localhost` on the server's port. No other story is listed: `MockedFetch`'s request is answered by its service
+ * worker, and the remote content stories' meta masks the host.
+ */
+const networkWarning = {
+  /**
+   * The rest of the line that says `RealFetch` makes a real network request.
+   */
+  request: ': 1 story (network--real-fetch). This story makes real network requests and may be unreliable.',
+  /**
+   * The rest of the line that says `RemoteImage` shows remote content.
+   */
+  remoteContent:
+    ': 1 story (network--remote-image) shows remote content. ' +
+    'A CDN can serve it differently on another machine, so CI may fail.',
+  /**
+   * Matches a line of the warning, of either kind, so the case finds every one.
+   */
+  linePattern: /^\S+: \d+ stor(?:y|ies) \(/,
+}
+
+/**
  * The test-path case: the script it adds to every `iframe.html`, which makes `navigator.userAgent` the page's own without
  * ` StorybookTestRunner`, as a Storybook that ignores visual-check's user agent sees it, and the stories it captures,
  * by the pattern their IDs match.
@@ -1506,7 +1528,8 @@ function headerCountProblems(run: CliRun, count: number): string[] {
  * `update` into an empty folder writes every story that isn't broken, `test` then passes them and finds the broken
  * ones missing, apart from the stories of the file that fails to load, which stay broken, and the baselines of the
  * stories expected to pass are byte-identical to the committed ones. Only those have a committed baseline the written
- * one must equal. Both commands take 2 workers from the config.
+ * one must equal. `update`'s standard error ends with the network warning for the network stories alone. Both commands
+ * take 2 workers from the config.
  */
 async function checkUpdateThenTest(expected: Outcomes): Promise<string[]> {
   rmSync(diagnosticsDir, { recursive: true, force: true })
@@ -1515,7 +1538,11 @@ async function checkUpdateThenTest(expected: Outcomes): Promise<string[]> {
     withTemporaryFolder(async (folder) => {
       const baselines = join(folder, 'baselines')
       const args = ['--all', '--config', writeConfig(folder, server.url, baselines)]
-      const updateProblems = await runAndCheck('update', args, mapOutcomes(expected, updateOutcomeOf))
+      const update = await runCli(['update', ...args], localEnvironment())
+      const updateProblems = [
+        ...expectedRunProblems('update', update, mapOutcomes(expected, updateOutcomeOf)),
+        ...networkWarningProblems(update.stderr, server),
+      ]
 
       if (updateProblems.length > 0) {
         return updateProblems
@@ -1525,10 +1552,36 @@ async function checkUpdateThenTest(expected: Outcomes): Promise<string[]> {
 
       return [
         ...baselineProblems(baselines, passing),
-        ...(await runAndCheck('test', args, mapOutcomes(expected, retestOutcomeOf))),
+        ...(await runTestAndCheck(args, mapOutcomes(expected, retestOutcomeOf))),
       ]
     }),
   )
+}
+
+/**
+ * Gives the problem with `update`'s standard error when its network warning isn't exactly the network stories' block,
+ * or none. The block is a line for `RealFetch`'s request, then one for `RemoteImage`'s remote content, both after the
+ * remote origin's host, `localhost` on the server's port. Standard error must end with it, and hold no other line of
+ * the warning, so a story listed with them, or a host with a line of its own, fails the case. Whatever else standard
+ * error says before the block doesn't matter.
+ */
+function networkWarningProblems(stderr: string, server: StorybookServer): string[] {
+  const host = `localhost:${new URL(server.url).port}`
+  const block = [`${host}${networkWarning.request}`, `${host}${networkWarning.remoteContent}`]
+  const warned = stderr.split('\n').filter((line) => networkWarning.linePattern.test(line))
+
+  if (warned.join('\n') === block.join('\n')) {
+    return stderr.endsWith(`${block.join('\n')}\n`)
+      ? []
+      : [`update's network warning doesn't end its standard error${outputOf(stderr)}`]
+  }
+
+  return [
+    `update's network warning isn't the network stories' block, expected:`,
+    ...block.map((line) => `  ${line}`),
+    'got:',
+    ...(warned.length > 0 ? warned.map((line) => `  ${line}`) : ['  no warning']),
+  ]
 }
 
 /**
@@ -1539,12 +1592,12 @@ function expectedRunProblems(command: string, run: CliRun, expected: Outcomes): 
 }
 
 /**
- * Runs a command locally, without `CI`, and lists how its exit code and outcomes differ from the expected ones.
+ * Runs `test` locally, without `CI`, and lists how its exit code and outcomes differ from the expected ones.
  */
-async function runAndCheck(command: 'test' | 'update', args: string[], expected: Outcomes): Promise<string[]> {
-  const run = await runCli([command, ...args], localEnvironment())
+async function runTestAndCheck(args: string[], expected: Outcomes): Promise<string[]> {
+  const run = await runCli(['test', ...args], localEnvironment())
 
-  return expectedRunProblems(command, run, expected)
+  return expectedRunProblems('test', run, expected)
 }
 
 /**
@@ -2278,7 +2331,7 @@ if (setupProblems.length > 0) {
       run: () => checkEndStateRuns(expected),
     },
     {
-      name: "update then test: update writes every story that isn't broken, test passes them and finds the broken ones missing, apart from the ones whose file fails to load, the baselines match the committed ones",
+      name: "update then test: update writes every story that isn't broken, test passes them and finds the broken ones missing, apart from the ones whose file fails to load, the baselines match the committed ones, update warns about the network stories alone",
       run: () => checkUpdateThenTest(expected),
     },
     {

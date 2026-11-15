@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import type { ReactNode, SyntheticEvent } from 'react'
 import { waitFor } from 'storybook/test'
 import { visualCheck } from '../.storybook/visual-check.ts'
+import { registerMockingWorker } from './mocking-worker.ts'
 import { remoteOrigin, remoteSquare, squarePath } from './remote-origin.ts'
 
 /**
@@ -254,37 +255,6 @@ async function loadBlobSquare(): Promise<{ blobSquare: string }> {
   const response = await fetch(sameOriginSquare)
 
   return { blobSquare: URL.createObjectURL(await response.blob()) }
-}
-
-/**
- * Promises that a service worker has activated.
- */
-function activated(worker: ServiceWorker): Promise<void> {
-  return new Promise((resolve) => {
-    const check = (): void => {
-      if (worker.state === 'activated') {
-        resolve()
-      }
-    }
-
-    worker.addEventListener('statechange', check)
-    check()
-  })
-}
-
-/**
- * Registers the mocking service worker with the scope `/sw-scope/`, and waits until it's active, so it controls the
- * frame the story then renders. The story page itself is outside the scope, so the worker never controls it.
- */
-async function registerMockingWorker(): Promise<void> {
-  const registration = await navigator.serviceWorker.register('/sw-scope/sw.js', { scope: '/sw-scope/' })
-  const worker = registration.installing ?? registration.waiting ?? registration.active
-
-  if (worker === null) {
-    throw new Error('visual-check: the mocking service worker has no worker')
-  }
-
-  await activated(worker)
 }
 
 /**
