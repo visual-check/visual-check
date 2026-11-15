@@ -460,6 +460,11 @@ function describeCapturePrep(
         reason: 'error',
         message: "visual-check's page script didn't run in the story's page, so it couldn't paint its masks.",
       }
+    case 'paint-failed':
+      return {
+        reason: 'error',
+        message: `visual-check couldn't paint the story's masks: ${failureReasonOf(prep.message)}`,
+      }
   }
 }
 

@@ -84,9 +84,11 @@ export interface CapturePrepRequest {
  *
  * It answers `{ outcome: 'ready', box }`, where `box` is the element's box, or `null` for the full page. When the
  * element is missing, a selector is invalid or the search timed out, it paints nothing and hides no caret. It never
- * throws: painting and hiding the caret are best effort, so anything else that throws once the element was measured,
- * such as a mask element whose box can't be read or a root that can't adopt the sheet, leaves that part out and still
- * answers `ready`.
+ * throws. A mask must never fail open: when finding the masks' boxes or painting them throws, as when the search
+ * rejects or an element can't be created, it answers `{ outcome: 'paint-failed', message }` and hides no caret, with
+ * what it painted so far left in the page. A mask element whose box can't be read covers nothing, and a host that can't
+ * be shown as a popover takes the highest `z-index`, as said above. Hiding the caret is best effort: a root that can't
+ * adopt the sheet is left out, and it still answers `ready`.
  */
 export const prepareCaptureFunction = `(context) => {
   const { shadowRoots, findRemoteContent, stateGlobal } = context
@@ -264,6 +266,21 @@ export const prepareCaptureFunction = `(context) => {
     }
   }
 
+  // Finds the masks' boxes and paints them, giving undefined when that's done, or why it couldn't be. A mask
+  // unpainted would leave its content in the capture, so anything thrown here fails the preparation.
+  const paintMasks = async (masks, maskColor, scroll, timeoutMs) => {
+    try {
+      const found = await maskBoxesOf(masks, scroll, timeoutMs)
+      if (found.outcome !== undefined) {
+        return found
+      }
+      paint(found.boxes, maskColor)
+      return undefined
+    } catch (error) {
+      return { outcome: 'paint-failed', message: messageOf(error) }
+    }
+  }
+
   // The shadow roots a frame's own page script recorded, closed ones included, or none when they can't be read.
   const recordedRootsOf = (frame) => {
     const recorded = read(() => frame.contentWindow[stateGlobal].shadowRoots, undefined)
@@ -299,13 +316,10 @@ export const prepareCaptureFunction = `(context) => {
     if (measured.outcome !== undefined) {
       return measured
     }
-    try {
-      const found = await maskBoxesOf(masks, scroll, timeoutMs)
-      if (found.outcome !== undefined) {
-        return found
-      }
-      paint(found.boxes, maskColor)
-    } catch {}
+    const painted = await paintMasks(masks, maskColor, scroll, timeoutMs)
+    if (painted !== undefined) {
+      return painted
+    }
     try {
       hideCaretIn(document, shadowRoots)
     } catch {}
@@ -381,6 +395,16 @@ export type CapturePrep =
        */
       outcome: 'script-missing'
     }
+  | {
+      /**
+       * Finding the masks' boxes or painting them threw, so the capture would show what they cover.
+       */
+      outcome: 'paint-failed'
+      /**
+       * What was thrown.
+       */
+      message: string
+    }
 
 /**
  * Whether a value is a box the page gives: whole numbers, `x` and `y` at least 0, and `width` and `height` over 0.
@@ -438,10 +462,15 @@ function readNotReady(answer: Record<string, unknown>): CapturePrep | undefined 
 }
 
 /**
- * Reads an answer of the page that says a selector isn't valid CSS. Gives `undefined` for any other answer.
+ * Reads an answer of the page that says a selector isn't valid CSS or the masks couldn't be painted. Gives `undefined`
+ * for any other answer.
  */
-function readInvalidSelector(answer: Record<string, unknown>): CapturePrep | undefined {
+function readFailure(answer: Record<string, unknown>): CapturePrep | undefined {
   const { message, name } = answer
+
+  if (answer.outcome === 'paint-failed' && typeof message === 'string') {
+    return { outcome: 'paint-failed', message }
+  }
 
   if (answer.outcome !== 'invalid-selector' || typeof message !== 'string') {
     return undefined
@@ -462,7 +491,7 @@ function readInvalidSelector(answer: Record<string, unknown>): CapturePrep | und
  */
 export function readCapturePrep(value: unknown): CapturePrep {
   const answer: Record<string, unknown> = typeof value === 'object' && value !== null ? { ...value } : {}
-  const prep = readReady(answer) ?? readNotReady(answer) ?? readInvalidSelector(answer)
+  const prep = readReady(answer) ?? readNotReady(answer) ?? readFailure(answer)
 
   if (prep !== undefined) {
     return prep

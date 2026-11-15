@@ -338,7 +338,7 @@ describe('host masks', () => {
     expect(document.adoptedStyleSheets).toEqual([])
   })
 
-  it('paint nothing when the search rejects, which it never does, and still answer ready', async () => {
+  it('fail to paint when the search rejects, which it never does, hiding no caret', async () => {
     const { document, created } = fakeCaptureDocument()
     const page = openPreparation(document, {
       remoteContent: async () => {
@@ -347,11 +347,11 @@ describe('host masks', () => {
     })
 
     expect(await page.prepare({ masks: [{ name: 'images', host: 'images.example.com' }] })).toEqual({
-      outcome: 'ready',
-      box: null,
+      outcome: 'paint-failed',
+      message: 'The search failed.',
     })
     expect(created).toEqual([])
-    expect(sheetsOf(document)).toEqual([{ madeBy: 'top', text: caretRule }])
+    expect(document.adoptedStyleSheets).toEqual([])
   })
 })
 
@@ -442,7 +442,7 @@ describe('painting', () => {
     expect(created).toEqual([])
   })
 
-  it('still answers with the box, hiding the caret, when creating an element throws', async () => {
+  it('fails to paint, hiding no caret, when creating an element throws', async () => {
     const { document } = fakeCaptureDocument({
       matches: {
         '.ad': [boxed({ x: 1, y: 2, width: 3, height: 4 })],
@@ -457,7 +457,22 @@ describe('painting', () => {
     })
     expect(
       await openPreparation(document).prepare({ element: '#card', masks: [{ name: 'ads', selector: '.ad' }] }),
-    ).toEqual({ outcome: 'ready', box: { x: 0, y: 0, width: 9, height: 9 } })
+    ).toEqual({ outcome: 'paint-failed', message: 'NotSupportedError: no elements.' })
+    expect(document.adoptedStyleSheets).toEqual([])
+  })
+
+  it('answers ready, creating nothing, when creating an element would throw but no mask covers anything', async () => {
+    const { document } = fakeCaptureDocument()
+
+    Object.assign(document, {
+      createElement: () => {
+        throw new Error('NotSupportedError: no elements.')
+      },
+    })
+    expect(await openPreparation(document).prepare({ masks: [{ name: 'ads', selector: '.ad' }] })).toEqual({
+      outcome: 'ready',
+      box: null,
+    })
     expect(sheetsOf(document)).toEqual([{ madeBy: 'top', text: caretRule }])
   })
 })
@@ -609,6 +624,12 @@ describe('readCapturePrep', () => {
     expect(readCapturePrep({ outcome })).toEqual({ outcome })
   })
 
+  it("reads masks that couldn't be painted, with what was thrown", () => {
+    const answer = { outcome: 'paint-failed', message: 'NotSupportedError: no elements.' }
+
+    expect(readCapturePrep(answer)).toEqual(answer)
+  })
+
   it.each([
     ['a number', 42],
     ['null', null],
@@ -626,6 +647,7 @@ describe('readCapturePrep', () => {
     ['an invalid selector of something else', { outcome: 'invalid-selector', of: 'story', message: 'bad' }],
     ['an invalid element selector without a message', { outcome: 'invalid-selector', of: 'element' }],
     ['an invalid mask selector without a name', { outcome: 'invalid-selector', of: 'mask', message: 'bad' }],
+    ['masks that could not be painted without a message', { outcome: 'paint-failed' }],
     ['an unknown outcome', { outcome: 'painted' }],
   ])('throws on %s, quoting it', (_what, value) => {
     expect(() => readCapturePrep(value)).toThrow(

@@ -574,6 +574,14 @@ describe('the masks', () => {
       },
     ],
     [
+      "the masks couldn't be painted",
+      { outcome: 'paint-failed', message: 'NotSupportedError: no elements' },
+      {
+        reason: 'error',
+        message: "visual-check couldn't paint the story's masks: NotSupportedError: no elements.",
+      },
+    ],
+    [
       "the page script didn't run",
       { outcome: 'script-missing' },
       {
