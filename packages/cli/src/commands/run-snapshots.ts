@@ -4,6 +4,7 @@ import type { BrowserPackage } from '../browser/read-browser-package.js'
 import { brokenImageTimeLimitMs, type CaptureSettings } from '../capture/capture-session.js'
 import { runWorkerPool } from '../capture/worker-pool.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
+import type { ReportWarning } from '../report/report-document.js'
 import { ReportError, reportFolderOf } from '../report/report-folder.js'
 import type { Shard } from '../sharding/shard.js'
 import type { Story } from '../storybook/read-stories.js'
@@ -13,7 +14,7 @@ import type { BrowserPlace } from './browser-route.js'
 import { hasOrphans, type StorybookBaselines } from './consistency-check.js'
 import { orphanLabelOf, orphanLinesOf } from './consistency-output.js'
 import type { LaunchBrowser } from './launch-browser.js'
-import { networkWarningOf } from './network-warning.js'
+import { networkWarningsOf, warningsTextOf } from './network-warning.js'
 import { type PlannedSnapshot, planSnapshots } from './plan-snapshots.js'
 import { type RunBrowser, runBrowserOf } from './run-browser.js'
 import { countsLineOf, snapshotCountOf, snapshotLineOf, snapshotNameOf } from './run-output.js'
@@ -23,7 +24,13 @@ import type { CaptureStory, SnapshotResult, SnapshotStatus } from './snapshot-re
 import { exitNoticeOf, stopMessageOf } from './stop-message.js'
 import { type SnapshotTools, takeSnapshot } from './take-snapshot.js'
 import { type Taking, testPlanOf } from './test-plan.js'
-import { deleteStorybookOrphans, longPathWarningOf, planUpdate, updateEndLinesOf } from './update-baselines.js'
+import {
+  type DeletedBaseline,
+  deleteStorybookOrphans,
+  longPathWarningOf,
+  planUpdate,
+  updateEndLinesOf,
+} from './update-baselines.js'
 
 /**
  * The stories a run covers in one Storybook, in the order they are taken and printed.
@@ -149,8 +156,9 @@ interface SnapshotRunEnd {
    */
   stderr: string
   /**
-   * What the run found, for the report: the snapshots it took and their results, and each Storybook's orphans, or for
-   * a `test` that stopped after its consistency check what the check found.
+   * What the run found, for the report: the snapshots it took and their results, each Storybook's orphans, and for
+   * `update` the baselines it deleted and its warnings, or for a `test` that stopped after its consistency check what
+   * the check found.
    */
   findings: RunFindings
 }
@@ -275,13 +283,13 @@ function countOf(statuses: readonly SnapshotStatus[], counted: SnapshotStatus): 
 }
 
 /**
- * Warns, for `update`, about the hosts its stories send real network requests to and the hosts whose remote content
- * they show, apart from the ones the config silences. Gives nothing for `test`, or when no host is left. Broken
- * snapshots reach no host.
+ * Gives the warnings, for `update`, about the hosts its stories send real network requests to and the hosts whose
+ * remote content they show, apart from the ones the config silences. Gives none for `test`. Broken snapshots reach no
+ * host.
  */
-function networkWarningsOf(run: SnapshotRun, snapshots: PlannedSnapshots): string {
+function updateWarningsOf(run: SnapshotRun, snapshots: PlannedSnapshots): ReportWarning[] {
   if (run.command !== 'update') {
-    return ''
+    return []
   }
 
   const taken = snapshots.items.flatMap(({ storybook, story }, index) => {
@@ -290,7 +298,7 @@ function networkWarningsOf(run: SnapshotRun, snapshots: PlannedSnapshots): strin
     return hosts === undefined ? [] : [{ storybook: storybook.name, storyId: story.id, hosts }]
   })
 
-  return networkWarningOf(taken, run.config.silenceHosts)
+  return networkWarningsOf(taken, run.config.silenceHosts)
 }
 
 /**
@@ -332,7 +340,7 @@ function endLinesOf(
   run: SnapshotRun,
   snapshots: PlannedSnapshots,
   baselines: readonly StorybookBaselines[],
-  deleted: string[],
+  deleted: readonly DeletedBaseline[],
 ): string[] {
   const statuses = snapshots.results.flatMap((result) => (result === undefined ? [] : [result.status]))
 
@@ -349,7 +357,7 @@ function endLinesOf(
 
   const summary = {
     written: writtenPathsOf(snapshots),
-    deleted,
+    deleted: deleted.map(({ path }) => path),
     kept: countOf(statuses, 'kept'),
     broken: countOf(statuses, 'broken'),
   }
@@ -601,7 +609,7 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
       : { command: 'update', visualDiff, recaptureDelayMs: run.recaptureDelayMs }
   let snapshots: PlannedSnapshots | undefined
   let baselines: StorybookBaselines[] = []
-  let deleted: string[] = []
+  let deleted: DeletedBaseline[] = []
 
   try {
     const share =
@@ -658,6 +666,8 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
     }
   }
 
+  const warnings = updateWarningsOf(run, snapshots)
+
   return {
     exitCode: exitCodeOf(run.command, snapshots, baselines),
     stdout: printedOf(snapshots, [...linesOf(snapshots), ...endLinesOf(run, snapshots, baselines, deleted)]),
@@ -665,7 +675,7 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
       exitNoticeOf(browser.firstExit()) +
       testPathWarningsOf(run.selections, snapshots.items, snapshots.results) +
       longPathWarningsOf(run, snapshots) +
-      networkWarningsOf(run, snapshots),
-    findings: { items: snapshots.items, results: snapshots.results, baselines },
+      warningsTextOf(warnings),
+    findings: { items: snapshots.items, results: snapshots.results, baselines, deleted, warnings },
   }
 }

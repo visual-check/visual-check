@@ -329,7 +329,7 @@ describe('parseCommandLine --shard', () => {
     })
   })
 
-  it.each(['live', 'log'] as const)('parses --reporter %s for update', (reporter) => {
+  it.each(['live', 'log', 'json'] as const)('parses --reporter %s for update', (reporter) => {
     expect(parseCommandLine(['update', '--reporter', reporter])).toEqual({
       command: 'update',
       options: { ...defaultOptions, reporter },
@@ -340,10 +340,6 @@ describe('parseCommandLine --shard', () => {
     expect(usageErrorOf('test', '--reporter', value).message).toBe(
       `--reporter takes live, log or json. Got '${value}'.`,
     )
-  })
-
-  it('rejects --reporter json for update until it has a document of its own', () => {
-    expect(usageErrorOf('update', '--reporter', 'json').message).toBe("update --reporter json isn't available yet.")
   })
 })
 

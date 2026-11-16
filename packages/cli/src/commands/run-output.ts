@@ -54,11 +54,12 @@ export function cliOutputOf(
 }
 
 /**
- * Composes what a `test` that exits 2 prints on each stream. stderr keeps its text and ends with `tail`: the report
- * line when the report was written, else what kept it from being written, or nothing. With `--reporter json`, stdout
- * holds the report's JSON document alone and the human lines are dropped. With any other reporter, stdout keeps them.
+ * Composes what a run prints on each stream when stdout doesn't end with the report line: a `test` that exits 2, and
+ * every `update`. stderr keeps its text and ends with `tail`: for a `test`, the report line when the report was
+ * written, else what kept it from being written, or nothing. With `--reporter json`, stdout holds the report's JSON
+ * document alone and the human lines are dropped. With any other reporter, stdout keeps them.
  */
-export function stopOutputOf(
+export function documentOutputOf(
   output: { stdout: string; stderr: string },
   report: Report,
   reporter: Reporter | undefined,

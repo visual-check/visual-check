@@ -124,7 +124,13 @@ export async function testPlanOf(options: TestPlanOptions, planned: PlannedSnaps
 
   const check = await checkConsistency(options.storybooks, planned)
   const output = consistencyOutputOf({ version: options.version, cwd: options.cwd, planned, check })
-  const findings = { items: output.items, results: output.results, baselines: check.storybooks }
+  const findings = {
+    items: output.items,
+    results: output.results,
+    baselines: check.storybooks,
+    deleted: [],
+    warnings: [],
+  }
 
   if (options.consistencyOnly) {
     return { stopped: { exitCode: output.consistent ? 0 : 1, stdout: output.stdout, findings } }

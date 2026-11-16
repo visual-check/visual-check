@@ -319,22 +319,17 @@ function shardFlagOf(
 }
 
 /**
- * Reads the `--reporter` flag: `live`, `log` or `json`. `update` has no JSON document yet, so `json` is rejected for
- * it.
+ * Reads the `--reporter` flag: `live`, `log` or `json`.
  *
- * @throws {UsageError} When the value is anything else, or is `json` for `update`.
+ * @throws {UsageError} When the value is anything else.
  */
-function reporterFlagOf(command: 'test' | 'update', reporter: string | undefined): Reporter | undefined {
+function reporterFlagOf(reporter: string | undefined): Reporter | undefined {
   if (reporter === undefined) {
     return undefined
   }
 
   if (!isReporter(reporter)) {
     throw new UsageError(`--reporter takes live, log or json. Got '${reporter}'.`)
-  }
-
-  if (command === 'update' && reporter === 'json') {
-    throw new UsageError("update --reporter json isn't available yet.")
   }
 
   return reporter
@@ -346,9 +341,9 @@ function reporterFlagOf(command: 'test' | 'update', reporter: string | undefined
  * @throws {UsageError} For an unknown command or flag, a missing, empty or extra argument, a flag that doesn't apply to
  * the command, flags that clash, a `--url` that isn't an http(s) URL or holds a login, a `--filter` that isn't a
  * regular expression, a `--workers` that isn't a whole number of 1 or more, `--consistency` on `update` or with `--all`
- * or `--filter`, a `--reporter` that isn't `live`, `log` or `json` or is `json` on `update`, and a `--shard` that isn't
- * `k/n` with 1 ≤ k ≤ n, or is on `update` or with `--consistency`. Once the flags parse, an error of a `test` or
- * `update` command line names its run. `--help` anywhere before a `--` separator wins, so it never throws.
+ * or `--filter`, a `--reporter` that isn't `live`, `log` or `json`, and a `--shard` that isn't `k/n` with 1 ≤ k ≤ n,
+ * or is on `update` or with `--consistency`. Once the flags parse, an error of a `test` or `update` command line names
+ * its run. `--help` anywhere before a `--` separator wins, so it never throws.
  */
 export function parseCommandLine(commandLineArguments: string[]): CommandLine {
   if (asksForHelp(commandLineArguments)) {
@@ -505,6 +500,6 @@ function runOptionsOf(command: 'test' | 'update', values: ParsedFlags): RunOptio
     workers: workersFlagOf(values.workers),
     consistency,
     shard,
-    reporter: reporterFlagOf(command, values.reporter),
+    reporter: reporterFlagOf(values.reporter),
   }
 }

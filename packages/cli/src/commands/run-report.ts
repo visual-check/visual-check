@@ -3,21 +3,34 @@ import { stemOfFileName } from '../baselines/baseline-files.js'
 import type { ResolvedStorybook } from '../config/resolve-config.js'
 import {
   emptyTestCounts,
+  emptyUpdateCounts,
   type ReportSelection,
   type ReportShard,
   type ReportStorybook,
+  type ReportWarning,
   reportDir,
   type TestReport,
   type TestReportEntry,
   testReportOf,
+  type UpdateReport,
+  updateReportOf,
 } from '../report/report-document.js'
 import { copyBaselineToReport, reportFolderOf } from '../report/report-folder.js'
 import type { Shard } from '../sharding/shard.js'
 import type { StorybookBaselines } from './consistency-check.js'
 import type { Selection } from './parse-command-line.js'
 import type { PlannedSnapshot } from './plan-snapshots.js'
-import { isListed, orphanEntryOf, testCountsOf, testEntryOf } from './report-entries.js'
+import {
+  deletedEntryOf,
+  isListed,
+  orphanEntryOf,
+  testCountsOf,
+  testEntryOf,
+  updateCountsOf,
+  updateEntryOf,
+} from './report-entries.js'
 import type { SnapshotResult } from './snapshot-result.js'
+import type { DeletedBaseline } from './update-baselines.js'
 
 /**
  * What a run that finished, or stopped after its consistency check, found: what the report lists and counts.
@@ -38,6 +51,14 @@ export interface RunFindings {
    * Each Storybook's baselines folder, in config order, with the orphans `test` reports. None for a shard.
    */
   baselines: StorybookBaselines[]
+  /**
+   * The baselines `update` deleted, in config order, then file name order. None for `test`.
+   */
+  deleted: DeletedBaseline[]
+  /**
+   * The warnings that end a finished `update`. None for `test`.
+   */
+  warnings: ReportWarning[]
 }
 
 /**
@@ -122,6 +143,27 @@ async function orphanEntriesOf(
 }
 
 /**
+ * Gives the result of each snapshot that finished, and the entry `entryOf` gives each listed one, in planned order,
+ * with its baseline's path relative to `configFolder`.
+ */
+function listedOf<Entry>(
+  findings: RunFindings,
+  configFolder: string,
+  entryOf: (item: PlannedSnapshot, result: SnapshotResult, configFolder: string) => Entry,
+): { results: SnapshotResult[]; entries: Entry[] } {
+  const finished = findings.items.flatMap((item, index) => {
+    const result = findings.results[index]
+
+    return result === undefined ? [] : [{ item, result }]
+  })
+
+  return {
+    results: finished.map(({ result }) => result),
+    entries: finished.flatMap(({ item, result }) => (isListed(result) ? [entryOf(item, result, configFolder)] : [])),
+  }
+}
+
+/**
  * Builds a `test` report of a run that exits 0 or 1: an entry for each listed snapshot, in planned order, then one for
  * each orphan, whose baseline it copies into the report folder, and the counts of every finished snapshot and orphan.
  * Plain passes are only counted.
@@ -133,14 +175,7 @@ async function orphanEntriesOf(
 export async function testReportFor(facts: TestReportFacts): Promise<TestReport> {
   const { findings } = facts
   const configFolder = dirname(facts.configPath)
-  const finished = findings.items.flatMap((item, index) => {
-    const result = findings.results[index]
-
-    return result === undefined ? [] : [{ item, result }]
-  })
-  const entries = finished.flatMap(({ item, result }) =>
-    isListed(result) ? [testEntryOf(item, result, configFolder)] : [],
-  )
+  const { results, entries } = listedOf(findings, configFolder, testEntryOf)
   const orphans = await orphanEntriesOf(findings.baselines, reportFolderOf(facts.configPath), configFolder)
 
   return testReportOf({
@@ -151,10 +186,7 @@ export async function testReportFor(facts: TestReportFacts): Promise<TestReport>
     selection: selectionOf(facts.selection),
     reportDir,
     storybooks: facts.storybooks.map(({ name, url }) => ({ name, url })),
-    counts: testCountsOf(
-      finished.map(({ result }) => result),
-      orphans.length,
-    ),
+    counts: testCountsOf(results, orphans.length),
     snapshots: [...entries, ...orphans],
     error: null,
   })
@@ -217,6 +249,67 @@ export function testErrorReportOf(facts: TestErrorReportFacts): TestReport {
     storybooks: facts.storybooks.map(({ name, url }) => ({ name, url })),
     counts: emptyTestCounts(),
     snapshots: [],
+    error: {
+      message: facts.message.trim(),
+      storybooks: facts.unreachable.map(({ name, url }) => ({ name, url })),
+    },
+  })
+}
+
+/**
+ * What an `update` report is built from.
+ *
+ * @public
+ */
+export type UpdateReportFacts = Omit<TestReportFacts, 'consistencyOnly' | 'shard'>
+
+/**
+ * Builds the report of an `update` that exits 0 or 1: an entry for each written or broken snapshot, in planned order,
+ * then one for each deleted baseline, the counts of every finished snapshot and deleted baseline, and the warnings.
+ * Kept baselines are only counted. It has no report folder, since `update` never writes one.
+ *
+ * @public
+ */
+export function updateReportFor(facts: UpdateReportFacts): UpdateReport {
+  const { findings } = facts
+  const configFolder = dirname(facts.configPath)
+  const { results, entries } = listedOf(findings, configFolder, updateEntryOf)
+  const deleted = findings.deleted.map(({ storybook, path }) => deletedEntryOf(storybook, path, configFolder))
+
+  return updateReportOf({
+    visualCheck: facts.version,
+    exitCode: facts.exitCode,
+    selection: selectionOf(facts.selection),
+    storybooks: facts.storybooks.map(({ name, url }) => ({ name, url })),
+    counts: updateCountsOf(results, deleted.length),
+    snapshots: [...entries, ...deleted],
+    warnings: findings.warnings,
+    error: null,
+  })
+}
+
+/**
+ * What the report of an `update` that exits 2 is built from.
+ *
+ * @public
+ */
+export type UpdateErrorReportFacts = Omit<TestErrorReportFacts, 'consistencyOnly' | 'shard' | 'written'>
+
+/**
+ * Builds the report of an `update` that exits 2: the error, its message trimmed, with the unreachable Storybooks, and
+ * no results or warnings.
+ *
+ * @public
+ */
+export function updateErrorReportOf(facts: UpdateErrorReportFacts): UpdateReport {
+  return updateReportOf({
+    visualCheck: facts.version,
+    exitCode: 2,
+    selection: selectionOf(facts.selection),
+    storybooks: facts.storybooks.map(({ name, url }) => ({ name, url })),
+    counts: emptyUpdateCounts(),
+    snapshots: [],
+    warnings: [],
     error: {
       message: facts.message.trim(),
       storybooks: facts.unreachable.map(({ name, url }) => ({ name, url })),

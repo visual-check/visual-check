@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { emptyTestCounts, reportJsonOf, testReportOf } from '../report/report-document.js'
-import { cliOutputOf, reportLineOf, stopOutputOf } from './run-output.js'
+import { cliOutputOf, documentOutputOf, reportLineOf } from './run-output.js'
 
 describe('reportLineOf', () => {
   it("gives report.json's path relative to the cwd, with /", () => {
@@ -46,7 +46,7 @@ describe('cliOutputOf', () => {
   })
 })
 
-describe('stopOutputOf', () => {
+describe('documentOutputOf', () => {
   const report = testReportOf({
     visualCheck: '0.1.0',
     consistencyOnly: false,
@@ -65,7 +65,7 @@ describe('stopOutputOf', () => {
   it.each([undefined, 'live', 'log'] as const)(
     'keeps stdout and ends stderr with the given tail for reporter %s',
     (reporter) => {
-      expect(stopOutputOf(result, report, reporter, line)).toEqual({
+      expect(documentOutputOf(result, report, reporter, line)).toEqual({
         stdout: '✓ web  a  passed\n',
         stderr: `Boom.\n${line}`,
       })
@@ -73,7 +73,7 @@ describe('stopOutputOf', () => {
   )
 
   it('puts only the document on stdout for json, dropping the human lines', () => {
-    expect(stopOutputOf(result, report, 'json', '')).toEqual({
+    expect(documentOutputOf(result, report, 'json', '')).toEqual({
       stdout: `${reportJsonOf(report)}\n`,
       stderr: 'Boom.\n',
     })

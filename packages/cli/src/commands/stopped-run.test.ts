@@ -2,9 +2,16 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { reportJsonOf, type TestReport } from '../report/report-document.js'
+import { reportJsonOf, type TestReport, type UpdateReport } from '../report/report-document.js'
 import { UsageError } from './parse-command-line.js'
-import { type RunStop, type StoppedTest, stoppedBy, stoppedTestOf, usageFailureOf } from './stopped-run.js'
+import {
+  type RunStop,
+  type StoppedTest,
+  stoppedBy,
+  stoppedTestOf,
+  stoppedUpdateOf,
+  usageFailureOf,
+} from './stopped-run.js'
 
 /**
  * The folders the tests made, removed after each test.
@@ -143,6 +150,41 @@ describe('stoppedTestOf', () => {
   })
 })
 
+describe('stoppedUpdateOf', () => {
+  it('prints what the run printed, writing no report', () => {
+    const project = createProject()
+    const output = stoppedUpdateOf(stopIn(project), {
+      version: '1.2.3',
+      options: { selection: { kind: 'default' }, reporter: undefined },
+    })
+
+    expect(output).toEqual({ exitCode: 2, stdout: '✓ web  a  12 ms\n', stderr: 'Warning.\nThe browser exited.\n' })
+    expect(readdirSync(project).sort()).toEqual(['.git', 'visual-check.config.mjs'])
+  })
+
+  it("prints update's error document alone on stdout with --reporter json, with no report folder", () => {
+    const project = createProject()
+    const output = stoppedUpdateOf(stopIn(project), {
+      version: '1.2.3',
+      options: { selection: { kind: 'all' }, reporter: 'json' },
+    })
+    const report = JSON.parse(output.stdout) as UpdateReport
+
+    expect(output.stderr).toBe('Warning.\nThe browser exited.\n')
+    expect(output.stdout.trimEnd().split('\n')).toHaveLength(1)
+    expect(report).toMatchObject({
+      command: 'update',
+      visualCheck: '1.2.3',
+      exitCode: 2,
+      reportDir: null,
+      storybooks: [{ name: 'web', url: 'http://web.test' }],
+      snapshots: [],
+      error: { message: 'The browser exited.', storybooks: [] },
+    })
+    expect(readdirSync(project).sort()).toEqual(['.git', 'visual-check.config.mjs'])
+  })
+})
+
 describe('usageFailureOf', () => {
   it('prints the message and the hint, writing no report, for update', async () => {
     const project = createProject()
@@ -156,6 +198,27 @@ describe('usageFailureOf', () => {
       exitCode: 2,
       stdout: '',
       stderr: '--shard applies only to test.\nRun visual-check --help to see the commands and options.\n',
+    })
+    expect(readdirSync(project).sort()).toEqual(['.git', 'visual-check.config.mjs'])
+  })
+
+  it("prints update's error document with --reporter json, without the hint, writing no report", async () => {
+    const project = createProject()
+    const error = new UsageError('--shard applies only to test.', {
+      command: 'update',
+      config: undefined,
+      reporter: 'json',
+    })
+    const output = await usageFailureOf(error, project, '1.2.3')
+
+    expect(output.stderr).toBe(
+      '--shard applies only to test.\nRun visual-check --help to see the commands and options.\n',
+    )
+    expect(JSON.parse(output.stdout)).toMatchObject({
+      command: 'update',
+      exitCode: 2,
+      reportDir: null,
+      error: { message: '--shard applies only to test.', storybooks: [] },
     })
     expect(readdirSync(project).sort()).toEqual(['.git', 'visual-check.config.mjs'])
   })

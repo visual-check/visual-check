@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
-import type { TestReport, TestReportEntry } from '../report/report-document.js'
+import type { TestReport, TestReportEntry, UpdateReport } from '../report/report-document.js'
 import { greyPng } from '../visual-diff/images.fixture.js'
 import {
   ciStopLine,
@@ -632,4 +632,214 @@ describe('runCli test report on exit 2', () => {
       expect(existsSync(join(reportFolderIn(project), 'report.json'))).toBe(false)
     },
   )
+})
+
+/**
+ * Reads every file under a folder, by its path relative to it, so two reads tell whether anything changed.
+ */
+function filesIn(folder: string): Record<string, string> {
+  return Object.fromEntries(
+    readdirSync(folder, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => {
+        const path = join(entry.parentPath, entry.name)
+
+        return [path.slice(folder.length), readFileSync(path, 'base64')]
+      }),
+  )
+}
+
+/**
+ * The broken story's page that changed in the second after its capture, and the third load of an unstable story.
+ */
+const greySnapshot = new Uint8Array(await greyPng(10, 10, 128))
+
+describe('runCli update --reporter json', () => {
+  it("prints update's document alone, its warnings on stderr, and never touches the report folder", async () => {
+    const { project, url } = await createRun(
+      ['a', 'b', 'c'],
+      { b: defaultRunSnapshot, c: defaultRunSnapshot, gone: defaultRunSnapshot },
+      "silenceHosts: ['*.silenced.test'],",
+    )
+
+    writeStaleReport(project)
+
+    const before = filesIn(reportFolderIn(project))
+    const { options } = fakeBrowser({
+      a: {
+        requestHosts: ['api.test', 'x.silenced.test'],
+        remote: [{ host: 'cdn.test', x: 0, y: 0, width: 10, height: 10 }],
+      },
+      b: { snapshot: otherSnapshot },
+      c: { captures: [{ snapshot: otherSnapshot }, {}] },
+    })
+    const result = await runCli(['update', '--reporter', 'json'], {}, project, options)
+    const report = JSON.parse(result.stdout) as UpdateReport
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout.trimEnd().split('\n')).toHaveLength(1)
+    expect(result.stderr).toBe(
+      'api.test: 1 story (a). This story makes real network requests and may be unreliable.\n' +
+        'cdn.test: 1 story (a) shows remote content. A CDN can serve it differently on another machine, so CI may ' +
+        'fail.\n',
+    )
+    expect(filesIn(reportFolderIn(project))).toEqual(before)
+    expect(report).toMatchObject({
+      version: 1,
+      visualCheck: version,
+      command: 'update',
+      consistencyOnly: false,
+      exitCode: 0,
+      shard: null,
+      selection: { by: 'all', base: null, changedFiles: null, fallback: null },
+      reportDir: null,
+      storybooks: [{ name: 'web', url }],
+      counts: { written: 2, deleted: 1, kept: 1, broken: 0, flaky: 1 },
+      error: null,
+    })
+    expect(report.warnings).toEqual([
+      {
+        kind: 'real-requests',
+        host: 'api.test',
+        stories: [{ storybook: 'web', story: 'a' }],
+        message: 'api.test: 1 story (a). This story makes real network requests and may be unreliable.',
+      },
+      {
+        kind: 'remote-content',
+        host: 'cdn.test',
+        stories: [{ storybook: 'web', story: 'a' }],
+        message:
+          'cdn.test: 1 story (a) shows remote content. A CDN can serve it differently on another machine, so CI may ' +
+          'fail.',
+      },
+    ])
+    expect(report.snapshots.map(({ id, status, reason }) => [id, status, reason])).toEqual([
+      ['a', 'written', 'missing'],
+      ['b', 'written', 'differs'],
+      ['gone', 'deleted', null],
+    ])
+    expect(report.snapshots[0]).toMatchObject({
+      message: 'Written: missing',
+      baseline: '.visual-check/baselines/a.png',
+      images: noImages,
+      realRequestHosts: ['api.test', 'x.silenced.test'],
+      remoteContentHosts: ['cdn.test'],
+    })
+    expect(report.snapshots[1]).toMatchObject({
+      message: 'Written: differs: 100 differ, 20 allowed',
+      pixels: { differ: 100, allowed: 20, budget: 20, scale: 1 },
+      realRequestHosts: [],
+      remoteContentHosts: [],
+    })
+    expect(report.snapshots[2]).toMatchObject({
+      story: null,
+      importPath: null,
+      message: 'Deleted: no story calls for it.',
+      baseline: '.visual-check/baselines/gone.png',
+    })
+  })
+
+  it('lists the broken stories with their reasons and details, exits 1, and never touches the report folder', async () => {
+    const { project } = await createRun(['a', 'b'], { a: otherSnapshot })
+
+    writeStaleReport(project)
+
+    const before = filesIn(reportFolderIn(project))
+    const { options } = fakeBrowser({
+      a: { snapshotLater: greySnapshot },
+      b: { captures: [{}, { snapshot: otherSnapshot }, { snapshot: greySnapshot }] },
+    })
+    const result = await runCli(['update', '--reporter', 'json'], {}, project, options)
+    const report = JSON.parse(result.stdout) as UpdateReport
+
+    expect(result.exitCode).toBe(1)
+    expect(filesIn(reportFolderIn(project))).toEqual(before)
+    expect(report).toMatchObject({ exitCode: 1, counts: { written: 0, deleted: 0, kept: 0, broken: 2, flaky: 0 } })
+    expect(report.snapshots).toMatchObject([
+      { id: 'a', status: 'broken', reason: 'changed-after-capture', attempts: 1 },
+      {
+        id: 'b',
+        status: 'broken',
+        reason: 'unstable',
+        attempts: 3,
+        message: "No two of the story's 3 loads agreed, so its baseline wasn't written.",
+      },
+    ])
+    expect(report.snapshots.map(({ details }) => details)).toStrictEqual([{}, {}])
+  })
+
+  it('prints the same with --reporter log as with no flag', async () => {
+    const plain = await createRun(['a'], { gone: defaultRunSnapshot })
+    const flagged = await createRun(['a'], { gone: defaultRunSnapshot })
+    const expected = await runCli(['update'], {}, plain.project, fakeBrowser().options)
+    const result = await runCli(['update', '--reporter', 'log'], {}, flagged.project, fakeBrowser().options)
+
+    expect(result).toEqual(expected)
+  })
+
+  it('prints the error document of an update in CI, writing nothing', async () => {
+    const { project } = await createRun(['a'])
+    const result = await runCli(['update', '--reporter', 'json'], { CI: 'true' }, project, fakeBrowser().options)
+    const message =
+      'visual-check update only runs locally, and the CI environment variable is set. ' +
+      'Run it on your machine and commit the baselines, or unset CI.'
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: `${JSON.stringify({
+        version: 1,
+        visualCheck: version,
+        command: 'update',
+        consistencyOnly: false,
+        exitCode: 2,
+        shard: null,
+        selection: { by: 'all', base: null, changedFiles: null, fallback: null },
+        reportDir: null,
+        storybooks: [],
+        counts: { written: 0, deleted: 0, kept: 0, broken: 0, flaky: 0 },
+        snapshots: [],
+        warnings: [],
+        error: { message, storybooks: [] },
+      })}\n`,
+      stderr: `${message}\n`,
+    })
+    expect(existsSync(join(project, '.visual-check'))).toBe(false)
+  })
+
+  it('names the unreachable Storybook in the error document, writing nothing', async () => {
+    const url = await takeUnusedUrl()
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
+    })
+    const result = await runCli(['update', '--reporter', 'json'], {}, project, fakeBrowser().options)
+    const report = JSON.parse(result.stdout) as UpdateReport
+
+    expect(result.exitCode).toBe(2)
+    expect(report).toMatchObject({
+      command: 'update',
+      exitCode: 2,
+      reportDir: null,
+      storybooks: [{ name: 'web', url }],
+      snapshots: [],
+      error: { message: result.stderr.trim(), storybooks: [{ name: 'web', url }] },
+    })
+    expect(existsSync(join(project, '.visual-check'))).toBe(false)
+  })
+
+  it('prints the error document of an invalid config, leaving the report folder untouched', async () => {
+    const { project } = await createRun(['a'], {}, "colour: 'red'")
+
+    writeStaleReport(project)
+
+    const before = filesIn(reportFolderIn(project))
+    const result = await runCli(['update', '--reporter', 'json'], {}, project, fakeBrowser().options)
+
+    expect(result.exitCode).toBe(2)
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      command: 'update',
+      reportDir: null,
+      error: { message: result.stderr.trim() },
+    })
+    expect(filesIn(reportFolderIn(project))).toEqual(before)
+  })
 })

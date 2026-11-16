@@ -12,6 +12,9 @@ import {
   type TestReportFacts,
   testErrorReportOf,
   testReportFor,
+  type UpdateReportFacts,
+  updateErrorReportOf,
+  updateReportFor,
 } from './run-report.js'
 import { missingResultOf, type SnapshotResult } from './snapshot-result.js'
 
@@ -77,15 +80,26 @@ function noOrphans(storybook: ResolvedStorybook): StorybookBaselines[] {
   return [{ storybook, paths: [], orphans: [], expected: [] }]
 }
 
+/**
+ * Gives findings with no deleted baseline and no warning.
+ */
+function findingsOf(findings: Pick<RunFindings, 'items' | 'results' | 'baselines'>): RunFindings {
+  return { ...findings, deleted: [], warnings: [] }
+}
+
 describe('testReportFor', () => {
   it('counts plain passes without listing them, and lists the rest in planned order', async () => {
     const { project, storybook } = projectFolder()
     const report = await testReportFor(
-      factsOf(project, storybook, {
-        items: [itemOf(storybook, 'a'), itemOf(storybook, 'b'), itemOf(storybook, 'c')],
-        results: [passed, missingResultOf(), undefined],
-        baselines: noOrphans(storybook),
-      }),
+      factsOf(
+        project,
+        storybook,
+        findingsOf({
+          items: [itemOf(storybook, 'a'), itemOf(storybook, 'b'), itemOf(storybook, 'c')],
+          results: [passed, missingResultOf(), undefined],
+          baselines: noOrphans(storybook),
+        }),
+      ),
     )
 
     expect(report).toMatchObject({
@@ -114,11 +128,15 @@ describe('testReportFor', () => {
     writeFileSync(orphan, 'old bytes')
 
     const report = await testReportFor(
-      factsOf(project, storybook, {
-        items: [itemOf(storybook, 'a')],
-        results: [missingResultOf()],
-        baselines: [{ storybook, paths: [orphan], orphans: [orphan], expected: [] }],
-      }),
+      factsOf(
+        project,
+        storybook,
+        findingsOf({
+          items: [itemOf(storybook, 'a')],
+          results: [missingResultOf()],
+          baselines: [{ storybook, paths: [orphan], orphans: [orphan], expected: [] }],
+        }),
+      ),
     )
 
     expect(report.counts).toEqual({ passed: 0, flaky: 0, differs: 0, broken: 0, missing: 1, orphan: 1 })
@@ -139,7 +157,7 @@ describe('testReportFor', () => {
   it('names a shard and a consistency-only run', async () => {
     const { project, storybook } = projectFolder()
     const report = await testReportFor({
-      ...factsOf(project, storybook, { items: [], results: [], baselines: [] }),
+      ...factsOf(project, storybook, findingsOf({ items: [], results: [], baselines: [] })),
       consistencyOnly: true,
       shard: { index: 2, total: 3 },
       exitCode: 0,
@@ -207,6 +225,131 @@ describe('testErrorReportOf', () => {
     expect(testErrorReportOf({ ...errorFacts, shard: undefined, written: false })).toMatchObject({
       shard: null,
       reportDir: null,
+    })
+  })
+})
+
+/**
+ * A storybook of an `update` run whose config is in `/project`, with its baselines in `/project/baselines`.
+ */
+const updateStorybook: ResolvedStorybook = {
+  name: 'web',
+  dir: '/project',
+  configDir: '/project/.storybook',
+  baselines: '/project/baselines',
+  url: 'http://web.test',
+}
+
+/**
+ * What an `update` report is built from, with the given findings.
+ */
+function updateFactsOf(findings: Partial<RunFindings>): UpdateReportFacts {
+  return {
+    version: '1.2.3',
+    configPath: '/project/visual-check.config.mjs',
+    selection: { kind: 'default' },
+    storybooks: [updateStorybook],
+    exitCode: 1,
+    findings: { items: [], results: [], baselines: [], deleted: [], warnings: [], ...findings },
+  }
+}
+
+describe('updateReportFor', () => {
+  const hosts = { requests: ['api.test'], remoteContent: ['cdn.test'] }
+  const written: SnapshotResult = { status: 'written', detail: '', attempts: 2, writtenFor: 'missing', hosts }
+  const kept: SnapshotResult = { status: 'kept', detail: 'kept · flaky', attempts: 2, flaky: true, hosts }
+  const broken: SnapshotResult = {
+    status: 'broken',
+    detail: '',
+    attempts: 3,
+    broken: { reason: 'unstable', message: "No two of the story's 3 loads agreed." },
+  }
+
+  it('lists the written and broken snapshots in planned order, then the deleted baselines, leaving out kept ones', () => {
+    const warning = {
+      kind: 'real-requests' as const,
+      host: 'api.test',
+      stories: [{ storybook: 'web', story: 'a' }],
+      message: 'api.test: 1 story (a).',
+    }
+    const report = updateReportFor(
+      updateFactsOf({
+        items: ['a', 'b', 'c', 'd'].map((id) => itemOf(updateStorybook, id)),
+        results: [broken, kept, written, undefined],
+        deleted: [{ storybook: updateStorybook, path: '/project/baselines/gone.png' }],
+        warnings: [warning],
+      }),
+    )
+
+    expect(report).toMatchObject({
+      version: 1,
+      visualCheck: '1.2.3',
+      command: 'update',
+      consistencyOnly: false,
+      exitCode: 1,
+      shard: null,
+      selection: { by: 'all', base: null, changedFiles: null, fallback: null },
+      reportDir: null,
+      storybooks: [{ name: 'web', url: 'http://web.test' }],
+      counts: { written: 1, deleted: 1, kept: 1, broken: 1, flaky: 1 },
+      warnings: [warning],
+      error: null,
+    })
+    expect(report.storybooks[0]).toEqual({ name: 'web', url: 'http://web.test' })
+    expect(report.snapshots.map(({ id, status, reason }) => [id, status, reason])).toEqual([
+      ['a', 'broken', 'unstable'],
+      ['c', 'written', 'missing'],
+      ['gone', 'deleted', null],
+    ])
+    expect(report.snapshots[1]).toMatchObject({
+      baseline: 'baselines/c.png',
+      realRequestHosts: ['api.test'],
+      remoteContentHosts: ['cdn.test'],
+    })
+    expect(report.snapshots[2]).toMatchObject({ baseline: 'baselines/gone.png', story: null })
+  })
+
+  it('gives empty counts and no entries when nothing was taken', () => {
+    expect(updateReportFor({ ...updateFactsOf({}), exitCode: 0 })).toMatchObject({
+      exitCode: 0,
+      counts: { written: 0, deleted: 0, kept: 0, broken: 0, flaky: 0 },
+      snapshots: [],
+      warnings: [],
+    })
+  })
+})
+
+describe('updateErrorReportOf', () => {
+  it('holds the error, trimmed, with the unreachable Storybooks, no results and no report folder', () => {
+    expect(
+      updateErrorReportOf({
+        version: errorFacts.version,
+        selection: errorFacts.selection,
+        storybooks: errorFacts.storybooks,
+        message: errorFacts.message,
+        unreachable: errorFacts.unreachable,
+      }),
+    ).toEqual({
+      version: 1,
+      visualCheck: '1.2.3',
+      command: 'update',
+      consistencyOnly: false,
+      exitCode: 2,
+      shard: null,
+      selection: { by: 'filter', base: null, changedFiles: null, fallback: null },
+      reportDir: null,
+      storybooks: [
+        { name: 'docs', url: 'http://docs.test' },
+        { name: 'web', url: 'http://web.test' },
+      ],
+      counts: { written: 0, deleted: 0, kept: 0, broken: 0, flaky: 0 },
+      snapshots: [],
+      warnings: [],
+      error: {
+        message:
+          'Nothing answers at http://web.test/index.json.\nTo check one Storybook on its own, pass --storybook <name>.',
+        storybooks: [{ name: 'web', url: 'http://web.test' }],
+      },
     })
   })
 })

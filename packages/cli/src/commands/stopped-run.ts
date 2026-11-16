@@ -2,8 +2,8 @@ import { locateConfig } from '../config/find-config.js'
 import type { ReportStorybook } from '../report/report-document.js'
 import { ReportError, reportFolderOf, writeErrorReport } from '../report/report-folder.js'
 import type { RunOptions, UsageError } from './parse-command-line.js'
-import { reportLineOf, stopOutputOf } from './run-output.js'
-import { testErrorReportOf } from './run-report.js'
+import { documentOutputOf, reportLineOf } from './run-output.js'
+import { testErrorReportOf, updateErrorReportOf } from './run-report.js'
 import { reportProblemOf } from './stop-message.js'
 
 /**
@@ -65,6 +65,22 @@ export interface StoppedTest {
 }
 
 /**
+ * What ending an `update` that exits 2 needs to know about the run, apart from what stopped it.
+ *
+ * @public
+ */
+export interface StoppedUpdate {
+  /**
+   * The CLI's version.
+   */
+  version: string
+  /**
+   * The run's options the error document reads.
+   */
+  options: Pick<RunOptions, 'selection' | 'reporter'>
+}
+
+/**
  * What a stopped run prints on each stream, and its exit code, 2.
  *
  * @public
@@ -118,7 +134,7 @@ export async function stoppedTestOf(stop: RunStop, test: StoppedTest): Promise<S
   })
 
   if (stop.configPath === undefined) {
-    return { exitCode: 2, ...stopOutputOf(stop, report, options.reporter, '') }
+    return { exitCode: 2, ...documentOutputOf(stop, report, options.reporter, '') }
   }
 
   const folder = reportFolderOf(stop.configPath)
@@ -129,20 +145,38 @@ export async function stoppedTestOf(stop: RunStop, test: StoppedTest): Promise<S
     if (error instanceof ReportError) {
       return {
         exitCode: 2,
-        ...stopOutputOf(stop, { ...report, reportDir: null }, options.reporter, reportProblemOf(error, cwd)),
+        ...documentOutputOf(stop, { ...report, reportDir: null }, options.reporter, reportProblemOf(error, cwd)),
       }
     }
 
     throw error
   }
 
-  return { exitCode: 2, ...stopOutputOf(stop, report, options.reporter, `${reportLineOf(cwd, folder)}\n`) }
+  return { exitCode: 2, ...documentOutputOf(stop, report, options.reporter, `${reportLineOf(cwd, folder)}\n`) }
+}
+
+/**
+ * Ends an `update` that exits 2 with what it printed. It never touches the report folder. With `--reporter json`,
+ * stdout holds `update`'s error document alone, with no report folder.
+ *
+ * @public
+ */
+export function stoppedUpdateOf(stop: RunStop, update: StoppedUpdate): StoppedOutput {
+  const report = updateErrorReportOf({
+    version: update.version,
+    selection: update.options.selection,
+    storybooks: stop.storybooks,
+    message: stop.message,
+    unreachable: stop.unreachable,
+  })
+
+  return { exitCode: 2, ...documentOutputOf(stop, report, update.options.reporter, '') }
 }
 
 /**
  * Ends a run whose command line has a usage error: the message and the hint on stderr, exit code 2. For `test`, once
  * its flags parsed, the report folder beside the config the run would load is replaced with a report holding the
- * error, as `stoppedTestOf` says.
+ * error, as `stoppedTestOf` says. For `update`, once its flags parsed, it ends as `stoppedUpdateOf` says.
  *
  * @throws {Error} Any error besides a `ReportError` while writing the report.
  *
@@ -150,20 +184,21 @@ export async function stoppedTestOf(stop: RunStop, test: StoppedTest): Promise<S
  */
 export async function usageFailureOf(error: UsageError, cwd: string, version: string): Promise<StoppedOutput> {
   const stderr = `${error.message}\n${usageHint}`
+  const stop = { stdout: '', stderr, message: error.message, storybooks: [], unreachable: [] }
 
-  if (error.run?.command !== 'test') {
+  if (error.run === undefined) {
     return { exitCode: 2, stdout: '', stderr }
   }
 
+  if (error.run.command === 'update') {
+    return stoppedUpdateOf(
+      { ...stop, configPath: undefined },
+      { version, options: { selection: { kind: 'default' }, reporter: error.run.reporter } },
+    )
+  }
+
   return await stoppedTestOf(
-    {
-      stdout: '',
-      stderr,
-      message: error.message,
-      configPath: locateConfig(cwd, error.run.config),
-      storybooks: [],
-      unreachable: [],
-    },
+    { ...stop, configPath: locateConfig(cwd, error.run.config) },
     {
       version,
       cwd,

@@ -24,12 +24,12 @@ import { dockerProblemOf } from './docker-problem.js'
 import { createLaunchBrowser, type LaunchBrowser } from './launch-browser.js'
 import { parseCommandLine, type Reporter, type RunOptions, UsageError } from './parse-command-line.js'
 import { readImageFit } from './read-image-fit.js'
-import { cliOutputOf, reportLineOf } from './run-output.js'
-import { type TestReportFacts, testReportFor } from './run-report.js'
+import { cliOutputOf, documentOutputOf, reportLineOf } from './run-output.js'
+import { type TestReportFacts, testReportFor, updateReportFor } from './run-report.js'
 import { runSnapshots } from './run-snapshots.js'
 import { selectStories } from './select-stories.js'
 import { reportProblemOf } from './stop-message.js'
-import { type RunStop, stoppedBy, stoppedTestOf, usageFailureOf } from './stopped-run.js'
+import { type RunStop, stoppedBy, stoppedTestOf, stoppedUpdateOf, usageFailureOf } from './stopped-run.js'
 import { defaultRecaptureDelayMs } from './update-snapshot.js'
 
 /**
@@ -207,7 +207,8 @@ export async function runCli(
  * that exits 2 with its config found, or named by the config error, replaces the folder with a `report.json` holding
  * only the error, naming the Storybooks where nothing answers, and ends stderr with the report's path; with no config
  * found, or when the report folder itself is what failed, nothing is written. With `--reporter json`, stdout then holds
- * the error document alone. `update` never touches the report folder.
+ * the error document alone. `update` never touches the report folder. With `--reporter json`, its stdout holds its own
+ * document alone, the error document when it exits 2, and its warnings stay on stderr.
  *
  * @throws {Error} Any error besides the problems that stop the run with exit 2.
  */
@@ -219,22 +220,21 @@ async function runTestOrUpdate(
   cliOptions: RunCliOptions,
 ): Promise<CliResult> {
   const ci = isCi(environment)
-
-  if (command === 'update' && ci) {
-    return failure(
-      'visual-check update only runs locally, and the CI environment variable is set. ' +
-        'Run it on your machine and commit the baselines, or unset CI.',
-    )
-  }
-
-  const outcome = await runOutcomeOf({ command, options, environment, cwd, cliOptions, ci })
+  const outcome =
+    command === 'update' && ci
+      ? stoppedBy(
+          'visual-check update only runs locally, and the CI environment variable is set. ' +
+            'Run it on your machine and commit the baselines, or unset CI.\n',
+          { configPath: undefined, storybooks: [] },
+        )
+      : await runOutcomeOf({ command, options, environment, cwd, cliOptions, ci })
 
   if ('finished' in outcome) {
     return outcome.finished
   }
 
   if (command === 'update') {
-    return { exitCode: 2, stdout: outcome.stopped.stdout, stderr: outcome.stopped.stderr }
+    return stoppedUpdateOf(outcome.stopped, { version: readVersion(), options })
   }
 
   return await stoppedTestOf(outcome.stopped, { version: readVersion(), cwd, options })
@@ -396,8 +396,8 @@ interface CheckedRun {
 }
 
 /**
- * Takes the snapshots, then for `test` writes the report of a run that exits 0 or 1. Gives the stop of a run that
- * stopped with exit 2.
+ * Takes the snapshots, then for `test` writes the report of a run that exits 0 or 1, and for `update` prints its
+ * document with `--reporter json`. Gives the stop of a run that stopped with exit 2.
  *
  * @throws {Error} Any error besides the problems that stop the run with exit 2.
  */
@@ -444,23 +444,28 @@ async function snapshotsOutcomeOf(
     }
   }
 
+  const facts = {
+    version,
+    configPath: config.path,
+    selection: options.selection,
+    storybooks: checked.storybooks.map(({ storybook }) => storybook),
+    exitCode: result.exitCode,
+    findings: result.findings,
+  }
+
   if (command === 'update') {
-    return { finished: { exitCode: result.exitCode, ...output } }
+    // update writes no report.json, so its document is built only to be printed.
+    if (options.reporter !== 'json') {
+      return { finished: { exitCode: result.exitCode, ...output } }
+    }
+
+    return { finished: { exitCode: result.exitCode, ...documentOutputOf(output, updateReportFor(facts), 'json', '') } }
   }
 
   return await withTestReport(
     { exitCode: result.exitCode, ...output },
     context.cwd,
-    {
-      version,
-      configPath: config.path,
-      consistencyOnly: options.consistency,
-      shard: options.shard,
-      selection: options.selection,
-      storybooks: checked.storybooks.map(({ storybook }) => storybook),
-      exitCode: result.exitCode,
-      findings: result.findings,
-    },
+    { ...facts, consistencyOnly: options.consistency, shard: options.shard },
     options.reporter,
   )
 }
