@@ -1,17 +1,10 @@
 import { dirname } from 'node:path'
-import { BaselineError } from '../baselines/baseline-error.js'
 import { baselinePathOf } from '../baselines/baseline-files.js'
-import { BrowserMismatchError, runImageOf } from '../browser/browser-version.js'
-import type { ChromeForTestingPlatform } from '../browser/chrome-for-testing-platform.js'
 import type { BrowserPackage } from '../browser/read-browser-package.js'
-import { BrowserDownloadError } from '../browser-download/browser-download-error.js'
-import { headlessShellPathsOf } from '../browser-download/install-headless-shell.js'
 import type { CaptureSettings } from '../capture/capture-session.js'
-import { BrowserExitedError, BrowserLaunchError } from '../capture/driver/driver.js'
 import { runWorkerPool } from '../capture/worker-pool.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
-import { ContainerError } from '../container/container-error.js'
-import { ReportError, reportFolderOf } from '../report/report-folder.js'
+import { reportFolderOf } from '../report/report-folder.js'
 import type { Shard } from '../sharding/shard.js'
 import type { Story } from '../storybook/read-stories.js'
 import { testPathWarningOf } from '../storybook/test-path.js'
@@ -19,20 +12,17 @@ import { createVisualDiff } from '../visual-diff/visual-diff.js'
 import type { BrowserPlace } from './browser-route.js'
 import { hasOrphans, type StorybookBaselines } from './consistency-check.js'
 import { orphanLabelOf, orphanLinesOf } from './consistency-output.js'
-import { dockerProblemOf } from './docker-problem.js'
 import type { LaunchBrowser } from './launch-browser.js'
-import { missingLibraryOf } from './missing-library.js'
 import { networkWarningOf } from './network-warning.js'
 import { type PlannedSnapshot, planSnapshots } from './plan-snapshots.js'
-import { platformProblemOf } from './platform-problem.js'
-import { type FirstBrowserExit, type RunBrowser, runBrowserOf } from './run-browser.js'
-import { countsLineOf, displayPathOf, snapshotCountOf, snapshotLineOf, snapshotNameOf } from './run-output.js'
+import { type RunBrowser, runBrowserOf } from './run-browser.js'
+import { countsLineOf, snapshotCountOf, snapshotLineOf, snapshotNameOf } from './run-output.js'
 import { type ShardShare, shardHeaderPartOf, shardNotesOf, shardShareOf } from './shard-share.js'
-import { brokenResultOf, type CaptureStory, type SnapshotResult, type SnapshotStatus } from './snapshot-result.js'
+import type { CaptureStory, SnapshotResult, SnapshotStatus } from './snapshot-result.js'
+import { exitNoticeOf, stopMessageOf } from './stop-message.js'
+import { type SnapshotTools, takeSnapshot } from './take-snapshot.js'
 import { type Taking, testPlanOf } from './test-plan.js'
-import { type TestTools, testSnapshot } from './test-snapshot.js'
 import { deleteStorybookOrphans, longPathWarningOf, planUpdate, updateEndLinesOf } from './update-baselines.js'
-import { type UpdateTools, updateSnapshot } from './update-snapshot.js'
 
 /**
  * The stories a run covers in one Storybook, in the order they are taken and printed.
@@ -175,52 +165,12 @@ const failingStatuses: Record<SnapshotRun['command'], readonly SnapshotStatus[]>
 }
 
 /**
- * What each failed baseline call asks the person to check, after its reason.
- */
-const baselineFixes: Record<BaselineError['action'], string> = {
-  read: "Check that it's a file visual-check can read.",
-  decode: 'Delete it or restore it from git, then run visual-check again.',
-  write: 'Check that its folder is writable and the disk has room.',
-  delete: 'Check that its folder is writable.',
-  list: "Check that it's a folder visual-check can read.",
-}
-
-/**
- * What each failed report call asks the person to check, after its reason.
- */
-const reportFixes: Record<ReportError['action'], string> = {
-  clear: 'Check that visual-check can remove it.',
-  write: 'Check that its folder is writable and the disk has room.',
-}
-
-/**
  * Per command, the heading its flaky snapshots are listed under.
  */
 const flakyHeadings: Record<SnapshotRun['command'], string> = {
   test: 'Flaky snapshots, which passed on a retry:',
   update: 'Flaky snapshots, whose loads disagreed:',
 }
-
-/**
- * What each snapshot of a run is taken with, by command: the visual diff both commands compare snapshots with, for
- * `test` alone the report folder it writes the images of each differing snapshot to and how many more times it
- * captures a snapshot that differs, and for `update` alone how long it waits before it captures a snapshot's page
- * again.
- */
-type SnapshotTools =
-  | (TestTools & {
-      /**
-       * The command, `test`, which compares each snapshot and reports the ones that differ.
-       */
-      command: 'test'
-    })
-  | (UpdateTools & {
-      /**
-       * The command, `update`, which compares each snapshot and writes the baselines that are missing or differ, once
-       * the story renders the same way twice. It never touches the report folder.
-       */
-      command: 'update'
-    })
 
 /**
  * The snapshots a run takes, and what became of each so far.
@@ -275,24 +225,6 @@ function captureSettingsOf(run: SnapshotRun): CaptureSettings {
     maskColor: config.maskColor,
     listHosts: run.command === 'update',
   }
-}
-
-/**
- * Takes one snapshot: tests it for `test`, else updates its baseline. A story whose stories file didn't load is
- * broken, with no capture and no baseline read.
- */
-async function snapshotOf(
-  item: PlannedSnapshot,
-  captureStory: CaptureStory,
-  tools: SnapshotTools,
-): Promise<SnapshotResult> {
-  if ('broken' in item) {
-    return brokenResultOf(item.broken)
-  }
-
-  return tools.command === 'test'
-    ? await testSnapshot(item, captureStory, tools)
-    : await updateSnapshot(item, captureStory, tools)
 }
 
 /**
@@ -438,29 +370,6 @@ async function takingOf(run: SnapshotRun, tools: SnapshotTools, planned: Planned
 const capturedStatuses: readonly SnapshotStatus[] = ['passed', 'differs', 'written', 'kept']
 
 /**
- * Writes the browser's last output lines under a heading, or nothing when there are none.
- */
-function browserOutputOf(output: readonly string[]): string {
-  return output.length === 0 ? '' : `The browser's last output:\n${output.map((line) => `  ${line}\n`).join('')}`
-}
-
-/**
- * Says that the first browser exited mid-run: the exit, whether visual-check relaunches the browser for the rest of
- * the run, and the browser's last output. Gives nothing when the browser didn't exit.
- */
-function exitNoticeOf(exit: FirstBrowserExit | undefined): string {
-  if (exit === undefined) {
-    return ''
-  }
-
-  const relaunch = exit.relaunched
-    ? 'visual-check relaunches it once for the rest of the run.'
-    : "No story left needed a capture, so visual-check didn't relaunch the browser."
-
-  return `${exit.error.message}\n${relaunch}\n${browserOutputOf(exit.error.output)}`
-}
-
-/**
  * Warns, one line each, for every Storybook in the run whose snapshots' `completing` render steps took a median of 50
  * ms or more, in config order: it seems to ignore the test path. Gives nothing when none does.
  */
@@ -479,137 +388,6 @@ function testPathWarningsOf(
       return warning === undefined ? [] : [`${warning}\n`]
     })
     .join('')
-}
-
-/**
- * Gives the next step after the browser failed to launch or exited while in use, pointing to its output first when it
- * printed any.
- */
-function browserFixOf(error: BrowserLaunchError | BrowserExitedError, run: SnapshotRun): string {
-  const why = error.output.length === 0 ? '' : "The browser's output below may say why. "
-
-  if (!(error instanceof BrowserLaunchError)) {
-    return `${why}Running out of memory is a common cause. Run visual-check again.`
-  }
-
-  return `${why}Check that ${whatToCheckOf(run)}, then run visual-check again.`
-}
-
-/**
- * Gives what to check after the browser failed to launch where it runs: that the image's headless shell starts in this
- * container, that Docker can run the platform's images, or that the downloaded executable starts on this machine.
- */
-function whatToCheckOf(run: SnapshotRun): string {
-  switch (run.place.in) {
-    case 'image':
-      return `${run.browserPackage.headlessShell} starts in this container`
-    case 'container':
-      return `Docker can run images for ${run.place.platform}`
-    case 'host':
-      return `${hostExecutableOf(run, run.place.platform)} starts on this machine`
-  }
-}
-
-/**
- * Gives the path of the headless shell's executable that visual-check downloads for the platform on the host.
- */
-function hostExecutableOf(run: SnapshotRun, platform: ChromeForTestingPlatform): string {
-  return headlessShellPathsOf(run.environment, run.browserPackage.chromium, platform).executable
-}
-
-/**
- * Gives what to print when the browser on the host can't start because Linux lacks a shared library it links against:
- * the library, both ways out, how to list every missing library, since the loader names only the first, and the
- * browser's last output.
- */
-function missingLibraryMessageOf(
-  library: string,
-  run: SnapshotRun,
-  platform: ChromeForTestingPlatform,
-  output: readonly string[],
-): string {
-  const containerPlatform = platform === 'linux-arm64' ? 'linux/arm64' : 'linux/amd64'
-
-  return (
-    `The browser can't start because ${library} is missing.\n` +
-    "Install the libraries the headless shell needs, since visual-check doesn't install system packages, or set " +
-    `platform to '${containerPlatform}' in the config to run the browser in visual-check's container.\n` +
-    `To list every missing library, run: ldd '${hostExecutableOf(run, platform)}' | grep 'not found'\n` +
-    browserOutputOf(output)
-  )
-}
-
-/**
- * Gives what to print for a browser that failed to launch or exited while in use: the platform problem when it stopped
- * before any capture with output saying its graphics process can't start, for its container's platform, or the
- * config's inside visual-check's image unless that is `host`; for a failed launch on the host whose output names a
- * missing library, that library, both ways out and how to list every missing one. Otherwise the error's message, the
- * next step and the browser's last output.
- */
-function browserStopMessageOf(
-  error: BrowserLaunchError | BrowserExitedError,
-  run: SnapshotRun,
-  capturedAny: boolean,
-): string {
-  const platform = run.place.in === 'container' ? run.place.platform : run.config.platform
-
-  if (platform !== 'host' && !capturedAny && error.graphicsFailed) {
-    return `${platformProblemOf(platform)}${browserOutputOf(error.output)}`
-  }
-
-  if (error instanceof BrowserLaunchError && run.place.in === 'host') {
-    const library = missingLibraryOf(error.output)
-
-    if (library !== undefined) {
-      return missingLibraryMessageOf(library, run, run.place.platform, error.output)
-    }
-  }
-
-  return `${error.message}\n${browserFixOf(error, run)}\n${browserOutputOf(error.output)}`
-}
-
-/**
- * Gives what to print for an error that stops the run with exit 2: a baseline that can't be read, decoded, written or
- * deleted, a baselines folder that can't be listed, a report folder that can't be cleared or written to, Docker's
- * error, a failed download, a failed launch's or a browser exit's with the next step and the browser's last output, or
- * a version mismatch. A browser that fails or exits before any capture, with output saying its graphics process can't
- * start, gives the platform problem for its container's platform, or the config's inside visual-check's image unless
- * that is `host`, instead of the next step. A failed launch on the host whose output names a missing library gives that
- * library and both ways out. Any other error gives `undefined`.
- *
- * `capturedAny` is whether a snapshot has been captured, which a broken or missing one hasn't.
- */
-function stopMessageOf(error: unknown, run: SnapshotRun, capturedAny: boolean): string | undefined {
-  if (error instanceof BaselineError) {
-    return (
-      `visual-check couldn't ${error.action} ${error.subject} ${displayPathOf(run.cwd, error.path)}: ${error.reason}. ` +
-      `${baselineFixes[error.action]}\n`
-    )
-  }
-
-  if (error instanceof ReportError) {
-    return (
-      `visual-check couldn't ${error.action} ${displayPathOf(run.cwd, error.path)}: ${error.reason}. ` +
-      `${reportFixes[error.action]}\n`
-    )
-  }
-
-  if (error instanceof BrowserLaunchError || error instanceof BrowserExitedError) {
-    return browserStopMessageOf(error, run, capturedAny)
-  }
-
-  if (error instanceof ContainerError) {
-    return dockerProblemOf(error, {
-      insideContainer: run.insideContainer,
-      image: runImageOf(run.browserPackage, run.config.image),
-    })
-  }
-
-  if (error instanceof BrowserDownloadError || error instanceof BrowserMismatchError) {
-    return `${error.message}\n`
-  }
-
-  return undefined
 }
 
 /**
@@ -679,7 +457,7 @@ async function takeSnapshots(
   await runWorkerPool(run.workers, snapshots.items, async (item, index, worker) => {
     const captureStory: CaptureStory = (toCapture, started) => browser.capture(worker, toCapture, started)
 
-    snapshots.results[index] = await snapshotOf(item, captureStory, tools)
+    snapshots.results[index] = await takeSnapshot(item, captureStory, tools)
   })
 }
 
