@@ -70,7 +70,7 @@ Notes:
 
 - The one-second check runs once, on the first load. It's a check and not a wait: the capture itself isn't delayed.
 - A snapshot that needed the third load is flaky, and `update` lists it at the end. `update` never fails because of flaky snapshots.
-- A missing baseline costs about 1 s, two loads and three captures. `test` and CI pay none of this.
+- A missing baseline costs about 1 s, two loads and three captures. On the test Storybook, `update` into an empty folder took 64.6 s with the checks and 25.8 s without (66 baselines written, 2 workers, the amd64 image under emulation on an arm64 Mac): about 1.2 s of a worker's time per missing baseline. `test` and CI pay none of this.
 - When a story's capture fails or isn't stable, nothing is written for it, its old baseline stays, and `update` exits 1.
 
 ## Warnings at the end of `update`
