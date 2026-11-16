@@ -10,6 +10,7 @@ const defaultOptions = {
   url: undefined,
   config: undefined,
   workers: undefined,
+  consistency: false,
 }
 
 /**
@@ -92,6 +93,7 @@ describe('parseCommandLine', () => {
     ['--url', ['--url', 'http://127.0.0.1:6006']],
     ['--config', ['--config', 'visual-check.config.ts']],
     ['--workers', ['--workers', '2']],
+    ['--consistency', ['--consistency']],
   ])('rejects %s for init', (flag, flagArguments) => {
     expect(usageErrorOf('init', ...flagArguments).message).toBe(`${flag} doesn't apply to init.`)
   })
@@ -212,5 +214,48 @@ describe('parseCommandLine', () => {
 
   it('rejects an empty --workers', () => {
     expect(usageErrorOf('test', '--workers', '').message).toBe('--workers needs a value.')
+  })
+})
+
+describe('parseCommandLine --consistency', () => {
+  it('carries --consistency alone for test', () => {
+    expect(parseCommandLine(['test', '--consistency'])).toEqual({
+      command: 'test',
+      options: { ...defaultOptions, consistency: true },
+    })
+  })
+
+  it('carries --consistency with --storybook, --url and --config', () => {
+    expect(
+      parseCommandLine([
+        'test',
+        '--consistency',
+        '--storybook',
+        'web',
+        '--url',
+        'http://127.0.0.1:6006',
+        '--config',
+        'a.ts',
+      ]),
+    ).toEqual({
+      command: 'test',
+      options: {
+        ...defaultOptions,
+        consistency: true,
+        storybook: 'web',
+        url: 'http://127.0.0.1:6006',
+        config: 'a.ts',
+      },
+    })
+  })
+
+  it.each([['--all'], ['--filter', 'x']])('rejects --consistency with %s', (...selectionFlags) => {
+    expect(usageErrorOf('test', '--consistency', ...selectionFlags).message).toBe(
+      '--consistency covers every story, so it takes no --all or --filter. Use --storybook to narrow it.',
+    )
+  })
+
+  it('rejects --consistency for update', () => {
+    expect(usageErrorOf('update', '--consistency').message).toBe('--consistency applies only to test.')
   })
 })

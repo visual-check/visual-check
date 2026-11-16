@@ -41,6 +41,11 @@ export interface RunOptions {
    * The number of workers `--workers` gives, or `undefined` when the flag isn't given.
    */
   workers: number | undefined
+  /**
+   * Whether `--consistency` is given: `test` only runs the consistency check, over every story, and captures nothing.
+   * Always `false` for `update`.
+   */
+  consistency: boolean
 }
 
 /**
@@ -55,7 +60,7 @@ export type CommandLine =
 /**
  * The flags `init` doesn't take, in the order a message names the first one given.
  */
-const flagsInitRejects = ['all', 'filter', 'storybook', 'url', 'config', 'workers'] as const
+const flagsInitRejects = ['all', 'filter', 'storybook', 'url', 'config', 'workers', 'consistency'] as const
 
 /**
  * The flags that take a value, which can't be empty.
@@ -107,6 +112,7 @@ function parseCommandLineArguments(commandLineArguments: string[]) {
       url: { type: 'string' },
       config: { type: 'string' },
       workers: { type: 'string' },
+      consistency: { type: 'boolean' },
       help: { type: 'boolean' },
       version: { type: 'boolean' },
     },
@@ -172,12 +178,39 @@ function workersFlagOf(workers: string | undefined): number | undefined {
 }
 
 /**
+ * Reads the `--consistency` flag for `test` or `update`. It covers every story, so every flag that selects stories must
+ * be rejected here, `--all` and `--filter` today, and any added later, such as `--affected`.
+ *
+ * @throws {UsageError} When it's given to `update`, or with `--all` or `--filter`.
+ */
+function consistencyFlagOf(
+  command: 'test' | 'update',
+  values: { consistency?: boolean | undefined; all?: boolean | undefined; filter?: string | undefined },
+): boolean {
+  if (!values.consistency) {
+    return false
+  }
+
+  if (command === 'update') {
+    throw new UsageError('--consistency applies only to test.')
+  }
+
+  if (values.all || values.filter !== undefined) {
+    throw new UsageError(
+      '--consistency covers every story, so it takes no --all or --filter. Use --storybook to narrow it.',
+    )
+  }
+
+  return true
+}
+
+/**
  * Reads the command line into the command it names and its options.
  *
  * @throws {UsageError} For an unknown command or flag, a missing, empty or extra argument, a flag that doesn't apply to
  * the command, flags that clash, a `--url` that isn't an http(s) URL or holds a login, a `--filter` that isn't a regular
- * expression, and a `--workers` that isn't a whole number of 1 or more. `--help` anywhere before a `--` separator wins,
- * so it never throws.
+ * expression, a `--workers` that isn't a whole number of 1 or more, and `--consistency` on `update` or with `--all` or
+ * `--filter`. `--help` anywhere before a `--` separator wins, so it never throws.
  */
 export function parseCommandLine(commandLineArguments: string[]): CommandLine {
   if (asksForHelp(commandLineArguments)) {
@@ -238,6 +271,8 @@ export function parseCommandLine(commandLineArguments: string[]): CommandLine {
 
   checkUrlFlag(values.url)
 
+  const consistency = consistencyFlagOf(command, values)
+
   return {
     command,
     options: {
@@ -246,6 +281,7 @@ export function parseCommandLine(commandLineArguments: string[]): CommandLine {
       url: values.url,
       config: values.config,
       workers: workersFlagOf(values.workers),
+      consistency,
     },
   }
 }

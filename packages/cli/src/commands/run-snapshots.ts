@@ -69,6 +69,11 @@ interface SnapshotRun {
    */
   ci: boolean
   /**
+   * Whether the run is `test --consistency`: it runs the consistency check and captures nothing. Always `false` for
+   * `update`.
+   */
+  consistencyOnly: boolean
+  /**
    * The resolved config.
    */
   config: ResolvedConfig
@@ -133,9 +138,9 @@ interface SnapshotRunResult {
    * The header, one line per snapshot, for `test` a line per orphan and its flaky snapshots, and the counts, then for
    * `update` the path of each baseline written and each orphan deleted and its flaky snapshots, or, for a failure that
    * stopped the run, the header and the lines of the snapshots that finished before it. For a CI `test` whose
-   * consistency check found anything, the consistency output, then a line that says why it captured nothing. Nothing
-   * when the run stopped with exit 2 before any capture, while it planned the snapshots, checked the baselines folders
-   * or cleared the report folder.
+   * consistency check found anything, the consistency output, then a line that says why it captured nothing. For
+   * `test --consistency`, the consistency output alone. Nothing when the run stopped with exit 2 before any capture,
+   * while it planned the snapshots, checked the baselines folders or cleared the report folder.
    */
   stdout: string
   /**
@@ -415,9 +420,10 @@ type Taking =
     }
 
 /**
- * Plans what `test` takes: runs the consistency check of every Storybook in the run, then clears the report folder. In
- * CI, when the check finds anything, it stops with exit 1 and the consistency output, followed by the line that says
- * CI stops before capturing. Otherwise it takes the snapshots `testSnapshotsOf` gives.
+ * Plans what `test` takes: runs the consistency check of every Storybook in the run, then clears the report folder.
+ * With `--consistency` it stops there, taking nothing, with the consistency output and exit 0 when the check finds
+ * nothing, else exit 1. In CI, when the check finds anything, it stops with exit 1 and the consistency output,
+ * followed by the line that says CI stops before capturing. Otherwise it takes the snapshots `testSnapshotsOf` gives.
  *
  * @throws {BaselineError} When a baselines folder can't be listed, or a baseline's path can't be looked at.
  * @throws {ReportError} When the report folder can't be cleared.
@@ -430,12 +436,14 @@ async function testPlanOf(run: SnapshotRun, planned: PlannedSnapshot[], reportFo
 
   await clearReport(reportFolder)
 
-  if (run.ci) {
-    const output = consistencyOutputOf({ version: run.version, cwd: run.cwd, planned, check })
+  const output = consistencyOutputOf({ version: run.version, cwd: run.cwd, planned, check })
 
-    if (!output.consistent) {
-      return { stopped: { exitCode: 1, stdout: `${output.stdout}${ciStopLine}\n` } }
-    }
+  if (run.consistencyOnly) {
+    return { stopped: { exitCode: output.consistent ? 0 : 1, stdout: output.stdout } }
+  }
+
+  if (run.ci && !output.consistent) {
+    return { stopped: { exitCode: 1, stdout: `${output.stdout}${ciStopLine}\n` } }
   }
 
   return { taken: testSnapshotsOf(planned, check), baselines: check.storybooks }
@@ -738,6 +746,11 @@ async function takeSnapshots(
  * consistency output, a header that counts every planned snapshot, then the missing and broken lines in planned order,
  * the orphan lines and the counts of each finding, then a line that says CI stops before capturing, and exits 1. A
  * consistent CI `test` goes on as a local one does.
+ *
+ * `test --consistency` runs only that check. Once the snapshots are planned, so the options read still loads every
+ * stories file in the browser, and the check has run, it clears the report folder, takes no snapshot, and prints the
+ * consistency output, in CI or not, with no line about CI. It exits 0 when the check finds nothing, else 1. The
+ * problems that stop a `test` with exit 2 stop it too.
  *
  * `update` also takes every snapshot outside the selection whose baseline is missing, so it writes every missing
  * baseline of the Storybooks in the run. A story outside the selection whose stories file didn't load is taken, and

@@ -41,6 +41,7 @@ Options for test and update:
   --storybook <name>  Cover only this Storybook
   --url <url>         Use this URL for the Storybook (with several Storybooks, needs --storybook)
   --config <path>     Use this config instead of searching for one
+  --consistency       Only check for missing baselines, orphans and stories files that fail to load (test only)
   --workers <n>       Capture with this many workers
 
 Other options:
@@ -185,11 +186,12 @@ export async function runCli(
  * failed to load and each orphan it finds, whatever the selection, and exits 1 when it finds any. Locally, and in CI
  * when it finds nothing, it captures the selected stories that aren't disabled. When the `CI` environment variable says
  * the run is in CI, a `test` whose check finds anything prints the check's findings and exits 1 without capturing.
- * `update` captures the selected stories that aren't disabled and the snapshots outside the selection whose baselines
- * are missing, then deletes the orphans of the Storybooks in the run. A finished `update` ends stderr with a warning
- * for the hosts its stories send real network requests to and the hosts whose remote content they show, grouped by host
- * with the first story IDs of each. The config's `silenceHosts` leaves hosts out. `test` never watches requests. The
- * warning never changes the exit code.
+ * `test --consistency` stops after the check, in CI or not: it captures nothing, prints the check's output, and exits 0
+ * when it finds nothing, else 1. `update` captures the selected stories that aren't disabled and the snapshots outside
+ * the selection whose baselines are missing, then deletes the orphans of the Storybooks in the run. A finished `update`
+ * ends stderr with a warning for the hosts its stories send real network requests to and the hosts whose remote content
+ * they show, grouped by host with the first story IDs of each. The config's `silenceHosts` leaves hosts out. `test`
+ * never watches requests. The warning never changes the exit code.
  *
  * @throws {ConfigError} When the config can't be found, loaded or used.
  */
@@ -238,6 +240,7 @@ async function runTestOrUpdate(
     command,
     version: readVersion(),
     ci,
+    consistencyOnly: options.consistency,
     config,
     workers: workersOf(options, config, placement.host),
     place: placement.place,

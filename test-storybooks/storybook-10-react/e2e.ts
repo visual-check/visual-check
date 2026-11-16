@@ -1641,17 +1641,47 @@ async function checkCiStop(expected: Outcomes): Promise<string[]> {
     const run = await runCli(['test', '--all', '--url', server.url], { ...localEnvironment(), CI: 'true' })
 
     return [
-      ...expectedRunProblems('test', run, outcomesMatching(expected, loadFailsFilter)),
-      ...perStoryOptionsLines
-        .filter(([storyId]) => loadFailsFilter.test(storyId))
-        .flatMap(([storyId, says]) => lineSaysProblems(run, storyId, says)),
-      ...consistencyHeaderProblems(run, Object.keys(expected).length),
+      ...consistencyStopProblems(run, server, expected),
       ...(run.stdout.endsWith(`\n${ciStopLine}\n`)
         ? []
         : [`test's output doesn't end with "${ciStopLine}"${outputOf(run.stdout)}`]),
-      ...capturedProblems(server),
     ]
   })
+}
+
+/**
+ * Runs `test --consistency` against the committed baselines with the package's config, on a server that lists the
+ * stories of the file that fails to load, and checks what it found without capturing. It exits 1, its only snapshot
+ * lines are those stories', broken, each saying the file failed to load, its header is the consistency output's,
+ * counting every snapshot with an expected outcome, its output has no CI line, and the browser asked for no story page.
+ * The expected outcomes are the ones of every story, those stories' included.
+ */
+async function checkConsistencyOnly(expected: Outcomes): Promise<string[]> {
+  return await withStorybookServer({ withLoadFails: true }, async (server) => {
+    const run = await runCli(['test', '--consistency', '--url', server.url])
+
+    return [
+      ...consistencyStopProblems(run, server, expected),
+      ...(run.stdout.includes(ciStopLine) ? [`test --consistency prints the CI line${outputOf(run.stdout)}`] : []),
+    ]
+  })
+}
+
+/**
+ * Lists how a run that stopped at the consistency check, against the committed baselines on a server that lists the
+ * stories of the file that fails to load, differs from what it should print: it gives exactly those stories' outcomes,
+ * each saying the file failed to load, its header is the consistency output's and counts every snapshot with an
+ * expected outcome, and the browser asked for no story page.
+ */
+function consistencyStopProblems(run: CliRun, server: StorybookServer, expected: Outcomes): string[] {
+  return [
+    ...expectedRunProblems('test', run, outcomesMatching(expected, loadFailsFilter)),
+    ...perStoryOptionsLines
+      .filter(([storyId]) => loadFailsFilter.test(storyId))
+      .flatMap(([storyId, says]) => lineSaysProblems(run, storyId, says)),
+    ...consistencyHeaderProblems(run, Object.keys(expected).length),
+    ...capturedProblems(server),
+  ]
 }
 
 /**
@@ -1840,7 +1870,8 @@ async function checkUpdateThenTest(expected: Outcomes): Promise<string[]> {
   return await withStorybookServer({}, (server) =>
     withTemporaryFolder(async (folder) => {
       const baselines = join(folder, 'baselines')
-      const args = ['--all', '--config', writeConfig(folder, server.url, baselines)]
+      const config = writeConfig(folder, server.url, baselines)
+      const args = ['--all', '--config', config]
       const update = await runCli(['update', ...args])
       const updateProblems = [
         ...expectedRunProblems('update', update, mapOutcomes(expected, updateOutcomeOf)),
@@ -1853,12 +1884,37 @@ async function checkUpdateThenTest(expected: Outcomes): Promise<string[]> {
 
       const passing = Object.keys(expected).filter((key) => expected[key] === 'passed')
 
+      const retestProblems = await runTestAndCheck(args, mapOutcomes(expected, retestOutcomeOf))
+      const pagesBefore = server.storyPageRequests().length
+      const consistency = await runCli(['test', '--consistency', '--config', config])
+
       return [
         ...baselineProblems(baselines, passing),
-        ...(await runTestAndCheck(args, mapOutcomes(expected, retestOutcomeOf))),
+        ...retestProblems,
+        ...consistencyAfterUpdateProblems(consistency, expected, server.storyPageRequests().length - pagesBefore),
       ]
     }),
   )
+}
+
+/**
+ * Lists how `test --consistency`, run right after an `update` that wrote every story that isn't broken, differs from
+ * what it should find: exactly the broken stories, missing since `update` writes no baseline for them, with the
+ * consistency header counting every snapshot, a counts line of that many missing and no orphan, and no story
+ * page loaded.
+ */
+function consistencyAfterUpdateProblems(run: CliRun, expected: Outcomes, storyPagesLoaded: number): string[] {
+  const missing = Object.entries(mapOutcomes(expected, retestOutcomeOf)).filter(([, outcome]) => outcome === 'missing')
+  const counts = `${missing.length} missing`
+
+  return [
+    ...expectedRunProblems('test --consistency', run, Object.fromEntries(missing)),
+    ...consistencyHeaderProblems(run, Object.keys(expected).length),
+    ...(run.stdout.endsWith(`\n${counts}\n`)
+      ? []
+      : [`test --consistency doesn't end with "${counts}"${outputOf(run.stdout)}`]),
+    ...(storyPagesLoaded > 0 ? [`test --consistency loaded ${storyPagesLoaded} story pages, so it captured`] : []),
+  ]
 }
 
 /**
@@ -2871,11 +2927,15 @@ if (setupProblems.length > 0) {
       run: () => checkCiStop(everyOutcome),
     },
     {
+      name: 'consistency only: test --consistency on a server that lists the stories file that fails to load exits 1 without capturing, its only lines are the two load-fails stories, broken, saying the file failed to load, its consistency header counts the expected outcomes, no story page is asked for',
+      run: () => checkConsistencyOnly(everyOutcome),
+    },
+    {
       name: `end state: ${endStateRuns} runs of test with pixels: 0 give every animation story its expected outcome`,
       run: () => checkEndStateRuns(expected),
     },
     {
-      name: "update then test: update writes every story that isn't broken, test passes them and finds the broken ones missing, the baselines match the committed ones, update warns about the network stories alone",
+      name: "update then test: update writes every story that isn't broken, test passes them and finds the broken ones missing, test --consistency then exits 1 finding exactly the broken ones missing, with no story page loaded, the baselines match the committed ones, update warns about the network stories alone",
       run: () => checkUpdateThenTest(expected),
     },
     {

@@ -871,6 +871,7 @@ Options for test and update:
   --storybook <name>  Cover only this Storybook
   --url <url>         Use this URL for the Storybook (with several Storybooks, needs --storybook)
   --config <path>     Use this config instead of searching for one
+  --consistency       Only check for missing baselines, orphans and stories files that fail to load (test only)
   --workers <n>       Capture with this many workers
 
 Other options:
@@ -1683,6 +1684,216 @@ describe('runCli consistency check', () => {
       ),
     )
     expect(storyIdsOf(record.urls).sort()).toEqual(['a', 'b', 'b'])
+  })
+})
+
+/**
+ * The line the consistency output ends with when nothing is missing, broken or an orphan.
+ */
+const consistentLine = 'Consistent: every baseline the stories call for is there, and none is an orphan.'
+
+/**
+ * Checks that a run opened no story page, took no viewport and captured nothing, as `test --consistency` doesn't.
+ */
+function expectNothingCaptured(record: {
+  urls: readonly string[]
+  viewports: readonly unknown[]
+  captures: readonly unknown[]
+}): void {
+  expect(storyIdsOf(record.urls)).toEqual([])
+  expect(record.viewports).toEqual([])
+  expect(record.captures).toEqual([])
+}
+
+describe('runCli test --consistency', () => {
+  it('prints the consistent output, captures nothing and exits 0 when every baseline is there and none is an orphan', async () => {
+    const { project } = await createRun(['a', 'b'], { a: defaultSnapshot, b: defaultSnapshot })
+    const { options, record } = fakeBrowser()
+    const result = await runCli(['test', '--consistency'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 0,
+      stdout: printed(consistencyHeaderOf(2), consistentLine),
+      stderr: '',
+    })
+    expectNothingCaptured(record)
+  })
+
+  it('reports a missing baseline and exits 1 without capturing', async () => {
+    const { project } = await createRun(['a', 'b'], { a: defaultSnapshot })
+    const { options, record } = fakeBrowser()
+    const result = await runCli(['test', '--consistency'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: printed(consistencyHeaderOf(2), missingLineOf('web', 'b'), '1 missing'),
+      stderr: '',
+    })
+    expectNothingCaptured(record)
+  })
+
+  it('reports an orphan and exits 1 without capturing', async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot, gone: defaultSnapshot })
+    const { options, record } = fakeBrowser()
+    const result = await runCli(['test', '--consistency'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: printed(consistencyHeaderOf(1), orphanLineOf('web', 'gone'), '0 missing · 1 orphan'),
+      stderr: '',
+    })
+    expectNothingCaptured(record)
+  })
+
+  it('reports each story of a stories file that failed to load and exits 1 without capturing', async () => {
+    const { project } = await createRun(['a', 'b', 'c'], { b: defaultSnapshot }, '', {
+      a: './a.stories.tsx',
+      b: './b.stories.tsx',
+      c: './a.stories.tsx',
+    })
+    const { options, record } = fakeBrowser({}, aFileFails)
+    const result = await runCli(['test', '--consistency'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: printed(
+        consistencyHeaderOf(3),
+        `! web  a  ${loadFailedDetail}`,
+        `! web  c  ${loadFailedDetail}`,
+        '0 missing · 2 broken',
+      ),
+      stderr: '',
+    })
+    expectNothingCaptured(record)
+  })
+
+  it("exits 2, printing nothing, when a baselines folder can't be listed", async () => {
+    const { project, folder } = await createRun(['a'])
+
+    mkdirSync(dirname(folder), { recursive: true })
+    writeFileSync(folder, '')
+
+    const { options, record } = fakeBrowser()
+    const result = await runCli(['test', '--consistency'], {}, project, options)
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stdout).toBe('')
+    expect(result.stderr).toContain("visual-check couldn't list the baselines folder .visual-check/baselines")
+    expectNothingCaptured(record)
+  })
+
+  it("exits 2 when the Storybook doesn't answer", async () => {
+    const down = await takeUnusedUrl()
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${down}' } } }\n`,
+    })
+    const result = await runCli(['test', '--consistency'], {}, project, noLaunch)
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stdout).toBe('')
+    expect(result.stderr).toContain("Storybook web doesn't answer at ")
+  })
+
+  it.each([['--all'], ['--filter', 'x']])('exits 2 for --consistency with %s', async (...selectionFlags) => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot })
+    const { options, record } = fakeBrowser()
+    const result = await runCli(['test', '--consistency', ...selectionFlags], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr:
+        '--consistency covers every story, so it takes no --all or --filter. Use --storybook to narrow it.\n' +
+        'Run visual-check --help to see the commands and options.\n',
+    })
+    expectNothingCaptured(record)
+  })
+
+  it('passes right after an update that wrote every baseline', async () => {
+    const { project } = await createRun(['a', 'b'])
+    const { options } = fakeBrowser()
+
+    expect((await runCli(['update', '--all'], {}, project, options)).exitCode).toBe(0)
+
+    const { options: checkOptions, record } = fakeBrowser()
+    const result = await runCli(['test', '--consistency'], {}, project, checkOptions)
+
+    expect(result).toEqual({ exitCode: 0, stdout: printed(consistencyHeaderOf(2), consistentLine), stderr: '' })
+    expectNothingCaptured(record)
+  })
+
+  it('clears the report folder', async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot })
+
+    writeStaleReport(project)
+
+    const result = await runCli(['test', '--consistency'], {}, project, fakeBrowser().options)
+
+    expect(result.exitCode).toBe(0)
+    expect(existsSync(reportFolderIn(project))).toBe(false)
+  })
+
+  it('prints the same output in CI, with no CI line', async () => {
+    const { project } = await createRun(['a', 'b'], { a: defaultSnapshot, gone: defaultSnapshot })
+    const local = await runCli(['test', '--consistency'], {}, project, fakeBrowser().options)
+    const inCi = await runCli(['test', '--consistency'], ciEnvironment, project, fakeBrowser().options)
+
+    expect(inCi).toEqual(local)
+    expect(inCi.exitCode).toBe(1)
+    expect(inCi.stdout).not.toContain(ciStopLine)
+  })
+})
+
+/**
+ * Creates a project with two Storybooks, `web` whose baselines are all there, and `docs` that has an orphan and a
+ * missing baseline, so a run that covers `docs` finds both.
+ */
+async function createWebAndDocsProject(): Promise<string> {
+  const web = await startStorybook(['a'])
+  const docs = await startStorybook(['d', 'e'])
+
+  return createProject({
+    'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${web}' }, docs: { dir: 'docs', url: '${docs}' } } }\n`,
+    'web/button.stories.tsx': '',
+    'docs/button.stories.tsx': '',
+    'web/.visual-check/baselines/a.png': defaultSnapshot,
+    'docs/.visual-check/baselines/d.png': defaultSnapshot,
+    'docs/.visual-check/baselines/gone.png': defaultSnapshot,
+  })
+}
+
+describe('runCli test --consistency with --storybook', () => {
+  it("leaves out the findings of a Storybook that isn't given, and counts only the snapshots of the one that is", async () => {
+    const project = await createWebAndDocsProject()
+    const { options, record } = fakeBrowser()
+    const result = await runCli(['test', '--consistency', '--storybook', 'web'], {}, project, options)
+
+    expect(result).toEqual({ exitCode: 0, stdout: printed(consistencyHeaderOf(1), consistentLine), stderr: '' })
+    expectNothingCaptured(record)
+  })
+
+  it('finds them all when every Storybook is covered', async () => {
+    const project = await createWebAndDocsProject()
+    const result = await runCli(['test', '--consistency'], {}, project, fakeBrowser().options)
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: printed(
+        consistencyHeaderOf(3),
+        missingLineOf('docs', 'e'),
+        orphanLineOf('docs', 'gone', 'docs/.visual-check/baselines'),
+        '1 missing · 1 orphan',
+      ),
+      stderr: '',
+    })
+  })
+
+  it("doesn't report the findings of the other Storybook in a local test with --storybook", async () => {
+    const project = await createWebAndDocsProject()
+    const result = await runCli(['test', '--storybook', 'web'], {}, project, fakeBrowser().options)
+
+    expect(result.exitCode).toBe(0)
+    expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 1), '✓ web  a  N ms', '1 passed'))
   })
 })
 
