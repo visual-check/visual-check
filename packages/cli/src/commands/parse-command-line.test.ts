@@ -11,6 +11,7 @@ const defaultOptions = {
   config: undefined,
   workers: undefined,
   consistency: false,
+  shard: undefined,
 }
 
 /**
@@ -69,7 +70,7 @@ describe('parseCommandLine', () => {
     expect(usageErrorOf('test', '--', '--help').message).toBe("Unexpected argument '--help'.")
   })
 
-  it.each(['filter', 'storybook', 'url', 'config'])('rejects an empty --%s', (flag) => {
+  it.each(['filter', 'storybook', 'url', 'config', 'shard'])('rejects an empty --%s', (flag) => {
     expect(usageErrorOf('test', `--${flag}=`).message).toBe(`--${flag} needs a value.`)
     expect(usageErrorOf('test', `--${flag}`, '').message).toBe(`--${flag} needs a value.`)
   })
@@ -94,6 +95,7 @@ describe('parseCommandLine', () => {
     ['--config', ['--config', 'visual-check.config.ts']],
     ['--workers', ['--workers', '2']],
     ['--consistency', ['--consistency']],
+    ['--shard', ['--shard', '2/4']],
   ])('rejects %s for init', (flag, flagArguments) => {
     expect(usageErrorOf('init', ...flagArguments).message).toBe(`${flag} doesn't apply to init.`)
   })
@@ -257,5 +259,64 @@ describe('parseCommandLine --consistency', () => {
 
   it('rejects --consistency for update', () => {
     expect(usageErrorOf('update', '--consistency').message).toBe('--consistency applies only to test.')
+  })
+})
+
+describe('parseCommandLine --shard', () => {
+  it.each([
+    ['1/1', { index: 1, total: 1 }],
+    ['2/4', { index: 2, total: 4 }],
+    ['4/4', { index: 4, total: 4 }],
+    ['10/12', { index: 10, total: 12 }],
+  ])('carries --shard %s for test', (value, shard) => {
+    expect(parseCommandLine(['test', '--shard', value])).toEqual({
+      command: 'test',
+      options: { ...defaultOptions, shard },
+    })
+  })
+
+  it.each([['--filter', 'x'], ['--storybook', 'web'], ['--all']])('accepts --shard with %s', (...selectionFlags) => {
+    expect(parseCommandLine(['test', '--shard', '2/4', ...selectionFlags])).toMatchObject({
+      command: 'test',
+      options: { shard: { index: 2, total: 4 } },
+    })
+  })
+
+  it.each([
+    '0/4',
+    '5/4',
+    '1.5/4',
+    '2/4.0',
+    '-1/4',
+    'a/4',
+    '2',
+    '2/',
+    '/4',
+    '2/0',
+    '0/0',
+    ' 2/4',
+    '2 / 4',
+    '02/4',
+    '9007199254740992/9007199254740993',
+  ])('rejects --shard %j, naming the value', (value) => {
+    expect(usageErrorOf('test', `--shard=${value}`).message).toBe(
+      `--shard takes k/n, two whole numbers with 1 ≤ k ≤ n, such as 2/4. Got '${value}'.`,
+    )
+  })
+
+  it('rejects an empty --shard', () => {
+    expect(usageErrorOf('test', '--shard', '').message).toBe('--shard needs a value.')
+  })
+
+  it('rejects --shard for update, even with a bad value', () => {
+    expect(usageErrorOf('update', '--shard', '2/4').message).toBe('--shard applies only to test.')
+    expect(usageErrorOf('update', '--shard', 'nope').message).toBe('--shard applies only to test.')
+  })
+
+  it('rejects --shard with --consistency, even with a bad value', () => {
+    const message = '--consistency runs in a job of its own, so it takes no --shard.'
+
+    expect(usageErrorOf('test', '--consistency', '--shard', '2/4').message).toBe(message)
+    expect(usageErrorOf('test', '--consistency', '--shard', 'nope').message).toBe(message)
   })
 })

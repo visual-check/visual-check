@@ -65,6 +65,7 @@
           "cli/config",
           "cli/container",
           "cli/report",
+          "cli/sharding",
           "cli/storybook",
           "cli/visual-diff"
         ]
