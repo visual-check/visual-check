@@ -70,6 +70,18 @@ const reportFixes: Record<ReportError['action'], string> = {
 }
 
 /**
+ * Says what a report call couldn't do, the path relative to `cwd`, the reason, and what to check.
+ *
+ * @public
+ */
+export function reportProblemOf(error: ReportError, cwd: string): string {
+  return (
+    `visual-check couldn't ${error.action} ${displayPathOf(cwd, error.path)}: ${error.reason}. ` +
+    `${reportFixes[error.action]}\n`
+  )
+}
+
+/**
  * Writes the browser's last output lines under a heading, or nothing when there are none.
  */
 function browserOutputOf(output: readonly string[]): string {
@@ -224,10 +236,7 @@ export function stopMessageOf(error: unknown, context: StopContext, capturedAny:
   }
 
   if (error instanceof ReportError) {
-    return (
-      `visual-check couldn't ${error.action} ${displayPathOf(context.cwd, error.path)}: ${error.reason}. ` +
-      `${reportFixes[error.action]}\n`
-    )
+    return reportProblemOf(error, context.cwd)
   }
 
   if (error instanceof SnapshotDecodeError) {

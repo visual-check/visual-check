@@ -1,4 +1,4 @@
-import { relative, sep } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import type { PlannedSnapshot } from './plan-snapshots.js'
 import type { SnapshotResult, SnapshotStatus } from './snapshot-result.js'
 
@@ -24,6 +24,13 @@ const marks: Record<SnapshotStatus, string> = {
  */
 export function displayPathOf(folder: string, path: string): string {
   return relative(folder, path).split(sep).join('/')
+}
+
+/**
+ * Builds the line that ends a `test`'s output: the path of the report folder's `report.json`, relative to `cwd`.
+ */
+export function reportLineOf(cwd: string, folder: string): string {
+  return `Report: ${displayPathOf(cwd, join(folder, 'report.json'))}`
 }
 
 /**

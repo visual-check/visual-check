@@ -459,7 +459,9 @@ describe('visual-check binary reaching Storybooks', () => {
     const result = await runAsynchronously({ cwd: project }, 'test')
 
     expect(result.status).toBe(0)
-    expect(result.stdout).toBe(`visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed\n`)
+    expect(result.stdout).toBe(
+      `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed\nReport: .visual-check/report/report.json\n`,
+    )
     expect(result.stderr).toBe('')
   })
 

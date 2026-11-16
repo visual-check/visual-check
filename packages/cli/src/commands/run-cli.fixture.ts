@@ -644,6 +644,19 @@ export function printed(...lines: string[]): string {
 }
 
 /**
+ * The line that ends the stdout of a `test` that exits 0 or 1, run in the config's folder.
+ */
+export const reportLine = 'Report: .visual-check/report/report.json'
+
+/**
+ * Builds what a `test` that exits 0 or 1, run in the config's folder, prints on stdout: these lines, then the report
+ * line.
+ */
+export function printedTest(...lines: string[]): string {
+  return printed(...lines, reportLine)
+}
+
+/**
  * Gives the first line a stream holds.
  */
 export function firstLineOf(text: string): string | undefined {

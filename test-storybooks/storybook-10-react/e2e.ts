@@ -39,7 +39,7 @@ import {
 import { createServer, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
-import { basename, delimiter, extname, join, resolve as resolvePath, sep } from 'node:path'
+import { basename, delimiter, extname, join, relative, resolve as resolvePath, sep } from 'node:path'
 import type { Readable } from 'node:stream'
 import { setTimeout as sleep } from 'node:timers/promises'
 
@@ -517,6 +517,16 @@ const consistencyHeaderPattern = /^visual-check \S+ · test · consistency · (\
  * The line a CI `test` ends its output with when its consistency check finds anything, so it captures nothing.
  */
 const ciStopLine = 'In CI, test stops before capturing when the consistency check finds anything.'
+
+/**
+ * The line every `test` that exits 0 or 1 ends its output with, for a config in `configFolder`: the path of the
+ * report's `report.json`, relative to the folder the CLI runs in.
+ */
+function reportLineOf(configFolder: string): string {
+  const path = relative(packageDir, join(configFolder, '.visual-check', 'report', 'report.json'))
+
+  return `Report: ${path.split(sep).join('/')}`
+}
 
 /**
  * How many shards the sharding case splits `test` into.
@@ -1643,8 +1653,8 @@ async function checkCommittedBaselines(expected: Outcomes): Promise<string[]> {
  * stories of the file that fails to load, and checks that the consistency check stopped it before any capture. It exits
  * 1, its only snapshot lines are those stories', broken, each saying the file failed to load, its header is the
  * consistency output's, counting every snapshot with an expected outcome, its output ends with the line that says CI
- * stops before capturing, and the browser asked for no story page. The expected outcomes are the ones of every story,
- * those stories' included.
+ * stops before capturing and the report line, and the browser asked for no story page. The expected outcomes are the
+ * ones of every story, those stories' included.
  */
 async function checkCiStop(expected: Outcomes): Promise<string[]> {
   return await withStorybookServer({ withLoadFails: true }, async (server) => {
@@ -1652,9 +1662,9 @@ async function checkCiStop(expected: Outcomes): Promise<string[]> {
 
     return [
       ...consistencyStopProblems(run, server, expected),
-      ...(run.stdout.endsWith(`\n${ciStopLine}\n`)
+      ...(run.stdout.endsWith(`\n${ciStopLine}\n${reportLineOf(packageDir)}\n`)
         ? []
-        : [`test's output doesn't end with "${ciStopLine}"${outputOf(run.stdout)}`]),
+        : [`test's output doesn't end with "${ciStopLine}" and the report line${outputOf(run.stdout)}`]),
     ]
   })
 }
@@ -2022,7 +2032,12 @@ async function checkUpdateThenTest(expected: Outcomes): Promise<string[]> {
       return [
         ...baselineProblems(baselines, passing),
         ...retestProblems,
-        ...consistencyAfterUpdateProblems(consistency, expected, server.storyPageRequests().length - pagesBefore),
+        ...consistencyAfterUpdateProblems(
+          consistency,
+          expected,
+          server.storyPageRequests().length - pagesBefore,
+          folder,
+        ),
       ]
     }),
   )
@@ -2031,19 +2046,24 @@ async function checkUpdateThenTest(expected: Outcomes): Promise<string[]> {
 /**
  * Lists how `test --consistency`, run right after an `update` that wrote every story that isn't broken, differs from
  * what it should find: exactly the broken stories, missing since `update` writes no baseline for them, with the
- * consistency header counting every snapshot, a counts line of that many missing and no orphan, and no story
- * page loaded.
+ * consistency header counting every snapshot, a counts line of that many missing and no orphan, then the report line
+ * of the config in `configFolder`, and no story page loaded.
  */
-function consistencyAfterUpdateProblems(run: CliRun, expected: Outcomes, storyPagesLoaded: number): string[] {
+function consistencyAfterUpdateProblems(
+  run: CliRun,
+  expected: Outcomes,
+  storyPagesLoaded: number,
+  configFolder: string,
+): string[] {
   const missing = Object.entries(mapOutcomes(expected, retestOutcomeOf)).filter(([, outcome]) => outcome === 'missing')
   const counts = `${missing.length} missing`
 
   return [
     ...expectedRunProblems('test --consistency', run, Object.fromEntries(missing)),
     ...consistencyHeaderProblems(run, Object.keys(expected).length),
-    ...(run.stdout.endsWith(`\n${counts}\n`)
+    ...(run.stdout.endsWith(`\n${counts}\n${reportLineOf(configFolder)}\n`)
       ? []
-      : [`test --consistency doesn't end with "${counts}"${outputOf(run.stdout)}`]),
+      : [`test --consistency doesn't end with "${counts}" and the report line${outputOf(run.stdout)}`]),
     ...(storyPagesLoaded > 0 ? [`test --consistency loaded ${storyPagesLoaded} story pages, so it captured`] : []),
   ]
 }

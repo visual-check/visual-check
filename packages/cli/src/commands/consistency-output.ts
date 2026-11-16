@@ -3,7 +3,7 @@ import { stemOfFileName } from '../baselines/baseline-files.js'
 import { type ConsistencyCheck, isConsistent, type StorybookBaselines } from './consistency-check.js'
 import type { PlannedSnapshot } from './plan-snapshots.js'
 import { countsLineOf, displayPathOf, failMark, snapshotCountOf, snapshotLineOf } from './run-output.js'
-import { brokenResultOf, missingResultOf } from './snapshot-result.js'
+import { brokenResultOf, missingResultOf, type SnapshotResult, type SnapshotStatus } from './snapshot-result.js'
 
 /**
  * What the consistency output is built from.
@@ -39,6 +39,15 @@ interface ConsistencyOutput {
    * The header, a line for each finding and the end line, each ending with a newline.
    */
   stdout: string
+  /**
+   * The snapshots it found, in planned order: each whose stories file failed to load, and each whose baseline is
+   * missing.
+   */
+  items: PlannedSnapshot[]
+  /**
+   * The result of each snapshot in `items`, by its index: broken or missing, with no capture.
+   */
+  results: SnapshotResult[]
 }
 
 /**
@@ -73,36 +82,43 @@ export function orphanLinesOf(cwd: string, storybooks: readonly StorybookBaselin
  * planned order the line of each snapshot whose baseline is missing and of each story whose stories file failed to
  * load, as `test` prints them, then a line for each orphan. It ends with a line that says the baselines are consistent
  * when it found nothing, or else with the counts of missing baselines, broken snapshots and orphans, each but the first
- * left out at zero. A broken snapshot counts as broken alone, whether its baseline is there or not.
+ * left out at zero. A broken snapshot counts as broken alone, whether its baseline is there or not. It also gives the
+ * snapshots it found, with their results, for the report.
  */
 export function consistencyOutputOf({ version, cwd, planned, check }: CheckedPlan): ConsistencyOutput {
-  const findings: string[] = []
-  let missing = 0
-  let broken = 0
-
-  for (const item of planned) {
+  const findings = planned.flatMap((item): { item: PlannedSnapshot; result: SnapshotResult }[] => {
     if ('broken' in item) {
-      broken += 1
-      findings.push(snapshotLineOf(item, brokenResultOf(item.broken, { attempts: 0 })))
-    } else if (check.missing.has(item)) {
-      missing += 1
-      findings.push(snapshotLineOf(item, missingResultOf()))
+      return [{ item, result: brokenResultOf(item.broken, { attempts: 0 }) }]
     }
-  }
 
+    return check.missing.has(item) ? [{ item, result: missingResultOf() }] : []
+  })
+  const results = findings.map(({ result }) => result)
   const orphanLines = orphanLinesOf(cwd, check.storybooks)
   const counts = [
-    ['missing', missing],
-    ['broken', broken],
+    ['missing', countOf(results, 'missing')],
+    ['broken', countOf(results, 'broken')],
     [orphanLabelOf(orphanLines.length), orphanLines.length],
   ] as const
   const consistent = isConsistent(check, planned)
   const lines = [
     `visual-check ${version} · test · consistency · ${snapshotCountOf(planned.length)}`,
-    ...findings,
+    ...findings.map(({ item, result }) => snapshotLineOf(item, result)),
     ...orphanLines,
     consistent ? consistentLine : countsLineOf(counts),
   ]
 
-  return { consistent, stdout: lines.map((line) => `${line}\n`).join('') }
+  return {
+    consistent,
+    stdout: lines.map((line) => `${line}\n`).join(''),
+    items: findings.map(({ item }) => item),
+    results,
+  }
+}
+
+/**
+ * Gives how many results have the status.
+ */
+function countOf(results: readonly SnapshotResult[], status: SnapshotStatus): number {
+  return results.filter((result) => result.status === status).length
 }

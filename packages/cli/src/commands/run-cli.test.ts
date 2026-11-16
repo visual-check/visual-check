@@ -54,6 +54,7 @@ import {
   orphanLineOf,
   otherSnapshot,
   printed,
+  printedTest,
   removeMarkerFolder,
   reportFolderIn,
   startRecordingServer,
@@ -170,7 +171,7 @@ Other options:
 
     expect(await runCli(['test'], {}, project, options)).toEqual({
       exitCode: 1,
-      stdout: printed(
+      stdout: printedTest(
         headerOf('test', 4),
         missingLineOf('web', 'a'),
         missingLineOf('web', 'b'),
@@ -320,7 +321,7 @@ Other options:
 
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBe('')
-    expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 1), '✓ web  a  N ms', '1 passed'))
+    expect(withoutTimes(result.stdout)).toBe(printedTest(headerOf('test', 1), '✓ web  a  N ms', '1 passed'))
     expect(record.urls).toEqual([previewOf(url), `${url}/iframe.html?id=a&viewMode=story`])
     expect(record.urls.some((loaded) => loaded.includes(':6007') || loaded.includes(':6008'))).toBe(false)
   })
@@ -375,7 +376,7 @@ describe('runCli test', () => {
     expect(result.exitCode).toBe(1)
     expect(result.stderr).toBe('')
     expect(withoutTimes(result.stdout)).toBe(
-      printed(headerOf('test', 1), '✓ web  a  N ms', orphanLineOf('web', 'gone'), '1 passed · 1 orphan'),
+      printedTest(headerOf('test', 1), '✓ web  a  N ms', orphanLineOf('web', 'gone'), '1 passed · 1 orphan'),
     )
     expect(storyIdsOf(record.urls)).toEqual(['a'])
     expect(readdirSync(folder).sort()).toEqual(['a.png', 'gone.png'])
@@ -388,7 +389,9 @@ describe('runCli test', () => {
 
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBe('')
-    expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 1), '✓ web  button--primary  N ms', '1 passed'))
+    expect(withoutTimes(result.stdout)).toBe(
+      printedTest(headerOf('test', 1), '✓ web  button--primary  N ms', '1 passed'),
+    )
     expect(record.urls).toEqual([
       `${url}/iframe.html?viewMode=story`,
       `${url}/iframe.html?id=button--primary&viewMode=story`,
@@ -410,7 +413,7 @@ describe('runCli test', () => {
     expect(result.exitCode).toBe(1)
     expect(result.stderr).toBe('')
     expect(withoutTimes(result.stdout)).toBe(
-      printed(
+      printedTest(
         headerOf('test', 5),
         '✓ web  a  N ms',
         '✗ web  b  differs: 100 differ, 20 allowed',
@@ -481,7 +484,7 @@ describe('runCli test', () => {
 
     expect(result).toEqual({
       exitCode: 1,
-      stdout: printed(
+      stdout: printedTest(
         headerOf('test', 2),
         missingLineOf('web', 'a'),
         missingLineOf('web', 'b'),
@@ -499,7 +502,7 @@ describe('runCli test', () => {
 
     expect(await runCli(['test', '--filter', 'nothing'], {}, project, fakeBrowser().options)).toEqual({
       exitCode: 0,
-      stdout: printed(headerOf('test', 0), '0 passed'),
+      stdout: printedTest(headerOf('test', 0), '0 passed'),
       stderr: '',
     })
   })
@@ -526,6 +529,7 @@ describe('runCli visual diff', () => {
         '✓ web  a  N ms',
         '✗ web  b  differs: 100 differ, 20 allowed',
         '1 passed · 1 differs',
+        'Report: ../.visual-check/report/report.json',
       ),
     )
     expect(readdirSync(images).sort()).toEqual(['b.baseline.png', 'b.diff.png', 'b.snapshot.png'])
@@ -551,7 +555,7 @@ describe('runCli visual diff', () => {
     ])
   })
 
-  it('removes a stale report folder, and writes no image when every snapshot passes', async () => {
+  it('replaces a stale report folder with report.json alone when every snapshot passes', async () => {
     const { project } = await createRun(['a'], { a: defaultRunSnapshot })
 
     writeStaleReport(project)
@@ -559,7 +563,7 @@ describe('runCli visual diff', () => {
     const result = await runCli(['test'], {}, project, fakeBrowser().options)
 
     expect(result.exitCode).toBe(0)
-    expect(existsSync(reportFolderIn(project))).toBe(false)
+    expect(readdirSync(reportFolderIn(project))).toEqual(['report.json'])
   })
 
   it('leaves the report folder alone in update', async () => {
@@ -582,7 +586,12 @@ describe('runCli visual diff', () => {
     const result = await runCli(['test'], {}, project, options)
 
     expect(withoutTimes(result.stdout)).toBe(
-      printed(headerOf('test', 2), '✓ web  a  N ms', '✗ web  b  differs: 3 differ, 0 allowed', '1 passed · 1 differs'),
+      printedTest(
+        headerOf('test', 2),
+        '✓ web  a  N ms',
+        '✗ web  b  differs: 3 differ, 0 allowed',
+        '1 passed · 1 differs',
+      ),
     )
   })
 
@@ -679,7 +688,7 @@ describe('runCli consistency check', () => {
 
     expect(result).toEqual({
       exitCode: 1,
-      stdout: printed(
+      stdout: printedTest(
         headerOf('test', 2),
         '✗ web  a  differs: 100 differ, 20 allowed',
         missingLineOf('web', 'b'),
@@ -713,7 +722,7 @@ describe('runCli consistency check', () => {
 
     expect(result.exitCode).toBe(1)
     expect(withoutTimes(result.stdout)).toBe(
-      printed(
+      printedTest(
         headerOf('test', 2),
         '✓ web  a  N ms · flaky',
         '✓ docs  d  N ms',
@@ -735,7 +744,7 @@ describe('runCli consistency check', () => {
     expect(result.exitCode).toBe(1)
     expect(result.stderr).toBe('')
     expect(withoutTimes(result.stdout)).toBe(
-      printed(headerOf('test', 1), '✓ web  a  N ms', orphanLineOf('web', 'b'), '1 passed · 1 orphan'),
+      printedTest(headerOf('test', 1), '✓ web  a  N ms', orphanLineOf('web', 'b'), '1 passed · 1 orphan'),
     )
     expect(storyIdsOf(record.urls)).toEqual(['a'])
   })
@@ -751,7 +760,7 @@ describe('runCli consistency check', () => {
 
     expect(result.exitCode).toBe(1)
     expect(withoutTimes(result.stdout)).toBe(
-      printed(
+      printedTest(
         headerOf('test', 3),
         `! web  a  ${loadFailedDetail}`,
         '✓ web  b  N ms',
@@ -788,7 +797,7 @@ describe('runCli consistency check', () => {
 
     expect(result).toEqual({
       exitCode: 1,
-      stdout: printed(consistencyHeaderOf(1), orphanLineOf('web', 'gone'), '0 missing · 1 orphan', ciStopLine),
+      stdout: printedTest(consistencyHeaderOf(1), orphanLineOf('web', 'gone'), '0 missing · 1 orphan', ciStopLine),
       stderr: '',
     })
     expect(record.urls).toEqual([previewOf(url)])
@@ -803,7 +812,7 @@ describe('runCli consistency check', () => {
 
     expect(result).toEqual({
       exitCode: 1,
-      stdout: printed(consistencyHeaderOf(2), missingLineOf('web', 'b'), '1 missing', ciStopLine),
+      stdout: printedTest(consistencyHeaderOf(2), missingLineOf('web', 'b'), '1 missing', ciStopLine),
       stderr: '',
     })
     expect(record.urls).toEqual([previewOf(url)])
@@ -826,7 +835,7 @@ describe('runCli consistency check', () => {
 
     expect(result).toEqual({
       exitCode: 1,
-      stdout: printed(
+      stdout: printedTest(
         consistencyHeaderOf(4),
         `! web  a  ${loadFailedDetail}`,
         missingLineOf('web', 'b'),
@@ -840,7 +849,7 @@ describe('runCli consistency check', () => {
     expect(record.urls).toEqual([previewOf(url)])
   })
 
-  it('clears the report folder when it stops a CI test', async () => {
+  it('replaces the report folder with report.json when it stops a CI test', async () => {
     const { project } = await createRun(['a'])
 
     writeStaleReport(project)
@@ -848,7 +857,7 @@ describe('runCli consistency check', () => {
     const result = await runCli(['test'], ciEnvironment, project, fakeBrowser().options)
 
     expect(result.exitCode).toBe(1)
-    expect(existsSync(reportFolderIn(project))).toBe(false)
+    expect(readdirSync(reportFolderIn(project))).toEqual(['report.json'])
   })
 
   it('goes on with a consistent CI test as with a local one', async () => {
@@ -858,7 +867,7 @@ describe('runCli consistency check', () => {
 
     expect(result.exitCode).toBe(1)
     expect(withoutTimes(result.stdout)).toBe(
-      printed(
+      printedTest(
         headerOf('test', 2),
         '✓ web  a  N ms',
         '✗ web  b  differs: 100 differ, 20 allowed',
@@ -895,7 +904,7 @@ describe('runCli test --consistency', () => {
 
     expect(result).toEqual({
       exitCode: 0,
-      stdout: printed(consistencyHeaderOf(2), consistentLine),
+      stdout: printedTest(consistencyHeaderOf(2), consistentLine),
       stderr: '',
     })
     expectNothingCaptured(record)
@@ -908,7 +917,7 @@ describe('runCli test --consistency', () => {
 
     expect(result).toEqual({
       exitCode: 1,
-      stdout: printed(consistencyHeaderOf(2), missingLineOf('web', 'b'), '1 missing'),
+      stdout: printedTest(consistencyHeaderOf(2), missingLineOf('web', 'b'), '1 missing'),
       stderr: '',
     })
     expectNothingCaptured(record)
@@ -921,7 +930,7 @@ describe('runCli test --consistency', () => {
 
     expect(result).toEqual({
       exitCode: 1,
-      stdout: printed(consistencyHeaderOf(1), orphanLineOf('web', 'gone'), '0 missing · 1 orphan'),
+      stdout: printedTest(consistencyHeaderOf(1), orphanLineOf('web', 'gone'), '0 missing · 1 orphan'),
       stderr: '',
     })
     expectNothingCaptured(record)
@@ -938,7 +947,7 @@ describe('runCli test --consistency', () => {
 
     expect(result).toEqual({
       exitCode: 1,
-      stdout: printed(
+      stdout: printedTest(
         consistencyHeaderOf(3),
         `! web  a  ${loadFailedDetail}`,
         `! web  c  ${loadFailedDetail}`,
@@ -1000,11 +1009,11 @@ describe('runCli test --consistency', () => {
     const { options: checkOptions, record } = fakeBrowser()
     const result = await runCli(['test', '--consistency'], {}, project, checkOptions)
 
-    expect(result).toEqual({ exitCode: 0, stdout: printed(consistencyHeaderOf(2), consistentLine), stderr: '' })
+    expect(result).toEqual({ exitCode: 0, stdout: printedTest(consistencyHeaderOf(2), consistentLine), stderr: '' })
     expectNothingCaptured(record)
   })
 
-  it('clears the report folder', async () => {
+  it('replaces the report folder with report.json', async () => {
     const { project } = await createRun(['a'], { a: defaultRunSnapshot })
 
     writeStaleReport(project)
@@ -1012,7 +1021,7 @@ describe('runCli test --consistency', () => {
     const result = await runCli(['test', '--consistency'], {}, project, fakeBrowser().options)
 
     expect(result.exitCode).toBe(0)
-    expect(existsSync(reportFolderIn(project))).toBe(false)
+    expect(readdirSync(reportFolderIn(project))).toEqual(['report.json'])
   })
 
   it('prints the same output in CI, with no CI line', async () => {
@@ -1050,7 +1059,7 @@ describe('runCli test --consistency with --storybook', () => {
     const { options, record } = fakeBrowser()
     const result = await runCli(['test', '--consistency', '--storybook', 'web'], {}, project, options)
 
-    expect(result).toEqual({ exitCode: 0, stdout: printed(consistencyHeaderOf(1), consistentLine), stderr: '' })
+    expect(result).toEqual({ exitCode: 0, stdout: printedTest(consistencyHeaderOf(1), consistentLine), stderr: '' })
     expectNothingCaptured(record)
   })
 
@@ -1060,7 +1069,7 @@ describe('runCli test --consistency with --storybook', () => {
 
     expect(result).toEqual({
       exitCode: 1,
-      stdout: printed(
+      stdout: printedTest(
         consistencyHeaderOf(3),
         missingLineOf('docs', 'e'),
         orphanLineOf('docs', 'gone', 'docs/.visual-check/baselines'),
@@ -1075,7 +1084,7 @@ describe('runCli test --consistency with --storybook', () => {
     const result = await runCli(['test', '--storybook', 'web'], {}, project, fakeBrowser().options)
 
     expect(result.exitCode).toBe(0)
-    expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 1), '✓ web  a  N ms', '1 passed'))
+    expect(withoutTimes(result.stdout)).toBe(printedTest(headerOf('test', 1), '✓ web  a  N ms', '1 passed'))
   })
 })
 
@@ -1219,7 +1228,7 @@ describe('runCli test --shard', () => {
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBe('')
     expect(withoutTimes(result.stdout)).toBe(
-      printed(shardHeaderOf('3/4', 1, 2), shardNote, '✓ web  d1  N ms', '✓ web  d2  N ms', '2 passed'),
+      printedTest(shardHeaderOf('3/4', 1, 2), shardNote, '✓ web  d1  N ms', '✓ web  d2  N ms', '2 passed'),
     )
   })
 
@@ -1232,13 +1241,13 @@ describe('runCli test --shard', () => {
 
       expect(result.exitCode).toBe(0)
       expect(withoutTimes(result.stdout)).toBe(
-        printed(shardHeaderOf('4/4', 1, 1), shardNote, '✓ web  c1  N ms', '1 passed'),
+        printedTest(shardHeaderOf('4/4', 1, 1), shardNote, '✓ web  c1  N ms', '1 passed'),
       )
       expect(capturedIdsOf(record)).toEqual(['c1'])
     }
   })
 
-  it('clears the report folder', async () => {
+  it('replaces the report folder with report.json', async () => {
     const { project } = await createShardedRun()
 
     writeStaleReport(project)
@@ -1246,7 +1255,7 @@ describe('runCli test --shard', () => {
     const result = await runCli(['test', '--shard', '1/2'], {}, project, fakeBrowser().options)
 
     expect(result.exitCode).toBe(0)
-    expect(existsSync(reportFolderIn(project))).toBe(false)
+    expect(readdirSync(reportFolderIn(project))).toEqual(['report.json'])
   })
 
   it('still reports a missing baseline of its own stories, and only those', async () => {
@@ -1255,7 +1264,7 @@ describe('runCli test --shard', () => {
 
     expect(result).toEqual({
       exitCode: 1,
-      stdout: printed(shardHeaderOf('1/2', 1, 1), shardNote, missingLineOf('web', 'a'), '0 passed · 1 missing'),
+      stdout: printedTest(shardHeaderOf('1/2', 1, 1), shardNote, missingLineOf('web', 'a'), '0 passed · 1 missing'),
       stderr: '',
     })
   })
@@ -1269,7 +1278,7 @@ describe('runCli test --shard', () => {
 
     expect(await runCli(['test', '--shard', '4/4'], {}, project, noLaunch)).toEqual({
       exitCode: 0,
-      stdout: printed(shardHeaderOf('4/4', 0, 0), shardNote, 'Shard 4/4 has nothing to capture.', '0 passed'),
+      stdout: printedTest(shardHeaderOf('4/4', 0, 0), shardNote, 'Shard 4/4 has nothing to capture.', '0 passed'),
       stderr: '',
     })
   })
@@ -1284,7 +1293,7 @@ describe('runCli test --shard', () => {
 
     expect(result).toEqual({
       exitCode: 0,
-      stdout: printed(shardHeaderOf('2/2', 1, 0), shardNote, 'Shard 2/2 has nothing to capture.', '0 passed'),
+      stdout: printedTest(shardHeaderOf('2/2', 1, 0), shardNote, 'Shard 2/2 has nothing to capture.', '0 passed'),
       stderr: '',
     })
     expect(record.captures).toEqual([])
@@ -2070,7 +2079,7 @@ describe('runCli per-story options', () => {
 
     expect(result.exitCode).toBe(0)
     expect(withoutTimes(result.stdout)).toBe(
-      printed(headerOf('test', 2), '✓ web  a  N ms', '✓ docs  d  N ms', '2 passed'),
+      printedTest(headerOf('test', 2), '✓ web  a  N ms', '✓ docs  d  N ms', '2 passed'),
     )
     expect(record.reads).toEqual([
       {
@@ -2202,7 +2211,7 @@ describe('runCli per-story options', () => {
 
     expect(result.exitCode).toBe(0)
     expect(withoutTimes(result.stdout)).toBe(
-      printed(headerOf('test', 2, 1), '✓ web  a  N ms', '✓ web  b  N ms', '2 passed'),
+      printedTest(headerOf('test', 2, 1), '✓ web  a  N ms', '✓ web  b  N ms', '2 passed'),
     )
     expect(result.stderr).toBe(relaunchNotice)
     expect(record.launches).toHaveLength(2)
@@ -2266,7 +2275,7 @@ describe('runCli per-story options', () => {
     const { options, record } = fakeBrowser({}, { read: { options: { a: { disable: true }, b: { disable: true } } } })
     const result = await runCli(['test'], {}, project, options)
 
-    expect(result).toEqual({ exitCode: 0, stdout: printed(headerOf('test', 0), '0 passed'), stderr: '' })
+    expect(result).toEqual({ exitCode: 0, stdout: printedTest(headerOf('test', 0), '0 passed'), stderr: '' })
     expect(record.reads).toHaveLength(1)
     expect(storyIdsOf(record.urls)).toEqual([])
     expect(record.viewports).toEqual([])
@@ -2279,7 +2288,7 @@ describe('runCli per-story options', () => {
 
     expect(result.exitCode).toBe(0)
     expect(withoutTimes(result.stdout)).toBe(
-      printed(headerOf('test', 2), '✓ web  a  N ms', '✓ web  c  N ms', '2 passed'),
+      printedTest(headerOf('test', 2), '✓ web  a  N ms', '✓ web  c  N ms', '2 passed'),
     )
     expect(storyIdsOf(record.urls).sort()).toEqual(['a', 'c'])
   })
@@ -2319,7 +2328,7 @@ describe('runCli per-story options', () => {
     expect(result.exitCode).toBe(1)
     expect(result.stderr).toBe('')
     expect(withoutTimes(result.stdout)).toBe(
-      printed(
+      printedTest(
         headerOf('test', 3),
         `! web  a  ${broken}`,
         '✓ web  b  N ms',
@@ -2336,7 +2345,7 @@ describe('runCli per-story options', () => {
     const result = await runCli(['test'], {}, project, options)
 
     expect(result.stdout).toBe(
-      printed(
+      printedTest(
         headerOf('test', 1),
         '! web  a  broken: Its stories file ./button.stories.tsx failed to load.',
         '0 passed · 1 broken',
@@ -2351,7 +2360,7 @@ describe('runCli per-story options', () => {
 
     expect(result).toEqual({
       exitCode: 1,
-      stdout: printed(
+      stdout: printedTest(
         headerOf('test', 1),
         "! web  a  broken: Its stories file ./button.stories.tsx didn't load within readyTimeout (4000 ms).",
         '0 passed · 1 broken',
@@ -2367,7 +2376,7 @@ describe('runCli per-story options', () => {
 
     expect(result).toEqual({
       exitCode: 1,
-      stdout: printed(
+      stdout: printedTest(
         headerOf('test', 1),
         '! web  a  broken: Its stories file ./button.stories.tsx failed to load: Error: boom.',
         '0 passed · 1 broken',
@@ -2412,7 +2421,7 @@ describe('runCli per-story options', () => {
 
     expect(await runCli(['test'], {}, project, noLaunch)).toEqual({
       exitCode: 0,
-      stdout: printed(headerOf('test', 0), '0 passed'),
+      stdout: printedTest(headerOf('test', 0), '0 passed'),
       stderr: '',
     })
   })
@@ -2449,7 +2458,7 @@ describe('runCli modes', () => {
     expect(result.exitCode).toBe(1)
     expect(result.stderr).toBe('')
     expect(withoutTimes(result.stdout)).toBe(
-      printed(
+      printedTest(
         headerOf('test', 4),
         '✓ web  a  N ms',
         '✓ web  a  dark  N ms',
@@ -2472,7 +2481,7 @@ describe('runCli modes', () => {
 
     expect(result.exitCode).toBe(1)
     expect(withoutTimes(result.stdout)).toBe(
-      printed(headerOf('test', 2), '✓ web  a  N ms', `! web  a  dark  ${brokenDetail}`, '1 passed · 1 broken'),
+      printedTest(headerOf('test', 2), '✓ web  a  N ms', `! web  a  dark  ${brokenDetail}`, '1 passed · 1 broken'),
     )
   })
 
@@ -2573,7 +2582,7 @@ describe('runCli retries and flaky snapshots', () => {
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBe('')
     expect(withoutTimes(result.stdout)).toBe(
-      printed(headerOf('test', 1), '✓ web  a  N ms · flaky', flakyHeading, '  web  a', '1 passed (1 flaky)'),
+      printedTest(headerOf('test', 1), '✓ web  a  N ms · flaky', flakyHeading, '  web  a', '1 passed (1 flaky)'),
     )
     expect(storyIdsOf(record.urls)).toEqual(['a', 'a'])
     expect(readdirSync(images).sort()).toEqual(['a.baseline.png', 'a.diff.png', 'a.snapshot.png'])
@@ -2589,7 +2598,7 @@ describe('runCli retries and flaky snapshots', () => {
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toBe(
-      printed(headerOf('test', 1), '✗ web  a  differs: 100 differ, 20 allowed', '0 passed · 1 differs'),
+      printedTest(headerOf('test', 1), '✗ web  a  differs: 100 differ, 20 allowed', '0 passed · 1 differs'),
     )
     expect(storyIdsOf(record.urls)).toEqual(['a'])
   })
@@ -2603,7 +2612,7 @@ describe('runCli retries and flaky snapshots', () => {
 
     expect(result.exitCode).toBe(0)
     expect(withoutTimes(result.stdout)).toBe(
-      printed(headerOf('test', 1), '✓ web  a  N ms · flaky', flakyHeading, '  web  a', '1 passed (1 flaky)'),
+      printedTest(headerOf('test', 1), '✓ web  a  N ms · flaky', flakyHeading, '  web  a', '1 passed (1 flaky)'),
     )
     expect(storyIdsOf(record.urls)).toEqual(['a', 'a', 'a'])
   })
@@ -2618,7 +2627,7 @@ describe('runCli retries and flaky snapshots', () => {
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toBe(
-      printed(headerOf('test', 1), '✗ web  a  differs: 100 differ, 20 allowed', '0 passed · 1 differs'),
+      printedTest(headerOf('test', 1), '✗ web  a  differs: 100 differ, 20 allowed', '0 passed · 1 differs'),
     )
     expect(storyIdsOf(record.urls)).toEqual(['a', 'a', 'a'])
     expect(new Uint8Array(readFileSync(join(images, 'a.baseline.png')))).toEqual(defaultRunSnapshot)
@@ -2670,7 +2679,7 @@ describe('runCli retries and flaky snapshots', () => {
     const result = await runCli(['test'], {}, project, options)
 
     expect(result.exitCode).toBe(1)
-    expect(result.stdout).toBe(printed(headerOf('test', 1), `! web  a  ${brokenDetail}`, '0 passed · 1 broken'))
+    expect(result.stdout).toBe(printedTest(headerOf('test', 1), `! web  a  ${brokenDetail}`, '0 passed · 1 broken'))
     expect(storyIdsOf(record.urls)).toEqual(['a'])
     expect(record.captures.map(({ id, onLoad }) => [id, onLoad])).toEqual([['a', 1]])
   })
@@ -2682,7 +2691,7 @@ describe('runCli retries and flaky snapshots', () => {
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toBe(
-      printed(headerOf('test', 1), '✗ web  a  differs: 100 differ, 20 allowed', '0 passed · 1 differs'),
+      printedTest(headerOf('test', 1), '✗ web  a  differs: 100 differ, 20 allowed', '0 passed · 1 differs'),
     )
     expect(storyIdsOf(record.urls)).toEqual(['a', 'a'])
     // The broken retry's page isn't captured: the snapshot keeps its first capture's images.
@@ -2694,7 +2703,7 @@ describe('runCli retries and flaky snapshots', () => {
     const { options, record } = fakeBrowser({ a: { captures: [{ snapshot: otherSnapshot }, {}] } })
     const result = await runCli(['test'], {}, project, options)
 
-    expect(result.stdout).toBe(printed(headerOf('test', 1), missingLineOf('web', 'a'), '0 passed · 1 missing'))
+    expect(result.stdout).toBe(printedTest(headerOf('test', 1), missingLineOf('web', 'a'), '0 passed · 1 missing'))
     expect(storyIdsOf(record.urls)).toEqual([])
   })
 
@@ -2730,7 +2739,7 @@ describe('runCli retries and flaky snapshots', () => {
 
     expect(result.exitCode).toBe(1)
     expect(withoutTimes(result.stdout)).toBe(
-      printed(
+      printedTest(
         headerOf('test', 4),
         '✓ web  a  N ms',
         '✓ web  a  dark  N ms · flaky',
@@ -2865,7 +2874,7 @@ describe('runCli update stability checks', () => {
     const result = await runCli(['test'], {}, project, options)
 
     expect(withoutTimes(result.stdout)).toBe(
-      printed(
+      printedTest(
         headerOf('test', 2),
         '✓ web  a  N ms',
         '✓ web  b  N ms · flaky',
@@ -2934,7 +2943,7 @@ describe('runCli remote content hint', () => {
 
     expect(result).toEqual({
       exitCode: 1,
-      stdout: printed(headerOf('test', 1), squareLine, ...unsplashHint, '0 passed · 1 differs'),
+      stdout: printedTest(headerOf('test', 1), squareLine, ...unsplashHint, '0 passed · 1 differs'),
       stderr: '',
     })
   })
@@ -2963,7 +2972,7 @@ describe('runCli remote content hint', () => {
     })
     const result = await runCli(['test'], {}, project, options)
 
-    expect(result.stdout).toBe(printed(headerOf('test', 1), squareLine, '0 passed · 1 differs'))
+    expect(result.stdout).toBe(printedTest(headerOf('test', 1), squareLine, '0 passed · 1 differs'))
   })
 
   it('counts a differing pixel within 1 px of the remote content as inside it, for anti-aliased edges', async () => {
@@ -2974,7 +2983,7 @@ describe('runCli remote content hint', () => {
     })
     const result = await runCli(['test'], {}, project, options)
 
-    expect(result.stdout).toBe(printed(headerOf('test', 1), squareLine, ...unsplashHint, '0 passed · 1 differs'))
+    expect(result.stdout).toBe(printedTest(headerOf('test', 1), squareLine, ...unsplashHint, '0 passed · 1 differs'))
   })
 
   it('hints by remote content that reaches past the image', async () => {
@@ -2985,7 +2994,7 @@ describe('runCli remote content hint', () => {
     })
     const result = await runCli(['test'], {}, project, options)
 
-    expect(result.stdout).toBe(printed(headerOf('test', 1), squareLine, ...unsplashHint, '0 passed · 1 differs'))
+    expect(result.stdout).toBe(printedTest(headerOf('test', 1), squareLine, ...unsplashHint, '0 passed · 1 differs'))
   })
 
   it('grows the margin with the device scale factor, rounded up', async () => {
@@ -3013,7 +3022,7 @@ describe('runCli remote content hint', () => {
     const { options } = fakeBrowser({ a: { snapshot: squareSnapshot, remote: squareRemote } })
     const result = await runCli(['test'], {}, project, options)
 
-    expect(result.stdout).toBe(printed(headerOf('test', 1), squareLine, '0 passed · 1 differs'))
+    expect(result.stdout).toBe(printedTest(headerOf('test', 1), squareLine, '0 passed · 1 differs'))
   })
 
   it('gives no hint to a snapshot that passes on a retry', async () => {
@@ -3034,7 +3043,7 @@ describe('runCli remote content hint', () => {
     })
     const result = await runCli(['test'], {}, project, options)
 
-    expect(result.stdout).toBe(printed(headerOf('test', 1), squareLine, '0 passed · 1 differs'))
+    expect(result.stdout).toBe(printedTest(headerOf('test', 1), squareLine, '0 passed · 1 differs'))
   })
 
   it('names each host whose remote content holds a differing pixel once, in the order of its boxes', async () => {
@@ -3051,7 +3060,7 @@ describe('runCli remote content hint', () => {
     const result = await runCli(['test'], {}, project, options)
 
     expect(result.stdout).toBe(
-      printed(
+      printedTest(
         headerOf('test', 1),
         squareLine,
         '  hint: Differs only inside remote content from b.com and c.com. A CDN can serve different bytes to different ' +
@@ -3151,7 +3160,7 @@ const foldedNamesNote = 'Their names differ only in letter case or in how an acc
 const clashFix = 'Rename one of the stories or modes, then run visual-check again.'
 
 describe('runCli baseline file names', () => {
-  it('exits 2 in test, before any capture or clearing the report, for two story IDs that differ only in encoding', async () => {
+  it('exits 2 in test, before any capture, for two story IDs that differ only in encoding', async () => {
     const { project, folder } = await createRun([composedId, decomposedId])
     const image = writeStaleReport(project)
     const { options, record } = fakeBrowser()
@@ -3163,7 +3172,7 @@ describe('runCli baseline file names', () => {
       stderr: printed(clashLineOf('web', `${composedId}.png`, composedId, decomposedId), foldedNamesNote, clashFix),
     })
     expect(storyIdsOf(record.urls)).toEqual([])
-    expect(existsSync(image)).toBe(true)
+    expect(existsSync(image)).toBe(false)
     expect(existsSync(folder)).toBe(false)
   })
 
@@ -3240,7 +3249,11 @@ describe('runCli baseline file names', () => {
 
     expect(result).toEqual({
       exitCode: 1,
-      stdout: printed(headerOf('test', 1), `✗ web  ${longId}  differs: 100 differ, 20 allowed`, '0 passed · 1 differs'),
+      stdout: printedTest(
+        headerOf('test', 1),
+        `✗ web  ${longId}  differs: 100 differ, 20 allowed`,
+        '0 passed · 1 differs',
+      ),
       stderr: '',
     })
     expect(readdirSync(join(reportFolderIn(project), 'images', 'web')).sort()).toEqual([
@@ -3347,7 +3360,7 @@ describe('runCli warning when a Storybook ignores the test path', () => {
 
     expect(result.exitCode).toBe(0)
     expect(withoutTimes(result.stdout)).toBe(
-      printed(headerOf('test', 3), '✓ web  a  N ms', '✓ web  b  N ms', '✓ web  c  N ms', '3 passed'),
+      printedTest(headerOf('test', 3), '✓ web  a  N ms', '✓ web  b  N ms', '✓ web  c  N ms', '3 passed'),
     )
     expect(result.stderr).toBe(testPathWarningOf('web', 'storybook 9.1.2', 101))
   })
@@ -3740,7 +3753,7 @@ describe('runCli launching the browser', () => {
 
     expect(result.exitCode).toBe(1)
     expect(withoutTimes(result.stdout)).toBe(
-      printed(
+      printedTest(
         headerOf('test', 3, 1),
         '✓ web  a  N ms',
         `! web  b  ${browserExitedDetail}`,
@@ -3775,7 +3788,7 @@ describe('runCli launching the browser', () => {
 
     expect(result.exitCode).toBe(1)
     expect(withoutTimes(result.stdout)).toBe(
-      printed(
+      printedTest(
         headerOf('test', 4, 2),
         `! web  a  ${browserExitedDetail}`,
         `! web  b  ${browserExitedDetail}`,
@@ -3836,7 +3849,7 @@ describe('runCli launching the browser', () => {
 
     expect(result.exitCode).toBe(0)
     expect(withoutTimes(result.stdout)).toBe(
-      printed(headerOf('test', 3, 1), '✓ web  a  N ms', '✓ web  b  N ms', '✓ web  c  N ms', '3 passed'),
+      printedTest(headerOf('test', 3, 1), '✓ web  a  N ms', '✓ web  b  N ms', '✓ web  c  N ms', '3 passed'),
     )
     expect(result.stderr).toBe(relaunchNotice)
     expect(record.events).toEqual([
@@ -4060,7 +4073,7 @@ describe('runCli launching the browser', () => {
 
       expect(result.exitCode).toBe(1)
       expect(withoutTimes(result.stdout)).toBe(
-        printed(
+        printedTest(
           headerOf('test', 3, 1),
           '✓ web  a  N ms',
           `! web  b  ${browserExitedDetail}`,
@@ -4168,7 +4181,7 @@ describe('runCli launching the browser', () => {
 
     expect(result.exitCode).toBe(0)
     expect(withoutTimes(result.stdout)).toBe(
-      printed(headerOf('test', 3, 2), '✓ web  a  N ms', '✓ web  b  N ms', '✓ web  c  N ms', '3 passed'),
+      printedTest(headerOf('test', 3, 2), '✓ web  a  N ms', '✓ web  b  N ms', '✓ web  c  N ms', '3 passed'),
     )
     expect(result.stderr).toBe('')
     expect(storyIdsOf(record.urls).sort()).toEqual(['a', 'b', 'c'])

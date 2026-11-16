@@ -17,6 +17,7 @@ import { networkWarningOf } from './network-warning.js'
 import { type PlannedSnapshot, planSnapshots } from './plan-snapshots.js'
 import { type RunBrowser, runBrowserOf } from './run-browser.js'
 import { countsLineOf, snapshotCountOf, snapshotLineOf, snapshotNameOf } from './run-output.js'
+import type { RunFindings } from './run-report.js'
 import { type ShardShare, shardHeaderPartOf, shardNotesOf, shardShareOf } from './shard-share.js'
 import type { CaptureStory, SnapshotResult, SnapshotStatus } from './snapshot-result.js'
 import { exitNoticeOf, stopMessageOf } from './stop-message.js'
@@ -139,7 +140,7 @@ interface SnapshotRunResult {
    * for a failure that stopped the run, the header and the lines of the snapshots that finished before it. For a CI
    * `test` whose consistency check found anything, the consistency output, then a line that says why it captured
    * nothing. For `test --consistency`, the consistency output alone. Nothing when the run stopped with exit 2 before
-   * any capture, while it planned the snapshots, checked the baselines folders or cleared the report folder.
+   * any capture, while it planned the snapshots or checked the baselines folders.
    */
   stdout: string
   /**
@@ -149,6 +150,12 @@ interface SnapshotRunResult {
    * capturing gives only the notice of the exit. Nothing for a run that went on with no exit and no warning.
    */
   stderr: string
+  /**
+   * What the run found, for the report: the snapshots it took and their results, and each Storybook's orphans, or for
+   * a `test` that stopped after its consistency check what the check found. `undefined` for a run that stopped with
+   * exit 2.
+   */
+  findings?: RunFindings
 }
 
 /**
@@ -341,7 +348,6 @@ function exitCodeOf(
  *
  * @throws {BaselineError} When a baselines folder can't be listed, a baseline's path can't be looked at, or for
  * `update` a baseline can't be read or decoded.
- * @throws {ReportError} When `test` can't clear the report folder.
  */
 async function takingOf(run: SnapshotRun, tools: SnapshotTools, planned: PlannedSnapshot[]): Promise<Taking> {
   if (tools.command === 'test') {
@@ -355,7 +361,6 @@ async function takingOf(run: SnapshotRun, tools: SnapshotTools, planned: Planned
         storybooks: run.selections.map(({ storybook }) => storybook),
       },
       planned,
-      tools.reportFolder,
     )
   }
 
@@ -471,15 +476,14 @@ async function takeSnapshots(
  * captures finish in. Each snapshot has its own baseline, `<story-id>.png` for the default capture and
  * `<story-id>.<mode>.png` for a mode, a key over 240 bytes shortened to its first 223 bytes, `-` and 16 hex characters
  * of its SHA-256. `test` compares each snapshot with its baseline by the story's tolerance, at the viewport's device
- * scale factor, and never captures a missing baseline. It clears the report folder, `.visual-check/report` beside the
- * config file, once the snapshots are planned and, except on a shard, the consistency check has run, and writes the
- * baseline, snapshot and visual diff of each snapshot whose first capture differs there. A snapshot that differs is
- * captured again, up to the config's `retries` more times; one that passes on a retry passes, flaky, and its line ends
- * with `· flaky`. One that still differs by pixels on its first capture and its last retry, with every differing pixel
- * of the last retry inside its remote content, give or take the device scale factor rounded up, gets a hint under its
- * line: the hosts, a mask line for each and the docs page. The hint never changes the exit code. After the lines,
- * `test` lists the flaky snapshots by name under a heading, when there are any, and its counts say how many passes are
- * flaky. A flaky snapshot never fails the run.
+ * scale factor, and never captures a missing baseline. It writes the baseline, snapshot and visual diff of each
+ * snapshot whose first capture differs to the report folder, `.visual-check/report` beside the config file, which
+ * `runCli` has cleared. A snapshot that differs is captured again, up to the config's `retries` more times; one that
+ * passes on a retry passes, flaky, and its line ends with `· flaky`. One that still differs by pixels on its first
+ * capture and its last retry, with every differing pixel of the last retry inside its remote content, give or take the
+ * device scale factor rounded up, gets a hint under its line: the hosts, a mask line for each and the docs page. The
+ * hint never changes the exit code. After the lines, `test` lists the flaky snapshots by name under a heading, when
+ * there are any, and its counts say how many passes are flaky. A flaky snapshot never fails the run.
  *
  * Every `test` but a shard's runs the consistency check once the snapshots are planned, and `test --consistency` runs
  * only that check: `test-plan.ts` has the rules.
@@ -525,18 +529,17 @@ async function takeSnapshots(
  * Each story of a stories file that failed to load, or didn't load within readyTimeout, is one broken snapshot,
  * `load-failed`, with no mode, no capture and no baseline read.
  *
- * Planning also stops the run with exit 2, before the report folder is cleared or anything is captured, on two
- * snapshots of one Storybook whose baselines would be one file, selected or not, and on a shard only among its own
- * stories files. Outside a shard, that's before any baselines folder is listed. Stderr names the first such pair in
- * each Storybook, in config order.
+ * Planning also stops the run with exit 2, before anything is captured, on two snapshots of one Storybook whose
+ * baselines would be one file, selected or not, and on a shard only among its own stories files. Outside a shard,
+ * that's before any baselines folder is listed. Stderr names the first such pair in each Storybook, in config order.
  *
  * When the browser exits, every story in flight is broken, `browser-exited`, the browser is relaunched once at the next
  * read or story that needs it, and the run goes on; stderr then says so, with the browser's last output, whatever the
- * run exits with. A baseline that can't be read, decoded or written, a report folder that can't be cleared or written
- * to, a failed launch or relaunch, a version mismatch or the relaunched browser's exit stops the run with exit 2,
- * keeping the lines of the snapshots that finished and deleting no orphan. So does a failed download, and an orphan
- * that can't be deleted. A browser that can't start its graphics process before the first capture says the machine
- * can't run the platform. The workers' sessions and the browsers are always closed.
+ * run exits with. A baseline that can't be read, decoded or written, a report folder that can't be written to, a failed
+ * launch or relaunch, a version mismatch or the relaunched browser's exit stops the run with exit 2, keeping the lines
+ * of the snapshots that finished and deleting no orphan. So does a failed download, and an orphan that can't be
+ * deleted. A browser that can't start its graphics process before the first capture says the machine can't run the
+ * platform. The workers' sessions and the browsers are always closed.
  *
  * A run that finishes ends stderr with a warning for each Storybook, in config order, whose captured snapshots'
  * `completing` render steps took a median of 50 ms or more: it seems to ignore the test path. For `update` on Windows,
@@ -617,5 +620,6 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
       testPathWarningsOf(run.selections, snapshots.items, snapshots.results) +
       longPathWarningsOf(run, snapshots) +
       networkWarningsOf(run, snapshots),
+    findings: { items: snapshots.items, results: snapshots.results, baselines },
   }
 }

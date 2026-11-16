@@ -1,8 +1,8 @@
 import type { ResolvedStorybook } from '../config/resolve-config.js'
-import { clearReport } from '../report/report-folder.js'
 import { type ConsistencyCheck, checkConsistency, type StorybookBaselines } from './consistency-check.js'
 import { consistencyOutputOf } from './consistency-output.js'
 import type { PlannedSnapshot } from './plan-snapshots.js'
+import type { RunFindings } from './run-report.js'
 
 /**
  * What `test` needs to plan what it takes.
@@ -52,7 +52,8 @@ export type Taking =
     }
   | {
       /**
-       * A run that stops before capturing: its exit code and stdout. Its stderr comes from `runSnapshots`.
+       * A run that stops before capturing: its exit code, stdout and what its consistency check found. Its stderr
+       * comes from `runSnapshots`.
        */
       stopped: {
         /**
@@ -63,6 +64,11 @@ export type Taking =
          * Text for standard output.
          */
         stdout: string
+        /**
+         * What the consistency check found, for the report: each snapshot whose stories file failed to load or whose
+         * baseline is missing, with its result, and each Storybook's orphans.
+         */
+        findings: RunFindings
       }
     }
 
@@ -81,59 +87,51 @@ function testSnapshotsOf(planned: readonly PlannedSnapshot[], check: Consistency
 }
 
 /**
- * Plans what `test` takes. Every `test` but a shard's runs the consistency check once the snapshots are planned, before
- * it clears the report folder: it lists each Storybook's baselines folder, where only `.png` files count, without
- * decoding any. It covers every planned snapshot, selected or not. Its findings are each snapshot whose baseline is
- * missing, each story whose stories file failed to load, and each orphan: a baseline no planned snapshot calls for,
- * apart from any that could belong to a story whose stories file didn't load, and any the file system takes for an
- * expected baseline.
+ * Plans what `test` takes. Every `test` but a shard's runs the consistency check once the snapshots are planned: it
+ * lists each Storybook's baselines folder, where only `.png` files count, without decoding any. It covers every planned
+ * snapshot, selected or not. Its findings are each snapshot whose baseline is missing, each story whose stories file
+ * failed to load, and each orphan: a baseline no planned snapshot calls for, apart from any that could belong to a
+ * story whose stories file didn't load, and any the file system takes for an expected baseline.
  *
  * Locally, `test` also takes every snapshot outside the selection that is a finding, so its missing or broken line is
  * printed and counted, the header included; a missing one is still never captured. After the snapshot lines, it prints
  * a line for each orphan, in config order then file name order, and its counts end with the orphans', which make it
  * exit 1.
  *
- * In CI, a `test` whose check finds anything captures nothing: once it has cleared the report folder, it stops with
- * exit 1 and prints the consistency output, a header that counts every planned snapshot, then the missing and broken
- * lines in planned order, the orphan lines and the counts of each finding, then a line that says CI stops before
- * capturing. A consistent CI `test` goes on as a local one does.
+ * In CI, a `test` whose check finds anything captures nothing: it stops with exit 1 and prints the consistency output,
+ * a header that counts every planned snapshot, then the missing and broken lines in planned order, the orphan lines and
+ * the counts of each finding, then a line that says CI stops before capturing. A consistent CI `test` goes on as a
+ * local one does.
  *
- * `test --consistency` runs only the check. Once the check has run and the report folder is cleared, it takes no
- * snapshot and prints the consistency output, in CI or not, with no line about CI. It exits 0 when the check finds
- * nothing, else 1. The options read before it still loads every stories file in the browser.
+ * `test --consistency` runs only the check. Once the check has run, it takes no snapshot and prints the consistency
+ * output, in CI or not, with no line about CI. It exits 0 when the check finds nothing, else 1. The options read before
+ * it still loads every stories file in the browser.
  *
- * A shard of `test --shard` runs no consistency check, in CI or not, and leaves it to `test --consistency`. It clears
- * the report folder and takes its selected snapshots and the broken ones of its stories files that failed to load. A
- * selected snapshot whose baseline is missing is still taken, and its line says so. It reports no orphan.
+ * A shard of `test --shard` runs no consistency check, in CI or not, and leaves it to `test --consistency`. It takes
+ * its selected snapshots and the broken ones of its stories files that failed to load. A selected snapshot whose
+ * baseline is missing is still taken, and its line says so. It reports no orphan.
  *
  * A baselines folder that can't be listed stops the run with exit 2, printing nothing on stdout.
  *
+ * A stopped run gives what the check found, for the report.
+ *
  * @throws {BaselineError} When a baselines folder can't be listed, or a baseline's path can't be looked at.
- * @throws {ReportError} When the report folder can't be cleared.
  */
-export async function testPlanOf(
-  options: TestPlanOptions,
-  planned: PlannedSnapshot[],
-  reportFolder: string,
-): Promise<Taking> {
+export async function testPlanOf(options: TestPlanOptions, planned: PlannedSnapshot[]): Promise<Taking> {
   if (options.sharded) {
-    await clearReport(reportFolder)
-
     return { taken: planned.filter((item) => item.selected || 'broken' in item), baselines: [] }
   }
 
   const check = await checkConsistency(options.storybooks, planned)
-
-  await clearReport(reportFolder)
-
   const output = consistencyOutputOf({ version: options.version, cwd: options.cwd, planned, check })
+  const findings = { items: output.items, results: output.results, baselines: check.storybooks }
 
   if (options.consistencyOnly) {
-    return { stopped: { exitCode: output.consistent ? 0 : 1, stdout: output.stdout } }
+    return { stopped: { exitCode: output.consistent ? 0 : 1, stdout: output.stdout, findings } }
   }
 
   if (options.ci && !output.consistent) {
-    return { stopped: { exitCode: 1, stdout: `${output.stdout}${ciStopLine}\n` } }
+    return { stopped: { exitCode: 1, stdout: `${output.stdout}${ciStopLine}\n`, findings } }
   }
 
   return { taken: testSnapshotsOf(planned, check), baselines: check.storybooks }

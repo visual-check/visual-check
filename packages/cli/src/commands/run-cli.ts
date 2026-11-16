@@ -15,14 +15,18 @@ import { ContainerError } from '../container/container-error.js'
 import { type DockerHost, type ProbeDocker, probeDocker } from '../container/docker-probe.js'
 import { isInsideContainer } from '../container/inside-container.js'
 import { knownContainerIdOf } from '../container/own-container.js'
+import { clearReport, ReportError, reportFolderOf, writeReportJson } from '../report/report-folder.js'
 import { type BrowserPlace, browserPlaceOf } from './browser-route.js'
 import { checkStorybooks } from './check-storybooks.js'
 import { dockerProblemOf } from './docker-problem.js'
 import { createLaunchBrowser, type LaunchBrowser } from './launch-browser.js'
 import { parseCommandLine, type RunOptions, UsageError } from './parse-command-line.js'
 import { readImageFit } from './read-image-fit.js'
+import { reportLineOf } from './run-output.js'
+import { type TestReportFacts, testReportFor } from './run-report.js'
 import { runSnapshots } from './run-snapshots.js'
 import { selectStories } from './select-stories.js'
+import { reportProblemOf } from './stop-message.js'
 import { defaultRecaptureDelayMs } from './update-snapshot.js'
 
 /**
@@ -195,6 +199,11 @@ export async function runCli(
  * requests to and the hosts whose remote content they show, grouped by host with the first story IDs of each. The
  * config's `silenceHosts` leaves hosts out. `test` never watches requests. The warning never changes the exit code.
  *
+ * Right after the config loads, `test` clears the report folder, `.visual-check/report` beside the config file; one it
+ * can't clear exits 2. Every `test` that exits 0 or 1, `test --consistency`, a CI stop and each shard included, then
+ * writes `report.json` there and ends stdout with the report's path, relative to the folder the CLI runs in. `update`
+ * never touches the report folder.
+ *
  * @throws {ConfigError} When the config can't be found, loaded or used.
  */
 async function runTestOrUpdate(
@@ -220,6 +229,12 @@ async function runTestOrUpdate(
   }
 
   const config = await loadConfig(loadConfigOptionsOf(options, ci, cwd))
+  const clearProblem = await clearReportProblemOf(command, config, cwd)
+
+  if (clearProblem !== undefined) {
+    return { exitCode: 2, stdout: '', stderr: clearProblem }
+  }
+
   const insideContainer = insideContainerOf(cliOptions, environment)
   const placement = await placeAndProbe(config, browserCheck.browserPackage, insideContainer, cliOptions)
 
@@ -238,9 +253,10 @@ async function runTestOrUpdate(
     }
   }
 
-  const result = await runSnapshots({
+  const version = readVersion()
+  const { findings, ...result } = await runSnapshots({
     command,
-    version: readVersion(),
+    version,
     ci,
     consistencyOnly: options.consistency,
     shard: options.shard,
@@ -259,8 +275,71 @@ async function runTestOrUpdate(
     environment,
     ...runDefaultsOf(cliOptions),
   })
+  const reported =
+    command === 'test' && findings !== undefined
+      ? await withTestReport(result, cwd, {
+          version,
+          configPath: config.path,
+          consistencyOnly: options.consistency,
+          shard: options.shard,
+          selection: options.selection,
+          storybooks: checks.storybooks.map(({ storybook }) => storybook),
+          exitCode: result.exitCode,
+          findings,
+        })
+      : result
 
-  return { ...result, stderr: `${warnings}${result.stderr}` }
+  return { ...reported, stderr: `${warnings}${reported.stderr}` }
+}
+
+/**
+ * Clears the report folder beside the config for `test`, so an old report never lingers. Gives what to print when it
+ * can't. `update` never touches the folder.
+ *
+ * @throws {Error} Any error besides a `ReportError`.
+ */
+async function clearReportProblemOf(
+  command: 'test' | 'update',
+  config: ResolvedConfig,
+  cwd: string,
+): Promise<string | undefined> {
+  if (command === 'update') {
+    return undefined
+  }
+
+  try {
+    await clearReport(reportFolderOf(config.path))
+  } catch (error) {
+    if (error instanceof ReportError) {
+      return reportProblemOf(error, cwd)
+    }
+
+    throw error
+  }
+
+  return undefined
+}
+
+/**
+ * Writes the report of a `test` that exits 0 or 1, then ends its stdout with the report's path. When the report can't
+ * be written, the run exits 2 with what went wrong after its stderr.
+ *
+ * @throws {Error} Any error besides a `ReportError`.
+ */
+async function withTestReport(result: CliResult, cwd: string, facts: TestReportFacts): Promise<CliResult> {
+  const folder = reportFolderOf(facts.configPath)
+
+  try {
+    await writeReportJson(folder, await testReportFor(facts))
+  } catch (error) {
+    if (error instanceof ReportError) {
+      return { ...result, exitCode: 2, stderr: `${result.stderr}${reportProblemOf(error, cwd)}` }
+    }
+
+    throw error
+  }
+
+  return { ...result, stdout: `${result.stdout}${reportLineOf(cwd, folder)}\n` }
 }
 
 /**
