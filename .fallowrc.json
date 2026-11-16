@@ -5,11 +5,19 @@
     "test-storybooks/storybook-10-react/visual-check.config.ts",
     "test-storybooks/storybook-11-react/visual-check.config.ts"
   ],
-  "ignorePatterns": ["test-storybooks/storybook-10-react/static/**"],
+  "ignorePatterns": ["test-storybooks/storybook-10-react/static/**", "test-storybooks/setup/fixtures/**"],
   "workspaces": {
     "settings": {
       "test-storybooks/storybook-9-react": { "ignoreDependencies": ["@visual-check/storybook"] },
-      "test-storybooks/storybook-11-react": { "ignoreDependencies": ["@visual-check/storybook"] }
+      "test-storybooks/storybook-11-react": { "ignoreDependencies": ["@visual-check/storybook"] },
+      "test-storybooks/setup": {
+        "ignoreDependencies": [
+          "@visual-check/chromium",
+          "@visual-check/cli",
+          "@visual-check/storybook",
+          "@visual-check/storybook-addon"
+        ]
+      }
     }
   },
   "duplicates": {
@@ -112,6 +120,7 @@
         "test-storybooks/storybook-10-react/visual-check.config.ts",
         "test-storybooks/storybook-11-react/.storybook/main.ts",
         "test-storybooks/storybook-11-react/visual-check.config.ts",
+        "test-storybooks/setup/init-check.ts",
         "packages/*/test/**/*.test.ts"
       ]
     }

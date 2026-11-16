@@ -1,0 +1,11 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "init-check": {
+      "cache": false,
+      "dependsOn": ["^build"],
+      "passThroughEnv": ["TEST_STORYBOOK_IMAGE", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy"]
+    }
+  }
+}

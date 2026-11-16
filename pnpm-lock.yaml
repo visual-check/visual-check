@@ -133,6 +133,30 @@ importers:
 
   packages/visual-check: {}
 
+  test-storybooks/setup:
+    devDependencies:
+      '@types/node':
+        specifier: 22.20.5
+        version: 22.20.5
+      '@visual-check/chromium':
+        specifier: workspace:*
+        version: link:../../packages/chromium
+      '@visual-check/cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
+      '@visual-check/storybook':
+        specifier: workspace:*
+        version: link:../../packages/storybook
+      '@visual-check/storybook-addon':
+        specifier: workspace:*
+        version: link:../../packages/storybook-addon
+      '@visual-check/typescript-config':
+        specifier: workspace:*
+        version: link:../../packages/typescript-config
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+
   test-storybooks/storybook-10-react:
     devDependencies:
       '@storybook/react-vite':
