@@ -1,26 +1,11 @@
-import { join } from 'node:path'
 import { BaselineError } from '../baselines/baseline-error.js'
-import { baselinePathOf, deleteOrphans, hasBaseline, listBaselines, readBaseline } from '../baselines/baseline-files.js'
-import { orphansOf } from '../baselines/baseline-set.js'
+import { deleteOrphans, readBaseline } from '../baselines/baseline-files.js'
 import { runWorkerPool } from '../capture/worker-pool.js'
 import type { ResolvedStorybook } from '../config/resolve-config.js'
 import type { VisualDiff } from '../visual-diff/visual-diff.js'
+import { checkConsistency, type StorybookBaselines } from './consistency-check.js'
 import type { PlannedSnapshot } from './plan-snapshots.js'
 import { countsLineOf, displayPathOf } from './run-output.js'
-
-/**
- * One Storybook's orphans, and the baselines its snapshots call for.
- */
-export interface StorybookOrphans {
-  /**
-   * The path of each orphan, in file name order.
-   */
-  orphans: string[]
-  /**
-   * The path of every baseline the Storybook's snapshots call for, selected or not, there or not.
-   */
-  expected: string[]
-}
 
 /**
  * What `update` takes and deletes.
@@ -34,7 +19,7 @@ interface UpdatePlan {
   /**
    * The orphans it deletes once every snapshot is taken, by Storybook in config order.
    */
-  orphans: StorybookOrphans[]
+  orphans: StorybookBaselines[]
 }
 
 /**
@@ -96,61 +81,17 @@ async function checkBaselinesDecode(
 }
 
 /**
- * Lists one Storybook's baselines folder, checks that each baseline decodes, and finds its orphans: the baselines
- * that none of its planned snapshots, selected or not, calls for, apart from any that could belong to a story whose
- * stories file didn't load.
- *
- * @throws {BaselineError} When the folder can't be listed, or a baseline can't be read or decoded, for the first one
- * in file name order.
- */
-async function checkFolder(
-  storybook: ResolvedStorybook,
-  planned: readonly PlannedSnapshot[],
-  visualDiff: VisualDiff,
-  concurrency: number,
-): Promise<StorybookOrphans> {
-  const fileNames = await listBaselines(storybook.baselines)
-
-  await checkBaselinesDecode(
-    fileNames.map((name) => join(storybook.baselines, name)),
-    visualDiff,
-    concurrency,
-  )
-
-  const own = planned.filter((snapshot) => snapshot.storybook === storybook)
-  const expectedKeys = own.map(({ key }) => key)
-  const unloadedStoryIds = own.flatMap((snapshot) => ('broken' in snapshot ? [snapshot.story.id] : []))
-
-  return {
-    orphans: orphansOf({ fileNames, expectedKeys, unloadedStoryIds }).map((name) => join(storybook.baselines, name)),
-    expected: expectedKeys.map((key) => baselinePathOf(storybook.baselines, key)),
-  }
-}
-
-/**
- * Whether `update` takes a planned snapshot: a selected one always, one outside the selection only when the file
- * system has no baseline at its exact path. That holds for a broken one too, a story whose stories file didn't load:
- * its key is the story ID, so it's taken, and reported as broken, when the story's default baseline is missing.
- *
- * @throws {BaselineError} When the baseline's path can't be looked at.
- */
-async function isTaken(snapshot: PlannedSnapshot): Promise<boolean> {
-  if (snapshot.selected) {
-    return true
-  }
-
-  return !(await hasBaseline(baselinePathOf(snapshot.storybook.baselines, snapshot.key)))
-}
-
-/**
- * Plans what `update` takes and deletes, before any capture. One Storybook at a time, in the order given, it lists the
- * baselines folder and decodes every baseline in it on the visual diff's threads, reading `concurrency` at once. It
- * takes every selected snapshot, and every snapshot outside the selection that has no baseline, a broken one included,
- * in the planned order. The orphans are the baselines no planned snapshot calls for, selected or not, apart from any
- * that could belong to a story whose stories file didn't load.
+ * Plans what `update` takes and deletes, before any capture. One Storybook at a time, in the order given, it runs the
+ * consistency check of its baselines folder, then decodes every baseline in it on the visual diff's threads, reading
+ * `concurrency` at once. It goes one Storybook at a time so that a Storybook's undecodable baseline is reported before
+ * the next one's folder that can't be listed. It takes every selected snapshot, and every snapshot outside the
+ * selection that has no baseline, a broken one included, in the planned order. The orphans are the baselines no planned
+ * snapshot calls for, selected or not, apart from any that could belong to a story whose stories file didn't load, and
+ * any the file system takes for an expected baseline.
  *
  * @throws {BaselineError} When a folder can't be listed, or a baseline can't be read or decoded, for the first such
- * one in config order, then file name order.
+ * one in config order, then file name order. Or when a baseline's path can't be looked at, for one of the paths that
+ * can't be.
  */
 export async function planUpdate(
   storybooks: readonly ResolvedStorybook[],
@@ -158,15 +99,27 @@ export async function planUpdate(
   visualDiff: VisualDiff,
   concurrency: number,
 ): Promise<UpdatePlan> {
-  const orphans: StorybookOrphans[] = []
+  const orphans: StorybookBaselines[] = []
+  const missing = new Set<PlannedSnapshot>()
 
   for (const storybook of storybooks) {
-    orphans.push(await checkFolder(storybook, planned, visualDiff, concurrency))
+    const own = planned.filter((snapshot) => snapshot.storybook === storybook)
+    const check = await checkConsistency([storybook], own)
+
+    await checkBaselinesDecode(
+      check.storybooks.flatMap(({ paths }) => paths),
+      visualDiff,
+      concurrency,
+    )
+
+    orphans.push(...check.storybooks)
+
+    for (const snapshot of check.missing) {
+      missing.add(snapshot)
+    }
   }
 
-  const taken = await Promise.all(planned.map(isTaken))
-
-  return { snapshots: planned.filter((_, index) => taken[index]), orphans }
+  return { snapshots: planned.filter((snapshot) => snapshot.selected || missing.has(snapshot)), orphans }
 }
 
 /**
@@ -175,7 +128,7 @@ export async function planUpdate(
  *
  * @throws {BaselineError} When one can't be deleted. The ones after it stay.
  */
-export async function deleteStorybookOrphans(storybooks: readonly StorybookOrphans[]): Promise<string[]> {
+export async function deleteStorybookOrphans(storybooks: readonly StorybookBaselines[]): Promise<string[]> {
   const deleted: string[] = []
 
   for (const { orphans, expected } of storybooks) {

@@ -15,6 +15,7 @@ import type { Story } from '../storybook/read-stories.js'
 import { testPathWarningOf } from '../storybook/test-path.js'
 import { createVisualDiff } from '../visual-diff/visual-diff.js'
 import type { BrowserPlace } from './browser-route.js'
+import type { StorybookBaselines } from './consistency-check.js'
 import { dockerProblemOf } from './docker-problem.js'
 import type { LaunchBrowser } from './launch-browser.js'
 import { missingLibraryOf } from './missing-library.js'
@@ -25,13 +26,7 @@ import { type FirstBrowserExit, type RunBrowser, runBrowserOf } from './run-brow
 import { countsLineOf, displayPathOf } from './run-output.js'
 import { brokenResultOf, type CaptureStory, type SnapshotResult, type SnapshotStatus } from './snapshot-result.js'
 import { type TestTools, testSnapshot } from './test-snapshot.js'
-import {
-  deleteStorybookOrphans,
-  longPathWarningOf,
-  planUpdate,
-  type StorybookOrphans,
-  updateEndLinesOf,
-} from './update-baselines.js'
+import { deleteStorybookOrphans, longPathWarningOf, planUpdate, updateEndLinesOf } from './update-baselines.js'
 import { type UpdateTools, updateSnapshot } from './update-snapshot.js'
 
 /**
@@ -717,7 +712,7 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
       ? { command: 'test', visualDiff, reportFolder: reportFolderOf(run.config.path), retries: run.config.retries }
       : { command: 'update', visualDiff, recaptureDelayMs: run.recaptureDelayMs }
   let snapshots: PlannedSnapshots | undefined
-  let orphans: StorybookOrphans[] = []
+  let orphans: StorybookBaselines[] = []
   let deleted: string[] = []
 
   try {

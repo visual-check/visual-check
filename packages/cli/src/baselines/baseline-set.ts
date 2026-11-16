@@ -74,9 +74,9 @@ function couldBeKeyOf(fileKey: string, storyId: string): boolean {
  * Finds the orphans among the baselines of one Storybook's folder: each file name that isn't exactly an expected key's
  * file name and that no story whose stories file didn't load could own. A name that differs from an expected one only
  * in case or in how an accented letter is encoded is an orphan here. Whether it's that baseline under another name is
- * the file system's call, made when the orphans are deleted. The keys of a story whose stories file didn't load are
- * unknown, so names are compared with its ID folded for case and encoding, and any file that could be one of its keys
- * is kept. Gives the orphans in the order given.
+ * the file system's call, made when the orphans are planned and again when they are deleted. The keys of a story whose
+ * stories file didn't load are unknown, so names are compared with its ID folded for case and encoding, and any file
+ * that could be one of its keys is kept. Gives the orphans in the order given.
  *
  * @public
  */

@@ -239,6 +239,52 @@ export async function listBaselines(folder: string): Promise<string[]> {
 }
 
 /**
+ * What the file system holds at the paths of the baselines a Storybook's snapshots call for.
+ */
+interface ExpectedBaselines {
+  /**
+   * For each expected path, in the order given, whether a file is at that exact path. The file system decides, so on
+   * macOS a file whose name differs only in case or in how an accented letter is encoded counts too.
+   */
+  present: boolean[]
+  /**
+   * Gives the paths, in the order given, that are none of the expected baselines. A path is one when it is the same
+   * file as an expected path: another name of it that the file system folds to the same name, as macOS does for names
+   * that differ only in case or encoding, a hard link to it, or a symbolic link to it. A path with no file is left
+   * out, since there is nothing there to tell apart.
+   *
+   * @throws {BaselineError} When a path can't be followed or looked at.
+   */
+  pathsNotExpected(paths: readonly string[]): Promise<string[]>
+}
+
+/**
+ * Looks at the paths of the baselines a Storybook's snapshots call for, there or not, once, so that both what is
+ * missing and what is not expected come from the same look.
+ *
+ * @throws {BaselineError} When an expected path can't be followed or looked at.
+ *
+ * @public
+ */
+export async function expectedBaselinesAt(expectedPaths: readonly string[]): Promise<ExpectedBaselines> {
+  const identities = await Promise.all(expectedPaths.map(fileIdentityOf))
+  const expected = new Set(identities)
+
+  return {
+    present: identities.map((identity) => identity !== undefined),
+    async pathsNotExpected(paths) {
+      const pathIdentities = await Promise.all(paths.map(fileIdentityOf))
+
+      return paths.filter((_, index) => {
+        const identity = pathIdentities[index]
+
+        return identity !== undefined && !expected.has(identity)
+      })
+    },
+  }
+}
+
+/**
  * Deletes a baseline. One that is already gone counts as deleted. For a symbolic link, only the link goes.
  *
  * @throws {BaselineError} When it can't be deleted, such as when its folder isn't writable.
