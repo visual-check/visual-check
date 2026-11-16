@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { baselineFileNameOf } from './baseline-files.js'
-import { orphansOf } from './baseline-set.js'
+import { baselineCountsOf, orphansOf } from './baseline-set.js'
 
 /**
  * `é` as one code point, as NFC encodes it.
@@ -91,5 +91,80 @@ describe('orphansOf', () => {
     const fileNames = ['button-0123456789abcdef.png', 'b-0123456789abcdef.png']
 
     expect(orphansOf({ fileNames, expectedKeys: [], unloadedStoryIds: ['button'] })).toEqual(fileNames)
+  })
+})
+
+describe('baselineCountsOf', () => {
+  it("counts a story's default capture and its modes", () => {
+    const fileNames = ['button.png', 'button.dark.png', 'button.wide.png', 'card.png']
+
+    expect(baselineCountsOf(fileNames, ['button', 'card'])).toEqual(
+      new Map([
+        ['button', 3],
+        ['card', 1],
+      ]),
+    )
+  })
+
+  it('gives a story with no baselines a count of 0', () => {
+    expect(baselineCountsOf(['card.png'], ['button', 'card'])).toEqual(
+      new Map([
+        ['button', 0],
+        ['card', 1],
+      ]),
+    )
+  })
+
+  it("doesn't count a neighbour that only starts with the story ID", () => {
+    const fileNames = ['button.png', 'button-group.png', 'button-group.dark.png', 'buttons.png']
+
+    expect(baselineCountsOf(fileNames, ['button', 'button-group'])).toEqual(
+      new Map([
+        ['button', 1],
+        ['button-group', 2],
+      ]),
+    )
+  })
+
+  it('counts the shortened baselines of a long story ID and of a long mode', () => {
+    const longId = `button--${'s'.repeat(300)}`
+    const fileNames = [
+      baselineFileNameOf(longId),
+      baselineFileNameOf(`${longId}.dark`),
+      baselineFileNameOf(`button.${'m'.repeat(300)}`),
+    ]
+
+    expect(baselineCountsOf(fileNames, [longId, 'button'])).toEqual(
+      new Map([
+        [longId, 2],
+        ['button', 1],
+      ]),
+    )
+  })
+
+  it('counts a shortened baseline whose kept start ends inside the mode start', () => {
+    const storyId = 's'.repeat(223)
+    const fileName = baselineFileNameOf(`${storyId}.${'m'.repeat(30)}`)
+
+    expect(baselineCountsOf([fileName], [storyId])).toEqual(new Map([[storyId, 1]]))
+  })
+
+  it("doesn't count a shortened key's shape with a short start", () => {
+    expect(baselineCountsOf(['button-0123456789abcdef.png'], ['button'])).toEqual(new Map([['button', 0]]))
+  })
+
+  it('counts a baseline that differs from the keys only in case or in accent encoding', () => {
+    const fileNames = [`Caf${decomposedE}.png`, `caf${decomposedE}.Dark.png`, 'BUTTON.png']
+
+    expect(baselineCountsOf(fileNames, [`caf${composedE}`, 'button'])).toEqual(
+      new Map([
+        [`caf${composedE}`, 2],
+        ['button', 1],
+      ]),
+    )
+  })
+
+  it("doesn't count an orphan for any story", () => {
+    expect(baselineCountsOf(['gone.png', 'gone.dark.png'], ['button'])).toEqual(new Map([['button', 0]]))
   })
 })

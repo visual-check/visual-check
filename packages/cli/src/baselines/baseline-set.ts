@@ -90,3 +90,62 @@ export function orphansOf({ fileNames, expectedKeys, unloadedStoryIds }: Baselin
     return !expected.has(fileName) && !unloaded.some((storyId) => couldBeKeyOf(fileKey, storyId))
   })
 }
+
+/**
+ * Gives the stories that could own a baseline, by its folded file key, from the stories' IDs grouped by their folded
+ * form. It's `couldBeKeyOf`'s rule without a scan of every story: a key that isn't shortened could only be a story ID
+ * or start with `<story-id>.`, so the whole key and each start of it that ends just before a `.` are looked up. Only a
+ * key with a shortened key's shape is checked against every story.
+ */
+function ownersOf(fileKey: string, storyIdsByFoldedId: ReadonlyMap<string, readonly string[]>): string[] {
+  if (keptStartOf(fileKey) !== undefined) {
+    return [...storyIdsByFoldedId]
+      .filter(([foldedId]) => couldBeKeyOf(fileKey, foldedId))
+      .flatMap(([, storyIds]) => storyIds)
+  }
+
+  const owners = [...(storyIdsByFoldedId.get(fileKey) ?? [])]
+
+  for (let dot = fileKey.indexOf('.'); dot !== -1; dot = fileKey.indexOf('.', dot + 1)) {
+    owners.push(...(storyIdsByFoldedId.get(fileKey.slice(0, dot)) ?? []))
+  }
+
+  return owners
+}
+
+/**
+ * Counts the baselines each story of one Storybook could own, by their file names in its baselines folder. A baseline
+ * counts for a story when its name, folded for case and encoding, could be one of the story's keys, folded too: the
+ * story ID, `<story-id>.<mode>`, or either of them shortened. A key that merely starts with the story ID, such as
+ * `button-group` for the story `button`, doesn't count, and an orphan counts for no story. A baseline counts for every
+ * story that could own it, so it can count for more than one, such as for two story IDs that fold the same. Gives a
+ * count, 0 included, for every story ID given.
+ *
+ * @public
+ */
+export function baselineCountsOf(fileNames: readonly string[], storyIds: readonly string[]): Map<string, number> {
+  const counts = new Map<string, number>()
+  const storyIdsByFoldedId = new Map<string, string[]>()
+
+  for (const storyId of new Set(storyIds)) {
+    const foldedId = foldedFileNameOf(storyId)
+
+    const sameFoldedId = storyIdsByFoldedId.get(foldedId)
+
+    counts.set(storyId, 0)
+
+    if (sameFoldedId === undefined) {
+      storyIdsByFoldedId.set(foldedId, [storyId])
+    } else {
+      sameFoldedId.push(storyId)
+    }
+  }
+
+  for (const fileName of fileNames) {
+    for (const storyId of ownersOf(stemOfFileName(foldedFileNameOf(fileName)), storyIdsByFoldedId)) {
+      counts.set(storyId, (counts.get(storyId) ?? 0) + 1)
+    }
+  }
+
+  return counts
+}
