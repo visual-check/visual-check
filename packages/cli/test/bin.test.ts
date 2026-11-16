@@ -1,9 +1,9 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
-import { delimiter, dirname, join } from 'node:path'
+import { delimiter, dirname, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
@@ -367,6 +367,36 @@ describe('visual-check binary', () => {
     expect(configResult.status).toBe(2)
     expect(configResult.stderr).toContain('storybooks.web.url: must be an http: or https: URL string')
     expect(configResult.stdout + configResult.stderr).not.toContain('hunter2')
+  })
+
+  it('exits 2 for init without --yes when standard input is no terminal, and writes nothing', () => {
+    const project = createProject({
+      'package.json': '{ "name": "web-app" }\n',
+      '.storybook/main.ts': 'export default {}\n',
+    })
+    /**
+     * Reads every file of the project outside `.git`, by path.
+     */
+    const filesOf = () =>
+      Object.fromEntries(
+        readdirSync(project, { recursive: true, withFileTypes: true })
+          .filter((entry) => entry.isFile())
+          .map((entry) => join(entry.parentPath, entry.name))
+          .filter((path) => !relative(project, path).startsWith(`.git${sep}`))
+          .map((path) => [relative(project, path), readFileSync(path, 'utf8')]),
+      )
+
+    spawnSync('git', ['init', '-q'], { cwd: project })
+
+    const before = filesOf()
+    const result = run({ cwd: project }, 'init')
+
+    expect(result.status).toBe(2)
+    expect(result.stdout).toBe('')
+    expect(result.stderr).toBe(
+      "visual-check init asks questions, and there's no terminal to ask them in. Run it in a terminal, or pass --yes to take every default.\n",
+    )
+    expect(filesOf()).toEqual(before)
   })
 
   it('exits 2 when a Storybook has no URL for the environment', () => {

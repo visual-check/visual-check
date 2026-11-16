@@ -5,8 +5,6 @@ import { isJsonObject } from './package-manager.js'
 
 /**
  * A package that code imports and `package.json` doesn't list.
- *
- * @public
  */
 export interface UnlistedDependency {
   /**

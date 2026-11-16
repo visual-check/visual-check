@@ -3,7 +3,15 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { listProjectFiles, mainFileOnDiskIn, nameConfigDirs, storybookConfigDirsOf } from './find-storybooks.js'
+import {
+  isInsideRoot,
+  listProjectFiles,
+  mainFileOnDiskIn,
+  nameConfigDirs,
+  relativePathOf,
+  storybookConfigDirsOf,
+  takeUniqueName,
+} from './find-storybooks.js'
 import { storybookCallsOf } from './storybook-scripts.js'
 
 /**
@@ -180,6 +188,47 @@ describe('nameConfigDirs', () => {
       { configDir: 'a/web/.storybook', name: 'web-2' },
       { configDir: 'b/web/.storybook', name: 'web-3' },
     ])
+  })
+})
+
+describe('relativePathOf', () => {
+  it('writes a path inside the folder with / and no ./', () => {
+    expect(relativePathOf('/project', join('/project', 'docs', '.storybook'))).toBe('docs/.storybook')
+  })
+
+  it('drops a trailing separator and gives . for the folder itself', () => {
+    expect(relativePathOf('/project', '/project/.storybook/')).toBe('.storybook')
+    expect(relativePathOf('/project', '/project')).toBe('.')
+  })
+
+  it('climbs out of the folder with ..', () => {
+    expect(relativePathOf('/project/src', '/project/visual-check.config.ts')).toBe('../visual-check.config.ts')
+  })
+})
+
+describe('isInsideRoot', () => {
+  it.each(['.', '.storybook', 'docs/.storybook', '..storybook'])('takes %s as inside', (folder) => {
+    expect(isInsideRoot(folder)).toBe(true)
+  })
+
+  it.each(['..', '../web', '/elsewhere', 'C:/elsewhere'])('takes %s as outside', (folder) => {
+    expect(isInsideRoot(folder)).toBe(false)
+  })
+})
+
+describe('takeUniqueName', () => {
+  it('takes a free name as it is and marks it used', () => {
+    const used = new Set(['docs'])
+
+    expect(takeUniqueName('web', used)).toBe('web')
+    expect([...used]).toEqual(['docs', 'web'])
+  })
+
+  it('suffixes a used name with the first free number from 2', () => {
+    const used = new Set(['web', 'web-2'])
+
+    expect(takeUniqueName('web', used)).toBe('web-3')
+    expect(takeUniqueName('web', used)).toBe('web-4')
   })
 })
 

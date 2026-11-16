@@ -1,7 +1,4 @@
-/**
- * The address of visual-check's docs site, which hints link to.
- */
-const docsBaseUrl = 'https://visual-check.vercel.app'
+import { docsUrlOf } from '../docs-site/docs-url.js'
 
 /**
  * Names the hosts in order: `a.com`, `a.com and b.com`, or `a.com, b.com and c.com`.
@@ -25,6 +22,6 @@ export function remoteContentHintOf(hosts: readonly string[]): string[] {
     `hint: Differs only inside remote content from ${hostListOf(hosts)}. ` +
       'A CDN can serve different bytes to different machines. Mask it by host:',
     ...hosts.map((host) => `  { host: '${host}' }`),
-    `See ${docsBaseUrl}/docs/remote-content`,
+    `See ${docsUrlOf('remote-content')}`,
   ]
 }

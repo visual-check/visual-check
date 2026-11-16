@@ -90,11 +90,19 @@ function storybookLiteralOf(storybook: ConfigStorybook): string {
 }
 
 /**
+ * Returns the entry of one Storybook under `storybooks`, as one line with no indentation, such as
+ * `'web-app': { url: 'http://127.0.0.1:6006' },`. The name is quoted when it isn't an identifier.
+ */
+export function configEntryOf(storybook: ConfigStorybook): string {
+  return `${keyOf(storybook.name)}: ${storybookLiteralOf(storybook)},`
+}
+
+/**
  * Returns the source of `visual-check.config.ts`. It holds only what differs from the defaults: each Storybook's
  * `url`, plus its `dir` and `configDir` when they aren't the defaults. Never `platform`, `image` or any other key.
  */
 export function configSourceOf(storybooks: readonly ConfigStorybook[]): string {
-  const lines = storybooks.map((storybook) => `    ${keyOf(storybook.name)}: ${storybookLiteralOf(storybook)},`)
+  const lines = storybooks.map((storybook) => `    ${configEntryOf(storybook)}`)
 
   return [
     "import { defineConfig } from '@visual-check/cli'",

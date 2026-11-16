@@ -605,13 +605,24 @@ interface FakeBrowserOptions {
 }
 
 /**
+ * The options only `init` reads, which a `test` or `update` run never uses.
+ */
+type InitOnlyOption =
+  | 'interactive'
+  | 'prompter'
+  | 'nodeVersion'
+  | 'listFiles'
+  | 'runCommand'
+  | 'findUnlistedDependencies'
+
+/**
  * Builds options whose every launch writes pull progress and gives a fresh fake driver of the given version, answering
  * each story as `stories` says and the options read as `read` says. Returns them with what the fake browsers saw.
  */
 function fakeBrowser(
   stories: Record<string, FakeStory> = {},
   { version: driverVersion = browserPackage.chromium, read = {} }: FakeBrowserOptions = {},
-): { options: Required<RunCliOptions>; record: FakeBrowserRecord; progress: string[] } {
+): { options: Required<Omit<RunCliOptions, InitOnlyOption>>; record: FakeBrowserRecord; progress: string[] } {
   const record = newRecord()
   const progress: string[] = []
   const gates: StoryGates = new Map()
@@ -903,12 +914,41 @@ Other options:
     expect(result.stderr.endsWith(`\n${usageHint}`)).toBe(true)
   })
 
-  it('exits 2 for init, which is not available yet', async () => {
-    expect(await runCli(['init'], {}, process.cwd())).toEqual({
-      exitCode: 2,
-      stdout: '',
-      stderr: "visual-check init isn't available yet. Write visual-check.config.ts by hand for now.\n",
+  it('sets up the project for init --yes with the CLI version and the browser range', async () => {
+    const { peerDependencies } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
+      peerDependencies: Record<string, string>
+    }
+    const project = createProject({
+      'package.json': JSON.stringify({
+        name: 'web-app',
+        packageManager: 'pnpm@9.12.3',
+        scripts: { storybook: 'storybook dev -p 6006' },
+      }),
+      '.storybook/main.ts': '',
+      'node_modules/storybook/package.json': JSON.stringify({ version: '10.6.7' }),
     })
+    const commands: string[] = []
+    const result = await runCli(['init', '--yes'], {}, project, {
+      os: 'linux',
+      nodeVersion: '22.23.1',
+      probeDocker: hostOptions.probeDocker,
+      listFiles: async () => [],
+      runCommand: async (command, args) => {
+        commands.push([command, ...args].join(' '))
+
+        return 0
+      },
+      findUnlistedDependencies: async () => [],
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe('')
+    expect(firstLineOf(result.stdout)).toBe('Wrote visual-check.config.ts')
+    expect(result.stdout).toContain('visual-check is set up. Next:\n')
+    expect(commands).toEqual([
+      `pnpm add --save-dev @visual-check/cli@${version} @visual-check/chromium@${peerDependencies['@visual-check/chromium']} @visual-check/storybook@${version}`,
+      `pnpm exec storybook add @visual-check/storybook-addon@${version} --yes`,
+    ])
   })
 
   it('exits 2 for update in CI before looking at the config', async () => {

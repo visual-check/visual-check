@@ -8,6 +8,7 @@ import {
   runScriptCommandOf,
   scriptsOf,
   storybookCommandOf,
+  visualCheckCommandOf,
 } from './package-manager.js'
 
 describe('packageManagerOf', () => {
@@ -94,6 +95,13 @@ describe('commands', () => {
     expect(storybookCommandOf('npm', ['dev'])).toEqual({ command: 'npx', args: ['storybook', 'dev'] })
     expect(storybookCommandOf('yarn', ['dev'])).toEqual({ command: 'yarn', args: ['storybook', 'dev'] })
     expect(storybookCommandOf('bun', [])).toEqual({ command: 'bunx', args: ['storybook'] })
+  })
+
+  it('runs the visual-check binary', () => {
+    expect(visualCheckCommandOf('pnpm', 'test')).toBe('pnpm exec visual-check test')
+    expect(visualCheckCommandOf('npm', 'update')).toBe('npx visual-check update')
+    expect(visualCheckCommandOf('yarn', 'test')).toBe('yarn visual-check test')
+    expect(visualCheckCommandOf('bun', 'update')).toBe('bunx visual-check update')
   })
 
   it('shows a command line with single spaces', () => {

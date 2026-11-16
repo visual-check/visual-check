@@ -191,19 +191,34 @@ export function addDevDependenciesCommandOf(packageManager: PackageManager, spec
 }
 
 /**
+ * The command that runs a binary the project installed, such as `storybook`, with `args`.
+ */
+function binCommandOf(packageManager: PackageManager, bin: string, args: readonly string[]): CommandLine {
+  switch (packageManager) {
+    case 'pnpm':
+      return { command: 'pnpm', args: ['exec', bin, ...args] }
+    case 'npm':
+      return { command: 'npx', args: [bin, ...args] }
+    case 'yarn':
+      return { command: 'yarn', args: [bin, ...args] }
+    case 'bun':
+      return { command: 'bunx', args: [bin, ...args] }
+  }
+}
+
+/**
  * The command that runs the project's `storybook` binary with `args`, such as `['dev', '-p', '6006']`.
  */
 export function storybookCommandOf(packageManager: PackageManager, args: readonly string[]): CommandLine {
-  switch (packageManager) {
-    case 'pnpm':
-      return { command: 'pnpm', args: ['exec', 'storybook', ...args] }
-    case 'npm':
-      return { command: 'npx', args: ['storybook', ...args] }
-    case 'yarn':
-      return { command: 'yarn', args: ['storybook', ...args] }
-    case 'bun':
-      return { command: 'bunx', args: ['storybook', ...args] }
-  }
+  return binCommandOf(packageManager, 'storybook', args)
+}
+
+/**
+ * The command line that runs the project's `visual-check` binary for `kind`, such as `pnpm exec visual-check test`:
+ * what to run when no script does.
+ */
+export function visualCheckCommandOf(packageManager: PackageManager, kind: 'test' | 'update'): string {
+  return commandLineOf(binCommandOf(packageManager, 'visual-check', [kind]))
 }
 
 /**

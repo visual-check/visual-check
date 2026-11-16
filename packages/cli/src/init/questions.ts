@@ -132,7 +132,7 @@ const defaultPackageManager: PackageManager = 'npm'
 /**
  * The port Storybook starts on when nothing sets another.
  */
-const defaultStorybookPort = 6006
+export const defaultStorybookPort = 6006
 
 /**
  * The name of the addon package.

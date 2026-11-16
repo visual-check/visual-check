@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream'
 import { describe, expect, it } from 'vitest'
-import { createTerminalPrompter, defaultsPrompter } from './prompter.js'
+import { createTerminalPrompter, defaultsPrompter, InputEndedError } from './prompter.js'
 
 /**
  * Builds a terminal prompter on streams that tests feed and read.
@@ -110,13 +110,32 @@ describe('createTerminalPrompter', () => {
     prompter.close()
   })
 
+  it('leaves the input alone until it asks', async () => {
+    const { input, prompter } = terminal()
+
+    prompter.note('hint: a note')
+    expect(input.readableFlowing).toBe(null)
+    expect(input.listenerCount('data')).toBe(0)
+
+    prompter.close()
+    expect(input.readableFlowing).toBe(null)
+
+    const asking = terminal()
+
+    asking.input.write('docs\n')
+    await expect(asking.prompter.text('Name', { defaultValue: 'web' })).resolves.toBe('docs')
+    expect(asking.input.readableFlowing).not.toBe(null)
+    asking.prompter.close()
+  })
+
   it('rejects when the input ends while it waits', async () => {
     const { input, written, prompter } = terminal()
     const answer = prompter.text('Name', { defaultValue: 'web' })
 
     input.end()
 
-    await expect(answer).rejects.toThrow(new Error('visual-check init needs an answer, and the input ended.'))
+    await expect(answer).rejects.toThrow(InputEndedError)
+    await expect(answer).rejects.toThrow('visual-check init needs an answer, and the input ended.')
     expect(written()).toBe('? Name (web) \n')
   })
 
@@ -127,9 +146,7 @@ describe('createTerminalPrompter', () => {
     input.end()
 
     await expect(prompter.text('Name', { defaultValue: 'web' })).resolves.toBe('first')
-    await expect(prompter.confirm('Add it?', true)).rejects.toThrow(
-      'visual-check init needs an answer, and the input ended.',
-    )
+    await expect(prompter.confirm('Add it?', true)).rejects.toThrow(InputEndedError)
   })
 })
 

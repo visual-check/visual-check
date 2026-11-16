@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { basename, join, posix } from 'node:path'
+import { basename, join, posix, relative, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { isFile } from '../config/find-config.js'
 import { configDirOf, defaultConfigDir, type StorybookCall } from './storybook-scripts.js'
@@ -58,6 +58,14 @@ export async function listProjectFiles(root: string): Promise<string[]> {
 }
 
 /**
+ * Returns `path` relative to `from`, written the way `init` writes a config folder and shows a path: `/` separated,
+ * with no `./`, no trailing `/`, and `.` for `from` itself.
+ */
+export function relativePathOf(from: string, path: string): string {
+  return relative(from, path).split(sep).join('/') || '.'
+}
+
+/**
  * Orders config folders: `.storybook` first, then by path.
  */
 function compareConfigDirs(left: string, right: string): number {
@@ -76,10 +84,10 @@ function compareConfigDirs(left: string, right: string): number {
 }
 
 /**
- * Whether a normalized config folder is inside the project root: not `..`, not under `../`, and not an absolute path
- * (posix or a Windows drive).
+ * Whether a normalized folder, relative to the project root, is inside it: not `..`, not under `../`, and not an
+ * absolute path (posix or a Windows drive).
  */
-function isInsideRoot(configDir: string): boolean {
+export function isInsideRoot(configDir: string): boolean {
   return (
     configDir !== '..' && !configDir.startsWith('../') && !posix.isAbsolute(configDir) && !/^[A-Za-z]:/.test(configDir)
   )
@@ -155,21 +163,29 @@ export interface NamedConfigDir {
 }
 
 /**
+ * Returns `base`, or when `used` holds it, the first of `base-2`, `base-3` and so on that it doesn't hold. Adds the
+ * name it returns to `used`.
+ */
+export function takeUniqueName(base: string, used: Set<string>): string {
+  let name = base
+
+  for (let suffix = 2; used.has(name); suffix += 1) {
+    name = `${base}-${suffix}`
+  }
+  used.add(name)
+
+  return name
+}
+
+/**
  * Gives each config folder a valid Storybook name, unique in the list. A name taken by an earlier folder gets `-2`,
  * `-3` and so on.
  */
 export function nameConfigDirs(configDirs: readonly string[], packageName: unknown, rootDir: string): NamedConfigDir[] {
   const used = new Set<string>()
 
-  return configDirs.map((configDir) => {
-    const base = slugOf(nameSourceOf(configDir, packageName, rootDir))
-    let name = base
-
-    for (let suffix = 2; used.has(name); suffix += 1) {
-      name = `${base}-${suffix}`
-    }
-    used.add(name)
-
-    return { configDir, name }
-  })
+  return configDirs.map((configDir) => ({
+    configDir,
+    name: takeUniqueName(slugOf(nameSourceOf(configDir, packageName, rootDir)), used),
+  }))
 }

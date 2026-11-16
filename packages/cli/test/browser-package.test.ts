@@ -109,8 +109,12 @@ describe('browser package check', () => {
   it('does not run for init', () => {
     const result = run(setUp(), { arguments: ['init'] })
 
+    // init's own checks stop it in a folder without a terminal or a Storybook, and none of them is about the browser.
     expect(result.status).toBe(2)
-    expect(result.stderr).toBe("visual-check init isn't available yet. Write visual-check.config.ts by hand for now.\n")
+    expect(result.stderr).toBe(
+      "visual-check init asks questions, and there's no terminal to ask them in. Run it in a terminal, or pass --yes to take every default.\n" +
+        'visual-check init found no Storybook: git lists no .storybook/main file (.ts, .js, .mjs, .cjs, .mts or .cts), and no script in package.json passes -c to storybook. Add Storybook, then run visual-check init again.\n',
+    )
   })
 
   it('exits 2 and names the npm install command when the package is missing', () => {

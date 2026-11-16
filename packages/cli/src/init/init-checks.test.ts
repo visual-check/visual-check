@@ -26,6 +26,17 @@ describe('blockingProblemsOf', () => {
     )
   })
 
+  it('stops at no package.json, after the Node problem', () => {
+    const noManifest =
+      "visual-check init found no package.json in the current folder or its parents. Run it in your project's folder."
+
+    expect(blockingProblemsOf({ ...fine, project: undefined, interactive: false })).toEqual([noManifest])
+    expect(blockingProblemsOf({ ...fine, project: undefined, nodeVersion: '20.18.0' })).toEqual([
+      'visual-check needs Node 22 or later, and this is Node 20.18.0. Upgrade Node, then run visual-check init again.',
+      noManifest,
+    ])
+  })
+
   it("names a package.json it can't read, relative to the folder it runs in", () => {
     const project = projectOf({ manifestProblem: 'the file must hold a JSON object' })
 
@@ -123,7 +134,7 @@ describe('dockerWarningOf', () => {
    * The sentence a missing or stopped Docker gets after its message.
    */
   const dockerFix =
-    "visual-check runs the browser in Docker: start or install Docker before you run visual:update, or set platform: 'host' in visual-check.config.ts."
+    "visual-check runs the browser in Docker: start or install Docker before you run visual-check update, or set platform: 'host' in the config."
 
   it('tells to install a missing Docker', () => {
     const error = new DockerMissingError("there's no docker command on PATH.")

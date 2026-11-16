@@ -1,10 +1,8 @@
-import { createInterface } from 'node:readline'
+import { createInterface, type Interface } from 'node:readline'
 import type { Readable, Writable } from 'node:stream'
 
 /**
  * Asks the person running `init` questions, one at a time.
- *
- * @public
  */
 export interface Prompter {
   /**
@@ -29,7 +27,8 @@ export interface Prompter {
    */
   confirm(message: string, defaultValue: boolean): Promise<boolean>
   /**
-   * Shows a line between the questions, such as a hint. The defaults prompter collects it instead.
+   * Shows a line before or between the questions, such as a hint or a warning. The defaults prompter collects it
+   * instead.
    */
   note(text: string): void
   /**
@@ -39,32 +38,69 @@ export interface Prompter {
 }
 
 /**
- * The error a terminal prompter rejects with when the input ends while it waits for an answer.
+ * The input ended while a terminal prompter waited for an answer, such as when the person pressed Ctrl+D. `init` stops
+ * with its message.
  */
-const inputEndedMessage = 'visual-check init needs an answer, and the input ended.'
+export class InputEndedError extends Error {
+  /**
+   * The class's name, so a stack trace or a log line reads `InputEndedError`.
+   */
+  override name = 'InputEndedError'
+
+  /**
+   * Builds the error with its one message.
+   */
+  constructor() {
+    super('visual-check init needs an answer, and the input ended.')
+  }
+}
 
 /**
- * Builds a prompter that writes the questions to `output` and reads the answers from `input`, a line at a time.
+ * The reader of a terminal prompter's input, and the lines it reads.
+ */
+interface InputReader {
+  /**
+   * The interface that reads the input.
+   */
+  reader: Interface
+  /**
+   * The lines of the input, one at a time.
+   */
+  lines: AsyncIterator<string>
+}
+
+/**
+ * Starts reading `input` a line at a time.
+ */
+function readerOf(input: Readable): InputReader {
+  const reader = createInterface({ input, terminal: false })
+
+  return { reader, lines: reader[Symbol.asyncIterator]() }
+}
+
+/**
+ * Builds a prompter that writes the questions and notes to `output` and reads the answers from `input`, a line at a
+ * time. It starts reading `input` at the first question, so a run that asks nothing leaves it alone.
  *
  * @public
  */
 export function createTerminalPrompter(input: Readable, output: Writable): Prompter {
-  const reader = createInterface({ input, terminal: false })
-  const lines = reader[Symbol.asyncIterator]()
+  let inputReader: InputReader | undefined
 
   /**
    * Writes the question, then returns the next line of the input. When the input has ended, it moves the cursor to a
-   * new line, so the error that follows starts on its own, and rejects.
+   * new line, so the error that follows starts on its own, and rejects with an `InputEndedError`.
    */
   async function ask(question: string): Promise<string> {
     output.write(question)
+    inputReader ??= readerOf(input)
 
-    const next = await lines.next()
+    const next = await inputReader.lines.next()
 
     if (next.done === true) {
       output.write('\n')
 
-      throw new Error(inputEndedMessage)
+      throw new InputEndedError()
     }
 
     return next.value
@@ -107,7 +143,7 @@ export function createTerminalPrompter(input: Readable, output: Writable): Promp
       output.write(`${text}\n`)
     },
     close() {
-      reader.close()
+      inputReader?.reader.close()
     },
   }
 }

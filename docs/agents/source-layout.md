@@ -62,6 +62,8 @@ packages/cli/src/
   bin.ts                entry
   index.ts              entry: the public config API
   commands/             init, test, update
+  init/                 what init detects, asks, writes and installs; adapter: git ls-files and Fallow's check
+  docs-site/            the docs site's address, which every docs link starts with
   config/
   storybook/            adapter: index.json, story URLs, the preview script and the test path
   capture/

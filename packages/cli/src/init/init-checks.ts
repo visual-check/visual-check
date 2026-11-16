@@ -1,7 +1,7 @@
-import { relative } from 'node:path'
 import { ContainerError, DockerMissingError } from '../container/container-error.js'
 import { classifyStorybookVersion, minimumText, newestSupportedMajor } from '../storybook/storybook-version.js'
 import type { DetectedProject } from './detect-project.js'
+import { relativePathOf } from './find-storybooks.js'
 
 /**
  * What `blockingProblemsOf` looks at.
@@ -16,9 +16,9 @@ interface BlockingCheck {
    */
   nodeVersion: string
   /**
-   * The project `init` detected.
+   * The project `init` detected, or `undefined` when it found no `package.json`.
    */
-  project: DetectedProject
+  project: DetectedProject | undefined
   /**
    * Whether `--yes` was passed.
    */
@@ -35,23 +35,50 @@ interface BlockingCheck {
 const minimumNodeMajor = 22
 
 /**
- * Lists what stops `init` before it asks anything, each as one line of text, in the order the checks run: Node, an
- * unreadable `package.json`, Deno, no terminal without `--yes`, no Storybook, and each Storybook older than the
- * minimum. Gives `[]` when `init` can go on.
+ * The problem when there's no project to set up.
+ */
+const noManifestProblem =
+  "visual-check init found no package.json in the current folder or its parents. Run it in your project's folder."
+
+/**
+ * Lists what stops `init` before it asks anything, each as one line of text, in the order the checks run: Node, no
+ * `package.json` (which ends the list, since the other checks need a project), an unreadable `package.json`, Deno, no
+ * terminal without `--yes`, no Storybook, and each Storybook older than the minimum. Gives `[]` when `init` can go on.
  */
 export function blockingProblemsOf({ cwd, nodeVersion, project, yes, interactive }: BlockingCheck): string[] {
-  const problems: string[] = []
+  const nodeProblems = nodeProblemsOf(nodeVersion)
 
-  if (Number(nodeVersion.split('.')[0]) < minimumNodeMajor) {
-    problems.push(
-      `visual-check needs Node ${minimumNodeMajor} or later, and this is Node ${nodeVersion}. ` +
-        'Upgrade Node, then run visual-check init again.',
-    )
+  if (project === undefined) {
+    return [...nodeProblems, noManifestProblem]
   }
+
+  return [...nodeProblems, ...setupProblemsOf(cwd, project, yes, interactive), ...storybookProblemsOf(project)]
+}
+
+/**
+ * Lists the Node problem: a version below the minimum.
+ */
+function nodeProblemsOf(nodeVersion: string): string[] {
+  if (Number(nodeVersion.split('.')[0]) >= minimumNodeMajor) {
+    return []
+  }
+
+  return [
+    `visual-check needs Node ${minimumNodeMajor} or later, and this is Node ${nodeVersion}. ` +
+      'Upgrade Node, then run visual-check init again.',
+  ]
+}
+
+/**
+ * Lists the problems with the project and the run, in order: an unreadable `package.json`, Deno, and no terminal
+ * without `--yes`.
+ */
+function setupProblemsOf(cwd: string, project: DetectedProject, yes: boolean, interactive: boolean): string[] {
+  const problems: string[] = []
 
   if (project.manifestProblem !== undefined) {
     problems.push(
-      `visual-check init can't read ${relative(cwd, project.manifestPath)}: ${project.manifestProblem}. ` +
+      `visual-check init can't read ${relativePathOf(cwd, project.manifestPath)}: ${project.manifestProblem}. ` +
         'Fix it, then run visual-check init again.',
     )
   }
@@ -69,8 +96,6 @@ export function blockingProblemsOf({ cwd, nodeVersion, project, yes, interactive
         'Run it in a terminal, or pass --yes to take every default.',
     )
   }
-
-  problems.push(...storybookProblemsOf(project))
 
   return problems
 }
@@ -136,7 +161,7 @@ export function dockerWarningOf(error: unknown, os: NodeJS.Platform): string {
 
   const warning =
     `Warning: ${error.message} visual-check runs the browser in Docker: start or install Docker before you ` +
-    "run visual:update, or set platform: 'host' in visual-check.config.ts."
+    "run visual-check update, or set platform: 'host' in the config."
 
   return os === 'win32' && error instanceof DockerMissingError
     ? `${warning} If Docker runs inside WSL, run visual-check from inside WSL too.`

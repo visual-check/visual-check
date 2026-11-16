@@ -2,7 +2,14 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { addScripts, configSourceOf, modesFileSource, visualCheckGitignore, writeIfMissing } from './setup-files.js'
+import {
+  addScripts,
+  configEntryOf,
+  configSourceOf,
+  modesFileSource,
+  visualCheckGitignore,
+  writeIfMissing,
+} from './setup-files.js'
 
 /**
  * The temporary folders the tests made, removed after each test.
@@ -135,6 +142,18 @@ export default defineConfig({
 
     expect(source).not.toContain('platform')
     expect(source).not.toContain('image')
+  })
+})
+
+describe('configEntryOf', () => {
+  it('gives one line with a bare key for an identifier', () => {
+    expect(configEntryOf({ name: 'web', url: 'http://127.0.0.1:6006' })).toBe("web: { url: 'http://127.0.0.1:6006' },")
+  })
+
+  it('quotes a key that is not an identifier and keeps configDir when it is not the default', () => {
+    expect(configEntryOf({ name: 'web-app', url: 'http://127.0.0.1:6007', configDir: 'docs/.storybook' })).toBe(
+      "'web-app': { configDir: 'docs/.storybook', url: 'http://127.0.0.1:6007' },",
+    )
   })
 })
 
