@@ -11,9 +11,18 @@ One Next.js app in this repo holds the landing page and the docs. It's built las
 - Hosted on Vercel, on Vercel's free domain for now. The owner sets up the Vercel project.
 - The live site updates on each release, so it never describes unreleased behaviour. Each PR gets a preview.
 - The CLI links to docs pages from the remote-content hint, `update`'s warnings and `init`'s closing message. It builds every link from one base address plus `/docs`, set when the Vercel project exists. If the site moves to its own domain later, the old address redirects.
-- The logo and its colours are in `assets/logo/`.
+- The logo is in `assets/logo/`.
 - Examples use the `visualCheck(...)` helper. Hand-written `parameters.visualCheck` objects aren't shown.
 - The docs never show branching on `process.env` in the config.
+
+## Design system
+
+- The site is built on the [visual-check design system](https://claude.ai/artifact/9DqMk3oeC9YBTBFYTE8218), with Tailwind CSS and shadcn/ui. Its README is the brand book: colours in a light and a dark theme, type, spacing, radii, the register shadow, motion and the components.
+- The design system is the source of truth. A change starts there, and its `tokens.css` and fonts are copied into the app unchanged.
+- Tokens are the only source of values. Tailwind's default scales are off, and shadcn's and Fumadocs' variables point at the tokens. No arbitrary Tailwind values, colour literals or raw lengths in components or pages; a missing value becomes a token in the design system first.
+- Every shadcn component is restyled to its design-system spec before it's used, and is done when it looks the same as its preview in both themes. A component the system doesn't have is designed there first.
+- A `DESIGN.md` in the app holds the rules for adding a component or a page, and the root `AGENTS.md` links to it.
+- A check in `@visual-check/repo-checks` fails on ad-hoc values in the app.
 
 ## Docs pages
 
@@ -149,6 +158,8 @@ All under `/docs`.
 
 - The map's notes for this area ([Map: visual-check v1 spec][1]), [Test apps repo][34], and the docs items of every ticket linked from the other files.
 - Decided while writing this PRD: Next.js with Fumadocs, Vercel, the landing page at the home page with the docs under `/docs`, updating the live site on release, and one base address for the CLI's docs links.
+- Decided after the PRD, with [#102][102]: the design system, Tailwind CSS with shadcn/ui, tokens as the only source of values, `DESIGN.md` and the check that enforces it.
 
 [1]: https://github.com/visual-check/visual-check/issues/1
 [34]: https://github.com/visual-check/visual-check/issues/34
+[102]: https://github.com/visual-check/visual-check/issues/102
