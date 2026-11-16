@@ -65,7 +65,7 @@ export interface CaptureSettings {
   maskColor: string
   /**
    * Whether each capture also lists the hosts its story sends real network requests to and shows remote content from.
-   * It turns on the page's request watching, which costs about 5%, so only `update` sets it.
+   * It turns on the page's request watching, so only `update` sets it.
    */
   listHosts: boolean
 }

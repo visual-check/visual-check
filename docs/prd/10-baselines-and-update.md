@@ -91,7 +91,7 @@ One block on stderr, grouped by host. Nothing fails on either warning, and `sile
 
 How they're found:
 
-- Only `update` turns on the Network domain and attaches to service workers. It costs about 5%, and `test` never pays it.
+- Only `update` turns on the Network domain and attaches to service workers. Its cost was within noise on the test Storybook (`update` into an empty folder, 30.4 s with it and 30.5 s without), and `test` never pays it.
 
 ## Output
 
