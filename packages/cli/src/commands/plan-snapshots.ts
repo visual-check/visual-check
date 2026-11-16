@@ -12,7 +12,7 @@ import { previewUrlOf, type Story } from '../storybook/read-stories.js'
 /**
  * A Storybook as planning needs it: its selected stories, and every story its `index.json` lists.
  */
-interface StorybookStories {
+export interface StorybookStories {
   /**
    * The Storybook.
    */

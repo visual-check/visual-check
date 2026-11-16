@@ -873,6 +873,7 @@ Options for test and update:
   --config <path>     Use this config instead of searching for one
   --consistency       Only check for missing baselines, orphans and stories files that fail to load (test only)
   --workers <n>       Capture with this many workers
+  --shard <k>/<n>     Run one shard's share of the stories files (test only)
 
 Other options:
   --help     Show this help
@@ -1894,6 +1895,277 @@ describe('runCli test --consistency with --storybook', () => {
 
     expect(result.exitCode).toBe(0)
     expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 1), '✓ web  a  N ms', '1 passed'))
+  })
+})
+
+/**
+ * Builds the header a shard prints, with how many stories files it was dealt. A run with no `workers` in its config
+ * gets 4 workers from the fake probe's and machine's 4 CPUs.
+ */
+function shardHeaderOf(shard: string, files: number, count: number, workers = 4): string {
+  const storiesFiles = `${files} ${files === 1 ? 'stories file' : 'stories files'}`
+  const snapshots = `${count} ${count === 1 ? 'snapshot' : 'snapshots'}`
+
+  return `visual-check ${version} · test · shard ${shard} · ${storiesFiles} · ${snapshots} · ${workers} workers`
+}
+
+/**
+ * The note every shard prints after its header.
+ */
+const shardNote = 'Missing baselines and orphans are left to test --consistency.'
+
+/**
+ * The stories files of the sharded project, by story ID: `a` holds three stories, `b` and `d` two each, `c` one, so
+ * four shards are dealt `a`, `b`, `d` and `c` in turn.
+ */
+const shardedImportPaths: Record<string, string> = {
+  a1: './a.stories.tsx',
+  a2: './a.stories.tsx',
+  a3: './a.stories.tsx',
+  b1: './b.stories.tsx',
+  b2: './b.stories.tsx',
+  c1: './c.stories.tsx',
+  d1: './d.stories.tsx',
+  d2: './d.stories.tsx',
+}
+
+/**
+ * The story IDs of the sharded project, in `index.json` order.
+ */
+const shardedStoryIds = Object.keys(shardedImportPaths)
+
+/**
+ * Makes a project whose one Storybook has the stories of `shardedImportPaths`, each with its baseline. `extra` adds
+ * baselines, by stem.
+ */
+async function createShardedRun(extra: Record<string, Uint8Array> = {}): Promise<{ project: string; url: string }> {
+  const baselines = Object.fromEntries(shardedStoryIds.map((id) => [id, defaultSnapshot]))
+
+  return await createRun(shardedStoryIds, { ...baselines, ...extra }, '', shardedImportPaths)
+}
+
+/**
+ * Gives the import paths of every stories file the options reads asked for, in order.
+ */
+function readFilesOf(record: { reads: readonly { files: readonly StoriesFile[] }[] }): string[] {
+  return record.reads.flatMap(({ files }) => files.map(({ importPath }) => importPath))
+}
+
+/**
+ * Gives the story IDs of every capture, sorted.
+ */
+function capturedIdsOf(record: { captures: readonly { id: string }[] }): string[] {
+  return record.captures.map(({ id }) => id).sort()
+}
+
+describe('runCli test --shard', () => {
+  it('captures every snapshot exactly once across four shards, each exiting 0', async () => {
+    const { project } = await createShardedRun()
+    const whole = fakeBrowser()
+
+    expect((await runCli(['test'], {}, project, whole.options)).exitCode).toBe(0)
+
+    const captured: string[] = []
+
+    for (const shard of ['1/4', '2/4', '3/4', '4/4']) {
+      const { options, record } = fakeBrowser()
+      const result = await runCli(['test', '--shard', shard], {}, project, options)
+
+      expect(result.exitCode).toBe(0)
+      expect(result.stderr).toBe('')
+      captured.push(...capturedIdsOf(record))
+    }
+
+    const sorted = captured.sort()
+
+    expect(sorted).toEqual(capturedIdsOf(whole.record))
+    expect(sorted).toEqual([...shardedStoryIds].sort())
+  })
+
+  it("loads only the shard's own stories files", async () => {
+    const { project } = await createShardedRun()
+    const shares = {
+      '1/4': ['./a.stories.tsx'],
+      '2/4': ['./b.stories.tsx'],
+      '3/4': ['./d.stories.tsx'],
+      '4/4': ['./c.stories.tsx'],
+    }
+
+    for (const [shard, files] of Object.entries(shares)) {
+      const { options, record } = fakeBrowser()
+
+      await runCli(['test', '--shard', shard], {}, project, options)
+
+      expect(readFilesOf(record)).toEqual(files)
+    }
+  })
+
+  it('reads no Storybook that has no stories file in the shard, and one split spans every Storybook', async () => {
+    const web = await startStorybook(['a1', 'a2', 'a3', 'b1'], {
+      a1: './a.stories.tsx',
+      a2: './a.stories.tsx',
+      a3: './a.stories.tsx',
+      b1: './b.stories.tsx',
+    })
+    const docs = await startStorybook(['d1'], { d1: './d.stories.tsx' })
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${web}' }, docs: { dir: 'docs', url: '${docs}' } } }\n`,
+      'web/a.stories.tsx': '',
+      'web/b.stories.tsx': '',
+      'docs/d.stories.tsx': '',
+      ...Object.fromEntries(
+        ['a1', 'a2', 'a3', 'b1'].map((id) => [`web/.visual-check/baselines/${id}.png`, defaultSnapshot]),
+      ),
+      'docs/.visual-check/baselines/d1.png': defaultSnapshot,
+    })
+    const first = fakeBrowser()
+    const second = fakeBrowser()
+    const firstResult = await runCli(['test', '--shard', '1/2'], {}, project, first.options)
+    const secondResult = await runCli(['test', '--shard', '2/2'], {}, project, second.options)
+
+    expect(first.record.reads.map(({ url }) => url)).toEqual([previewOf(web)])
+    expect(readFilesOf(first.record)).toEqual(['./a.stories.tsx'])
+    expect(firstLineOf(firstResult.stdout)).toBe(shardHeaderOf('1/2', 1, 3))
+    expect(second.record.reads.map(({ url }) => url)).toEqual([previewOf(web), previewOf(docs)])
+    expect(readFilesOf(second.record)).toEqual(['./b.stories.tsx', './d.stories.tsx'])
+    expect(firstLineOf(secondResult.stdout)).toBe(shardHeaderOf('2/2', 2, 2))
+  })
+
+  it('prints the shard header and the note that the consistency check is left to test --consistency', async () => {
+    const { project } = await createShardedRun()
+    const result = await runCli(['test', '--shard', '3/4'], {}, project, fakeBrowser().options)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe('')
+    expect(withoutTimes(result.stdout)).toBe(
+      printed(shardHeaderOf('3/4', 1, 2), shardNote, '✓ web  d1  N ms', '✓ web  d2  N ms', '2 passed'),
+    )
+  })
+
+  it('runs no consistency check: an orphan fails no shard, locally or in CI', async () => {
+    const { project } = await createShardedRun({ gone: defaultSnapshot })
+
+    for (const environment of [{}, ciEnvironment]) {
+      const { options, record } = fakeBrowser()
+      const result = await runCli(['test', '--shard', '4/4'], environment, project, options)
+
+      expect(result.exitCode).toBe(0)
+      expect(withoutTimes(result.stdout)).toBe(
+        printed(shardHeaderOf('4/4', 1, 1), shardNote, '✓ web  c1  N ms', '1 passed'),
+      )
+      expect(capturedIdsOf(record)).toEqual(['c1'])
+    }
+  })
+
+  it('clears the report folder', async () => {
+    const { project } = await createShardedRun()
+
+    writeStaleReport(project)
+
+    const result = await runCli(['test', '--shard', '1/2'], {}, project, fakeBrowser().options)
+
+    expect(result.exitCode).toBe(0)
+    expect(existsSync(reportFolderIn(project))).toBe(false)
+  })
+
+  it('still reports a missing baseline of its own stories, and only those', async () => {
+    const { project } = await createRun(['a', 'b'], {}, '', { a: './a.stories.tsx', b: './b.stories.tsx' })
+    const result = await runCli(['test', '--shard', '1/2'], {}, project, fakeBrowser().options)
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: printed(shardHeaderOf('1/2', 1, 1), shardNote, missingLineOf('web', 'a'), '0 passed · 1 missing'),
+      stderr: '',
+    })
+  })
+
+  it('exits 0 with a note, launching no browser, when the shard is dealt no stories file', async () => {
+    const { project } = await createRun(['a', 'b', 'c'], { a: defaultSnapshot }, '', {
+      a: './a.stories.tsx',
+      b: './b.stories.tsx',
+      c: './c.stories.tsx',
+    })
+
+    expect(await runCli(['test', '--shard', '4/4'], {}, project, noLaunch)).toEqual({
+      exitCode: 0,
+      stdout: printed(shardHeaderOf('4/4', 0, 0), shardNote, 'Shard 4/4 has nothing to capture.', '0 passed'),
+      stderr: '',
+    })
+  })
+
+  it('exits 0 with a note when every story of its stories files is disabled', async () => {
+    const { project } = await createRun(['a', 'b'], { a: defaultSnapshot }, '', {
+      a: './a.stories.tsx',
+      b: './b.stories.tsx',
+    })
+    const { options, record } = fakeBrowser({}, { read: { options: { b: { disable: true } } } })
+    const result = await runCli(['test', '--shard', '2/2'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 0,
+      stdout: printed(shardHeaderOf('2/2', 1, 0), shardNote, 'Shard 2/2 has nothing to capture.', '0 passed'),
+      stderr: '',
+    })
+    expect(record.captures).toEqual([])
+  })
+
+  it('splits only the stories --filter selects', async () => {
+    const { project } = await createShardedRun()
+    const captured: string[] = []
+    const headers: (string | undefined)[] = []
+
+    for (const shard of ['1/3', '2/3', '3/3']) {
+      const { options, record } = fakeBrowser()
+      const result = await runCli(['test', '--filter', '^[ab]1$', '--shard', shard], {}, project, options)
+
+      expect(result.exitCode).toBe(0)
+      captured.push(...capturedIdsOf(record))
+      headers.push(firstLineOf(result.stdout))
+    }
+
+    expect(captured.sort()).toEqual(['a1', 'b1'])
+    expect(headers).toEqual([shardHeaderOf('1/3', 1, 1), shardHeaderOf('2/3', 1, 1), shardHeaderOf('3/3', 0, 0)])
+  })
+
+  it.each([
+    [['test', '--shard', '0/4'], "--shard takes k/n, two whole numbers with 1 ≤ k ≤ n, such as 2/4. Got '0/4'."],
+    [['test', '--shard', '1/2', '--consistency'], '--consistency runs in a job of its own, so it takes no --shard.'],
+    [['update', '--shard', '1/2'], '--shard applies only to test.'],
+  ])('exits 2 for %j', async (commandLine, message) => {
+    const { project } = await createShardedRun()
+
+    expect(await runCli(commandLine, {}, project, noLaunch)).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr: `${message}\n${usageHint}`,
+    })
+  })
+
+  it("exits 2 when the Storybook doesn't answer", async () => {
+    const down = await takeUnusedUrl()
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${down}' } } }\n`,
+    })
+    const result = await runCli(['test', '--shard', '1/2'], {}, project, noLaunch)
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stdout).toBe('')
+    expect(result.stderr).toContain("Storybook web doesn't answer at ")
+  })
+
+  it("exits 2, printing nothing and launching no browser, when a baselines folder can't be listed", async () => {
+    const { project, folder } = await createRun(['a'])
+
+    mkdirSync(dirname(folder), { recursive: true })
+    writeFileSync(folder, '')
+
+    expect(await runCli(['test', '--shard', '1/2'], {}, project, noLaunch)).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr:
+        "visual-check couldn't list the baselines folder .visual-check/baselines: ENOTDIR: not a directory. Check " +
+        "that it's a folder visual-check can read.\n",
+    })
   })
 })
 

@@ -25,6 +25,10 @@ export interface TestPlanOptions {
    */
   consistencyOnly: boolean
   /**
+   * Whether the run is a shard of `test --shard`, which runs no consistency check.
+   */
+  sharded: boolean
+  /**
    * The Storybooks in the run, in config order, whose baselines folders the check lists.
    */
   storybooks: readonly ResolvedStorybook[]
@@ -77,11 +81,12 @@ function testSnapshotsOf(planned: readonly PlannedSnapshot[], check: Consistency
 }
 
 /**
- * Plans what `test` takes. Every `test` runs the consistency check once the snapshots are planned, before it clears the
- * report folder: it lists each Storybook's baselines folder, where only `.png` files count, without decoding any. It
- * covers every planned snapshot, selected or not. Its findings are each snapshot whose baseline is missing, each story
- * whose stories file failed to load, and each orphan: a baseline no planned snapshot calls for, apart from any that
- * could belong to a story whose stories file didn't load, and any the file system takes for an expected baseline.
+ * Plans what `test` takes. Every `test` but a shard's runs the consistency check once the snapshots are planned, before
+ * it clears the report folder: it lists each Storybook's baselines folder, where only `.png` files count, without
+ * decoding any. It covers every planned snapshot, selected or not. Its findings are each snapshot whose baseline is
+ * missing, each story whose stories file failed to load, and each orphan: a baseline no planned snapshot calls for,
+ * apart from any that could belong to a story whose stories file didn't load, and any the file system takes for an
+ * expected baseline.
  *
  * Locally, `test` also takes every snapshot outside the selection that is a finding, so its missing or broken line is
  * printed and counted, the header included; a missing one is still never captured. After the snapshot lines, it prints
@@ -97,6 +102,10 @@ function testSnapshotsOf(planned: readonly PlannedSnapshot[], check: Consistency
  * snapshot and prints the consistency output, in CI or not, with no line about CI. It exits 0 when the check finds
  * nothing, else 1. The options read before it still loads every stories file in the browser.
  *
+ * A shard of `test --shard` runs no consistency check, in CI or not, and leaves it to `test --consistency`. It clears
+ * the report folder and takes its selected snapshots and the broken ones of its stories files that failed to load. A
+ * selected snapshot whose baseline is missing is still taken, and its line says so. It reports no orphan.
+ *
  * A baselines folder that can't be listed stops the run with exit 2, printing nothing on stdout.
  *
  * @throws {BaselineError} When a baselines folder can't be listed, or a baseline's path can't be looked at.
@@ -107,6 +116,12 @@ export async function testPlanOf(
   planned: PlannedSnapshot[],
   reportFolder: string,
 ): Promise<Taking> {
+  if (options.sharded) {
+    await clearReport(reportFolder)
+
+    return { taken: planned.filter((item) => item.selected || 'broken' in item), baselines: [] }
+  }
+
   const check = await checkConsistency(options.storybooks, planned)
 
   await clearReport(reportFolder)

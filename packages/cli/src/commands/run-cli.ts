@@ -43,6 +43,7 @@ Options for test and update:
   --config <path>     Use this config instead of searching for one
   --consistency       Only check for missing baselines, orphans and stories files that fail to load (test only)
   --workers <n>       Capture with this many workers
+  --shard <k>/<n>     Run one shard's share of the stories files (test only)
 
 Other options:
   --help     Show this help
@@ -187,11 +188,12 @@ export async function runCli(
  * when it finds nothing, it captures the selected stories that aren't disabled. When the `CI` environment variable says
  * the run is in CI, a `test` whose check finds anything prints the check's findings and exits 1 without capturing.
  * `test --consistency` stops after the check, in CI or not: it captures nothing, prints the check's output, and exits 0
- * when it finds nothing, else 1. `update` captures the selected stories that aren't disabled and the snapshots outside
- * the selection whose baselines are missing, then deletes the orphans of the Storybooks in the run. A finished `update`
- * ends stderr with a warning for the hosts its stories send real network requests to and the hosts whose remote content
- * they show, grouped by host with the first story IDs of each. The config's `silenceHosts` leaves hosts out. `test`
- * never watches requests. The warning never changes the exit code.
+ * when it finds nothing, else 1. `test --shard k/n` takes only its share of the stories files, worked out from each
+ * Storybook's index and baselines folder, and runs no consistency check. `update` captures the selected stories that
+ * aren't disabled and the snapshots outside the selection whose baselines are missing, then deletes the orphans of the
+ * Storybooks in the run. A finished `update` ends stderr with a warning for the hosts its stories send real network
+ * requests to and the hosts whose remote content they show, grouped by host with the first story IDs of each. The
+ * config's `silenceHosts` leaves hosts out. `test` never watches requests. The warning never changes the exit code.
  *
  * @throws {ConfigError} When the config can't be found, loaded or used.
  */
@@ -241,6 +243,7 @@ async function runTestOrUpdate(
     version: readVersion(),
     ci,
     consistencyOnly: options.consistency,
+    shard: options.shard,
     config,
     workers: workersOf(options, config, placement.host),
     place: placement.place,
