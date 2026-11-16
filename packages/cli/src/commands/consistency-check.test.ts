@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { BaselineError } from '../baselines/baseline-error.js'
 import type { ResolvedStorybook } from '../config/resolve-config.js'
 import type { Story } from '../storybook/read-stories.js'
-import { checkConsistency } from './consistency-check.js'
+import { checkConsistency, hasOrphans, isConsistent } from './consistency-check.js'
 import type { PlannedSnapshot } from './plan-snapshots.js'
 
 /**
@@ -133,7 +133,7 @@ describe('checkConsistency', () => {
 
     const check = await checkConsistency([storybook], [there, selected, unselected, mode, modeThere, broken])
 
-    expect(check.missing).toEqual(new Set([selected, unselected, mode, broken]))
+    expect([...check.missing]).toEqual([selected, unselected, mode, broken])
   })
 
   it('leaves out the snapshots of a Storybook that is not given', async () => {
@@ -143,7 +143,7 @@ describe('checkConsistency', () => {
 
     const check = await checkConsistency([given], [wanted, snapshotOf(other, 'b')])
 
-    expect(check.missing).toEqual(new Set([wanted]))
+    expect([...check.missing]).toEqual([wanted])
   })
 
   it("never calls a baseline an orphan that could belong to a story whose stories file didn't load", async () => {
@@ -176,7 +176,7 @@ describe('checkConsistency', () => {
     const check = await checkConsistency([storybook], [snapshot])
 
     expect(check.storybooks).toEqual([{ storybook, paths: [], orphans: [], expected: [join(folder, 'a.png')] }])
-    expect(check.missing).toEqual(new Set([snapshot]))
+    expect([...check.missing]).toEqual([snapshot])
     expect(existsSync(folder)).toBe(false)
   })
 
@@ -210,4 +210,49 @@ describe('checkConsistency', () => {
       expect(check.missing.size).toBe(0)
     },
   )
+})
+
+describe('isConsistent', () => {
+  it('holds when every baseline is there and none is an orphan', async () => {
+    const folder = createFolder()
+    const storybook = storybookOf('web', folder)
+    const planned = [snapshotOf(storybook, 'a'), snapshotOf(storybook, 'b', undefined, false)]
+
+    writeBaselines(folder, ['a.png', 'b.png'])
+
+    const check = await checkConsistency([storybook], planned)
+
+    expect(isConsistent(check, planned)).toBe(true)
+    expect(hasOrphans(check.storybooks)).toBe(false)
+  })
+
+  it('fails for a missing baseline', async () => {
+    const storybook = storybookOf('web', createFolder())
+    const planned = [snapshotOf(storybook, 'a')]
+
+    expect(isConsistent(await checkConsistency([storybook], planned), planned)).toBe(false)
+  })
+
+  it('fails for an orphan', async () => {
+    const folder = createFolder()
+    const storybook = storybookOf('web', folder)
+    const planned = [snapshotOf(storybook, 'a')]
+
+    writeBaselines(folder, ['a.png', 'gone.png'])
+
+    const check = await checkConsistency([storybook], planned)
+
+    expect(isConsistent(check, planned)).toBe(false)
+    expect(hasOrphans(check.storybooks)).toBe(true)
+  })
+
+  it('fails for a story whose stories file failed to load, even when its baseline is there', async () => {
+    const folder = createFolder()
+    const storybook = storybookOf('web', folder)
+    const planned = [brokenOf(storybook, 'a')]
+
+    writeBaselines(folder, ['a.png'])
+
+    expect(isConsistent(await checkConsistency([storybook], planned), planned)).toBe(false)
+  })
 })

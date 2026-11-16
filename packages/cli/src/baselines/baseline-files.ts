@@ -155,18 +155,6 @@ async function fileIdentityOf(path: string): Promise<string | undefined> {
 }
 
 /**
- * Whether a baseline is at the path. The file system decides, so on macOS a file whose name differs only in case or in
- * how an accented letter is encoded counts too. No baselines folder means no baseline.
- *
- * @throws {BaselineError} When the path can't be followed or looked at.
- *
- * @public
- */
-export async function hasBaseline(path: string): Promise<boolean> {
-  return (await fileIdentityOf(path)) !== undefined
-}
-
-/**
  * Gives the entries of a baselines folder, with their types. A missing folder has none.
  *
  * @throws {BaselineError} When the folder is there but can't be listed, such as a file in its place.

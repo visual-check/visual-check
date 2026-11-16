@@ -1,8 +1,8 @@
 import { basename } from 'node:path'
 import { stemOfFileName } from '../baselines/baseline-files.js'
-import type { ConsistencyCheck, StorybookBaselines } from './consistency-check.js'
+import { type ConsistencyCheck, isConsistent, type StorybookBaselines } from './consistency-check.js'
 import type { PlannedSnapshot } from './plan-snapshots.js'
-import { countsLineOf, displayPathOf, snapshotCountOf, snapshotLineOf } from './run-output.js'
+import { countsLineOf, displayPathOf, failMark, snapshotCountOf, snapshotLineOf } from './run-output.js'
 import { brokenResultOf, missingResultOf } from './snapshot-result.js'
 
 /**
@@ -54,7 +54,7 @@ export function orphanLabelOf(count: number): string {
 }
 
 /**
- * Builds a line for each orphan, Storybooks in the order given, then file name order: a fail mark, the Storybook, the
+ * Builds a line for each orphan, Storybooks in the order given, then file name order: the fail mark, the Storybook, the
  * orphan's file name without `.png`, and that no story calls for its path, relative to the folder the CLI runs in, so
  * `update` would delete it.
  */
@@ -62,7 +62,7 @@ export function orphanLinesOf(cwd: string, storybooks: readonly StorybookBaselin
   return storybooks.flatMap(({ storybook, orphans }) =>
     orphans.map(
       (path) =>
-        `✗ ${storybook.name}  ${stemOfFileName(basename(path))}  orphan: no story calls for ` +
+        `${failMark} ${storybook.name}  ${stemOfFileName(basename(path))}  orphan: no story calls for ` +
         `${displayPathOf(cwd, path)}; run visual-check update to delete it`,
     ),
   )
@@ -76,22 +76,27 @@ export function orphanLinesOf(cwd: string, storybooks: readonly StorybookBaselin
  * left out at zero. A broken snapshot counts as broken alone, whether its baseline is there or not.
  */
 export function consistencyOutputOf({ version, cwd, planned, check }: CheckedPlan): ConsistencyOutput {
-  const findings = planned.flatMap((item) => {
-    if ('broken' in item) {
-      return [snapshotLineOf(item, brokenResultOf(item.broken))]
-    }
+  const findings: string[] = []
+  let missing = 0
+  let broken = 0
 
-    return check.missing.has(item) ? [snapshotLineOf(item, missingResultOf())] : []
-  })
+  for (const item of planned) {
+    if ('broken' in item) {
+      broken += 1
+      findings.push(snapshotLineOf(item, brokenResultOf(item.broken)))
+    } else if (check.missing.has(item)) {
+      missing += 1
+      findings.push(snapshotLineOf(item, missingResultOf()))
+    }
+  }
+
   const orphanLines = orphanLinesOf(cwd, check.storybooks)
-  const missing = planned.filter((item) => !('broken' in item) && check.missing.has(item)).length
-  const broken = planned.filter((item) => 'broken' in item).length
   const counts = [
     ['missing', missing],
     ['broken', broken],
     [orphanLabelOf(orphanLines.length), orphanLines.length],
   ] as const
-  const consistent = findings.length === 0 && orphanLines.length === 0
+  const consistent = isConsistent(check, planned)
   const lines = [
     `visual-check ${version} · test · consistency · ${snapshotCountOf(planned.length)}`,
     ...findings,

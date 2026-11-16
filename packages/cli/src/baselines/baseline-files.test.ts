@@ -22,7 +22,6 @@ import {
   deleteOrphans,
   expectedBaselinesAt,
   foldedFileNameOf,
-  hasBaseline,
   listBaselines,
   readBaseline,
   snapshotKeyOf,
@@ -316,32 +315,6 @@ describe('writeBaseline', () => {
   })
 })
 
-describe('hasBaseline', () => {
-  it('says a baseline is there', async () => {
-    const path = join(createFolder(), 'button--primary.png')
-
-    writeFileSync(path, snapshot)
-    expect(await hasBaseline(path)).toBe(true)
-  })
-
-  it('says a baseline is missing, with or without its folder', async () => {
-    const folder = createFolder()
-
-    expect(await hasBaseline(join(folder, 'button--primary.png'))).toBe(false)
-    expect(await hasBaseline(join(folder, 'baselines', 'button--primary.png'))).toBe(false)
-  })
-
-  it("throws a BaselineError when the path can't be followed", async () => {
-    const folder = createFolder()
-
-    writeFileSync(join(folder, 'baselines'), '')
-    await expect(hasBaseline(join(folder, 'baselines', 'button--primary.png'))).rejects.toMatchObject({
-      action: 'read',
-      reason: 'ENOTDIR: not a directory',
-    })
-  })
-})
-
 describe('listBaselines', () => {
   it('lists the PNG files by name, leaving out other files, temporary files and subfolders', async () => {
     const folder = createFolder()
@@ -400,6 +373,23 @@ describe('expectedBaselinesAt', () => {
     const expected = await expectedBaselinesAt([join(folder, 'missing.png'), join(folder, 'a.png')])
 
     expect(expected.present).toEqual([false, true])
+  })
+
+  it('finds no file for a path whose baselines folder is missing', async () => {
+    const folder = createFolder()
+    const expected = await expectedBaselinesAt([join(folder, 'baselines', 'button--primary.png')])
+
+    expect(expected.present).toEqual([false])
+  })
+
+  it("throws a BaselineError when a path can't be followed", async () => {
+    const folder = createFolder()
+
+    writeFileSync(join(folder, 'baselines'), '')
+    await expect(expectedBaselinesAt([join(folder, 'baselines', 'button--primary.png')])).rejects.toMatchObject({
+      action: 'read',
+      reason: 'ENOTDIR: not a directory',
+    })
   })
 
   it('gives the paths that are not expected, in the order given', async () => {

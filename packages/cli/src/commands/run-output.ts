@@ -3,14 +3,19 @@ import type { PlannedSnapshot } from './plan-snapshots.js'
 import type { SnapshotResult, SnapshotStatus } from './snapshot-result.js'
 
 /**
+ * The mark of a line that fails the run: a snapshot that differs or is missing, and an orphan.
+ */
+export const failMark = '✗'
+
+/**
  * The mark each status's line starts with.
  */
 const marks: Record<SnapshotStatus, string> = {
   passed: '✓',
   written: '✓',
   kept: '✓',
-  differs: '✗',
-  missing: '✗',
+  differs: failMark,
+  missing: failMark,
   broken: '!',
 }
 

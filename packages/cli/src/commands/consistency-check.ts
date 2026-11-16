@@ -117,3 +117,19 @@ export async function checkConsistency(
 
   return { storybooks: checked, missing: new Set(planned.filter((snapshot) => missing.has(snapshot))) }
 }
+
+/**
+ * Whether any Storybook's baselines folder holds an orphan.
+ */
+export function hasOrphans(storybooks: readonly StorybookBaselines[]): boolean {
+  return storybooks.some(({ orphans }) => orphans.length > 0)
+}
+
+/**
+ * Whether the check found nothing: no planned snapshot with a missing baseline, no story whose stories file failed to
+ * load, and no orphan. A local `test`'s exit code comes from its snapshots' statuses and `hasOrphans`, which agree with
+ * this because every finding is taken locally.
+ */
+export function isConsistent(check: ConsistencyCheck, planned: readonly PlannedSnapshot[]): boolean {
+  return !hasOrphans(check.storybooks) && !planned.some((item) => 'broken' in item || check.missing.has(item))
+}
