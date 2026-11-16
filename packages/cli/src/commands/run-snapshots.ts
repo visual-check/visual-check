@@ -1,5 +1,5 @@
 import { BaselineError } from '../baselines/baseline-error.js'
-import { baselinePathOf, readBaseline, writeBaseline } from '../baselines/baseline-files.js'
+import { baselinePathOf } from '../baselines/baseline-files.js'
 import { BrowserMismatchError, runImageOf } from '../browser/browser-version.js'
 import type { ChromeForTestingPlatform } from '../browser/chrome-for-testing-platform.js'
 import type { BrowserPackage } from '../browser/read-browser-package.js'
@@ -13,24 +13,17 @@ import { ContainerError } from '../container/container-error.js'
 import { clearReport, ReportError, reportFolderOf } from '../report/report-folder.js'
 import type { Story } from '../storybook/read-stories.js'
 import { testPathWarningOf } from '../storybook/test-path.js'
-import { createVisualDiff, type VisualDiff } from '../visual-diff/visual-diff.js'
+import { createVisualDiff } from '../visual-diff/visual-diff.js'
 import type { BrowserPlace } from './browser-route.js'
 import { dockerProblemOf } from './docker-problem.js'
 import type { LaunchBrowser } from './launch-browser.js'
 import { missingLibraryOf } from './missing-library.js'
 import { networkWarningOf } from './network-warning.js'
-import { type PlannedSnapshot, planSnapshots, type SnapshotToCapture } from './plan-snapshots.js'
+import { type PlannedSnapshot, planSnapshots } from './plan-snapshots.js'
 import { platformProblemOf } from './platform-problem.js'
 import { type FirstBrowserExit, type RunBrowser, runBrowserOf } from './run-browser.js'
 import { countsLineOf, displayPathOf } from './run-output.js'
-import {
-  brokenResultOf,
-  type CaptureStory,
-  compareWithBaseline,
-  type SnapshotResult,
-  type SnapshotStatus,
-  storyToCaptureOf,
-} from './snapshot-result.js'
+import { brokenResultOf, type CaptureStory, type SnapshotResult, type SnapshotStatus } from './snapshot-result.js'
 import { type TestTools, testSnapshot } from './test-snapshot.js'
 import {
   deleteStorybookOrphans,
@@ -39,6 +32,7 @@ import {
   type StorybookOrphans,
   updateEndLinesOf,
 } from './update-baselines.js'
+import { type UpdateTools, updateSnapshot } from './update-snapshot.js'
 
 /**
  * The stories a run covers in one Storybook, in the order they are taken and printed.
@@ -111,6 +105,12 @@ interface SnapshotRun {
    */
   environment: Record<string, string | undefined>
   /**
+   * How long after the capture session asks whether to capture a snapshot's page again, right after the first capture
+   * and the reading of its hosts, `update` captures the page again, to check it isn't still changing, in ms. `test`
+   * never captures a page again.
+   */
+  recaptureDelayMs: number
+  /**
    * Launches the browser, at the first options read, and again at the first read or story that needs it after the
    * browser exits.
    */
@@ -131,9 +131,9 @@ interface SnapshotRunResult {
   exitCode: number
   /**
    * The header, one line per snapshot and the counts, then for `update` the path of each baseline written and each
-   * orphan deleted, or, for a failure that stopped the run, the header and the lines of the snapshots that finished
-   * before it. Nothing when the run stopped before any capture, while it planned the snapshots or, for `update`,
-   * checked the baselines folders.
+   * orphan deleted and its flaky snapshots, or, for a failure that stopped the run, the header and the lines of the
+   * snapshots that finished before it. Nothing when the run stopped before any capture, while it planned the snapshots
+   * or, for `update`, checked the baselines folders.
    */
   stdout: string
   /**
@@ -190,9 +190,18 @@ const reportFixes: Record<ReportError['action'], string> = {
 }
 
 /**
- * What each snapshot of a run is taken with, by command: the visual diff both commands compare snapshots with and, for
- * `test` alone, the report folder it writes the images of each differing snapshot to and how many more times it
- * captures a snapshot that differs.
+ * Per command, the heading its flaky snapshots are listed under.
+ */
+const flakyHeadings: Record<SnapshotRun['command'], string> = {
+  test: 'Flaky snapshots, which passed on a retry:',
+  update: 'Flaky snapshots, whose loads disagreed:',
+}
+
+/**
+ * What each snapshot of a run is taken with, by command: the visual diff both commands compare snapshots with, for
+ * `test` alone the report folder it writes the images of each differing snapshot to and how many more times it
+ * captures a snapshot that differs, and for `update` alone how long it waits before it captures a snapshot's page
+ * again.
  */
 type SnapshotTools =
   | (TestTools & {
@@ -201,17 +210,13 @@ type SnapshotTools =
        */
       command: 'test'
     })
-  | {
+  | (UpdateTools & {
       /**
-       * The command, `update`, which compares each snapshot and writes the baselines that are missing or differ. It
-       * never touches the report folder.
+       * The command, `update`, which compares each snapshot and writes the baselines that are missing or differ, once
+       * the story renders the same way twice. It never touches the report folder.
        */
       command: 'update'
-      /**
-       * The run's visual diff.
-       */
-      visualDiff: VisualDiff
-    }
+    })
 
 /**
  * The snapshots a run takes, and what became of each so far.
@@ -273,48 +278,7 @@ async function snapshotOf(
 
   return tools.command === 'test'
     ? await testSnapshot(item, captureStory, tools)
-    : await updateSnapshot(item, captureStory, tools.visualDiff)
-}
-
-/**
- * Updates one snapshot's baseline: writes the snapshot when the baseline is missing, or differs from it beyond the
- * story's tolerance or in size, and leaves a baseline within tolerance untouched. The detail says why a baseline was
- * written: `written: missing`, or `written: differs: ` and what `test` would say. A broken story writes nothing.
- *
- * @throws {BaselineError} When the baseline can't be read, decoded or written.
- * @throws {ImageDecodeError} When the snapshot can't be decoded, which the browser's PNG files rule out.
- * @throws {Error} When a visual diff thread stops mid-comparison.
- */
-async function updateSnapshot(
-  item: SnapshotToCapture,
-  captureStory: CaptureStory,
-  visualDiff: VisualDiff,
-): Promise<SnapshotResult> {
-  const capture = await captureStory(storyToCaptureOf(item))
-
-  if ('broken' in capture) {
-    return brokenResultOf(capture.broken)
-  }
-
-  const { snapshot, completingMs, hosts } = capture
-  const path = baselinePathOf(item.storybook.baselines, item.key)
-  const baseline = await readBaseline(path)
-
-  if (baseline === undefined) {
-    await writeBaseline(path, snapshot)
-
-    return { status: 'written', detail: 'written: missing', completingMs, hosts }
-  }
-
-  const result = await compareWithBaseline(visualDiff, item, baseline, snapshot, path)
-
-  if (result.outcome === 'differs') {
-    await writeBaseline(path, snapshot)
-
-    return { status: 'written', detail: `written: differs: ${result.message}`, completingMs, hosts }
-  }
-
-  return { status: 'kept', detail: 'kept', completingMs, hosts }
+    : await updateSnapshot(item, captureStory, tools)
 }
 
 /**
@@ -372,10 +336,11 @@ function testCountLabelOf(status: SnapshotStatus, flaky: number): string {
 }
 
 /**
- * Builds the lines that end a finished run's output: for `test`, the flaky snapshots under a heading, when there are
+ * Builds the lines that end a finished run's output: for `test`, the flaky snapshots under its heading, when there are
  * any, then the counts line, each counted status with its count, leaving out zero counts except the first, the passed
  * count saying how many are flaky; for `update`, the counts of written, deleted and kept baselines and broken
- * snapshots, then the path of each baseline written, in the snapshots' order, and of each orphan deleted.
+ * snapshots, then the path of each baseline written, in the snapshots' order, and of each orphan deleted, then the
+ * flaky snapshots under its heading, when there are any.
  */
 function endLinesOf(run: SnapshotRun, snapshots: PlannedSnapshots, deleted: string[]): string[] {
   const statuses = snapshots.results.flatMap((result) => (result === undefined ? [] : [result.status]))
@@ -386,15 +351,17 @@ function endLinesOf(run: SnapshotRun, snapshots: PlannedSnapshots, deleted: stri
       (status) => [testCountLabelOf(status, flaky), countOf(statuses, status)] as const,
     )
 
-    return [...flakyLinesOf(snapshots), countsLineOf(counts)]
+    return [...flakyLinesOf('test', snapshots), countsLineOf(counts)]
   }
 
-  return updateEndLinesOf(run.cwd, {
+  const summary = {
     written: writtenPathsOf(snapshots),
     deleted,
     kept: countOf(statuses, 'kept'),
     broken: countOf(statuses, 'broken'),
-  })
+  }
+
+  return [...updateEndLinesOf(run.cwd, summary), ...flakyLinesOf('update', snapshots)]
 }
 
 /**
@@ -621,13 +588,13 @@ function linesOf({ items, results }: PlannedSnapshots): string[] {
 }
 
 /**
- * Lists the flaky snapshots by name under a heading, in the snapshots' order, each indented by two spaces. Gives no
- * line when none is flaky.
+ * Lists the flaky snapshots by name under the command's heading, in the snapshots' order, each indented by two spaces.
+ * Gives no line when none is flaky.
  */
-function flakyLinesOf({ items, results }: PlannedSnapshots): string[] {
+function flakyLinesOf(command: SnapshotRun['command'], { items, results }: PlannedSnapshots): string[] {
   const names = items.flatMap((item, index) => (results[index]?.flaky === true ? [`  ${snapshotNameOf(item)}`] : []))
 
-  return names.length === 0 ? [] : ['Flaky snapshots, which passed on a retry:', ...names]
+  return names.length === 0 ? [] : [flakyHeadings[command], ...names]
 }
 
 /**
@@ -684,12 +651,23 @@ async function takeSnapshots(
  * broken, when its default baseline is missing, and left out when it's there. Before any capture, it lists each
  * Storybook's baselines folder, where only `.png` files count, and decodes each of them; the first one that can't be
  * listed or decoded, in config order then file name order, stops the run with exit 2, printing nothing on stdout. It
- * compares each snapshot with its baseline as `test` does, and writes it when the baseline is missing or differs beyond
- * tolerance or in size. A baseline within tolerance stays untouched, even when its bytes differ. Once every snapshot is
- * taken, it deletes the orphans: the baselines that no planned snapshot calls for, selected or not, apart from any that
- * could belong to a story whose stories file didn't load. An orphan the file system takes for an expected baseline is
- * that baseline, so it stays. Its counts are of written, deleted and kept baselines and broken snapshots, followed by
- * the path of each baseline written and each orphan deleted. `update` never touches the report folder.
+ * compares each snapshot's first capture with its baseline as `test` does. A baseline within tolerance stays untouched,
+ * even when its bytes differ, after one load and one capture. A baseline that is missing or differs beyond tolerance or
+ * in size is written only once the story renders the same way twice, each check by the story's own tolerance, a size
+ * difference counting as a difference. First, the same page is captured again `recaptureDelayMs` after the capture
+ * session asks for it, right after the first capture and the reading of its hosts, so at least that long after the
+ * first capture, which isn't delayed; when the two differ, the story is broken, `changed-after-capture`, and its line
+ * points to the wait hook. Then the story is loaded a second time. A second load within tolerance of a baseline the
+ * first differed from leaves that baseline untouched, kept and flaky. A second load that agrees with the first is
+ * written. Otherwise a third load decides: the later of two loads that agree is written, flaky, and when no two agree,
+ * the story is broken, `unstable`. So `update` makes at most 3 loads of a snapshot, not counting the capture session's
+ * own retries of a story that navigates away, whatever `retries` says, and a broken story writes nothing. A flaky
+ * snapshot's line ends with `· flaky`. Once every snapshot is taken, it deletes the orphans: the baselines that no
+ * planned snapshot calls for, selected or not, apart from any that could belong to a story whose stories file didn't
+ * load. An orphan the file system takes for an expected baseline is that baseline, so it stays. Its counts are of
+ * written, deleted and kept baselines and broken snapshots, followed by the path of each baseline written and each
+ * orphan deleted, then its flaky snapshots by name under a heading of their own, when there are any. A flaky snapshot
+ * never fails `update`. `update` never touches the report folder.
  *
  * Each Storybook with stories gets one options read, in config order, on a page of its own, covering every story its
  * `index.json` lists whatever the selection. So the browser is launched at the first read, even when no story then
@@ -737,7 +715,7 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
   const tools: SnapshotTools =
     run.command === 'test'
       ? { command: 'test', visualDiff, reportFolder: reportFolderOf(run.config.path), retries: run.config.retries }
-      : { command: 'update', visualDiff }
+      : { command: 'update', visualDiff, recaptureDelayMs: run.recaptureDelayMs }
   let snapshots: PlannedSnapshots | undefined
   let orphans: StorybookOrphans[] = []
   let deleted: string[] = []

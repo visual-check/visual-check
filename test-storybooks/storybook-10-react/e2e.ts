@@ -26,6 +26,7 @@ import {
   constants,
   cpSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -76,7 +77,8 @@ const cliBin = join(packageDir, 'node_modules', '@visual-check', 'cli', 'dist', 
 const committedBaselines = join(packageDir, '.visual-check', 'baselines')
 
 /**
- * Where the update case copies the baselines it wrote when they differ from the committed ones, for CI to keep.
+ * Where the update-then-test case copies the baselines it wrote when they differ from the committed ones, and each
+ * stability case the card story's baseline when it isn't the committed one, for CI to keep.
  */
 const diagnosticsDir = join(packageDir, 'e2e-output')
 
@@ -244,9 +246,90 @@ const flakyHeading = 'Flaky snapshots, which passed on a retry:'
 
 /**
  * What the detail of a snapshot line that passed on a retry ends with. The `passed` outcome's pattern pins it to the
- * end.
+ * end. `update`'s flaky lines end with it too, which the `kept` outcome's pattern allows.
  */
 const flakyMark = '· flaky'
+
+/**
+ * The heading `update` lists its flaky snapshots under, the last lines of its standard output, each name on a line of
+ * its own indented two spaces.
+ */
+const updateFlakyHeading = 'Flaky snapshots, whose loads disagreed:'
+
+/**
+ * The most loads `update` makes of a snapshot, whatever `retries` says.
+ */
+const updateMaxLoads = 3
+
+/**
+ * The stability cases: `update` on the card story alone, by its ID and the pattern that matches only it, each on a
+ * server of its own whose `index.json` lists only that story. `update` takes every snapshot whose baseline is missing
+ * whatever the selection, and the stories whose file fails to load have none, so with every story listed they would be
+ * broken and fail every run. The server adds each case's markup to the story's page loads, load by load, and counts
+ * them. Its cases:
+ *
+ * - `keptFlaky`: the deliberate change's stylesheet in the first load only, with the baseline there. The first load
+ *   differs from the baseline and the second is within tolerance of it, so the baseline is kept, flaky.
+ * - `writtenFlaky`: the same, with the baseline missing. The first two loads disagree and the third agrees with the
+ *   second, so the third is written, flaky, as the committed baseline has it.
+ * - `unstable`: a different card background in each load, red, green, then blue, with the baseline there. No two of
+ *   the 3 loads agree, so the story is broken.
+ * - `changedAfterCapture`: a script in each of the 3 loads `update` can make that adds a fixed clock, 48 px text at the
+ *   bottom left, and sets its text to `Date.now()` at once and every 50 ms after, with the baseline there. The text
+ *   must be there from the start: a fast machine captures the first load before a first tick, and an empty clock
+ *   matches the baseline, which `update` keeps without a check. The first load's page differs from the baseline, and
+ *   captured again a second later it differs by pixels, so the story is broken after 1 load.
+ */
+const updateStability = {
+  storyId: deliberateChange.storyId,
+  filter: flakyChange.filter,
+  keptFlaky: {
+    name: 'kept-flaky',
+    loadMarkup: [deliberateChange.style],
+    hasBaseline: true,
+    outcome: 'kept',
+    detail: /^kept · flaky$/,
+    flaky: true,
+    storyPages: 2,
+  } satisfies StabilityRun,
+  writtenFlaky: {
+    name: 'written-flaky',
+    loadMarkup: [deliberateChange.style],
+    hasBaseline: false,
+    outcome: 'written',
+    detail: /^written: missing · flaky$/,
+    flaky: true,
+    storyPages: updateMaxLoads,
+  } satisfies StabilityRun,
+  unstable: {
+    name: 'unstable',
+    loadMarkup: ['#ef4444', '#22c55e', '#3b82f6'].map(
+      (color) => `<style>.card { background: ${color} !important; }</style>`,
+    ),
+    hasBaseline: true,
+    outcome: 'broken',
+    detail: /^broken: No two of the story's 3 loads agreed, so its baseline wasn't written\.$/,
+    flaky: false,
+    storyPages: updateMaxLoads,
+  } satisfies StabilityRun,
+  changedAfterCapture: {
+    name: 'changed-after-capture',
+    loadMarkup: Array.from(
+      { length: updateMaxLoads },
+      () =>
+        '<script>addEventListener("DOMContentLoaded", () => { ' +
+        'const clock = document.body.appendChild(document.createElement("div")); ' +
+        'clock.style.cssText = "position: fixed; left: 16px; bottom: 16px; font: 48px monospace; color: #000"; ' +
+        'const tick = () => { clock.textContent = String(Date.now()) }; tick(); setInterval(tick, 50) })</script>',
+    ),
+    hasBaseline: true,
+    outcome: 'broken',
+    detail:
+      /^broken: The story changed in the second after its capture: \d+ differ, \d+ allowed\. Use its wait hook to wait until it settles\.$/,
+    flaky: false,
+    storyPages: 1,
+  } satisfies StabilityRun,
+}
 
 /**
  * The remote content hint case: the story it unmasks, by its ID and the pattern that matches only it, and the script
@@ -496,7 +579,7 @@ const outcomeDetails: [Outcome, RegExp][] = [
   ['broken', /^broken: /],
   ['missing', /^missing: /],
   ['written', /^written: /],
-  ['kept', /^kept$/],
+  ['kept', /^kept( · flaky)?$/],
 ]
 
 /**
@@ -529,10 +612,10 @@ interface ServeOptions {
    */
   injectIntoIframe?: string
   /**
-   * Markup added to the end of the `<head>` of one story's first page loads only, after `injectIntoIframe`'s: the
-   * first `loads` requests for that story's page. The options-reading page never gets it.
+   * Markup added to the end of the `<head>` of one story's page loads, after `injectIntoIframe`'s, load by load: each
+   * request for that story's page gets the markup for its place in the order. The options-reading page never gets it.
    */
-  injectIntoFirstLoads?: FirstLoadsMarkup
+  injectIntoLoads?: StoryLoadsMarkup
   /**
    * Leaves every story page request unanswered until `releaseStoryPages()` or the server stops, so a run can't finish
    * a capture meanwhile. The options-reading page is answered at once.
@@ -546,21 +629,18 @@ interface ServeOptions {
 }
 
 /**
- * Markup for one story's first page loads.
+ * Markup for one story's page loads, load by load.
  */
-interface FirstLoadsMarkup {
+interface StoryLoadsMarkup {
   /**
    * The ID of the story whose page gets the markup.
    */
   storyId: string
   /**
-   * How many of that story's first page loads get it.
+   * The markup of each of that story's page loads, in order: the first load gets the first, the second the second, and
+   * so on. A load past the end of the list gets none.
    */
-  loads: number
-  /**
-   * The markup.
-   */
-  markup: string
+  markup: string[]
 }
 
 /**
@@ -587,6 +667,42 @@ interface FlakyRun {
    * The `retries` the run's config sets. The config's default when not given.
    */
   retries?: number
+}
+
+/**
+ * One stability case: `update` on the card story alone, with markup in its page loads, against a baselines folder that
+ * holds the story's committed baseline, or nothing when the case has it missing.
+ */
+interface StabilityRun {
+  /**
+   * The folder, in the diagnostics folder's `update-stability/`, that keeps the story's baseline after the run when it
+   * isn't the committed one.
+   */
+  name: string
+  /**
+   * The markup of each of the story's page loads, in order: see `StoryLoadsMarkup`.
+   */
+  loadMarkup: string[]
+  /**
+   * Whether the baselines folder holds the story's committed baseline before the run.
+   */
+  hasBaseline: boolean
+  /**
+   * The outcome `update` gives the story.
+   */
+  outcome: Outcome
+  /**
+   * Matches the whole detail of the story's line.
+   */
+  detail: RegExp
+  /**
+   * Whether `update` lists the story as flaky.
+   */
+  flaky: boolean
+  /**
+   * How many times the server is asked for the story's page.
+   */
+  storyPages: number
 }
 
 /**
@@ -1033,16 +1149,16 @@ function storyPageIdOf(pathname: string, searchParams: URLSearchParams): string 
 }
 
 /**
- * Gives the markup a story page gets: `injectIntoIframe`'s, then `injectIntoFirstLoads`'s when the page is of its
- * story and `load`, which counts the requests for the story's page so far, this one included, is one of its first
- * `loads`.
+ * Gives the markup a story page gets: `injectIntoIframe`'s, then `injectIntoLoads`'s for `load` when the page is of its
+ * story. `load` counts the requests for the story's page so far, this one included.
  */
 function storyPageMarkupOf(options: ServeOptions, storyId: string, load: number): string | undefined {
-  const { injectIntoIframe, injectIntoFirstLoads: firstLoads } = options
-  const isFirstLoad = firstLoads !== undefined && firstLoads.storyId === storyId && load <= firstLoads.loads
+  const { injectIntoIframe, injectIntoLoads: storyLoads } = options
+  const loadMarkup =
+    storyLoads !== undefined && storyLoads.storyId === storyId ? storyLoads.markup[load - 1] : undefined
 
   // join writes an undefined injectIntoIframe as nothing.
-  return isFirstLoad ? [injectIntoIframe, firstLoads.markup].join('') : injectIntoIframe
+  return loadMarkup === undefined ? injectIntoIframe : [injectIntoIframe, loadMarkup].join('')
 }
 
 /**
@@ -1913,7 +2029,7 @@ async function checkFlakyRetries(): Promise<string[]> {
  */
 async function flakyRunProblems({ changedLoads, outcome, storyPages, retries }: FlakyRun): Promise<string[]> {
   const { storyId, filter, markup } = flakyChange
-  const serveOptions = { injectIntoFirstLoads: { storyId, loads: changedLoads, markup } }
+  const serveOptions = { injectIntoLoads: { storyId, markup: Array.from({ length: changedLoads }, () => markup) } }
 
   return await withStorybookServer(serveOptions, (server) =>
     withTemporaryFolder(async (folder) => {
@@ -1935,7 +2051,7 @@ async function flakyRunProblems({ changedLoads, outcome, storyPages, retries }: 
 function storyPageCountProblems(server: StorybookServer, storyId: string, count: number): string[] {
   const seen = server.storyPageRequests().filter((requested) => requested === storyId).length
 
-  return seen === count ? [] : [`test: the server was asked for ${storyId}'s page ${seen} times, expected ${count}`]
+  return seen === count ? [] : [`the server was asked for ${storyId}'s page ${seen} times, expected ${count}`]
 }
 
 /**
@@ -1967,6 +2083,109 @@ function notFlakyProblems(run: CliRun): string[] {
   const flaky = run.snapshots.some((snapshot) => snapshot.detail.includes(flakyMark))
 
   return flaky || run.stdout.includes(flakyHeading) ? [`test reports a flaky snapshot${outputOf(run.stdout)}`] : []
+}
+
+/**
+ * Runs `update` on the card story alone, with a stability case's markup in its page loads and a config whose baselines
+ * folder holds the story's committed baseline, or nothing when the case has it missing: see `updateStability`.
+ * `update` gives the story the case's outcome and detail, so it exits 1 only when the story is broken, and lists it as
+ * flaky only when the case is flaky. The server is asked for the story's page the case's number of times, and the
+ * folder then holds the story's committed baseline alone, byte for byte: kept or left untouched, or written as
+ * committed. So no other baseline is written. A baseline that isn't the committed one is copied to the case's folder
+ * in the diagnostics folder's `update-stability/`.
+ */
+async function checkUpdateStability(stabilityRun: StabilityRun): Promise<string[]> {
+  const { storyId, filter } = updateStability
+  const { name, loadMarkup, hasBaseline, outcome, detail, flaky, storyPages } = stabilityRun
+  const serveOptions = { onlyStory: storyId, injectIntoLoads: { storyId, markup: loadMarkup } }
+
+  return await withStorybookServer(serveOptions, (server) =>
+    withTemporaryFolder(async (folder) => {
+      const baselines = join(folder, 'baselines')
+      const baselineName = `${storyId}.png`
+
+      mkdirSync(baselines)
+
+      if (hasBaseline) {
+        cpSync(join(committedBaselines, baselineName), join(baselines, baselineName))
+      }
+
+      const config = writeConfig(folder, server.url, baselines)
+      const run = await runCli(['update', '--filter', filter.source, '--config', config], localEnvironment())
+
+      return [
+        ...expectedRunProblems('update', run, { [storyId]: outcome }),
+        ...lineMatchesProblems(run, storyId, detail),
+        ...updateFlakyProblems(run, storyId, flaky),
+        ...storyPageCountProblems(server, storyId, storyPages),
+        ...onlyCommittedBaselineProblems(baselines, baselineName, join(diagnosticsDir, 'update-stability', name)),
+      ]
+    }),
+  )
+}
+
+/**
+ * Gives the problem with the snapshot line of a story's default capture in a run of `update` when the pattern doesn't
+ * match its whole detail, or none when it does or the run has no line for it, which the outcome check reports.
+ */
+function lineMatchesProblems(run: CliRun, storyId: string, detail: RegExp): string[] {
+  const line = run.snapshots.find((snapshot) => snapshot.key === storyId)
+
+  return line === undefined || detail.test(line.detail)
+    ? []
+    : [`update: ${storyId}'s line says "${line.detail}", expected it to match ${detail}`]
+}
+
+/**
+ * Gives the problem with a run of `update` with the Storybook `react` when a flaky story isn't listed alone under the
+ * flaky heading at the end of its standard output, or, for a story that isn't flaky, when the run lists flaky
+ * snapshots at all, or none.
+ */
+function updateFlakyProblems(run: CliRun, storyId: string, flaky: boolean): string[] {
+  const listed = `${updateFlakyHeading}\n  react  ${storyId}\n`
+
+  if (flaky) {
+    return run.stdout.endsWith(listed)
+      ? []
+      : [`update's output doesn't end with ${JSON.stringify(listed)}${outputOf(run.stdout)}`]
+  }
+
+  return run.stdout.includes(updateFlakyHeading) ? [`update lists a flaky snapshot${outputOf(run.stdout)}`] : []
+}
+
+/**
+ * Gives the problems with a baselines folder that must hold one committed baseline alone: any other file in it, or
+ * that baseline missing or not byte-identical to the committed one. A baseline that isn't is copied to `keptIn`, for
+ * CI to keep.
+ */
+function onlyCommittedBaselineProblems(folder: string, name: string, keptIn: string): string[] {
+  const others = readdirSync(folder).filter((file) => file !== name)
+
+  return [
+    ...(others.length > 0 ? [`the baselines folder holds more than ${name}: ${others.join(', ')}`] : []),
+    ...committedBaselineProblems(join(folder, name), keptIn),
+  ]
+}
+
+/**
+ * Gives the problem with a baseline that is missing, or isn't byte-identical to the committed one of the same name, or
+ * none. One that isn't is copied to `keptIn`, for CI to keep, and the problem says where.
+ */
+function committedBaselineProblems(path: string, keptIn: string): string[] {
+  const name = basename(path)
+
+  if (isSameFile(path, join(committedBaselines, name))) {
+    return []
+  }
+
+  if (!isFile(path)) {
+    return [`${name} is missing from the baselines folder`]
+  }
+
+  mkdirSync(keptIn, { recursive: true })
+  cpSync(path, join(keptIn, name))
+
+  return [`${name} isn't byte-identical to the committed one: it's in ${keptIn}`]
 }
 
 /**
@@ -2608,6 +2827,22 @@ if (setupProblems.length > 0) {
     {
       name: `flaky: with ${flakyChange.storyId}'s first page load changed, test passes it flaky on its one retry, its line ends "· flaky", test lists it as flaky and counts "1 passed (1 flaky)", the report holds its images; with retries: 0, test exits 1 and it differs after 1 page load; with retries: 2 and its first 2 page loads changed, it passes flaky after 3`,
       run: checkFlakyRetries,
+    },
+    {
+      name: `update kept flaky: with ${updateStability.storyId}'s baseline there and its first page load changed, update on it alone keeps the baseline untouched after 2 page loads, its line says "kept · flaky", update lists it as flaky and exits 0, nothing else is written`,
+      run: () => checkUpdateStability(updateStability.keptFlaky),
+    },
+    {
+      name: `update written flaky: with ${updateStability.storyId}'s baseline missing and its first page load changed, update on it alone writes it after 3 page loads, byte-identical to the committed one, its line says "written: missing · flaky", update lists it as flaky and exits 0, nothing else is written`,
+      run: () => checkUpdateStability(updateStability.writtenFlaky),
+    },
+    {
+      name: `update unstable: with ${updateStability.storyId}'s baseline there and a different card background in each of its page loads, update on it alone exits 1 after 3 page loads, it's broken saying no two loads agreed, its baseline is untouched, nothing else is written`,
+      run: () => checkUpdateStability(updateStability.unstable),
+    },
+    {
+      name: `update changed after capture: with a clock ticking in ${updateStability.storyId}'s page, update on it alone exits 1 after 1 page load, it's broken saying the story changed by pixels in the second after its capture and to use its wait hook, its baseline is untouched, nothing else is written`,
+      run: () => checkUpdateStability(updateStability.changedAfterCapture),
     },
     {
       name: `remote content hint: with ${unmaskedRemoteContent.storyId}'s host mask dropped, test exits 1, it differs, and its line is followed by the hint naming localhost on the server's port, its mask line and the docs page`,

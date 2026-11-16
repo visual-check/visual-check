@@ -81,7 +81,7 @@ A story that can't be captured: its stories file fails to load, or it errors, cr
 _Avoid_: Failed story, errored story
 
 **Flaky snapshot**:
-A snapshot whose captures didn't agree within one run but settled on another try, so it still passed or was written.
+A snapshot whose captures didn't agree within one run but settled on another try, so it still passed, was kept or was written.
 _Avoid_: Unstable snapshot, intermittent, passed on recapture
 
 **Report**:

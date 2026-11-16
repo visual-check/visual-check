@@ -41,7 +41,7 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
   - the stability checks always run, and a snapshot that isn't stable writes nothing, with the reason in the panel;
   - a capture identical to the file, byte for byte, leaves the file untouched;
   - with `CI` set it's refused;
-  - the panel lists every written path, the snapshots that needed a third load, and `update`'s warnings by host.
+  - the panel lists every written path, the flaky snapshots, and `update`'s warnings by host.
 - It never deletes orphans. That stays with the CLI's `update`.
 - It works on a dev server with no special handling.
 

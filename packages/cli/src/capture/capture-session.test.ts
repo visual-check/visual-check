@@ -1831,6 +1831,307 @@ describe('a story that navigates away', () => {
   })
 })
 
+describe('capturing the same page again', () => {
+  /**
+   * The snapshot a page gives at its first capture.
+   */
+  const first = new Uint8Array([1, 1, 1])
+
+  /**
+   * The snapshot a page gives at each capture after its first.
+   */
+  const again = new Uint8Array([2, 2, 2])
+
+  /**
+   * A page whose first capture gives `first` and whose later captures answer as `later` says, giving `again` by
+   * default. It answers the rest as `behaviour` says.
+   */
+  const capturingTwice = (
+    behaviour: FakePageBehaviour = {},
+    later: () => Promise<Uint8Array> = async () => again,
+  ): FakePageBehaviour => {
+    let captures = 0
+
+    return {
+      ...behaviour,
+      capture: async () => {
+        captures += 1
+
+        return captures === 1 ? first : await later()
+      },
+    }
+  }
+
+  /**
+   * The methods a page received up to the first capture of a story that captured well.
+   */
+  const capturedOn = (page: number): string[] => [
+    `${page}:setViewport`,
+    `${page}:goto`,
+    `${page}:evaluate`,
+    `${page}:evaluate`,
+    `${page}:evaluate`,
+    `${page}:evaluate`,
+    `${page}:evaluate`,
+    `${page}:capture`,
+  ]
+
+  it('captures once, giving nothing captured again, for a story without captureAgainIf', async () => {
+    const driver = new FakeDriver({ pages: [capturingTwice()] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toStrictEqual({
+      snapshot: first,
+      completingMs: undefined,
+    })
+    expect(driver.methods()).toEqual(capturedOn(1))
+  })
+
+  it('calls captureAgainIf with the snapshot as soon as it is captured', async () => {
+    let methodsWhenCalled: string[] = []
+    const driver = new FakeDriver({ pages: [capturingTwice()] })
+    const captureAgainIf = vi.fn(async () => {
+      methodsWhenCalled = driver.methods()
+
+      return false
+    })
+
+    await openCaptureSession(driver, settings).capture({ ...primary, captureAgainIf })
+    expect(captureAgainIf).toHaveBeenCalledExactlyOnceWith(first)
+    expect(methodsWhenCalled).toEqual(capturedOn(1))
+  })
+
+  it('captures nothing more when captureAgainIf resolves false, keeping the page for the next story', async () => {
+    const driver = new FakeDriver({ pages: [capturingTwice()] })
+    const session = openCaptureSession(driver, settings)
+
+    expect(await session.capture({ ...primary, captureAgainIf: async () => false })).toStrictEqual({
+      snapshot: first,
+      completingMs: undefined,
+    })
+    expect(await session.capture(secondary)).toEqual({ snapshot: again })
+    expect(driver.methods()).toEqual([...capturedOn(1), '1:clearStorage', ...capturedOn(1)])
+  })
+
+  /**
+   * An element's box, as the capture preparation gives it.
+   */
+  const box = { x: 8, y: 16, width: 320, height: 200 }
+
+  it.each([
+    ['the full page', primary, null, 'full-page'],
+    ["the element's box", { ...primary, element: '#card' }, box, box],
+  ])(
+    'captures %s again at once when captureAgainIf resolves true, beside the first snapshot',
+    async (_area, story, prepBox, area) => {
+      const driver = new FakeDriver({
+        pages: [capturingTwice({ capturePrep: async () => ({ outcome: 'ready', box: prepBox }) })],
+      })
+      const capture = await openCaptureSession(driver, settings).capture({ ...story, captureAgainIf: async () => true })
+
+      expect(capture).toStrictEqual({ snapshot: first, completingMs: undefined, capturedAgain: again })
+      expect('snapshot' in capture && capture.capturedAgain).toBe(again)
+      expect(driver.methods()).toEqual([...capturedOn(1), '1:capture'])
+      expect(driver.calls.slice(-2)).toEqual([
+        { page: 1, method: 'capture', args: [area] },
+        { page: 1, method: 'capture', args: [area] },
+      ])
+    },
+  )
+
+  it('keeps the page for the next story after it captured again, clearing it as after any story that captured', async () => {
+    const driver = new FakeDriver({ pages: [capturingTwice()] })
+    const session = openCaptureSession(driver, settings)
+
+    await session.capture({ ...primary, captureAgainIf: async () => true })
+    expect(await session.capture(secondary)).toEqual({ snapshot: again })
+    expect(driver.setups).toHaveLength(1)
+    expect(driver.methods()).toEqual([...capturedOn(1), '1:capture', '1:clearStorage', ...capturedOn(1)])
+  })
+
+  it('gives the completing time, the remote content and the hosts of the first capture, read before captureAgainIf is called', async () => {
+    let called = false
+    const remote = [{ host: 'images.example.com', x: 1, y: 2, width: 3, height: 4 }]
+    const driver = new FakeDriver({
+      pages: [
+        capturingTwice({
+          storyWait: async () => finishedAnswer({ completingMs: 104 }),
+          capturePrep: async () => ({ outcome: 'ready', box: null, remote }),
+          requestHosts: () => (called ? ['late.example.com'] : ['api.example.com']),
+        }),
+      ],
+    })
+    const story = {
+      ...primary,
+      viewport: { ...primary.viewport, deviceScaleFactor: 1 },
+      findRemoteContent: true,
+      captureAgainIf: async () => {
+        called = true
+
+        return true
+      },
+    }
+
+    expect(await openCaptureSession(driver, { ...settings, listHosts: true }).capture(story)).toStrictEqual({
+      snapshot: first,
+      completingMs: 104,
+      remoteContent: [{ host: 'images.example.com', x: 1, y: 2, width: 3, height: 4 }],
+      hosts: { requests: ['api.example.com'], remoteContent: ['images.example.com'] },
+      capturedAgain: again,
+    })
+  })
+
+  it.each([
+    [
+      'crashed',
+      'a crash',
+      new PageCrashedError(),
+      'The page crashed while capturing the snapshot again, usually because it ran out of memory. Fewer workers leave each page more memory.',
+    ],
+    [
+      'error',
+      'an error',
+      new Error('The browser said no.'),
+      'Capturing the snapshot again failed: The browser said no.',
+    ],
+    [
+      'error',
+      "the driver's own time limit, not readyTimeout",
+      new PageTimeoutError("The page didn't capture within 30 s.", 30_000),
+      "Capturing the snapshot again failed: The page didn't capture within 30 s.",
+    ],
+  ])(
+    'makes a broken story, %s, of a second capture that fails with %s, closing the page',
+    async (reason, _how, error, message) => {
+      const driver = new FakeDriver({
+        pages: [
+          capturingTwice({}, async () => {
+            throw error
+          }),
+        ],
+      })
+
+      expect(
+        await openCaptureSession(driver, settings).capture({ ...primary, captureAgainIf: async () => true }),
+      ).toEqual({ broken: { reason, message } })
+      expect(driver.methods()).toEqual([...capturedOn(1), '1:capture', '1:close'])
+    },
+  )
+
+  it('rejects when the browser exits during the second capture, closing nothing', async () => {
+    const exited = new BrowserExitedError({ code: 1, signal: null, error: undefined }, [])
+    const driver = new FakeDriver({
+      pages: [
+        capturingTwice({}, async () => {
+          throw exited
+        }),
+      ],
+    })
+
+    await expect(
+      openCaptureSession(driver, settings).capture({ ...primary, captureAgainIf: async () => true }),
+    ).rejects.toBe(exited)
+    expect(driver.methods()).toEqual([...capturedOn(1), '1:capture'])
+  })
+
+  it('rejects with what captureAgainIf rejects with, closing the page and capturing nothing more', async () => {
+    const failure = new Error('The snapshots could not be compared.')
+    const driver = new FakeDriver({ pages: [capturingTwice()] })
+    const session = openCaptureSession(driver, settings)
+    const captureAgainIf = async (): Promise<boolean> => {
+      throw failure
+    }
+
+    await expect(session.capture({ ...primary, captureAgainIf })).rejects.toBe(failure)
+    expect(driver.methods()).toEqual([...capturedOn(1), '1:close'])
+    expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot })
+    expect(driver.setups).toHaveLength(2)
+  })
+
+  it("rejects with what captureAgainIf rejects with when the page doesn't close", async () => {
+    const failure = new Error('The snapshots could not be compared.')
+    const driver = new FakeDriver({
+      pages: [
+        capturingTwice({
+          close: async () => {
+            throw new Error('The page crashed.')
+          },
+        }),
+      ],
+    })
+    const captureAgainIf = async (): Promise<boolean> => {
+      throw failure
+    }
+
+    await expect(openCaptureSession(driver, settings).capture({ ...primary, captureAgainIf })).rejects.toBe(failure)
+  })
+
+  /**
+   * Pages whose story is broken, as when it is.
+   */
+  const brokenPages: [string, FakePageBehaviour][] = [
+    ['Storybook reports it failed', { storyWait: async () => finishedAnswer({ status: 'error' }) }],
+    [
+      'its capture fails',
+      {
+        capture: async () => {
+          throw new Error('The browser said no.')
+        },
+      },
+    ],
+  ]
+
+  it.each(brokenPages)('does not call captureAgainIf for a broken story, as when %s', async (_when, behaviour) => {
+    const captureAgainIf = vi.fn(async () => true)
+    const driver = new FakeDriver({ pages: [behaviour] })
+
+    expect(await openCaptureSession(driver, settings).capture({ ...primary, captureAgainIf })).toHaveProperty('broken')
+    expect(captureAgainIf).not.toHaveBeenCalled()
+  })
+
+  it('calls captureAgainIf once, for the snapshot of the retry, when the first attempt navigates away', async () => {
+    const captureAgainIf = vi.fn(async () => true)
+    const driver = new FakeDriver({
+      pages: [
+        {
+          goto: async () => {
+            throw new PageNavigatedAwayError('http://localhost:6006/one', 'The page navigated to /one.')
+          },
+        },
+        capturingTwice(),
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture({ ...primary, captureAgainIf })).toStrictEqual({
+      snapshot: first,
+      completingMs: undefined,
+      capturedAgain: again,
+    })
+    expect(captureAgainIf).toHaveBeenCalledExactlyOnceWith(first)
+    expect(driver.methods()).toEqual(['1:setViewport', '1:goto', '1:close', ...capturedOn(2), '2:capture'])
+  })
+
+  it('retries a story whose second capture navigates away on a fresh page, calling captureAgainIf again for its snapshot', async () => {
+    const retried = new Uint8Array([3, 3, 3])
+    const captureAgainIf = vi.fn(async () => true)
+    const driver = new FakeDriver({
+      pages: [
+        capturingTwice({}, async () => {
+          throw new PageNavigatedAwayError('http://localhost:6006/one', 'The page navigated to /one.')
+        }),
+        { capture: async () => retried },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture({ ...primary, captureAgainIf })).toStrictEqual({
+      snapshot: retried,
+      completingMs: undefined,
+      capturedAgain: retried,
+    })
+    expect(captureAgainIf.mock.calls).toEqual([[first], [retried]])
+    expect(driver.methods()).toEqual([...capturedOn(1), '1:capture', '1:close', ...capturedOn(2), '2:capture'])
+  })
+})
+
 describe('a browser exit', () => {
   const exited = new BrowserExitedError({ code: 1, signal: null, error: undefined }, [])
 

@@ -43,8 +43,9 @@ export interface CaptureSettings {
    * for Storybook to report it finished, waiting for its images and fonts, running its wait hook, checking its images
    * and fonts again after the hook, bringing it to its end state, checking its images and fonts again after that and
    * painting its masks share it, each getting what's left, in whole ms rounded up. Each wait in the page gives up when
-   * it runs out, and the driver allows up to 1 s more for the page's answer. Setting the viewport and the capture are
-   * bound by the driver's own fixed limits instead.
+   * it runs out, and the driver allows up to 1 s more for the page's answer. Setting the viewport, the capture and
+   * capturing the snapshot again are bound by the driver's own fixed limits instead. Nothing limits a story's
+   * `captureAgainIf`.
    */
   readyTimeoutMs: number
   /**
@@ -71,8 +72,8 @@ export interface CaptureSettings {
 }
 
 /**
- * A snapshot to capture: a story's URL, with a mode's globals in it, the viewport to capture it at, and the story's
- * element and masks.
+ * A snapshot to capture: a story's URL, with a mode's globals in it, the viewport to capture it at, the story's element
+ * and masks, and whether to capture the same page again once the snapshot is captured.
  *
  * @public
  */
@@ -104,6 +105,18 @@ export interface StoryToCapture {
    * to list hosts.
    */
   findRemoteContent?: boolean
+  /**
+   * Decides whether to capture the same page again. It's called with the snapshot as soon as it's captured and what
+   * the snapshot comes with is read, with the page left as it is. Each attempt that captured a snapshot calls it once,
+   * and an attempt that's broken before its snapshot is captured never calls it. A second capture that navigates away
+   * is retried like any other attempt, and the retry calls it again, so it may be called once per attempt. When it
+   * resolves true, the area the snapshot was captured from is captured again at once, with nothing done to the page in
+   * between, and the capture gives it as `capturedAgain`. For the full page, the page is measured again at the second
+   * capture, so its size can change. When it resolves false, nothing more is captured. When it rejects, the page is
+   * closed and the capture rejects with the same error. readyTimeout doesn't limit it. Without it, the snapshot is
+   * captured once.
+   */
+  captureAgainIf?: (snapshot: Uint8Array) => Promise<boolean>
 }
 
 /**
@@ -153,6 +166,10 @@ export interface RemoteContentBox {
  * - `element-missing`: the story's `element` selector matched nothing, or an element whose box is of zero size.
  * - `browser-exited`: the browser exited while the story was in flight. The run's browser gives it; a capture session
  *   rejects with a `BrowserExitedError` instead.
+ * - `changed-after-capture`: the story's page, captured again a second after its first capture on one load, had
+ *   changed beyond its tolerance, so `update` wrote no baseline. `update` gives it; a capture session never does.
+ * - `unstable`: no two of the 3 loads `update` made of the story agreed within its tolerance, so it wrote no baseline.
+ *   `update` gives it; a capture session never does.
  *
  * @public
  */
@@ -168,12 +185,14 @@ export type BrokenReason =
   | 'too-tall'
   | 'element-missing'
   | 'browser-exited'
+  | 'changed-after-capture'
+  | 'unstable'
 
 /**
  * A story that can't be captured: why, and a one-line message for people saying so. A capture session gives one for a
  * story it can't capture, and the run gives one for a story in flight when its browser exits and for each story of a
- * stories file that didn't load. A story whose fonts didn't load also keeps the faces still loading, and a story that
- * navigated away keeps where it went.
+ * stories file that didn't load. `update` gives one for a story that doesn't render the same way twice. A story whose
+ * fonts didn't load also keeps the faces still loading, and a story that navigated away keeps where it went.
  *
  * @public
  */
@@ -237,8 +256,8 @@ export interface StoryHosts {
 
 /**
  * What capturing a story gave: its snapshot, with how long Storybook's `completing` render step took, the remote
- * content it shows when the story asked for it and the hosts it reaches when the session lists them, or, for a broken
- * story, why it can't be captured.
+ * content it shows when the story asked for it, the hosts it reaches when the session lists them and the same page
+ * captured again when the story's `captureAgainIf` asked for it, or, for a broken story, why it can't be captured.
  *
  * @public
  */
@@ -259,9 +278,15 @@ export type StoryCapture =
        */
       remoteContent?: RemoteContentBox[]
       /**
-       * The hosts the story reaches. Present exactly when the session's settings ask to list hosts.
+       * The hosts the story reaches. Present exactly when the session's settings ask to list hosts. They're read right
+       * after the first capture, before the story's `captureAgainIf` is called.
        */
       hosts?: StoryHosts
+      /**
+       * The same area of the page captured a second time, at once after the story's `captureAgainIf` resolved true for
+       * the snapshot, as PNG bytes exactly as the browser made them. Present exactly when it resolved true.
+       */
+      capturedAgain?: Uint8Array
     }
   | {
       /**
@@ -281,8 +306,10 @@ export interface CaptureSession {
    * first clears the cookies and storage that story left, and when that fails, it captures on a fresh page instead. A
    * story that navigates away is captured again at once, up to 2 more times, each on a fresh page in a fresh browser
    * context; when it navigates away a third time, it's a broken story. Any other story that can't be captured comes
-   * back as a broken story straight away, and the page is replaced by a fresh one for the next. Rejects only with a
-   * `BrowserExitedError`, when the browser exits. Call it once the previous capture has settled.
+   * back as a broken story straight away, and the page is replaced by a fresh one for the next. When the story's
+   * `captureAgainIf` resolves true for the snapshot, the same page is captured again at once. Rejects with a
+   * `BrowserExitedError` when the browser exits, and, after closing the page, with whatever the story's
+   * `captureAgainIf` rejects with. Call it once the previous capture has settled.
    */
   capture: (story: StoryToCapture) => Promise<StoryCapture>
   /**
@@ -305,6 +332,7 @@ type Step =
   | 'assets-after-end-state'
   | 'masks'
   | 'capture'
+  | 'capture-again'
 
 /**
  * A check of the story's images and fonts: the one once the story finished, the one after its wait hook ran, or the one
@@ -326,6 +354,7 @@ const stepNames: Record<Step, string> = {
   'assets-after-end-state': 'waiting for images and fonts after its end state',
   masks: 'painting its masks and hiding the caret',
   capture: 'capturing the snapshot',
+  'capture-again': 'capturing the snapshot again',
 }
 
 /**
@@ -706,6 +735,21 @@ function capturedExtrasOf(
 }
 
 /**
+ * A snapshot captured on a page: what capturing the story gave, and the area it was captured from, so the same area
+ * can be captured again.
+ */
+interface CapturedSnapshot {
+  /**
+   * What capturing the story gave: its snapshot and what it comes with, without a second capture.
+   */
+  result: Omit<Extract<StoryCapture, { snapshot: Uint8Array }>, 'capturedAgain'>
+  /**
+   * What the snapshot was captured from: the element's box, or the full page.
+   */
+  area: CaptureArea
+}
+
+/**
  * Captures a story on an open page: sets the story's viewport, loads the story, waits until Storybook reports it
  * finished with nothing gone wrong, waits for its images and fonts, runs its wait hook, brings it to its end state,
  * measures its element, paints its masks, hides the caret and captures the element's box, or the full page when the
@@ -714,10 +758,15 @@ function capturedExtrasOf(
  * those checks and the masks share readyTimeout, each getting only what's left of it. When the story asks for it with
  * `findRemoteContent`, the snapshot comes with the remote content it shows, unless the search didn't answer in time.
  * When the settings ask to list hosts, it also gives the hosts the page sent requests to, read once the capture is
- * done, and the hosts of the remote content the story shows, from the same search as the host masks. A story that
- * can't be captured comes back as a broken story. Rejects only with a `BrowserExitedError`.
+ * done, and the hosts of the remote content the story shows, from the same search as the host masks. Gives the area
+ * the snapshot was captured from beside it, and leaves the story's `captureAgainIf` to the caller. A story that can't
+ * be captured comes back as a broken story. Rejects only with a `BrowserExitedError`.
  */
-async function captureOnPage(page: Page, story: StoryToCapture, settings: CaptureSettings): Promise<StoryCapture> {
+async function captureOnPage(
+  page: Page,
+  story: StoryToCapture,
+  settings: CaptureSettings,
+): Promise<CapturedSnapshot | { broken: BrokenStory }> {
   const deadline = performance.now() + settings.readyTimeoutMs
   const timeLeft = (): number => Math.max(0, Math.ceil(deadline - performance.now()))
   let step: Step = 'viewport'
@@ -834,13 +883,48 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
 
     const snapshot = await page.capture(prepared.area)
 
-    return { snapshot, completingMs: wait.completingMs, ...capturedExtrasOf(page, story, settings, prepared) }
+    return {
+      result: { snapshot, completingMs: wait.completingMs, ...capturedExtrasOf(page, story, settings, prepared) },
+      area: prepared.area,
+    }
   } catch (error) {
     if (error instanceof BrowserExitedError) {
       throw error
     }
 
     return { broken: describeFailure(error, step, story, settings.readyTimeoutMs) }
+  }
+}
+
+/**
+ * Calls the story's `captureAgainIf` with a snapshot just captured on the page, leaving the page as it is. When it
+ * resolves true, captures the area the snapshot was captured from again at once, doing nothing to the page in between,
+ * bound by the driver's own capture limit, and gives the snapshot with the second capture as `capturedAgain`. Gives the
+ * snapshot as it is when the story has no `captureAgainIf` or it resolves false. A second capture that fails comes back
+ * as a broken story. Rejects with a `BrowserExitedError` when the browser exits during the second capture, and with
+ * whatever `captureAgainIf` rejects with: it runs outside the handling that turns the page's failures into a broken
+ * story.
+ */
+async function captureAgainIfAsked(
+  page: Page,
+  story: StoryToCapture,
+  settings: CaptureSettings,
+  captured: CapturedSnapshot,
+): Promise<StoryCapture> {
+  const again = await story.captureAgainIf?.(captured.result.snapshot)
+
+  if (again !== true) {
+    return captured.result
+  }
+
+  try {
+    return { ...captured.result, capturedAgain: await page.capture(captured.area) }
+  } catch (error) {
+    if (error instanceof BrowserExitedError) {
+      throw error
+    }
+
+    return { broken: describeFailure(error, 'capture-again', story, settings.readyTimeoutMs) }
   }
 }
 
@@ -889,6 +973,11 @@ export function pageSetupOf(settings: CaptureSettings): PageSetup {
  * other outcome of a retry, a snapshot or another broken reason, is the story's outcome, and no other reason is
  * retried.
  *
+ * When a story has `captureAgainIf`, each attempt that captured a snapshot calls it with the snapshot, the page left as
+ * it is, and captures the same area again at once when it resolves true. A second capture that fails makes the story
+ * broken, and its page is closed; one that navigates away is retried like any attempt that does. When
+ * `captureAgainIf` rejects, the session closes the page and the capture rejects with the same error.
+ *
  * @public
  */
 export function openCaptureSession(driver: Driver, settings: CaptureSettings): CaptureSession {
@@ -922,9 +1011,10 @@ export function openCaptureSession(driver: Driver, settings: CaptureSettings): C
   }
 
   /**
-   * Captures the story on the open page, opening one first when none is. A story that can't be captured, or whose page
-   * can't be opened, comes back as a broken story, and a broken story's page is closed. Rejects only with a
-   * `BrowserExitedError`, and then drops the page without closing it.
+   * Captures the story on the open page, opening one first when none is, and captures it again there when the story's
+   * `captureAgainIf` asks for it. A story that can't be captured, or whose page can't be opened, comes back as a broken
+   * story, and a broken story's page is closed. Rejects with a `BrowserExitedError`, and then drops the page without
+   * closing it. When the story's `captureAgainIf` rejects, closes the page and rejects with the same error.
    */
   const captureOnOpenPage = async (story: StoryToCapture): Promise<StoryCapture> => {
     try {
@@ -942,17 +1032,24 @@ export function openCaptureSession(driver: Driver, settings: CaptureSettings): C
       }
     }
 
-    const capture = await captureOnPage(page, story, settings).catch((error: unknown) => {
-      page = undefined
+    try {
+      const captured = await captureOnPage(page, story, settings)
+      const capture = 'broken' in captured ? captured : await captureAgainIfAsked(page, story, settings, captured)
+
+      if ('broken' in capture) {
+        await closePage()
+      }
+
+      return capture
+    } catch (error) {
+      if (error instanceof BrowserExitedError) {
+        page = undefined
+      } else {
+        await closePage()
+      }
 
       throw error
-    })
-
-    if ('broken' in capture) {
-      await closePage()
     }
-
-    return capture
   }
 
   return {
