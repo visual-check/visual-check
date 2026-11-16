@@ -1,12 +1,15 @@
 import { BaselineError } from '../baselines/baseline-error.js'
 import type { BrokenStory, StoryCapture, StoryHosts, StoryToCapture } from '../capture/capture-session.js'
+import type { PageMessage } from '../capture/driver/driver.js'
 import type { StoryMask } from '../capture/prepare-capture.js'
 import type { StoryOptions } from '../config/story-options.js'
+import type { ReportImages } from '../report/report-document.js'
 import { storyUrlOf } from '../storybook/read-stories.js'
 import {
   ImageDecodeError,
   type ImageRegion,
   type VisualDiff,
+  type VisualDiffFailure,
   type VisualDiffResult,
 } from '../visual-diff/visual-diff.js'
 import type { SnapshotToCapture } from './plan-snapshots.js'
@@ -17,9 +20,20 @@ import type { SnapshotToCapture } from './plan-snapshots.js'
 export type SnapshotStatus = 'passed' | 'differs' | 'missing' | 'broken' | 'written' | 'kept'
 
 /**
- * One snapshot's status, the text its line ends with and, for a captured snapshot, how long Storybook's `completing`
- * render step took and, for `update`, the hosts its story reaches. A snapshot that differs can carry a hint, printed
- * under its line.
+ * What the report keeps of a comparison that differed: why, its message, the pixels that differ and are allowed, and
+ * both sizes.
+ */
+export type ReportedComparison = Pick<
+  VisualDiffFailure,
+  'reason' | 'message' | 'differ' | 'allowed' | 'baselineSize' | 'snapshotSize'
+>
+
+/**
+ * One snapshot's status, the text its line ends with, how many captures it took and, for a captured snapshot, how long
+ * Storybook's `completing` render step took and, for `update`, the hosts its story reaches. A snapshot that differs
+ * can carry a hint, printed under its line. It also carries what the report lists of it: the comparison that
+ * differed, why it broke, the hosts its hint names, the console messages and the images of the listed capture, and why
+ * `update` wrote it.
  */
 export interface SnapshotResult {
   /**
@@ -30,6 +44,12 @@ export interface SnapshotResult {
    * The line's last column, such as `142 ms` or `differs: 84 differ, 80 allowed (20 at scale 2)`.
    */
   detail: string
+  /**
+   * How many captures visual-check asked for: 0 for a missing baseline and a stories file that didn't load, 1 and the
+   * retries made for `test`, and the loads made for `update`. The capture session's own retries of a story that
+   * navigates away aren't counted.
+   */
+  attempts: number
   /**
    * How long Storybook's `completing` render step took for the story, in ms, on its first load for `update`.
    * `undefined` for a story that wasn't captured, or whose page didn't see the step.
@@ -51,6 +71,48 @@ export interface SnapshotResult {
    * lines with no indentation.
    */
   hint?: string[]
+  /**
+   * How the first capture differed from the baseline: for `test`, of a snapshot that differs or passed only on a
+   * retry; for `update`, of a baseline written because it differed.
+   */
+  comparison?: ReportedComparison
+  /**
+   * Why a broken snapshot's story can't be captured.
+   */
+  broken?: BrokenStory
+  /**
+   * The hosts of the remote content a differing snapshot differs only inside, which its hint names.
+   */
+  hintHosts?: string[]
+  /**
+   * The console messages and errors of the capture the report lists: `test`'s first capture, or the load `update`
+   * wrote or broke on. Left out when that capture had no page.
+   */
+  console?: PageMessage[]
+  /**
+   * The images `test` wrote to the report folder, relative to it: the first capture's baseline, snapshot and visual
+   * diff of a snapshot that differs or passed only on a retry, or a broken story's image of its page as the snapshot.
+   */
+  images?: ReportImages
+  /**
+   * Why `update` wrote the baseline: it was missing, or the snapshot differed from it.
+   */
+  writtenFor?: 'missing' | 'differs'
+}
+
+/**
+ * What a broken snapshot's result keeps besides its broken story: how many captures it took and the console messages
+ * of the capture that broke, when it had a page.
+ */
+interface BrokenAttempts {
+  /**
+   * How many captures visual-check asked for, the one that broke included.
+   */
+  attempts: number
+  /**
+   * The console messages and errors of the capture that broke. `undefined` when it had no page or no capture.
+   */
+  console?: PageMessage[] | undefined
 }
 
 /**
@@ -122,17 +184,38 @@ export function storyToCaptureOf({ storybook, story, options, globals, viewport 
 }
 
 /**
- * Gives the result of a snapshot whose baseline is missing, whose detail says to run `update`.
+ * Gives the result of a snapshot whose baseline is missing, whose detail says to run `update`. It took no capture.
  */
 export function missingResultOf(): SnapshotResult {
-  return { status: 'missing', detail: 'missing: no baseline yet; run visual-check update to write it' }
+  return { status: 'missing', detail: 'missing: no baseline yet; run visual-check update to write it', attempts: 0 }
 }
 
 /**
- * Gives a broken snapshot's result, whose detail is the broken story's message.
+ * Gives a broken snapshot's result, whose detail is the broken story's message, with the broken story, how many
+ * captures it took and, when given, the console messages of the capture that broke.
  */
-export function brokenResultOf(broken: BrokenStory): SnapshotResult {
-  return { status: 'broken', detail: `broken: ${broken.message}` }
+export function brokenResultOf(broken: BrokenStory, { attempts, console }: BrokenAttempts): SnapshotResult {
+  return {
+    status: 'broken',
+    detail: `broken: ${broken.message}`,
+    attempts,
+    broken,
+    ...(console === undefined ? {} : { console }),
+  }
+}
+
+/**
+ * Gives what the report keeps of a comparison that differed, leaving out the visual diff's bytes and the regions hit.
+ */
+export function reportedComparisonOf({
+  reason,
+  message,
+  differ,
+  allowed,
+  baselineSize,
+  snapshotSize,
+}: VisualDiffFailure): ReportedComparison {
+  return { reason, message, differ, allowed, baselineSize, snapshotSize }
 }
 
 /**

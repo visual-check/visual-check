@@ -1084,19 +1084,21 @@ describe('a broken story', () => {
       'whose play function threw, even though Storybook reports it finished well',
       { errors: [{ event: 'playFunctionThrewException', text: 'Error: boom', stack: ['at play (a.js:1)'] }] },
       "The story's play function threw Error: boom.",
+      'Error: boom',
       ['at play (a.js:1)'],
     ],
     [
       'whose play function left unhandled errors',
       { status: 'error', errors: [{ event: 'unhandledErrorsWhilePlaying', text: 'Error: late', stack: [] }] },
       "The story's play function left unhandled errors: Error: late.",
+      'Error: late',
       [],
     ],
-  ])('is play-threw for a story %s, keeping its stack', async (_what, answer, message, stack) => {
+  ])('is play-threw for a story %s, keeping its error and stack', async (_what, answer, message, errorText, stack) => {
     const driver = new FakeDriver({ pages: [{ storyWait: async () => finishedAnswer(answer) }] })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: { reason: 'play-threw', message, stack },
+      broken: { reason: 'play-threw', message, errorText, stack },
       console: [],
     })
     expect(driver.methods()).not.toContain('1:capture')

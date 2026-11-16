@@ -20,10 +20,10 @@ const marks: Record<SnapshotStatus, string> = {
 }
 
 /**
- * Writes a path relative to the folder the CLI runs in, with `/` on every OS.
+ * Writes a path relative to `folder`, such as the folder the CLI runs in or the config's, with `/` on every OS.
  */
-export function displayPathOf(cwd: string, path: string): string {
-  return relative(cwd, path).split(sep).join('/')
+export function displayPathOf(folder: string, path: string): string {
+  return relative(folder, path).split(sep).join('/')
 }
 
 /**

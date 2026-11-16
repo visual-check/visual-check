@@ -279,7 +279,9 @@ export interface ReportEntryFields {
    */
   attempts: number
   /**
-   * The pixels of a difference in pixels, otherwise `null`.
+   * How many pixels the first capture of a snapshot that differs or passed on a retry differs by and how many are
+   * allowed, otherwise `null`. On a size difference `differ` counts the padding too and can be at most `allowed`,
+   * since the size alone makes it differ.
    */
   pixels: ReportPixels | null
   /**

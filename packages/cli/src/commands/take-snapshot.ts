@@ -38,7 +38,7 @@ export async function takeSnapshot(
   tools: SnapshotTools,
 ): Promise<SnapshotResult> {
   if ('broken' in item) {
-    return brokenResultOf(item.broken)
+    return brokenResultOf(item.broken, { attempts: 0 })
   }
 
   return tools.command === 'test'

@@ -821,6 +821,11 @@ export type StoryWait =
        */
       message: string
       /**
+       * The error as Storybook described it, such as `Error: boom`, or the unhandled errors, `; ` apart. Empty when it
+       * described none.
+       */
+      errorText: string
+      /**
        * Up to the first 5 frames of the stack of the error `play` threw, or of its first unhandled error: the lines
        * that start with `at `, each trimmed, without the message. None when the error had no stack.
        */
@@ -907,7 +912,12 @@ function classifyFinished(answer: FinishedAnswer): StoryWait {
     }
 
     if (rule.outcome === 'play-threw') {
-      return { outcome: 'play-threw', message: rule.message(error.text), stack: error.stack ?? [] }
+      return {
+        outcome: 'play-threw',
+        message: rule.message(error.text),
+        errorText: error.text,
+        stack: error.stack ?? [],
+      }
     }
 
     return { outcome: rule.outcome, message: rule.message(error.text) }

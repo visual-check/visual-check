@@ -83,7 +83,7 @@ export function consistencyOutputOf({ version, cwd, planned, check }: CheckedPla
   for (const item of planned) {
     if ('broken' in item) {
       broken += 1
-      findings.push(snapshotLineOf(item, brokenResultOf(item.broken)))
+      findings.push(snapshotLineOf(item, brokenResultOf(item.broken, { attempts: 0 })))
     } else if (check.missing.has(item)) {
       missing += 1
       findings.push(snapshotLineOf(item, missingResultOf()))

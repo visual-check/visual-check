@@ -1,6 +1,7 @@
 import { setTimeout as sleep } from 'node:timers/promises'
 import { baselinePathOf, readBaseline, writeBaseline } from '../baselines/baseline-files.js'
 import type { BrokenStory, StoryCapture } from '../capture/capture-session.js'
+import type { PageMessage } from '../capture/driver/driver.js'
 import type { VisualDiff, VisualDiffFailure, VisualDiffResult } from '../visual-diff/visual-diff.js'
 import type { SnapshotToCapture } from './plan-snapshots.js'
 import {
@@ -8,6 +9,7 @@ import {
   type CaptureStory,
   compareCaptures,
   compareWithBaseline,
+  reportedComparisonOf,
   type SnapshotResult,
   storyToCaptureOf,
 } from './snapshot-result.js'
@@ -64,6 +66,10 @@ type FirstLoad =
        * Why the story can't be captured.
        */
       broken: BrokenStory
+      /**
+       * The console messages and errors of the load that broke, left out when it had no page.
+       */
+      console?: PageMessage[]
     }
   | {
       /**
@@ -231,7 +237,9 @@ const unstableStory: BrokenStory = {
  * navigates away, whatever the config's `retries` says. A broken load stops it there, with that load's broken story. A
  * broken story writes nothing. The detail says why a baseline was written, `written: missing`, or `written: differs: `
  * and what `test` would say of the first capture, and ends with ` · flaky` for a flaky snapshot. The result's
- * completing time and hosts are the first load's.
+ * completing time and hosts are the first load's. It counts the loads made, and carries why a baseline was written,
+ * the first load's comparison with the baseline it differed from, and the console messages of the load written or
+ * broken on: the third for a story whose loads never agreed, the first for one that changed after its capture.
  *
  * @throws {BaselineError} When the baseline can't be read, decoded or written.
  * @throws {SnapshotDecodeError} When a snapshot can't be decoded, which the browser's PNG files rule out.
@@ -250,26 +258,26 @@ export async function updateSnapshot(
   const first = await firstLoadOf(item, captureStory, tools, baseline)
 
   if ('broken' in first) {
-    return brokenResultOf(first.broken)
+    return brokenResultOf(first.broken, { attempts: 1, console: first.console })
   }
 
   const { completingMs, hosts } = first.capture
 
   if ('kept' in first) {
-    return { status: 'kept', detail: 'kept', completingMs, hosts }
+    return { status: 'kept', detail: 'kept', attempts: 1, completingMs, hosts }
   }
 
   const { capture: firstCapture, capturedAgain, comparison } = first
   const changed = await changedAfterCaptureOf(visualDiff, item, firstCapture.snapshot, capturedAgain)
 
   if (changed !== undefined) {
-    return brokenResultOf(changed)
+    return brokenResultOf(changed, { attempts: 1, console: firstCapture.console })
   }
 
   const secondCapture = await captureStory(storyToCaptureOf(item))
 
   if ('broken' in secondCapture) {
-    return brokenResultOf(secondCapture.broken)
+    return brokenResultOf(secondCapture.broken, { attempts: 2, console: secondCapture.console })
   }
 
   const keptByBaseline =
@@ -277,21 +285,28 @@ export async function updateSnapshot(
     (await compareWithBaseline(visualDiff, item, baseline.bytes, secondCapture.snapshot, path)).outcome === 'passed'
 
   if (keptByBaseline) {
-    return { status: 'kept', detail: 'kept · flaky', completingMs, hosts, flaky: true }
+    return { status: 'kept', detail: 'kept · flaky', attempts: 2, completingMs, hosts, flaky: true }
   }
 
   const writtenDetail = comparison === undefined ? 'written: missing' : `written: differs: ${comparison.message}`
+  const written = {
+    completingMs,
+    hosts,
+    ...(comparison === undefined
+      ? { writtenFor: 'missing' as const }
+      : { comparison: reportedComparisonOf(comparison), writtenFor: 'differs' as const }),
+  }
 
   if (await capturesAgree(visualDiff, item, firstCapture.snapshot, secondCapture.snapshot)) {
     await writeBaseline(path, secondCapture.snapshot)
 
-    return { status: 'written', detail: writtenDetail, completingMs, hosts }
+    return { status: 'written', detail: writtenDetail, attempts: 2, ...written, console: secondCapture.console }
   }
 
   const thirdCapture = await captureStory(storyToCaptureOf(item))
 
   if ('broken' in thirdCapture) {
-    return brokenResultOf(thirdCapture.broken)
+    return brokenResultOf(thirdCapture.broken, { attempts: 3, console: thirdCapture.console })
   }
 
   const thirdAgrees =
@@ -301,8 +316,15 @@ export async function updateSnapshot(
   if (thirdAgrees) {
     await writeBaseline(path, thirdCapture.snapshot)
 
-    return { status: 'written', detail: `${writtenDetail} · flaky`, completingMs, hosts, flaky: true }
+    return {
+      status: 'written',
+      detail: `${writtenDetail} · flaky`,
+      attempts: 3,
+      ...written,
+      flaky: true,
+      console: thirdCapture.console,
+    }
   }
 
-  return brokenResultOf(unstableStory)
+  return brokenResultOf(unstableStory, { attempts: 3, console: thirdCapture.console })
 }

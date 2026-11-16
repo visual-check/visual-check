@@ -2064,7 +2064,12 @@ describe('readStoryWait', () => {
     [
       'play threw',
       { errors: [recorded('playFunctionThrewException', 'Error: boom')] },
-      { outcome: 'play-threw', message: "The story's play function threw Error: boom.", stack: [] },
+      {
+        outcome: 'play-threw',
+        message: "The story's play function threw Error: boom.",
+        errorText: 'Error: boom',
+        stack: [],
+      },
     ],
     [
       'play left unhandled errors',
@@ -2072,6 +2077,7 @@ describe('readStoryWait', () => {
       {
         outcome: 'play-threw',
         message: "The story's play function left unhandled errors: Error: one; Error: two.",
+        errorText: 'Error: one; Error: two',
         stack: [],
       },
     ],
@@ -2116,7 +2122,12 @@ describe('readStoryWait', () => {
           recorded('playFunctionThrewException', 'Error: play'),
         ],
       },
-      { outcome: 'play-threw', message: "The story's play function threw Error: play.", stack: [] },
+      {
+        outcome: 'play-threw',
+        message: "The story's play function threw Error: play.",
+        errorText: 'Error: play',
+        stack: [],
+      },
     ],
     [
       'unhandled errors, over the story throwing, storyErrored, the error display and the status',
@@ -2132,6 +2143,7 @@ describe('readStoryWait', () => {
       {
         outcome: 'play-threw',
         message: "The story's play function left unhandled errors: Error: unhandled.",
+        errorText: 'Error: unhandled',
         stack: [],
       },
     ],
@@ -2162,7 +2174,12 @@ describe('readStoryWait', () => {
           recorded('playFunctionThrewException', 'Error: second'),
         ],
       },
-      { outcome: 'play-threw', message: "The story's play function threw Error: first.", stack: [] },
+      {
+        outcome: 'play-threw',
+        message: "The story's play function threw Error: first.",
+        errorText: 'Error: first',
+        stack: [],
+      },
     ],
   ])('reads %s', (_what, answer, wait) => {
     expect(readStoryWait(finishedAnswer(answer))).toEqual(wait)
@@ -2174,6 +2191,7 @@ describe('readStoryWait', () => {
     expect(readStoryWait(finishedAnswer({ errors: [error] }))).toEqual({
       outcome: 'play-threw',
       message: "The story's play function threw Error: boom.",
+      errorText: 'Error: boom',
       stack: ['at play (a.js:1)', 'at run'],
     })
   })

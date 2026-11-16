@@ -260,6 +260,11 @@ export type BrokenStory =
        */
       message: string
       /**
+       * The error as Storybook described it, such as `Error: boom`, or the unhandled errors, `; ` apart. Empty when it
+       * described none.
+       */
+      errorText: string
+      /**
        * Up to the first 5 frames of the error's stack, the lines that start with `at `, each trimmed, without its
        * message. None when the error had no stack.
        */
@@ -574,7 +579,7 @@ function stillWaitingFor(wait: Extract<StoryWait, { outcome: 'timed-out' }>): st
 function describeStoryWait(wait: Exclude<StoryWait, { outcome: 'finished' }>, readyTimeoutMs: number): BrokenStory {
   switch (wait.outcome) {
     case 'play-threw':
-      return { reason: 'play-threw', message: wait.message, stack: wait.stack }
+      return { reason: 'play-threw', message: wait.message, errorText: wait.errorText, stack: wait.stack }
     case 'errored':
       return { reason: 'error', message: wait.message }
     case 'timed-out':
