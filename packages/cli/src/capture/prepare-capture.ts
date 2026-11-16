@@ -45,18 +45,44 @@ export interface CapturePrepRequest {
    */
   maskColor: string
   /**
-   * Whether the answer also lists the hosts of the remote content the story shows, in `remoteHosts`. It makes the
-   * remote content search run even when there are no host masks.
+   * Whether to bring back the remote content the page shows. Without it, and without a host mask, no remote content
+   * search runs.
    */
-  listRemoteHosts: boolean
+  findRemote: boolean
+}
+
+/**
+ * Remote content the page shows, as the capture preparation gives it: one item per element and host.
+ */
+export interface PageRemoteContent {
+  /**
+   * The host it comes from, such as `images.example.com`, with its port when the URL has one.
+   */
+  host: string
+  /**
+   * The distance from the top document's left edge to the element's border box, in CSS pixels, not rounded.
+   */
+  x: number
+  /**
+   * The distance from the top document's top edge to the element's border box, in CSS pixels, not rounded.
+   */
+  y: number
+  /**
+   * The border box's width, in CSS pixels, over 0.
+   */
+  width: number
+  /**
+   * The border box's height, in CSS pixels, over 0.
+   */
+  height: number
 }
 
 /**
  * The source of a function, evaluated in the page as part of the page script, that creates the capture preparation.
  * It takes what the page script kept at document start: `shadowRoots`, `findRemoteContent`, the remote content search,
  * and `stateGlobal`, the name of the global it keeps its state under in every document. It gives a function that takes
- * a request, `{ element, masks, maskColor, listRemoteHosts }`, and a time limit in ms, and prepares the page for its
- * capture. Creating it reads nothing in the page. It reads the page's scroll once.
+ * a request, `{ element, masks, maskColor, findRemote }`, and a time limit in ms, and prepares the page for its capture.
+ * Creating it reads nothing in the page. It reads the page's scroll once.
  *
  * 1. Measures the element, when `element` isn't `null`: the first match of the selector in the top document. A
  *    selector that throws gives `{ outcome: 'invalid-selector', of: 'element', message }`. No match gives
@@ -67,11 +93,11 @@ export interface CapturePrepRequest {
  *    width or height, before or after that, or one that can't be read, gives `found: 'zero-size'`.
  * 2. Finds the masks' boxes. A selector mask covers each element of the top document that matches it and has an
  *    area, by its border box, with the page's scroll, not rounded. A selector that throws gives
- *    `{ outcome: 'invalid-selector', of: 'mask', name, message }`. The remote content search runs once, with the same
- *    time limit, only when there's at least one host mask or `listRemoteHosts` is set, and it's shared by both. Each
- *    item whose `host` or `hostname` is a host mask's host, in lowercase, gives its box. A search that timed out gives
- *    `{ outcome: 'timed-out' }` when there's a host mask, since its content would show in the capture. Without one, it
- *    only leaves the list of remote hosts empty.
+ *    `{ outcome: 'invalid-selector', of: 'mask', name, message }`. Then the remote content search runs once, with the
+ *    same time limit, only when there's a host mask or `findRemote` is true: host masks and `findRemote` share it.
+ *    For a host mask, each item whose `host` or `hostname` is the mask's host, in lowercase, gives its box, and a
+ *    search that timed out gives `{ outcome: 'timed-out' }`. With no host mask, a search that timed out or rejected
+ *    leaves the remote content unknown and fails nothing.
  * 3. Paints the boxes, when there's at least one: one `visual-check-masks` element holding one `div` per box, in
  *    `maskColor`, appended to the top document's root element. Inline styles with `!important` keep the page's own
  *    styles off them. It's a manual popover, shown at once, so it sits in the top layer, over every dialog and popover
@@ -91,15 +117,16 @@ export interface CapturePrepRequest {
  *    shadow roots and the frames in it. Each document gets a sheet made by its own window, as a constructed sheet can
  *    only be adopted in the document that made it.
  *
- * It answers `{ outcome: 'ready', box }`, where `box` is the element's box, or `null` for the full page. With
- * `listRemoteHosts`, the answer also has `remoteHosts`: the `host` of each item the search found, once, in the order
- * found, leaving out a host a host mask covers, as step 2 matches it. When the element is missing, a selector is
- * invalid or the search timed out, it paints nothing and hides no caret. It never throws. A mask must never fail
- * open: when finding the masks' boxes or painting them throws, as when the search rejects or an element can't be
- * created, it answers `{ outcome: 'paint-failed', message }` and hides no caret, with what it painted so far left in
- * the page. A mask element whose box can't be read covers nothing, and a host that can't be shown as a popover takes
- * the highest `z-index`, as said above. Hiding the caret is best effort: a root that can't adopt the sheet is left out,
- * and it still answers `ready`.
+ * It answers `{ outcome: 'ready', box }`, where `box` is the element's box, or `null` for the full page. When
+ * `findRemote` is true and the search answered, it adds `remote`, the remote content found, maybe none: each item's
+ * `host`, with its port when the URL has one, and its box, `x`, `y`, `width` and `height`, in CSS pixels of the top
+ * document, as the search gives them. Without `remote`, the remote content is unknown. When the element is missing, a
+ * selector is invalid or the search for a host mask timed out, it paints nothing and hides no caret. It never throws. A
+ * mask must never fail open: when finding the masks' boxes or painting them throws, as when the search for a host mask
+ * rejects or an element can't be created, it answers `{ outcome: 'paint-failed', message }` and hides no caret, with
+ * what it painted so far left in the page. A mask element whose box can't be read covers nothing, and a host that can't
+ * be shown as a popover takes the highest `z-index`, as said above. Hiding the caret is best effort: a root that can't
+ * adopt the sheet is left out, and it still answers `ready`.
  */
 export const prepareCaptureFunction = `(context) => {
   const { shadowRoots, findRemoteContent, stateGlobal } = context
@@ -186,13 +213,24 @@ export const prepareCaptureFunction = `(context) => {
     return { boxes: elements.map((element) => documentBoxOf(element, scroll)).filter((box) => box !== undefined) }
   }
 
-  // Whether a host mask covers an item of the remote content search, by its host or its hostname.
-  const covers = (mask, item) => {
-    const host = mask.host.toLowerCase()
-    return item.host === host || item.hostname === host
+  // Runs the remote content search once, when a host mask or the request needs it, or gives undefined when neither
+  // does. A search that rejects fails the host masks, as a mask must never fail open, and with no host mask leaves the
+  // remote content unknown.
+  const searchOnce = async (hostMasks, findRemote, timeoutMs) => {
+    if (hostMasks.length === 0 && !findRemote) {
+      return undefined
+    }
+    try {
+      return await findRemoteContent(timeoutMs)
+    } catch (error) {
+      if (hostMasks.length > 0) {
+        throw error
+      }
+      return undefined
+    }
   }
 
-  // The boxes of the remote content the host masks cover, given the search, which ran when there's a host mask.
+  // The boxes of the remote content the host masks cover, or why there are none.
   const hostBoxesOf = (hostMasks, search) => {
     if (hostMasks.length === 0) {
       return { boxes: [] }
@@ -202,8 +240,9 @@ export const prepareCaptureFunction = `(context) => {
     }
     const boxes = []
     for (const mask of hostMasks) {
+      const host = mask.host.toLowerCase()
       for (const item of search.items) {
-        if (covers(mask, item)) {
+        if (item.host === host || item.hostname === host) {
           boxes.push({ left: item.x, top: item.y, right: item.x + item.width, bottom: item.y + item.height })
         }
       }
@@ -211,23 +250,24 @@ export const prepareCaptureFunction = `(context) => {
     return { boxes }
   }
 
-  // The host of each item the search found, once, in the order found, leaving out the hosts a host mask covers.
-  // Nothing when the search timed out.
-  const remoteHostsOf = (hostMasks, search) => {
-    if (search.outcome === 'timed-out') {
-      return []
+  // The remote content a search found, each item by its host and box, or undefined when it's unknown: no search ran,
+  // it rejected or it timed out.
+  const remoteOf = (search) => {
+    if (search === undefined || search.outcome !== 'found') {
+      return undefined
     }
-    const hosts = []
-    for (const item of search.items) {
-      if (!hostMasks.some((mask) => covers(mask, item)) && !hosts.includes(item.host)) {
-        hosts.push(item.host)
-      }
-    }
-    return hosts
+    return search.items.map((item) => ({
+      host: item.host,
+      x: item.x,
+      y: item.y,
+      width: item.width,
+      height: item.height,
+    }))
   }
 
-  // The boxes of the selector masks, or why there are none.
-  const selectorMaskBoxesOf = (masks, scroll) => {
+  // The boxes of every mask, selector masks first, with the remote content found when the request asks for it, or why
+  // there are none.
+  const maskBoxesOf = async (masks, scroll, findRemote, timeoutMs) => {
     const boxes = []
     for (const mask of masks) {
       if (typeof mask.selector === 'string') {
@@ -238,7 +278,13 @@ export const prepareCaptureFunction = `(context) => {
         boxes.push(...found.boxes)
       }
     }
-    return { boxes }
+    const hostMasks = masks.filter((mask) => typeof mask.host === 'string')
+    const search = await searchOnce(hostMasks, findRemote, timeoutMs)
+    const found = hostBoxesOf(hostMasks, search)
+    if (found.outcome !== undefined) {
+      return found
+    }
+    return { boxes: [...boxes, ...found.boxes], remote: findRemote ? remoteOf(search) : undefined }
   }
 
   // The inline style of the element that holds the masks: a box at the document's origin, the size of its scrollable
@@ -295,23 +341,16 @@ export const prepareCaptureFunction = `(context) => {
     }
   }
 
-  // Finds the masks' boxes and paints them, giving the remote hosts to list, only when asked for, or why it couldn't
-  // be done. The remote content search runs once, when there's a host mask or the hosts are asked for. A mask
-  // unpainted would leave its content in the capture, so anything thrown here fails the preparation.
-  const paintMasks = async (masks, maskColor, scroll, listRemoteHosts, timeoutMs) => {
+  // Finds the masks' boxes and paints them, giving the remote content found when that's done, or why it couldn't be.
+  // A mask unpainted would leave its content in the capture, so anything thrown here fails the preparation.
+  const paintMasks = async (masks, maskColor, scroll, findRemote, timeoutMs) => {
     try {
-      const hostMasks = masks.filter((mask) => typeof mask.host === 'string')
-      const selected = selectorMaskBoxesOf(masks, scroll)
-      if (selected.outcome !== undefined) {
-        return selected
+      const found = await maskBoxesOf(masks, scroll, findRemote, timeoutMs)
+      if (found.outcome !== undefined) {
+        return found
       }
-      const search = hostMasks.length > 0 || listRemoteHosts ? await findRemoteContent(timeoutMs) : undefined
-      const hosted = hostBoxesOf(hostMasks, search)
-      if (hosted.outcome !== undefined) {
-        return hosted
-      }
-      paint([...selected.boxes, ...hosted.boxes], maskColor)
-      return listRemoteHosts ? { remoteHosts: remoteHostsOf(hostMasks, search) } : {}
+      paint(found.boxes, maskColor)
+      return { remote: found.remote }
     } catch (error) {
       return { outcome: 'paint-failed', message: messageOf(error) }
     }
@@ -340,20 +379,21 @@ export const prepareCaptureFunction = `(context) => {
   }
 
   return async (request, timeoutMs) => {
-    const { element, masks, maskColor, listRemoteHosts } = request
+    const { element, masks, maskColor, findRemote } = request
     const scroll = pageScrollOf()
     const measured = element === null ? { box: null } : elementBoxOf(element, scroll)
     if (measured.outcome !== undefined) {
       return measured
     }
-    const painted = await paintMasks(masks, maskColor, scroll, listRemoteHosts, timeoutMs)
+    const painted = await paintMasks(masks, maskColor, scroll, findRemote, timeoutMs)
     if (painted.outcome !== undefined) {
       return painted
     }
     try {
       hideCaretIn(document, shadowRoots)
     } catch {}
-    return { outcome: 'ready', box: measured.box, ...painted }
+    const ready = { outcome: 'ready', box: measured.box }
+    return painted.remote === undefined ? ready : { ...ready, remote: painted.remote }
   }
 }`
 
@@ -371,10 +411,10 @@ export type CapturePrep =
        */
       box: CaptureBox | null
       /**
-       * The hosts of the remote content the story shows, each once, in the order found, without the hosts a host mask
-       * covers, such as `images.example.com` or `cdn.example.com:8443`. Only when the request asked for them.
+       * The remote content the page shows, when the request asked for it and the search answered. Without it, the
+       * remote content is unknown.
        */
-      remoteHosts?: string[]
+      remote?: PageRemoteContent[]
     }
   | {
       /**
@@ -460,36 +500,62 @@ function isCaptureBox(value: unknown): value is CaptureBox {
 }
 
 /**
- * Whether a value is a list of text, as the page gives its lists of names and hosts.
+ * Whether a value is an item of the remote content the page gives: a `host` that isn't empty, finite `x` and `y`, and
+ * finite `width` and `height` over 0.
  */
-export function isTextList(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
+function isRemoteItem(value: unknown): value is PageRemoteContent {
+  if (typeof value !== 'object' || value === null) {
+    return false
+  }
+
+  const { host, x, y, width, height }: Record<string, unknown> = { ...value }
+  const sides = [x, y, width, height]
+
+  if (typeof host !== 'string' || host === '' || !sides.every((side) => Number.isFinite(side))) {
+    return false
+  }
+
+  return Number(width) > 0 && Number(height) > 0
 }
 
 /**
- * Reads an answer of the page that's ready, with the element's box or none, and the remote hosts when it has them.
- * Gives `undefined` for any other answer, one whose `remoteHosts` isn't a list of text included.
+ * Reads the remote content the page gives with an answer that's ready, keeping each item's host and box only. Gives
+ * `{ remote: undefined }` when there's none, and `undefined` when it's not a list of items the page gives.
+ */
+function readRemote(value: unknown): { remote: PageRemoteContent[] | undefined } | undefined {
+  if (value === undefined) {
+    return { remote: undefined }
+  }
+
+  if (!Array.isArray(value) || !value.every(isRemoteItem)) {
+    return undefined
+  }
+
+  return { remote: value.map(({ host, x, y, width, height }) => ({ host, x, y, width, height })) }
+}
+
+/**
+ * Reads an answer of the page that's ready, with the element's box or none, and the remote content when it gives one.
+ * Gives `undefined` for any other answer.
  */
 function readReady(answer: Record<string, unknown>): CapturePrep | undefined {
-  const { box, remoteHosts } = answer
+  const { box } = answer
+  const read = readRemote(answer.remote)
 
-  if (answer.outcome !== 'ready') {
+  if (answer.outcome !== 'ready' || read === undefined) {
     return undefined
   }
 
-  if (remoteHosts !== undefined && !isTextList(remoteHosts)) {
+  if (box !== null && !isCaptureBox(box)) {
     return undefined
   }
 
-  const hosts = remoteHosts === undefined ? {} : { remoteHosts: [...remoteHosts] }
-
-  if (box === null) {
-    return { outcome: 'ready', box: null, ...hosts }
+  const ready: Extract<CapturePrep, { outcome: 'ready' }> = {
+    outcome: 'ready',
+    box: box === null ? null : { x: box.x, y: box.y, width: box.width, height: box.height },
   }
 
-  return isCaptureBox(box)
-    ? { outcome: 'ready', box: { x: box.x, y: box.y, width: box.width, height: box.height }, ...hosts }
-    : undefined
+  return read.remote === undefined ? ready : { ...ready, remote: read.remote }
 }
 
 /**

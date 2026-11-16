@@ -219,6 +219,55 @@ const onePixelChange = {
 }
 
 /**
+ * The flaky case: the story it changes, by its ID and the pattern that matches only it, and the deliberate change's
+ * stylesheet, which the server adds to that story's first page loads only, so a retry past them captures the story as
+ * its baseline has it. Its runs, each on a server of its own: the `retries` its config sets, the config's default when
+ * not given, how many of the story's first page loads change, the outcome `test` gives the story, and how many times
+ * the server is asked for its page, once and then on each retry `test` takes.
+ */
+const flakyChange = {
+  storyId: deliberateChange.storyId,
+  filter: /^card--default$/,
+  markup: deliberateChange.style,
+  runs: [
+    { name: 'default retries', changedLoads: 1, outcome: 'passed', storyPages: 2 },
+    { name: 'retries: 0', retries: 0, changedLoads: 1, outcome: 'differs', storyPages: 1 },
+    { name: 'retries: 2', retries: 2, changedLoads: 2, outcome: 'passed', storyPages: 3 },
+  ] satisfies FlakyRun[],
+}
+
+/**
+ * The heading `test` lists its flaky snapshots under, after the snapshot lines, each name on a line of its own
+ * indented two spaces.
+ */
+const flakyHeading = 'Flaky snapshots, which passed on a retry:'
+
+/**
+ * What the detail of a snapshot line that passed on a retry ends with. The `passed` outcome's pattern pins it to the
+ * end.
+ */
+const flakyMark = '· flaky'
+
+/**
+ * The remote content hint case: the story it unmasks, by its ID and the pattern that matches only it, and the script
+ * it adds to every `iframe.html`, which runs before Storybook imports any stories file and sets the story's mask
+ * `remote` to `null`, so the snapshot shows the remote content its baseline has masked. The options-reading page gets
+ * the script too, and visual-check reads the mask there. Every differing pixel then lies inside remote content from
+ * `localhost` on the server's port, the list marker of `list-style-image` included, since the search counts the whole
+ * list, so `test` hints at a mask for that host.
+ */
+const unmaskedRemoteContent = {
+  storyId: 'remote-content--every-kind',
+  filter: /^remote-content--every-kind$/,
+  script: '<script>globalThis.__visualCheckE2eUnmask = true</script>',
+}
+
+/**
+ * The address of the docs page the remote content hint links to.
+ */
+const remoteContentDocs = 'https://visual-check.vercel.app/docs/remote-content'
+
+/**
  * The images `test` writes to the report for a differing snapshot, `<key>.<kind>.png` each.
  */
 const reportImageKinds = ['baseline', 'snapshot', 'diff'] as const
@@ -442,7 +491,7 @@ const snapshotLinePattern = /^[✓✗!] \S+ {2}(\S+)(?: {2}([a-z0-9-]+))? {2}(.+
  * The detail each outcome's line ends with.
  */
 const outcomeDetails: [Outcome, RegExp][] = [
-  ['passed', /^\d+ ms$/],
+  ['passed', /^\d+ ms( · flaky)?$/],
   ['differs', /^differs: /],
   ['broken', /^broken: /],
   ['missing', /^missing: /],
@@ -480,6 +529,11 @@ interface ServeOptions {
    */
   injectIntoIframe?: string
   /**
+   * Markup added to the end of the `<head>` of one story's first page loads only, after `injectIntoIframe`'s: the
+   * first `loads` requests for that story's page. The options-reading page never gets it.
+   */
+  injectIntoFirstLoads?: FirstLoadsMarkup
+  /**
    * Leaves every story page request unanswered until `releaseStoryPages()` or the server stops, so a run can't finish
    * a capture meanwhile. The options-reading page is answered at once.
    */
@@ -489,6 +543,50 @@ interface ServeOptions {
    * entry is listed when not given.
    */
   onlyStory?: string
+}
+
+/**
+ * Markup for one story's first page loads.
+ */
+interface FirstLoadsMarkup {
+  /**
+   * The ID of the story whose page gets the markup.
+   */
+  storyId: string
+  /**
+   * How many of that story's first page loads get it.
+   */
+  loads: number
+  /**
+   * The markup.
+   */
+  markup: string
+}
+
+/**
+ * One run of the flaky case.
+ */
+interface FlakyRun {
+  /**
+   * What the run's problems start with.
+   */
+  name: string
+  /**
+   * How many of the story's first page loads change.
+   */
+  changedLoads: number
+  /**
+   * The outcome `test` gives the story.
+   */
+  outcome: Outcome
+  /**
+   * How many times the server is asked for the story's page.
+   */
+  storyPages: number
+  /**
+   * The `retries` the run's config sets. The config's default when not given.
+   */
+  retries?: number
 }
 
 /**
@@ -870,11 +968,16 @@ function withMarkup(page: Buffer, markup: string | undefined): Buffer | string {
 }
 
 /**
- * Answers a request for a URL path with the static build's file, or 404 when it names no file there. Every
- * `iframe.html`, the options-reading page included, gets the markup `injectIntoIframe` gives, and `index.json` lists
- * only the story `onlyStory` names, when it names one.
+ * Answers a request for a URL path with the static build's file, or 404 when it names no file there. An
+ * `iframe.html` gets the markup, when there is any, and `index.json` lists only the story `onlyStory` names, when it
+ * names one.
  */
-function serveFile(pathname: string, response: ServerResponse, options: ServeOptions): void {
+function serveFile(
+  pathname: string,
+  response: ServerResponse,
+  options: ServeOptions,
+  markup: string | undefined,
+): void {
   const filePath = staticFileOf(pathname)
 
   if (filePath === undefined) {
@@ -887,16 +990,21 @@ function serveFile(pathname: string, response: ServerResponse, options: ServeOpt
 
   response
     .writeHead(200, { 'content-type': contentTypes[extname(filePath)] ?? 'application/octet-stream' })
-    .end(changedBodyOf(pathname, body, options))
+    .end(changedBodyOf(pathname, body, options, markup))
 }
 
 /**
- * Gives a static file's body as the options change it: every `iframe.html` with the markup `injectIntoIframe` gives,
- * and `index.json` with only the entry `onlyStory` names.
+ * Gives a static file's body as the server changes it: an `iframe.html` with the markup, when there is any, and
+ * `index.json` with only the entry `onlyStory` names.
  */
-function changedBodyOf(pathname: string, body: Buffer, options: ServeOptions): Buffer | string {
+function changedBodyOf(
+  pathname: string,
+  body: Buffer,
+  options: ServeOptions,
+  markup: string | undefined,
+): Buffer | string {
   if (pathname === '/iframe.html') {
-    return withMarkup(body, options.injectIntoIframe)
+    return withMarkup(body, markup)
   }
 
   if (pathname === '/index.json' && options.onlyStory !== undefined) {
@@ -925,6 +1033,19 @@ function storyPageIdOf(pathname: string, searchParams: URLSearchParams): string 
 }
 
 /**
+ * Gives the markup a story page gets: `injectIntoIframe`'s, then `injectIntoFirstLoads`'s when the page is of its
+ * story and `load`, which counts the requests for the story's page so far, this one included, is one of its first
+ * `loads`.
+ */
+function storyPageMarkupOf(options: ServeOptions, storyId: string, load: number): string | undefined {
+  const { injectIntoIframe, injectIntoFirstLoads: firstLoads } = options
+  const isFirstLoad = firstLoads !== undefined && firstLoads.storyId === storyId && load <= firstLoads.loads
+
+  // join writes an undefined injectIntoIframe as nothing.
+  return isFirstLoad ? [injectIntoIframe, firstLoads.markup].join('') : injectIntoIframe
+}
+
+/**
  * Serves the static build on a free port of 127.0.0.1, changed as the options say, and records the requests for story
  * pages. While it holds them, it keeps each one's answer until they're released. The options-reading page is never
  * held or recorded, so a run reads every story's options before it asks for a story page. It never answers a request
@@ -936,10 +1057,15 @@ async function serveStorybook(options: ServeOptions = {}): Promise<StorybookServ
   let holding = options.holdStoryPages ?? false
 
   /**
-   * Records a request for a story page, then answers it, or keeps the answer while the server holds story pages.
+   * Records a request for a story page, then answers it with the markup that load gets, or keeps the answer while the
+   * server holds story pages.
    */
-  const answerStoryPage = (storyId: string, answer: () => void): void => {
+  const answerStoryPage = (storyId: string, answerWith: (markup: string | undefined) => void): void => {
     storyPageRequests.push(storyId)
+
+    const load = storyPageRequests.filter((requested) => requested === storyId).length
+    const markup = storyPageMarkupOf(options, storyId, load)
+    const answer = (): void => answerWith(markup)
 
     if (holding) {
       heldAnswers.push(answer)
@@ -952,7 +1078,6 @@ async function serveStorybook(options: ServeOptions = {}): Promise<StorybookServ
 
   const server = createServer((request, response) => {
     const { pathname, searchParams } = new URL(request.url ?? '/', 'http://127.0.0.1')
-    const answer = (): void => serveFile(pathname, response, options)
     const storyId = storyPageIdOf(pathname, searchParams)
 
     if (pathname === neverAnsweredPath) {
@@ -960,12 +1085,12 @@ async function serveStorybook(options: ServeOptions = {}): Promise<StorybookServ
     }
 
     if (storyId !== undefined) {
-      answerStoryPage(storyId, answer)
+      answerStoryPage(storyId, (markup) => serveFile(pathname, response, options, markup))
 
       return
     }
 
-    answer()
+    serveFile(pathname, response, options, options.injectIntoIframe)
   })
 
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -1143,12 +1268,13 @@ function exitCodeProblems(command: string, run: CliRun, expected: number): strin
 }
 
 /**
- * Writes what a run printed on standard error on one line, in parentheses, or nothing when it printed nothing.
+ * Writes what a run printed on standard output or error on one line, in parentheses, or nothing when it printed
+ * nothing.
  */
-function outputOf(stderr: string): string {
-  const output = stderr.trim().replace(/\s*\n\s*/g, ' ')
+function outputOf(output: string): string {
+  const oneLine = output.trim().replace(/\s*\n\s*/g, ' ')
 
-  return output ? ` (${output})` : ''
+  return oneLine ? ` (${oneLine})` : ''
 }
 
 /**
@@ -1252,7 +1378,7 @@ interface ConfigOptions {
    */
   readyTimeout?: number
   /**
-   * How many more times a failing snapshot is captured before it fails. The config's default when not given.
+   * How many more times `test` captures a snapshot that differs before it fails. The config's default when not given.
    */
   retries?: number
   /**
@@ -1638,12 +1764,8 @@ function lineSaysProblems(run: CliRun, storyId: string, text: string): string[] 
  */
 function navigatedAwayProblems(run: CliRun, server: StorybookServer): string[] {
   const { storyId, says, loads } = hazards.navigatesAway
-  const seen = server.storyPageRequests().filter((requested) => requested === storyId).length
 
-  return [
-    ...lineSaysProblems(run, storyId, says),
-    ...(seen === loads ? [] : [`test: the server was asked for ${storyId}'s page ${seen} times, expected ${loads}`]),
-  ]
+  return [...lineSaysProblems(run, storyId, says), ...storyPageCountProblems(server, storyId, loads)]
 }
 
 /**
@@ -1764,6 +1886,135 @@ function reportImageProblems(configFolder: string, key: string): string[] {
     .map((kind) => join(imagesFolder, `${key}.${kind}.png`))
     .filter((path) => !isFile(path))
     .map((path) => `test wrote no ${path}`)
+}
+
+/**
+ * The flaky case's runs, one after the other, each on a server of its own that changes the card story's first page
+ * loads and with a config of its own: see `flakyChange`. Each problem starts with its run's name.
+ */
+async function checkFlakyRetries(): Promise<string[]> {
+  const problems: string[] = []
+
+  for (const flakyRun of flakyChange.runs) {
+    const runProblems = await flakyRunProblems(flakyRun)
+
+    problems.push(...runProblems.map((problem) => `${flakyRun.name}: ${problem}`))
+  }
+
+  return problems
+}
+
+/**
+ * Runs `test` on the card story against the committed baselines, with the story's first `changedLoads` page loads
+ * changed and a config that sets the run's `retries`. `test` gives the story the run's outcome, and the server is asked
+ * for its page the run's number of times. A pass is flaky: its line ends with `· flaky`, `test` lists it under the
+ * flaky heading, its counts say `1 passed (1 flaky)`, and the report beside the config keeps its first capture's
+ * baseline, snapshot and diff. A snapshot that differs isn't flaky, so `test` lists no flaky snapshot.
+ */
+async function flakyRunProblems({ changedLoads, outcome, storyPages, retries }: FlakyRun): Promise<string[]> {
+  const { storyId, filter, markup } = flakyChange
+  const serveOptions = { injectIntoFirstLoads: { storyId, loads: changedLoads, markup } }
+
+  return await withStorybookServer(serveOptions, (server) =>
+    withTemporaryFolder(async (folder) => {
+      const config = writeConfig(folder, server.url, committedBaselines, retries === undefined ? {} : { retries })
+      const run = await runCli(['test', '--filter', filter.source, '--config', config])
+
+      return [
+        ...expectedRunProblems('test', run, { [storyId]: outcome }),
+        ...storyPageCountProblems(server, storyId, storyPages),
+        ...(outcome === 'passed' ? flakyPassProblems(run, storyId, folder) : notFlakyProblems(run)),
+      ]
+    }),
+  )
+}
+
+/**
+ * Gives the problem when the server wasn't asked for a story's page this many times, or none when it was.
+ */
+function storyPageCountProblems(server: StorybookServer, storyId: string, count: number): string[] {
+  const seen = server.storyPageRequests().filter((requested) => requested === storyId).length
+
+  return seen === count ? [] : [`test: the server was asked for ${storyId}'s page ${seen} times, expected ${count}`]
+}
+
+/**
+ * Lists what shows a story's pass isn't flaky in a run of `test` with the Storybook `react`: its line doesn't end with
+ * `· flaky`, the flaky heading isn't followed by its name, the counts don't say `1 passed (1 flaky)`, or the report
+ * beside the config doesn't hold its images.
+ */
+function flakyPassProblems(run: CliRun, storyId: string, configFolder: string): string[] {
+  return [
+    ...lineSaysProblems(run, storyId, flakyMark),
+    ...stdoutSaysProblems(run, [`${flakyHeading}\n  react  ${storyId}\n`, '1 passed (1 flaky)']),
+    ...reportImageProblems(configFolder, storyId),
+  ]
+}
+
+/**
+ * Lists each text a run's standard output doesn't hold, with the whole output on one line.
+ */
+function stdoutSaysProblems(run: CliRun, texts: string[]): string[] {
+  return texts
+    .filter((text) => !run.stdout.includes(text))
+    .map((text) => `test's output doesn't say ${JSON.stringify(text)}${outputOf(run.stdout)}`)
+}
+
+/**
+ * Gives the problem when a run of `test` marks a line flaky or lists flaky snapshots, or none.
+ */
+function notFlakyProblems(run: CliRun): string[] {
+  const flaky = run.snapshots.some((snapshot) => snapshot.detail.includes(flakyMark))
+
+  return flaky || run.stdout.includes(flakyHeading) ? [`test reports a flaky snapshot${outputOf(run.stdout)}`] : []
+}
+
+/**
+ * With the remote content story's mask `remote` dropped, `test` on that story against the committed baselines exits 1:
+ * the story differs, since its snapshot shows the remote content its baseline has masked, and on its one retry every
+ * differing pixel lies inside that content. So the story's line is followed by the hint, each line indented two
+ * spaces: that it differs only inside remote content from `localhost` on the server's port, the mask line for that
+ * host, and the docs page. The story differing also shows that the script reached the options-reading page.
+ */
+async function checkRemoteContentHint(): Promise<string[]> {
+  const { storyId, filter, script } = unmaskedRemoteContent
+
+  return await withStorybookServer({ injectIntoIframe: script }, (server) =>
+    withTemporaryFolder(async (folder) => {
+      const config = writeConfig(folder, server.url, committedBaselines)
+      const run = await runCli(['test', '--filter', filter.source, '--config', config])
+      const host = `localhost:${new URL(server.url).port}`
+
+      return [
+        ...expectedRunProblems('test', run, { [storyId]: 'differs' }),
+        ...linesAfterProblems(run, storyId, [
+          `  hint: Differs only inside remote content from ${host}. A CDN can serve different bytes to different ` +
+            'machines. Mask it by host:',
+          `    { host: '${host}' }`,
+          `  See ${remoteContentDocs}`,
+        ]),
+      ]
+    }),
+  )
+}
+
+/**
+ * Gives the problem when the lines right after the snapshot line of a story's default capture aren't these, or none
+ * when they are or the run has no line for it, which the outcome check reports.
+ */
+function linesAfterProblems(run: CliRun, storyId: string, expected: string[]): string[] {
+  const lines = run.stdout.split('\n')
+  const index = lines.findIndex((line) => snapshotOf(line)[0]?.key === storyId)
+
+  if (index === -1) {
+    return []
+  }
+
+  const after = lines.slice(index + 1, index + 1 + expected.length)
+
+  return after.join('\n') === expected.join('\n')
+    ? []
+    : [`test: the lines after ${storyId}'s are ${JSON.stringify(after)}, expected ${JSON.stringify(expected)}`]
 }
 
 /**
@@ -2353,6 +2604,14 @@ if (setupProblems.length > 0) {
     {
       name: `one-pixel change: with pixels: 0, test exits 1, ${onePixelChange.storyId} differs saying "1 differ, 0 allowed" and the report holds its images; with the default tolerance, test passes it`,
       run: () => checkOnePixelChange(expected),
+    },
+    {
+      name: `flaky: with ${flakyChange.storyId}'s first page load changed, test passes it flaky on its one retry, its line ends "· flaky", test lists it as flaky and counts "1 passed (1 flaky)", the report holds its images; with retries: 0, test exits 1 and it differs after 1 page load; with retries: 2 and its first 2 page loads changed, it passes flaky after 3`,
+      run: checkFlakyRetries,
+    },
+    {
+      name: `remote content hint: with ${unmaskedRemoteContent.storyId}'s host mask dropped, test exits 1, it differs, and its line is followed by the hint naming localhost on the server's port, its mask line and the docs page`,
+      run: checkRemoteContentHint,
     },
     {
       name: "test path: a Storybook that ignores the test path's user agent triggers the warning once, and the run passes",

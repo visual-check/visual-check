@@ -1,32 +1,19 @@
 import { BaselineError } from '../baselines/baseline-error.js'
-import { baselinePathOf, baselineStemOf, readBaseline, writeBaseline } from '../baselines/baseline-files.js'
+import { baselinePathOf, readBaseline, writeBaseline } from '../baselines/baseline-files.js'
 import { BrowserMismatchError, runImageOf } from '../browser/browser-version.js'
 import type { ChromeForTestingPlatform } from '../browser/chrome-for-testing-platform.js'
 import type { BrowserPackage } from '../browser/read-browser-package.js'
 import { BrowserDownloadError } from '../browser-download/browser-download-error.js'
 import { headlessShellPathsOf } from '../browser-download/install-headless-shell.js'
-import type {
-  BrokenStory,
-  CaptureSettings,
-  StoryCapture,
-  StoryHosts,
-  StoryToCapture,
-} from '../capture/capture-session.js'
+import type { CaptureSettings } from '../capture/capture-session.js'
 import { BrowserExitedError, BrowserLaunchError } from '../capture/driver/driver.js'
-import type { StoryMask } from '../capture/prepare-capture.js'
 import { runWorkerPool } from '../capture/worker-pool.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
-import type { StoryOptions } from '../config/story-options.js'
 import { ContainerError } from '../container/container-error.js'
-import { clearReport, ReportError, reportFolderOf, writeFailureImages } from '../report/report-folder.js'
-import { type Story, storyUrlOf } from '../storybook/read-stories.js'
+import { clearReport, ReportError, reportFolderOf } from '../report/report-folder.js'
+import type { Story } from '../storybook/read-stories.js'
 import { testPathWarningOf } from '../storybook/test-path.js'
-import {
-  createVisualDiff,
-  ImageDecodeError,
-  type VisualDiff,
-  type VisualDiffResult,
-} from '../visual-diff/visual-diff.js'
+import { createVisualDiff, type VisualDiff } from '../visual-diff/visual-diff.js'
 import type { BrowserPlace } from './browser-route.js'
 import { dockerProblemOf } from './docker-problem.js'
 import type { LaunchBrowser } from './launch-browser.js'
@@ -36,6 +23,15 @@ import { type PlannedSnapshot, planSnapshots, type SnapshotToCapture } from './p
 import { platformProblemOf } from './platform-problem.js'
 import { type FirstBrowserExit, type RunBrowser, runBrowserOf } from './run-browser.js'
 import { countsLineOf, displayPathOf } from './run-output.js'
+import {
+  brokenResultOf,
+  type CaptureStory,
+  compareWithBaseline,
+  type SnapshotResult,
+  type SnapshotStatus,
+  storyToCaptureOf,
+} from './snapshot-result.js'
+import { type TestTools, testSnapshot } from './test-snapshot.js'
 import {
   deleteStorybookOrphans,
   longPathWarningOf,
@@ -150,36 +146,6 @@ interface SnapshotRunResult {
 }
 
 /**
- * What became of one snapshot: a `test` status, or an `update` one. `broken` belongs to both.
- */
-type SnapshotStatus = 'passed' | 'differs' | 'missing' | 'broken' | 'written' | 'kept'
-
-/**
- * One snapshot's status, the text its line ends with and, for a captured snapshot, how long Storybook's `completing`
- * render step took and, for `update`, the hosts its story reaches.
- */
-interface SnapshotResult {
-  /**
-   * What became of the snapshot.
-   */
-  status: SnapshotStatus
-  /**
-   * The line's last column, such as `142 ms` or `differs: 84 differ, 80 allowed (20 at scale 2)`.
-   */
-  detail: string
-  /**
-   * How long Storybook's `completing` render step took for the story, in ms. `undefined` for a story that wasn't
-   * captured, or whose page didn't see the step.
-   */
-  completingMs?: number | undefined
-  /**
-   * The hosts the story reaches, for an `update` snapshot that was written or kept. `undefined` for a snapshot that
-   * wasn't, and for any `test` snapshot, since `test` doesn't list hosts.
-   */
-  hosts?: StoryHosts | undefined
-}
-
-/**
  * The mark each status's line starts with.
  */
 const marks: Record<SnapshotStatus, string> = {
@@ -225,23 +191,16 @@ const reportFixes: Record<ReportError['action'], string> = {
 
 /**
  * What each snapshot of a run is taken with, by command: the visual diff both commands compare snapshots with and, for
- * `test` alone, the report folder it writes the images of each differing snapshot to.
+ * `test` alone, the report folder it writes the images of each differing snapshot to and how many more times it
+ * captures a snapshot that differs.
  */
 type SnapshotTools =
-  | {
+  | (TestTools & {
       /**
        * The command, `test`, which compares each snapshot and reports the ones that differ.
        */
       command: 'test'
-      /**
-       * The run's visual diff.
-       */
-      visualDiff: VisualDiff
-      /**
-       * The report folder.
-       */
-      reportFolder: string
-    }
+    })
   | {
       /**
        * The command, `update`, which compares each snapshot and writes the baselines that are missing or differ. It
@@ -300,45 +259,6 @@ function captureSettingsOf(run: SnapshotRun): CaptureSettings {
 }
 
 /**
- * Gives the masks a story's options set, in the order they are named, with the ones set to `null` dropped. Gives
- * nothing when the options set no masks or set them to `null`.
- */
-function masksOf(masks: StoryOptions['masks']): StoryMask[] {
-  return Object.entries(masks ?? {}).flatMap(([name, mask]) => (mask === null ? [] : [{ name, ...mask }]))
-}
-
-/**
- * Gives the story's ID, the URL of its own page with the snapshot's globals, the snapshot's viewport, and the element
- * and the masks the story's options set. A story with no element, or with `null`, is captured in full, and one with no
- * masks is captured with none.
- */
-function storyToCaptureOf({ storybook, story, options, globals, viewport }: SnapshotToCapture): StoryToCapture {
-  const { element } = options
-  const masks = masksOf(options.masks)
-
-  return {
-    id: story.id,
-    url: storyUrlOf(storybook.url, story.id, globals),
-    viewport,
-    ...(typeof element === 'string' ? { element } : {}),
-    ...(masks.length === 0 ? {} : { masks }),
-  }
-}
-
-/**
- * Captures a story in the run's browser, on the worker's own session. `started`, when given, is called once the
- * browser is up, just before the capture.
- */
-type CaptureStory = (story: StoryToCapture, started?: () => void) => Promise<StoryCapture>
-
-/**
- * Gives a broken snapshot's result, whose detail is the broken story's message.
- */
-function brokenResultOf(broken: BrokenStory): SnapshotResult {
-  return { status: 'broken', detail: `broken: ${broken.message}` }
-}
-
-/**
  * Takes one snapshot: tests it for `test`, else updates its baseline. A story whose stories file didn't load is
  * broken, with no capture and no baseline read.
  */
@@ -352,87 +272,8 @@ async function snapshotOf(
   }
 
   return tools.command === 'test'
-    ? await testSnapshot(item, captureStory, tools.visualDiff, tools.reportFolder)
+    ? await testSnapshot(item, captureStory, tools)
     : await updateSnapshot(item, captureStory, tools.visualDiff)
-}
-
-/**
- * Compares a snapshot with its baseline at `path` by the story's tolerance, at its viewport's device scale factor.
- *
- * @throws {BaselineError} When the files differ and the baseline can't be decoded, with the decoder's reason.
- */
-async function compareWithBaseline(
-  visualDiff: VisualDiff,
-  item: SnapshotToCapture,
-  baseline: Uint8Array,
-  snapshot: Uint8Array,
-  path: string,
-): Promise<VisualDiffResult> {
-  try {
-    return await visualDiff.compare({
-      baseline,
-      snapshot,
-      tolerance: item.tolerance,
-      scale: item.viewport.deviceScaleFactor,
-    })
-  } catch (error) {
-    if (error instanceof ImageDecodeError && error.image === 'baseline') {
-      // The bare decoder reason, since the printed line already names the baseline.
-      throw new BaselineError('decode', path, new Error(error.reason, { cause: error }))
-    }
-
-    throw error
-  }
-}
-
-/**
- * Tests one snapshot: a missing baseline is reported without a capture, and a snapshot passes when it differs from its
- * baseline by no more than the story's tolerance. One that differs beyond it, or in size, leaves its baseline, snapshot
- * and visual diff in the report folder, named after its baseline's stem. It asks for a capture only once it has read
- * the baseline. A pass's time is the capture's alone: it leaves out the browser's launch and the comparison.
- *
- * @throws {BaselineError} When the baseline can't be read or decoded.
- * @throws {ReportError} When an image can't be written to the report folder.
- * @throws {ImageDecodeError} When the snapshot can't be decoded, which the browser's PNG files rule out.
- * @throws {Error} When a visual diff thread stops mid-comparison.
- */
-async function testSnapshot(
-  item: SnapshotToCapture,
-  captureStory: CaptureStory,
-  visualDiff: VisualDiff,
-  reportFolder: string,
-): Promise<SnapshotResult> {
-  const path = baselinePathOf(item.storybook.baselines, item.key)
-  const baseline = await readBaseline(path)
-
-  if (baseline === undefined) {
-    return { status: 'missing', detail: 'missing: no baseline yet; run visual-check update to write it' }
-  }
-
-  let started = performance.now()
-  const capture = await captureStory(storyToCaptureOf(item), () => {
-    started = performance.now()
-  })
-
-  if ('broken' in capture) {
-    return brokenResultOf(capture.broken)
-  }
-
-  const elapsedMs = Math.round(performance.now() - started)
-  const { snapshot, completingMs } = capture
-  const result = await compareWithBaseline(visualDiff, item, baseline, snapshot, path)
-
-  if (result.outcome === 'differs') {
-    await writeFailureImages(reportFolder, item.storybook.name, baselineStemOf(item.key), {
-      baseline,
-      snapshot,
-      diff: result.diff,
-    })
-
-    return { status: 'differs', detail: `differs: ${result.message}`, completingMs }
-  }
-
-  return { status: 'passed', detail: `${elapsedMs} ms`, completingMs }
 }
 
 /**
@@ -524,15 +365,28 @@ function longPathWarningsOf(run: SnapshotRun, snapshots: PlannedSnapshots): stri
 }
 
 /**
- * Builds the lines that end a finished run's output: for `test`, the counts line, each counted status with its count,
- * leaving out zero counts except the first; for `update`, the counts of written, deleted and kept baselines and broken
+ * Labels a counted status of `test`: the passed count says how many of its snapshots are flaky, when any is.
+ */
+function testCountLabelOf(status: SnapshotStatus, flaky: number): string {
+  return status === 'passed' && flaky > 0 ? `${status} (${flaky} flaky)` : status
+}
+
+/**
+ * Builds the lines that end a finished run's output: for `test`, the flaky snapshots under a heading, when there are
+ * any, then the counts line, each counted status with its count, leaving out zero counts except the first, the passed
+ * count saying how many are flaky; for `update`, the counts of written, deleted and kept baselines and broken
  * snapshots, then the path of each baseline written, in the snapshots' order, and of each orphan deleted.
  */
 function endLinesOf(run: SnapshotRun, snapshots: PlannedSnapshots, deleted: string[]): string[] {
   const statuses = snapshots.results.flatMap((result) => (result === undefined ? [] : [result.status]))
 
   if (run.command === 'test') {
-    return [countsLineOf(testCountedStatuses.map((status) => [status, countOf(statuses, status)]))]
+    const flaky = snapshots.results.filter((result) => result?.flaky === true).length
+    const counts = testCountedStatuses.map(
+      (status) => [testCountLabelOf(status, flaky), countOf(statuses, status)] as const,
+    )
+
+    return [...flakyLinesOf(snapshots), countsLineOf(counts)]
   }
 
   return updateEndLinesOf(run.cwd, {
@@ -740,18 +594,40 @@ function plannedSnapshotsOf(run: SnapshotRun, items: PlannedSnapshot[]): Planned
 }
 
 /**
- * Gives the line of each snapshot that has finished, in the snapshots' order: its mark, Storybook, story ID, mode when
- * it has one, and detail.
+ * Names a snapshot by its Storybook, story ID and mode when it has one, two spaces apart.
+ */
+function snapshotNameOf({ storybook, story, mode }: PlannedSnapshot): string {
+  const modeColumn = mode === undefined ? '' : `  ${mode}`
+
+  return `${storybook.name}  ${story.id}${modeColumn}`
+}
+
+/**
+ * Gives the line of each snapshot that has finished, in the snapshots' order: its mark, name and detail, followed by
+ * the lines of its hint, when it has one, each indented by two spaces.
  */
 function linesOf({ items, results }: PlannedSnapshots): string[] {
-  return items.flatMap(({ storybook, story, mode }, index) => {
+  return items.flatMap((item, index) => {
     const result = results[index]
-    const modeColumn = mode === undefined ? '' : `  ${mode}`
 
-    return result === undefined
-      ? []
-      : [`${marks[result.status]} ${storybook.name}  ${story.id}${modeColumn}  ${result.detail}`]
+    if (result === undefined) {
+      return []
+    }
+
+    const hintLines = result.hint?.map((line) => `  ${line}`) ?? []
+
+    return [`${marks[result.status]} ${snapshotNameOf(item)}  ${result.detail}`, ...hintLines]
   })
+}
+
+/**
+ * Lists the flaky snapshots by name under a heading, in the snapshots' order, each indented by two spaces. Gives no
+ * line when none is flaky.
+ */
+function flakyLinesOf({ items, results }: PlannedSnapshots): string[] {
+  const names = items.flatMap((item, index) => (results[index]?.flaky === true ? [`  ${snapshotNameOf(item)}`] : []))
+
+  return names.length === 0 ? [] : ['Flaky snapshots, which passed on a retry:', ...names]
 }
 
 /**
@@ -795,8 +671,13 @@ async function takeSnapshots(
  * `<story-id>.<mode>.png` for a mode, a key over 240 bytes shortened to its first 223 bytes, `-` and 16 hex characters
  * of its SHA-256. `test` compares each snapshot with its baseline by the story's tolerance, at the viewport's device
  * scale factor, and never captures a missing baseline. It clears the report folder, `.visual-check/report` beside the
- * config file, once the snapshots are planned, and writes the baseline, snapshot and visual diff of each snapshot that
- * differs there.
+ * config file, once the snapshots are planned, and writes the baseline, snapshot and visual diff of each snapshot whose
+ * first capture differs there. A snapshot that differs is captured again, up to the config's `retries` more times; one
+ * that passes on a retry passes, flaky, and its line ends with `· flaky`. One that still differs by pixels on its first
+ * capture and its last retry, with every differing pixel of the last retry inside its remote content, give or take the
+ * device scale factor rounded up, gets a hint under its line: the hosts, a mask line for each and the docs page. The
+ * hint never changes the exit code. After the lines, `test` lists the flaky snapshots by name under a heading, when
+ * there are any, and its counts say how many passes are flaky. A flaky snapshot never fails the run.
  *
  * `update` also takes every snapshot outside the selection whose baseline is missing, so it writes every missing
  * baseline of the Storybooks in the run. A story outside the selection whose stories file didn't load is taken, and
@@ -855,7 +736,7 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
   const visualDiff = createVisualDiff()
   const tools: SnapshotTools =
     run.command === 'test'
-      ? { command: 'test', visualDiff, reportFolder: reportFolderOf(run.config.path) }
+      ? { command: 'test', visualDiff, reportFolder: reportFolderOf(run.config.path), retries: run.config.retries }
       : { command: 'update', visualDiff }
   let snapshots: PlannedSnapshots | undefined
   let orphans: StorybookOrphans[] = []

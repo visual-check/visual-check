@@ -4,7 +4,7 @@ import { isMainThread, parentPort, workerData } from 'node:worker_threads'
 import pixelmatch from 'pixelmatch'
 import sharp from 'sharp'
 import type { Tolerance } from '../config/define-config.js'
-import type { ImageSize, ThreadReply, ThreadResult, ThreadTask, VisualDiffRequest } from './visual-diff.js'
+import type { ImageRegion, ImageSize, ThreadReply, ThreadResult, ThreadTask, VisualDiffRequest } from './visual-diff.js'
 
 /**
  * What the pool starts a thread with. It repeats the pool's own, because this file imports no file of its own.
@@ -127,6 +127,67 @@ function crop(image: DecodedImage, inner: ImageSize): Uint8Array {
 }
 
 /**
+ * Clears `scratch`, draws into it the `size` pixels of a pixelmatch pass over `baseline` and `snapshot` with
+ * `diffMask`, and gives it: only a differing pixel is drawn, so the rest keep an alpha of 0. A pass of its own counts
+ * the pixels the count counts, whatever colour pixelmatch draws the diff in. `scratch` is the visual diff's buffer,
+ * reused once the diff is encoded, so the pass needs no buffer of its own.
+ */
+function maskOf(
+  baseline: Uint8Array,
+  snapshot: Uint8Array,
+  scratch: Uint8Array,
+  size: ImageSize,
+  options: { threshold: number; includeAA: boolean },
+): Uint8Array {
+  scratch.fill(0)
+  pixelmatch(baseline, snapshot, scratch, size.width, size.height, { ...options, diffMask: true })
+
+  return scratch
+}
+
+/**
+ * Marks in `hit` every region that holds the pixel at `column`, `row`, and says whether any does.
+ */
+function markRegionsAt(regions: readonly ImageRegion[], hit: boolean[], column: number, row: number): boolean {
+  let inside = false
+
+  for (let index = 0; index < regions.length; index += 1) {
+    const region = regions[index] as ImageRegion
+
+    if (column >= region.x && column < region.x + region.width && row >= region.y && row < region.y + region.height) {
+      hit[index] = true
+      inside = true
+    }
+  }
+
+  return inside
+}
+
+/**
+ * Gives the indexes of the `regions` that hold a differing pixel, in ascending order, or `undefined` when a differing
+ * pixel lies outside every region. `mask` is the `width` × `height` pixels of a pixelmatch pass with `diffMask`, where
+ * only a differing pixel has an alpha other than 0.
+ */
+function regionsHolding(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  regions: readonly ImageRegion[],
+): number[] | undefined {
+  const hit = regions.map(() => false)
+
+  for (let row = 0; row < height; row += 1) {
+    for (let column = 0; column < width; column += 1) {
+      if (mask[(row * width + column) * 4 + 3] !== 0 && !markRegionsAt(regions, hit, column, row)) {
+        return undefined
+      }
+    }
+  }
+
+  return hit.flatMap((isHit, index) => (isHit ? [index] : []))
+}
+
+/**
  * Encodes RGBA pixels of `size` as a PNG file, padded in cyan on the right and the bottom up to `padded`.
  */
 async function encode(pixels: Uint8Array, size: ImageSize, padded: ImageSize): Promise<Uint8Array> {
@@ -185,6 +246,17 @@ export async function compareImages(request: VisualDiffRequest): Promise<ThreadR
     diffColor: differingColor,
   })
   const differ = differInside + padding
+  // Encoded first, since the regions' pass reuses its buffer.
+  const diff = await encode(output, inner, outer)
+  const regionsHit =
+    sizeChanged || request.regions === undefined
+      ? undefined
+      : regionsHolding(
+          maskOf(sharedBaseline, sharedSnapshot, output, inner, options),
+          inner.width,
+          inner.height,
+          request.regions,
+        )
 
   return {
     outcome: 'differs',
@@ -196,7 +268,8 @@ export async function compareImages(request: VisualDiffRequest): Promise<ThreadR
     allowed,
     baselineSize,
     snapshotSize,
-    diff: await encode(output, inner, outer),
+    diff,
+    ...(regionsHit === undefined ? {} : { regionsHit }),
   }
 }
 

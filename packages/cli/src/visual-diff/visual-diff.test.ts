@@ -113,6 +113,23 @@ describe('createVisualDiff', () => {
     expect([...baseline]).toEqual(baselineBytes)
   })
 
+  it('sends the regions to its thread', async () => {
+    visualDiff = createVisualDiff()
+
+    const result = await visualDiff.compare({
+      baseline: await greyPng(4, 3, 128),
+      snapshot: await greyPng(4, 3, 128, [{ x: 2, y: 1, rgba: [0, 0, 0, 255] }]),
+      tolerance: { ...defaults, pixels: 0 },
+      scale: 1,
+      regions: [
+        { x: 0, y: 0, width: 1, height: 1 },
+        { x: 2, y: 1, width: 1, height: 1 },
+      ],
+    })
+
+    expect(result).toMatchObject({ outcome: 'differs', regionsHit: [1] })
+  })
+
   it('rejects an undecodable baseline with an ImageDecodeError that names it', async () => {
     visualDiff = createVisualDiff()
 

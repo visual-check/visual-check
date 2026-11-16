@@ -96,7 +96,7 @@ export interface ResolvedConfig {
    */
   readyTimeout: number
   /**
-   * How many more times a failing snapshot is captured before it fails.
+   * How many more times `test` captures a snapshot that differs from its baseline before it fails.
    */
   retries: number
   /**

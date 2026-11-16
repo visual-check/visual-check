@@ -5,6 +5,14 @@ import { visualCheck } from '../.storybook/visual-check.ts'
 import { registerMockingWorker } from './mocking-worker.ts'
 import { remoteOrigin, remoteSquare, squarePath } from './remote-origin.ts'
 
+declare global {
+  /**
+   * `true` when the end-to-end check's remote content hint case drops the meta's mask `remote`, through a script the
+   * check's server adds to every `iframe.html` before Storybook imports any stories file.
+   */
+  var __visualCheckE2eUnmask: boolean | undefined
+}
+
 /**
  * The teal square from the story page's own origin.
  */
@@ -272,12 +280,13 @@ function isLoaded(image: HTMLImageElement): boolean {
 }
 
 /**
- * The meta's mask `remote` covers everything from the remote origin's host, `localhost`.
+ * The meta's mask `remote` covers everything from the remote origin's host, `localhost`, unless the page's
+ * `globalThis.__visualCheckE2eUnmask` is `true` when this file is imported: then it's `null`, which drops it.
  */
 const meta = {
   title: 'Remote Content',
   parameters: {
-    ...visualCheck({ masks: { remote: { host: 'localhost' } } }),
+    ...visualCheck({ masks: { remote: globalThis.__visualCheckE2eUnmask === true ? null : { host: 'localhost' } } }),
   },
 } satisfies Meta
 
