@@ -86,6 +86,13 @@ export function storyToCaptureOf({ storybook, story, options, globals, viewport 
 }
 
 /**
+ * Gives the result of a snapshot whose baseline is missing, whose detail says to run `update`.
+ */
+export function missingResultOf(): SnapshotResult {
+  return { status: 'missing', detail: 'missing: no baseline yet; run visual-check update to write it' }
+}
+
+/**
  * Gives a broken snapshot's result, whose detail is the broken story's message.
  */
 export function brokenResultOf(broken: BrokenStory): SnapshotResult {

@@ -10,11 +10,13 @@ import { BrowserExitedError, BrowserLaunchError } from '../capture/driver/driver
 import { runWorkerPool } from '../capture/worker-pool.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
 import { ContainerError } from '../container/container-error.js'
-import { clearReport, ReportError, reportFolderOf } from '../report/report-folder.js'
+import { ReportError, reportFolderOf } from '../report/report-folder.js'
 import type { Story } from '../storybook/read-stories.js'
 import { testPathWarningOf } from '../storybook/test-path.js'
 import { createVisualDiff } from '../visual-diff/visual-diff.js'
 import type { BrowserPlace } from './browser-route.js'
+import { hasOrphans, type StorybookBaselines } from './consistency-check.js'
+import { orphanLabelOf, orphanLinesOf } from './consistency-output.js'
 import { dockerProblemOf } from './docker-problem.js'
 import type { LaunchBrowser } from './launch-browser.js'
 import { missingLibraryOf } from './missing-library.js'
@@ -22,16 +24,11 @@ import { networkWarningOf } from './network-warning.js'
 import { type PlannedSnapshot, planSnapshots } from './plan-snapshots.js'
 import { platformProblemOf } from './platform-problem.js'
 import { type FirstBrowserExit, type RunBrowser, runBrowserOf } from './run-browser.js'
-import { countsLineOf, displayPathOf } from './run-output.js'
+import { countsLineOf, displayPathOf, snapshotCountOf, snapshotLineOf, snapshotNameOf } from './run-output.js'
 import { brokenResultOf, type CaptureStory, type SnapshotResult, type SnapshotStatus } from './snapshot-result.js'
+import { type Taking, testPlanOf } from './test-plan.js'
 import { type TestTools, testSnapshot } from './test-snapshot.js'
-import {
-  deleteStorybookOrphans,
-  longPathWarningOf,
-  planUpdate,
-  type StorybookOrphans,
-  updateEndLinesOf,
-} from './update-baselines.js'
+import { deleteStorybookOrphans, longPathWarningOf, planUpdate, updateEndLinesOf } from './update-baselines.js'
 import { type UpdateTools, updateSnapshot } from './update-snapshot.js'
 
 /**
@@ -68,6 +65,15 @@ interface SnapshotRun {
    * The CLI's version, for the header.
    */
   version: string
+  /**
+   * Whether the run is in CI, where `test` stops before capturing when the consistency check finds anything.
+   */
+  ci: boolean
+  /**
+   * Whether the run is `test --consistency`: it runs the consistency check and captures nothing. Always `false` for
+   * `update`.
+   */
+  consistencyOnly: boolean
   /**
    * The resolved config.
    */
@@ -130,31 +136,21 @@ interface SnapshotRunResult {
    */
   exitCode: number
   /**
-   * The header, one line per snapshot and the counts, then for `update` the path of each baseline written and each
-   * orphan deleted and its flaky snapshots, or, for a failure that stopped the run, the header and the lines of the
-   * snapshots that finished before it. Nothing when the run stopped before any capture, while it planned the snapshots
-   * or, for `update`, checked the baselines folders.
+   * The header, one line per snapshot, for `test` a line per orphan and its flaky snapshots, and the counts, then for
+   * `update` the path of each baseline written and each orphan deleted and its flaky snapshots, or, for a failure that
+   * stopped the run, the header and the lines of the snapshots that finished before it. For a CI `test` whose
+   * consistency check found anything, the consistency output, then a line that says why it captured nothing. For
+   * `test --consistency`, the consistency output alone. Nothing when the run stopped with exit 2 before any capture,
+   * while it planned the snapshots, checked the baselines folders or cleared the report folder.
    */
   stdout: string
   /**
    * When the first browser exited mid-run, that it exited, whether visual-check relaunches it once, and its last output.
    * Then, for a run that stopped with exit 2, what stopped it, or for a run that finished, a warning for each Storybook
-   * that seems to ignore the test path, then for `update` the hosts its stories reach. Nothing for a run that went on
-   * with no exit and no warning.
+   * that seems to ignore the test path, then for `update` the hosts its stories reach. A CI `test` that stopped before
+   * capturing gives only the notice of the exit. Nothing for a run that went on with no exit and no warning.
    */
   stderr: string
-}
-
-/**
- * The mark each status's line starts with.
- */
-const marks: Record<SnapshotStatus, string> = {
-  passed: '✓',
-  written: '✓',
-  kept: '✓',
-  differs: '✗',
-  missing: '✗',
-  broken: '!',
 }
 
 /**
@@ -241,7 +237,7 @@ interface PlannedSnapshots {
  * Builds the header: the CLI's version, the command, how many snapshots the run takes and how many workers it runs.
  */
 function headerOf(run: SnapshotRun, count: number): string {
-  const snapshots = `${count} ${count === 1 ? 'snapshot' : 'snapshots'}`
+  const snapshots = snapshotCountOf(count)
   const workers = `${run.workers} ${run.workers === 1 ? 'worker' : 'workers'}`
 
   return `visual-check ${run.version} · ${run.command} · ${snapshots} · ${workers}`
@@ -336,22 +332,29 @@ function testCountLabelOf(status: SnapshotStatus, flaky: number): string {
 }
 
 /**
- * Builds the lines that end a finished run's output: for `test`, the flaky snapshots under its heading, when there are
- * any, then the counts line, each counted status with its count, leaving out zero counts except the first, the passed
- * count saying how many are flaky; for `update`, the counts of written, deleted and kept baselines and broken
- * snapshots, then the path of each baseline written, in the snapshots' order, and of each orphan deleted, then the
- * flaky snapshots under its heading, when there are any.
+ * Builds the lines that end a finished run's output: for `test`, a line for each orphan in `baselines`, then the flaky
+ * snapshots under its heading, when there are any, then the counts line, each counted status with its count and then
+ * the orphans', leaving out zero counts except the first, the passed count saying how many are flaky; for `update`, the
+ * counts of written, deleted and kept baselines and broken snapshots, then the path of each baseline written, in the
+ * snapshots' order, and of each orphan deleted, then the flaky snapshots under its heading, when there are any.
  */
-function endLinesOf(run: SnapshotRun, snapshots: PlannedSnapshots, deleted: string[]): string[] {
+function endLinesOf(
+  run: SnapshotRun,
+  snapshots: PlannedSnapshots,
+  baselines: readonly StorybookBaselines[],
+  deleted: string[],
+): string[] {
   const statuses = snapshots.results.flatMap((result) => (result === undefined ? [] : [result.status]))
 
   if (run.command === 'test') {
     const flaky = snapshots.results.filter((result) => result?.flaky === true).length
-    const counts = testCountedStatuses.map(
-      (status) => [testCountLabelOf(status, flaky), countOf(statuses, status)] as const,
-    )
+    const orphanLines = orphanLinesOf(run.cwd, baselines)
+    const counts = [
+      ...testCountedStatuses.map((status) => [testCountLabelOf(status, flaky), countOf(statuses, status)] as const),
+      [orphanLabelOf(orphanLines.length), orphanLines.length] as const,
+    ]
 
-    return [...flakyLinesOf('test', snapshots), countsLineOf(counts)]
+    return [...orphanLines, ...flakyLinesOf('test', snapshots), countsLineOf(counts)]
   }
 
   const summary = {
@@ -365,12 +368,49 @@ function endLinesOf(run: SnapshotRun, snapshots: PlannedSnapshots, deleted: stri
 }
 
 /**
- * Gives the exit code: 1 when any snapshot has a failing status for the command, else 0.
+ * Gives the exit code: 1 when any snapshot has a failing status for the command, or for `test` when any Storybook's
+ * baselines hold an orphan, else 0.
  */
-function exitCodeOf(command: SnapshotRun['command'], snapshots: PlannedSnapshots): number {
-  return snapshots.results.some((result) => result !== undefined && failingStatuses[command].includes(result.status))
-    ? 1
-    : 0
+function exitCodeOf(
+  command: SnapshotRun['command'],
+  snapshots: PlannedSnapshots,
+  baselines: readonly StorybookBaselines[],
+): number {
+  const failed = snapshots.results.some(
+    (result) => result !== undefined && failingStatuses[command].includes(result.status),
+  )
+  const orphaned = command === 'test' && hasOrphans(baselines)
+
+  return failed || orphaned ? 1 : 0
+}
+
+/**
+ * Plans what the run takes once the snapshots are planned: `testPlanOf` for `test`, and for `update` `planUpdate`,
+ * which also checks that every baseline decodes.
+ *
+ * @throws {BaselineError} When a baselines folder can't be listed, a baseline's path can't be looked at, or for
+ * `update` a baseline can't be read or decoded.
+ * @throws {ReportError} When `test` can't clear the report folder.
+ */
+async function takingOf(run: SnapshotRun, tools: SnapshotTools, planned: PlannedSnapshot[]): Promise<Taking> {
+  if (tools.command === 'test') {
+    return await testPlanOf(
+      {
+        version: run.version,
+        cwd: run.cwd,
+        ci: run.ci,
+        consistencyOnly: run.consistencyOnly,
+        storybooks: run.selections.map(({ storybook }) => storybook),
+      },
+      planned,
+      tools.reportFolder,
+    )
+  }
+
+  const storybooks = run.selections.map(({ storybook }) => storybook)
+  const update = await planUpdate(storybooks, planned, tools.visualDiff, run.workers)
+
+  return { taken: update.snapshots, baselines: update.orphans }
 }
 
 /**
@@ -561,15 +601,6 @@ function plannedSnapshotsOf(run: SnapshotRun, items: PlannedSnapshot[]): Planned
 }
 
 /**
- * Names a snapshot by its Storybook, story ID and mode when it has one, two spaces apart.
- */
-function snapshotNameOf({ storybook, story, mode }: PlannedSnapshot): string {
-  const modeColumn = mode === undefined ? '' : `  ${mode}`
-
-  return `${storybook.name}  ${story.id}${modeColumn}`
-}
-
-/**
  * Gives the line of each snapshot that has finished, in the snapshots' order: its mark, name and detail, followed by
  * the lines of its hint, when it has one, each indented by two spaces.
  */
@@ -583,7 +614,7 @@ function linesOf({ items, results }: PlannedSnapshots): string[] {
 
     const hintLines = result.hint?.map((line) => `  ${line}`) ?? []
 
-    return [`${marks[result.status]} ${snapshotNameOf(item)}  ${result.detail}`, ...hintLines]
+    return [snapshotLineOf(item, result), ...hintLines]
   })
 }
 
@@ -638,13 +669,17 @@ async function takeSnapshots(
  * `<story-id>.<mode>.png` for a mode, a key over 240 bytes shortened to its first 223 bytes, `-` and 16 hex characters
  * of its SHA-256. `test` compares each snapshot with its baseline by the story's tolerance, at the viewport's device
  * scale factor, and never captures a missing baseline. It clears the report folder, `.visual-check/report` beside the
- * config file, once the snapshots are planned, and writes the baseline, snapshot and visual diff of each snapshot whose
- * first capture differs there. A snapshot that differs is captured again, up to the config's `retries` more times; one
- * that passes on a retry passes, flaky, and its line ends with `· flaky`. One that still differs by pixels on its first
- * capture and its last retry, with every differing pixel of the last retry inside its remote content, give or take the
- * device scale factor rounded up, gets a hint under its line: the hosts, a mask line for each and the docs page. The
- * hint never changes the exit code. After the lines, `test` lists the flaky snapshots by name under a heading, when
- * there are any, and its counts say how many passes are flaky. A flaky snapshot never fails the run.
+ * config file, once the snapshots are planned and the consistency check has run, and writes the baseline, snapshot and
+ * visual diff of each snapshot whose first capture differs there. A snapshot that differs is captured again, up to the
+ * config's `retries` more times; one that passes on a retry passes, flaky, and its line ends with `· flaky`. One that
+ * still differs by pixels on its first capture and its last retry, with every differing pixel of the last retry inside
+ * its remote content, give or take the device scale factor rounded up, gets a hint under its line: the hosts, a mask
+ * line for each and the docs page. The hint never changes the exit code. After the lines, `test` lists the flaky
+ * snapshots by name under a heading, when there are any, and its counts say how many passes are flaky. A flaky snapshot
+ * never fails the run.
+ *
+ * Every `test` runs the consistency check once the snapshots are planned, and `test --consistency` runs only that
+ * check: `test-plan.ts` has the rules.
  *
  * `update` also takes every snapshot outside the selection whose baseline is missing, so it writes every missing
  * baseline of the Storybooks in the run. A story outside the selection whose stories file didn't load is taken, and
@@ -678,9 +713,9 @@ async function takeSnapshots(
  * Each story of a stories file that failed to load, or didn't load within readyTimeout, is one broken snapshot,
  * `load-failed`, with no mode, no capture and no baseline read.
  *
- * Planning also stops the run with exit 2, before the report folder is cleared or anything is captured, on two
- * snapshots of one Storybook whose baselines would be one file, selected or not. Stderr names the first such pair in
- * each Storybook, in config order.
+ * Planning also stops the run with exit 2, before any baselines folder is listed, the report folder is cleared or
+ * anything is captured, on two snapshots of one Storybook whose baselines would be one file, selected or not. Stderr
+ * names the first such pair in each Storybook, in config order.
  *
  * When the browser exits, every story in flight is broken, `browser-exited`, the browser is relaunched once at the next
  * read or story that needs it, and the run goes on; stderr then says so, with the browser's last output, whatever the
@@ -717,7 +752,7 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
       ? { command: 'test', visualDiff, reportFolder: reportFolderOf(run.config.path), retries: run.config.retries }
       : { command: 'update', visualDiff, recaptureDelayMs: run.recaptureDelayMs }
   let snapshots: PlannedSnapshots | undefined
-  let orphans: StorybookOrphans[] = []
+  let baselines: StorybookBaselines[] = []
   let deleted: string[] = []
 
   try {
@@ -727,21 +762,19 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
       return { exitCode: 2, stdout: '', stderr: `${exitNoticeOf(browser.firstExit())}${plan.problem}\n` }
     }
 
-    let taken = plan.snapshots.filter(({ selected }) => selected)
+    const taking = await takingOf(run, tools, plan.snapshots)
 
-    if (tools.command === 'test') {
-      await clearReport(tools.reportFolder)
-    } else {
-      const storybooks = run.selections.map(({ storybook }) => storybook)
-      const update = await planUpdate(storybooks, plan.snapshots, tools.visualDiff, run.workers)
-
-      taken = update.snapshots
-      orphans = update.orphans
+    if ('stopped' in taking) {
+      return { ...taking.stopped, stderr: exitNoticeOf(browser.firstExit()) }
     }
 
-    snapshots = plannedSnapshotsOf(run, taken)
+    baselines = taking.baselines
+    snapshots = plannedSnapshotsOf(run, taking.taken)
     await takeSnapshots(run, browser, snapshots, tools)
-    deleted = await deleteStorybookOrphans(orphans)
+
+    if (tools.command === 'update') {
+      deleted = await deleteStorybookOrphans(baselines)
+    }
   } catch (error) {
     const message = stopMessageOf(error, run, capturedAnyOf(snapshots))
 
@@ -761,8 +794,8 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
   }
 
   return {
-    exitCode: exitCodeOf(run.command, snapshots),
-    stdout: printedOf(snapshots, [...linesOf(snapshots), ...endLinesOf(run, snapshots, deleted)]),
+    exitCode: exitCodeOf(run.command, snapshots, baselines),
+    stdout: printedOf(snapshots, [...linesOf(snapshots), ...endLinesOf(run, snapshots, baselines, deleted)]),
     stderr:
       exitNoticeOf(browser.firstExit()) +
       testPathWarningsOf(run.selections, snapshots.items, snapshots.results) +

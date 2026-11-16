@@ -20,8 +20,8 @@ import {
   baselinePathOf,
   baselineStemOf,
   deleteOrphans,
+  expectedBaselinesAt,
   foldedFileNameOf,
-  hasBaseline,
   listBaselines,
   readBaseline,
   snapshotKeyOf,
@@ -315,32 +315,6 @@ describe('writeBaseline', () => {
   })
 })
 
-describe('hasBaseline', () => {
-  it('says a baseline is there', async () => {
-    const path = join(createFolder(), 'button--primary.png')
-
-    writeFileSync(path, snapshot)
-    expect(await hasBaseline(path)).toBe(true)
-  })
-
-  it('says a baseline is missing, with or without its folder', async () => {
-    const folder = createFolder()
-
-    expect(await hasBaseline(join(folder, 'button--primary.png'))).toBe(false)
-    expect(await hasBaseline(join(folder, 'baselines', 'button--primary.png'))).toBe(false)
-  })
-
-  it("throws a BaselineError when the path can't be followed", async () => {
-    const folder = createFolder()
-
-    writeFileSync(join(folder, 'baselines'), '')
-    await expect(hasBaseline(join(folder, 'baselines', 'button--primary.png'))).rejects.toMatchObject({
-      action: 'read',
-      reason: 'ENOTDIR: not a directory',
-    })
-  })
-})
-
 describe('listBaselines', () => {
   it('lists the PNG files by name, leaving out other files, temporary files and subfolders', async () => {
     const folder = createFolder()
@@ -388,6 +362,77 @@ describe('listBaselines', () => {
       message: `Couldn't list the baselines folder ${folder}: ENOTDIR: not a directory.`,
     })
   })
+})
+
+describe('expectedBaselinesAt', () => {
+  it('tells which expected paths have a file, in the order given', async () => {
+    const folder = createFolder()
+
+    writeFileSync(join(folder, 'a.png'), snapshot)
+
+    const expected = await expectedBaselinesAt([join(folder, 'missing.png'), join(folder, 'a.png')])
+
+    expect(expected.present).toEqual([false, true])
+  })
+
+  it('finds no file for a path whose baselines folder is missing', async () => {
+    const folder = createFolder()
+    const expected = await expectedBaselinesAt([join(folder, 'baselines', 'button--primary.png')])
+
+    expect(expected.present).toEqual([false])
+  })
+
+  it("throws a BaselineError when a path can't be followed", async () => {
+    const folder = createFolder()
+
+    writeFileSync(join(folder, 'baselines'), '')
+    await expect(expectedBaselinesAt([join(folder, 'baselines', 'button--primary.png')])).rejects.toMatchObject({
+      action: 'read',
+      reason: 'ENOTDIR: not a directory',
+    })
+  })
+
+  it('gives the paths that are not expected, in the order given', async () => {
+    const folder = createFolder()
+
+    for (const name of ['a.png', 'b.png', 'c.png']) {
+      writeFileSync(join(folder, name), snapshot)
+    }
+
+    const paths = [join(folder, 'c.png'), join(folder, 'a.png'), join(folder, 'b.png')]
+    const expected = await expectedBaselinesAt([join(folder, 'a.png'), join(folder, 'missing.png')])
+
+    expect(await expected.pathsNotExpected(paths)).toEqual([join(folder, 'c.png'), join(folder, 'b.png')])
+  })
+
+  it('leaves out a path that is a hard link to an expected baseline, and a path with no file', async () => {
+    const folder = createFolder()
+
+    writeFileSync(join(folder, 'a.png'), snapshot)
+    linkSync(join(folder, 'a.png'), join(folder, 'other-name.png'))
+
+    const expected = await expectedBaselinesAt([join(folder, 'a.png')])
+
+    expect(await expected.pathsNotExpected([join(folder, 'other-name.png'), join(folder, 'gone.png')])).toEqual([])
+  })
+
+  it.skipIf(process.platform !== 'darwin')(
+    "leaves out a path the file system takes for an expected baseline, as macOS does for 'ς' and 'σ'",
+    async (context) => {
+      const folder = createFolder()
+
+      writeFileSync(join(folder, 'ς.png'), snapshot)
+
+      if (!existsSync(join(folder, 'σ.png'))) {
+        context.skip('This folder is on a file system that tells the two names apart.')
+      }
+
+      const expected = await expectedBaselinesAt([join(folder, 'σ.png')])
+
+      expect(expected.present).toEqual([true])
+      expect(await expected.pathsNotExpected([join(folder, 'ς.png')])).toEqual([])
+    },
+  )
 })
 
 describe('deleteOrphans', () => {
