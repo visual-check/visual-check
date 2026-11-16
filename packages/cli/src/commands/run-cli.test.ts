@@ -97,6 +97,7 @@ Options for test and update:
   --consistency       Only check for missing baselines, orphans and stories files that fail to load (test only)
   --workers <n>       Capture with this many workers
   --shard <k>/<n>     Run one shard's share of the stories files (test only)
+  --reporter <name>   Live or log for people, json for the report's JSON document on stdout
 
 Other options:
   --help     Show this help

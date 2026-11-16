@@ -329,4 +329,27 @@ describe('runCli test report after the consistency check', () => {
       ['a2', 'broken'],
     ])
   })
+
+  it('prints only the report document on stdout with --reporter json, the rest on stderr', async () => {
+    const { project } = await createRun(['a', 'b'], { a: defaultRunSnapshot, b: defaultRunSnapshot }, 'retries: 0')
+    const browser = fakeBrowser({ b: { snapshot: otherSnapshot } })
+    const result = await runCli(['test', '--reporter', 'json'], {}, project, browser.options)
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout.endsWith('\n')).toBe(true)
+    expect(result.stdout.trimEnd().split('\n')).toHaveLength(1)
+    expect(JSON.parse(result.stdout)).toEqual(readReport(project))
+    expect(result.stdout).toBe(readFileSync(join(reportFolderIn(project), 'report.json'), 'utf8'))
+    expect(result.stdout).not.toContain('Report:')
+    expect(lastLineOf(result.stderr)).toBe(reportLine)
+  })
+
+  it.each(['live', 'log'])('prints the same with --reporter %s as with no flag', async (reporter) => {
+    const plain = await createRun(['a'], { a: defaultRunSnapshot })
+    const flagged = await createRun(['a'], { a: defaultRunSnapshot })
+    const expected = await runCli(['test'], {}, plain.project, fakeBrowser().options)
+    const result = await runCli(['test', '--reporter', reporter], {}, flagged.project, fakeBrowser().options)
+
+    expect(result).toEqual(expected)
+  })
 })

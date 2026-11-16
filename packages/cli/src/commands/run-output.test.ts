@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { reportLineOf } from './run-output.js'
+import { emptyTestCounts, reportJsonOf, testReportOf } from '../report/report-document.js'
+import { cliOutputOf, reportLineOf } from './run-output.js'
 
 describe('reportLineOf', () => {
   it("gives report.json's path relative to the cwd, with /", () => {
@@ -11,5 +12,36 @@ describe('reportLineOf', () => {
     expect(reportLineOf(join(project, 'packages', 'web'), folder)).toBe(
       'Report: ../../.visual-check/report/report.json',
     )
+  })
+})
+
+describe('cliOutputOf', () => {
+  const report = testReportOf({
+    visualCheck: '0.1.0',
+    consistencyOnly: false,
+    exitCode: 0,
+    shard: null,
+    selection: { by: 'all', base: null, changedFiles: null, fallback: null },
+    reportDir: '.visual-check/report',
+    storybooks: [{ name: 'web', url: 'http://localhost:6006' }],
+    counts: emptyTestCounts(),
+    snapshots: [],
+    error: null,
+  })
+  const result = { stdout: '✓ web  a  passed\n', stderr: 'warning\n' }
+  const line = 'Report: .visual-check/report/report.json'
+
+  it.each([undefined, 'live', 'log'] as const)('ends stdout with the report line for reporter %s', (reporter) => {
+    expect(cliOutputOf(result, report, reporter, line)).toEqual({
+      stdout: `✓ web  a  passed\n${line}\n`,
+      stderr: 'warning\n',
+    })
+  })
+
+  it('puts only the document on stdout for json, and the report line last on stderr', () => {
+    expect(cliOutputOf(result, report, 'json', line)).toEqual({
+      stdout: `${reportJsonOf(report)}\n`,
+      stderr: `warning\n${line}\n`,
+    })
   })
 })

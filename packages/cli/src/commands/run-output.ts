@@ -1,4 +1,6 @@
 import { join, relative, sep } from 'node:path'
+import { type Report, reportJsonOf } from '../report/report-document.js'
+import type { Reporter } from './parse-command-line.js'
 import type { PlannedSnapshot } from './plan-snapshots.js'
 import type { SnapshotResult, SnapshotStatus } from './snapshot-result.js'
 
@@ -31,6 +33,24 @@ export function displayPathOf(folder: string, path: string): string {
  */
 export function reportLineOf(cwd: string, folder: string): string {
   return `Report: ${displayPathOf(cwd, join(folder, 'report.json'))}`
+}
+
+/**
+ * Composes what a `test` that wrote its report prints on each stream. With `--reporter json`, stdout holds the report's
+ * JSON document alone, the human lines are dropped, and stderr keeps its text and ends with the report line. With any
+ * other reporter, stdout ends with the report line.
+ */
+export function cliOutputOf(
+  output: { stdout: string; stderr: string },
+  report: Report,
+  reporter: Reporter | undefined,
+  reportLine: string,
+): { stdout: string; stderr: string } {
+  if (reporter === 'json') {
+    return { stdout: `${reportJsonOf(report)}\n`, stderr: `${output.stderr}${reportLine}\n` }
+  }
+
+  return { stdout: `${output.stdout}${reportLine}\n`, stderr: output.stderr }
 }
 
 /**

@@ -19,6 +19,11 @@ export class UsageError extends Error {
 export type Selection = { kind: 'default' } | { kind: 'all' } | { kind: 'filter'; pattern: RegExp }
 
 /**
+ * How a run reports: `live` and `log` print the human output, `json` prints the report's JSON document on stdout.
+ */
+export type Reporter = 'live' | 'log' | 'json'
+
+/**
  * The options `test` and `update` share.
  */
 export interface RunOptions {
@@ -51,6 +56,10 @@ export interface RunOptions {
    * The shard `--shard` gives, or `undefined` when the flag isn't given. Always `undefined` for `update`.
    */
   shard: Shard | undefined
+  /**
+   * The reporter `--reporter` names, or `undefined` when the flag isn't given.
+   */
+  reporter: Reporter | undefined
 }
 
 /**
@@ -65,12 +74,22 @@ export type CommandLine =
 /**
  * The flags `init` doesn't take, in the order a message names the first one given.
  */
-const flagsInitRejects = ['all', 'filter', 'storybook', 'url', 'config', 'workers', 'consistency', 'shard'] as const
+const flagsInitRejects = [
+  'all',
+  'filter',
+  'storybook',
+  'url',
+  'config',
+  'workers',
+  'consistency',
+  'shard',
+  'reporter',
+] as const
 
 /**
  * The flags that take a value, which can't be empty.
  */
-const flagsWithValue = ['filter', 'storybook', 'url', 'config', 'workers', 'shard'] as const
+const flagsWithValue = ['filter', 'storybook', 'url', 'config', 'workers', 'shard', 'reporter'] as const
 
 /**
  * Turns a thrown value into its message.
@@ -119,6 +138,7 @@ function parseCommandLineArguments(commandLineArguments: string[]) {
       workers: { type: 'string' },
       consistency: { type: 'boolean' },
       shard: { type: 'string' },
+      reporter: { type: 'string' },
       help: { type: 'boolean' },
       version: { type: 'boolean' },
     },
@@ -266,12 +286,35 @@ function shardFlagOf(
 }
 
 /**
+ * Reads the `--reporter` flag: `live`, `log` or `json`. `update` has no JSON document yet, so `json` is rejected for
+ * it.
+ *
+ * @throws {UsageError} When the value is anything else, or is `json` for `update`.
+ */
+function reporterFlagOf(command: 'test' | 'update', reporter: string | undefined): Reporter | undefined {
+  if (reporter === undefined) {
+    return undefined
+  }
+
+  if (reporter !== 'live' && reporter !== 'log' && reporter !== 'json') {
+    throw new UsageError(`--reporter takes live, log or json. Got '${reporter}'.`)
+  }
+
+  if (command === 'update' && reporter === 'json') {
+    throw new UsageError("update --reporter json isn't available yet.")
+  }
+
+  return reporter
+}
+
+/**
  * Reads the command line into the command it names and its options.
  *
  * @throws {UsageError} For an unknown command or flag, a missing, empty or extra argument, a flag that doesn't apply to
  * the command, flags that clash, a `--url` that isn't an http(s) URL or holds a login, a `--filter` that isn't a
  * regular expression, a `--workers` that isn't a whole number of 1 or more, `--consistency` on `update` or with `--all`
- * or `--filter`, and a `--shard` that isn't `k/n` with 1 ≤ k ≤ n, or is on `update` or with `--consistency`.
+ * or `--filter`, a `--reporter` that isn't `live`, `log` or `json` or is `json` on `update`, and a `--shard` that isn't
+ * `k/n` with 1 ≤ k ≤ n, or is on `update` or with `--consistency`.
  * `--help` anywhere before a `--` separator wins, so it never throws.
  */
 export function parseCommandLine(commandLineArguments: string[]): CommandLine {
@@ -346,6 +389,7 @@ export function parseCommandLine(commandLineArguments: string[]): CommandLine {
       workers: workersFlagOf(values.workers),
       consistency,
       shard,
+      reporter: reporterFlagOf(command, values.reporter),
     },
   }
 }

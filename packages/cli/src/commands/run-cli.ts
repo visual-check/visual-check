@@ -20,9 +20,9 @@ import { type BrowserPlace, browserPlaceOf } from './browser-route.js'
 import { checkStorybooks } from './check-storybooks.js'
 import { dockerProblemOf } from './docker-problem.js'
 import { createLaunchBrowser, type LaunchBrowser } from './launch-browser.js'
-import { parseCommandLine, type RunOptions, UsageError } from './parse-command-line.js'
+import { parseCommandLine, type Reporter, type RunOptions, UsageError } from './parse-command-line.js'
 import { readImageFit } from './read-image-fit.js'
-import { reportLineOf } from './run-output.js'
+import { cliOutputOf, reportLineOf } from './run-output.js'
 import { type TestReportFacts, testReportFor } from './run-report.js'
 import { runSnapshots } from './run-snapshots.js'
 import { selectStories } from './select-stories.js'
@@ -48,6 +48,7 @@ Options for test and update:
   --consistency       Only check for missing baselines, orphans and stories files that fail to load (test only)
   --workers <n>       Capture with this many workers
   --shard <k>/<n>     Run one shard's share of the stories files (test only)
+  --reporter <name>   Live or log for people, json for the report's JSON document on stdout
 
 Other options:
   --help     Show this help
@@ -277,16 +278,21 @@ async function runTestOrUpdate(
   })
   const reported =
     command === 'test' && findings !== undefined
-      ? await withTestReport(result, cwd, {
-          version,
-          configPath: config.path,
-          consistencyOnly: options.consistency,
-          shard: options.shard,
-          selection: options.selection,
-          storybooks: checks.storybooks.map(({ storybook }) => storybook),
-          exitCode: result.exitCode,
-          findings,
-        })
+      ? await withTestReport(
+          result,
+          cwd,
+          {
+            version,
+            configPath: config.path,
+            consistencyOnly: options.consistency,
+            shard: options.shard,
+            selection: options.selection,
+            storybooks: checks.storybooks.map(({ storybook }) => storybook),
+            exitCode: result.exitCode,
+            findings,
+          },
+          options.reporter,
+        )
       : result
 
   return { ...reported, stderr: `${warnings}${reported.stderr}` }
@@ -321,16 +327,26 @@ async function clearReportProblemOf(
 }
 
 /**
- * Writes the report of a `test` that exits 0 or 1, then ends its stdout with the report's path. When the report can't
- * be written, the run exits 2 with what went wrong after its stderr.
+ * Writes the report of a `test` that exits 0 or 1, then ends its stdout with the report's path. With `--reporter json`
+ * stdout holds the report's JSON document alone and the path ends stderr. When the report can't be written, the run
+ * exits 2 with what went wrong after its stderr.
  *
  * @throws {Error} Any error besides a `ReportError`.
  */
-async function withTestReport(result: CliResult, cwd: string, facts: TestReportFacts): Promise<CliResult> {
+async function withTestReport(
+  result: CliResult,
+  cwd: string,
+  facts: TestReportFacts,
+  reporter: Reporter | undefined,
+): Promise<CliResult> {
   const folder = reportFolderOf(facts.configPath)
 
   try {
-    await writeReportJson(folder, await testReportFor(facts))
+    const report = await testReportFor(facts)
+
+    await writeReportJson(folder, report)
+
+    return { ...result, ...cliOutputOf(result, report, reporter, reportLineOf(cwd, folder)) }
   } catch (error) {
     if (error instanceof ReportError) {
       return { ...result, exitCode: 2, stderr: `${result.stderr}${reportProblemOf(error, cwd)}` }
@@ -338,8 +354,6 @@ async function withTestReport(result: CliResult, cwd: string, facts: TestReportF
 
     throw error
   }
-
-  return { ...result, stdout: `${result.stdout}${reportLineOf(cwd, folder)}\n` }
 }
 
 /**

@@ -12,6 +12,7 @@ const defaultOptions = {
   workers: undefined,
   consistency: false,
   shard: undefined,
+  reporter: undefined,
 }
 
 /**
@@ -70,7 +71,7 @@ describe('parseCommandLine', () => {
     expect(usageErrorOf('test', '--', '--help').message).toBe("Unexpected argument '--help'.")
   })
 
-  it.each(['filter', 'storybook', 'url', 'config', 'shard'])('rejects an empty --%s', (flag) => {
+  it.each(['filter', 'storybook', 'url', 'config', 'shard', 'reporter'])('rejects an empty --%s', (flag) => {
     expect(usageErrorOf('test', `--${flag}=`).message).toBe(`--${flag} needs a value.`)
     expect(usageErrorOf('test', `--${flag}`, '').message).toBe(`--${flag} needs a value.`)
   })
@@ -96,6 +97,7 @@ describe('parseCommandLine', () => {
     ['--workers', ['--workers', '2']],
     ['--consistency', ['--consistency']],
     ['--shard', ['--shard', '2/4']],
+    ['--reporter', ['--reporter', 'json']],
   ])('rejects %s for init', (flag, flagArguments) => {
     expect(usageErrorOf('init', ...flagArguments).message).toBe(`${flag} doesn't apply to init.`)
   })
@@ -318,5 +320,29 @@ describe('parseCommandLine --shard', () => {
 
     expect(usageErrorOf('test', '--consistency', '--shard', '2/4').message).toBe(message)
     expect(usageErrorOf('test', '--consistency', '--shard', 'nope').message).toBe(message)
+  })
+
+  it.each(['live', 'log', 'json'] as const)('parses --reporter %s for test', (reporter) => {
+    expect(parseCommandLine(['test', '--reporter', reporter])).toEqual({
+      command: 'test',
+      options: { ...defaultOptions, reporter },
+    })
+  })
+
+  it.each(['live', 'log'] as const)('parses --reporter %s for update', (reporter) => {
+    expect(parseCommandLine(['update', '--reporter', reporter])).toEqual({
+      command: 'update',
+      options: { ...defaultOptions, reporter },
+    })
+  })
+
+  it.each(['nope', 'JSON', 'json,log'])('rejects --reporter %j, naming the value', (value) => {
+    expect(usageErrorOf('test', '--reporter', value).message).toBe(
+      `--reporter takes live, log or json. Got '${value}'.`,
+    )
+  })
+
+  it('rejects --reporter json for update until it has a document of its own', () => {
+    expect(usageErrorOf('update', '--reporter', 'json').message).toBe("update --reporter json isn't available yet.")
   })
 })

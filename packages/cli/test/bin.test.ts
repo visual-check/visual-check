@@ -259,6 +259,14 @@ describe('visual-check binary', () => {
     expect(result.stderr).toContain('Run visual-check --help to see the commands and options.')
   })
 
+  it('exits 2 with the hint for an invalid --reporter', () => {
+    const result = run({}, 'test', '--reporter', 'nope')
+
+    expect(result.status).toBe(2)
+    expect(result.stderr).toContain("--reporter takes live, log or json. Got 'nope'.")
+    expect(result.stderr).toContain('Run visual-check --help to see the commands and options.')
+  })
+
   it('exits 2 when --all and --filter are given together', () => {
     const result = run({}, 'test', '--all', '--filter', 'x')
 
@@ -463,6 +471,20 @@ describe('visual-check binary reaching Storybooks', () => {
       `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed\nReport: .visual-check/report/report.json\n`,
     )
     expect(result.stderr).toBe('')
+  })
+
+  it('prints exactly one JSON document on stdout for test --reporter json, the report line on stderr', async () => {
+    const url = await startStorybookServer({ c: entryOf('button--primary:test', { subtype: 'test' }) })
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
+      'button.stories.tsx': '',
+    })
+    const result = await runAsynchronously({ cwd: project }, 'test', '--reporter', 'json')
+
+    expect(result.status).toBe(0)
+    expect(result.stdout.trimEnd().split('\n')).toHaveLength(1)
+    expect(JSON.parse(result.stdout)).toMatchObject({ version: 1, command: 'test', exitCode: 0 })
+    expect(result.stderr).toBe('Report: .visual-check/report/report.json\n')
   })
 
   it('reaches the browser to read the per-story options of every story, even when --filter selects none', async () => {
