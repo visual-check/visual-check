@@ -45,6 +45,9 @@ Options for test and update:
   --workers <n>       Capture with this many workers
   --shard <k>/<n>     Run one shard's share of the stories files (test only)
 
+Options for init:
+  --yes               Take every default
+
 Other options:
   --help     Show this help
   --version  Show the version

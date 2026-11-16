@@ -54,12 +54,22 @@ export interface RunOptions {
 }
 
 /**
+ * The options `init` takes.
+ */
+export interface InitOptions {
+  /**
+   * Whether `--yes` is given: `init` takes every default and asks nothing.
+   */
+  yes: boolean
+}
+
+/**
  * What the command line asks for.
  */
 export type CommandLine =
   | { command: 'help' }
   | { command: 'version' }
-  | { command: 'init' }
+  | { command: 'init'; options: InitOptions }
   | { command: 'test' | 'update'; options: RunOptions }
 
 /**
@@ -119,6 +129,7 @@ function parseCommandLineArguments(commandLineArguments: string[]) {
       workers: { type: 'string' },
       consistency: { type: 'boolean' },
       shard: { type: 'string' },
+      yes: { type: 'boolean' },
       help: { type: 'boolean' },
       version: { type: 'boolean' },
     },
@@ -211,6 +222,17 @@ function consistencyFlagOf(
 }
 
 /**
+ * Checks the `--yes` flag for `test` or `update`, which don't take it.
+ *
+ * @throws {UsageError} When it's given.
+ */
+function checkYesFlag(yes: boolean | undefined): void {
+  if (yes) {
+    throw new UsageError('--yes applies only to init.')
+  }
+}
+
+/**
  * Reads a `k/n` shard: two whole numbers of 1 or more, written in digits, with k no greater than n.
  */
 function parseShard(value: string): Shard | undefined {
@@ -271,7 +293,8 @@ function shardFlagOf(
  * @throws {UsageError} For an unknown command or flag, a missing, empty or extra argument, a flag that doesn't apply to
  * the command, flags that clash, a `--url` that isn't an http(s) URL or holds a login, a `--filter` that isn't a
  * regular expression, a `--workers` that isn't a whole number of 1 or more, `--consistency` on `update` or with `--all`
- * or `--filter`, and a `--shard` that isn't `k/n` with 1 ≤ k ≤ n, or is on `update` or with `--consistency`.
+ * or `--filter`, a `--shard` that isn't `k/n` with 1 ≤ k ≤ n, or is on `update` or with `--consistency`, and `--yes` on
+ * `test` or `update`.
  * `--help` anywhere before a `--` separator wins, so it never throws.
  */
 export function parseCommandLine(commandLineArguments: string[]): CommandLine {
@@ -328,8 +351,10 @@ export function parseCommandLine(commandLineArguments: string[]): CommandLine {
       throw new UsageError(`--${rejected} doesn't apply to init.`)
     }
 
-    return { command: 'init' }
+    return { command: 'init', options: { yes: values.yes === true } }
   }
+
+  checkYesFlag(values.yes)
 
   checkUrlFlag(values.url)
 

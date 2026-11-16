@@ -252,6 +252,13 @@ describe('visual-check binary', () => {
     expect(result.stdout).toMatch(/^ {2}update +/m)
   })
 
+  it('lists --yes for --help', () => {
+    const result = run({}, '--help')
+
+    expect(result.status).toBe(0)
+    expect(result.stdout).toMatch(/^ {2}--yes +/m)
+  })
+
   it('exits 2 with the hint for an unknown flag', () => {
     const result = run({}, '--nope')
 
