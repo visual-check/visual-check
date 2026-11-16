@@ -42,6 +42,15 @@ import { tmpdir } from 'node:os'
 import { basename, delimiter, extname, join, relative, resolve as resolvePath, sep } from 'node:path'
 import type { Readable } from 'node:stream'
 import { setTimeout as sleep } from 'node:timers/promises'
+import { isDeepStrictEqual } from 'node:util'
+import type {
+  ReportBrokenReason,
+  ReportImages,
+  TestReport,
+  TestReportCounts,
+  TestReportEntry,
+  UpdateReport,
+} from '@visual-check/cli'
 
 /**
  * What became of one snapshot, as the CLI's line for it says: a `test` outcome, or an `update` one.
@@ -208,7 +217,8 @@ const growingMask = {
 
 /**
  * The one-pixel change: the story it changes, by its ID and the pattern that matches only it, the stylesheet that
- * changes it and the detail its line must hold with `pixels: 0`, `differs:` included so a larger count can't match.
+ * changes it, the detail its line must hold with `pixels: 0`, `differs:` included so a larger count can't match, and
+ * the `pixels` its report entry must give then.
  * The stylesheet draws one black CSS pixel at (1000, 600) through a fixed `body::after`, which takes no space in the
  * layout. The story is captured in the default 1280 × 720 viewport at scale 1, so that spot is inside the snapshot, on
  * the white page far from the card, and exactly one pixel of the snapshot changes.
@@ -220,6 +230,7 @@ const onePixelChange = {
     '<style>body::after { content: ""; position: fixed; left: 1000px; top: 600px; width: 1px; height: 1px; ' +
     'background: #000; }</style>',
   says: 'differs: 1 differ, 0 allowed',
+  pixels: { differ: 1, allowed: 0, budget: 0, scale: 1 },
 }
 
 /**
@@ -352,9 +363,20 @@ const unmaskedRemoteContent = {
 const remoteContentDocs = 'https://visual-check.vercel.app/docs/remote-content'
 
 /**
- * The images `test` writes to the report for a differing snapshot, `<key>.<kind>.png` each.
+ * The report JSON case: the story each of its runs takes, by its ID and the pattern that matches only it, and the
+ * stem of the stray baseline it adds to a copy of the committed baselines, which no story calls for, so `test` lists
+ * it as an orphan.
  */
-const reportImageKinds = ['baseline', 'snapshot', 'diff'] as const
+const reportJson = {
+  storyId: 'card--default',
+  filter: /^card--default$/,
+  orphan: 'stray--orphan',
+}
+
+/**
+ * What a report entry lists when it has no image.
+ */
+const noImages: ReportImages = { baseline: null, snapshot: null, diff: null }
 
 /**
  * How many workers every case that captures in parallel uses, through `--workers` or the config it writes, so each
@@ -389,7 +411,10 @@ const storybook10Baselines = resolvePath(packageDir, '..', 'storybook-10-react',
 /**
  * The hazard stories, by the pattern their IDs match, and what the hazards case checks beyond their outcomes: where
  * the one that navigates away goes and how many times its page loads, once and then on each of its 2 retries, what the
- * one that crashes says, and the stories whose next story must pass, because they leave their page held or crashed.
+ * one that crashes says, the stories whose next story must pass, because they leave their page held or crashed, and
+ * what the report's entries of the two broken ones hold. The one that crashes has no image, and neither has the one
+ * that navigates away, whose entry gives where it went and keeps the warning its `play` logs before it follows the
+ * link, which shows console messages survive the navigation.
  *
  * The case runs with a `readyTimeout` of 60 s, in ms. The story that crashes fills V8's heap, about 3.8 GB, before its
  * renderer crashes: 1 to 4 s on a Mac, but 14 to 19 s on CI's runners, past the default 10 s.
@@ -400,6 +425,18 @@ const hazards = {
   navigatesAway: { storyId: 'hazards--navigates-away', says: 'navigated away to /categories/burgers', loads: 3 },
   crashes: { storyId: 'hazards--crashes', says: 'The page crashed' },
   followedByPass: ['hazards--before-unload', 'hazards--crashes'],
+  entries: [
+    { storyId: 'hazards--crashes', reason: 'crashed', pageImage: false },
+    {
+      storyId: 'hazards--navigates-away',
+      reason: 'navigated-away',
+      pageImage: false,
+      holds: 'details.url ending /categories/burgers and the warning "Following the burgers link"',
+      has: (entry) =>
+        entry.details?.url?.endsWith('/categories/burgers') === true &&
+        entry.console.some(({ level, text }) => level === 'warn' && text === 'Following the burgers link'),
+    },
+  ] satisfies BrokenEntry[],
 }
 
 /**
@@ -453,6 +490,64 @@ const captureAreaLines: [storyId: string, says: string][] = [
   ['capture-area--element-missing', 'matched nothing'],
   ['capture-area--element-zero-size', 'box of zero size'],
   ['capture-area--too-tall', 'over 32,767 on a side. Set element'],
+]
+
+/**
+ * What the report's entry of each broken readiness, per-story options and capture area story holds: its reason, an
+ * image of its page but for the story too tall to capture and the ones whose file failed to load, and the details its
+ * reason gives. The story whose `play` threw has its stack, which shows the stack reaches visual-check through
+ * Storybook's channel, and the one whose `play` left an unhandled error keeps it as a console message of level `error`.
+ */
+const brokenEntries: BrokenEntry[] = [
+  { storyId: 'readiness--render-throws', reason: 'error', pageImage: true },
+  {
+    storyId: 'readiness--play-throws',
+    reason: 'play-threw',
+    pageImage: true,
+    holds: "play's message and a stack",
+    has: (entry) =>
+      entry.details?.play?.message.includes('visual-check: play threw') === true && entry.details.play.stack.length > 0,
+  },
+  {
+    storyId: 'readiness--play-leaves-unhandled-error',
+    reason: 'play-threw',
+    pageImage: true,
+    holds: 'a console message of level error',
+    has: (entry) => entry.console.some(({ level }) => level === 'error'),
+  },
+  {
+    storyId: 'readiness--never-ready',
+    reason: 'timeout',
+    pageImage: true,
+    holds: 'details.timeoutMs',
+    has: (entry) => (entry.details?.timeoutMs ?? 0) > 0,
+  },
+  {
+    storyId: 'readiness--font-never-loads',
+    reason: 'fonts-not-loaded',
+    pageImage: true,
+    holds: 'Never Loads in details.pendingFonts',
+    has: (entry) => entry.details?.pendingFonts?.some((face) => face.includes('Never Loads')) === true,
+  },
+  { storyId: 'wait--throws', reason: 'wait-threw', pageImage: true },
+  { storyId: 'capture-area--element-missing', reason: 'element-missing', pageImage: true },
+  { storyId: 'capture-area--element-zero-size', reason: 'element-missing', pageImage: true },
+  {
+    storyId: 'capture-area--too-tall',
+    reason: 'too-tall',
+    pageImage: false,
+    holds: 'details.size',
+    has: (entry) => entry.details?.size?.length === 2,
+  },
+  ...['load-fails--first', 'load-fails--second'].map(
+    (storyId): BrokenEntry => ({
+      storyId,
+      reason: 'load-failed',
+      pageImage: false,
+      holds: "the file's error in details.loadError",
+      has: (entry) => entry.details?.loadError?.includes('visual-check: this stories file fails to load') === true,
+    }),
+  ),
 ]
 
 /**
@@ -519,11 +614,19 @@ const consistencyHeaderPattern = /^visual-check \S+ · test · consistency · (\
 const ciStopLine = 'In CI, test stops before capturing when the consistency check finds anything.'
 
 /**
+ * The report folder `test` writes beside a config in `configFolder`.
+ */
+function reportFolderOf(configFolder: string): string {
+  return join(configFolder, '.visual-check', 'report')
+}
+
+/**
  * The line every `test` that exits 0 or 1 ends its output with, for a config in `configFolder`: the path of the
- * report's `report.json`, relative to the folder the CLI runs in.
+ * report's `report.json`, relative to the folder the CLI runs in. With `--reporter json`, or on exit 2, it ends
+ * standard error instead.
  */
 function reportLineOf(configFolder: string): string {
-  const path = relative(packageDir, join(configFolder, '.visual-check', 'report', 'report.json'))
+  const path = relative(packageDir, join(reportFolderOf(configFolder), 'report.json'))
 
   return `Report: ${path.split(sep).join('/')}`
 }
@@ -917,6 +1020,32 @@ interface HostRun {
    * cache folder.
    */
   environment: NodeJS.ProcessEnv
+}
+
+/**
+ * What the report's entry of a broken story must hold beyond its status.
+ */
+interface BrokenEntry {
+  /**
+   * The story's ID, its entry's `id`.
+   */
+  storyId: string
+  /**
+   * Its `reason`.
+   */
+  reason: ReportBrokenReason
+  /**
+   * Whether `images.snapshot` holds an image of its page. Its other images are always `null`.
+   */
+  pageImage: boolean
+  /**
+   * What `has` checks, for the problem when it fails.
+   */
+  holds?: string
+  /**
+   * Whether the entry holds what `holds` says.
+   */
+  has?: (entry: TestReportEntry) => boolean
 }
 
 /**
@@ -1635,6 +1764,221 @@ async function waitUntil(condition: () => boolean, timeoutMilliseconds: number):
 }
 
 /**
+ * Reads the `report.json` of the report beside a config in `configFolder`.
+ */
+function readReport(configFolder: string): TestReport {
+  return JSON.parse(readFileSync(join(reportFolderOf(configFolder), 'report.json'), 'utf8')) as TestReport
+}
+
+/**
+ * Reads the report beside a config in `configFolder` and gives what `check` finds wrong with it, each problem led by
+ * `report:`, or the problem that there's no `report.json`.
+ */
+function reportProblems(configFolder: string, check: (report: TestReport) => string[]): string[] {
+  const path = join(reportFolderOf(configFolder), 'report.json')
+
+  if (!isFile(path)) {
+    return [`test wrote no ${path}`]
+  }
+
+  return check(readReport(configFolder)).map((problem) => `report: ${problem}`)
+}
+
+/**
+ * Whether the text's last line is this one.
+ */
+function endsWithLine(text: string, line: string): boolean {
+  return `\n${text}`.endsWith(`\n${line}\n`)
+}
+
+/**
+ * Gives the problem when a run's standard output, or with `stream: 'stderr'` its standard error, doesn't end with the
+ * report line of a config in `configFolder`, or none.
+ */
+function reportLineProblems(run: CliRun, configFolder: string, stream: 'stdout' | 'stderr' = 'stdout'): string[] {
+  const line = reportLineOf(configFolder)
+
+  return endsWithLine(run[stream], line) ? [] : [`${stream}'s last line isn't "${line}"${outputOf(run[stream])}`]
+}
+
+/**
+ * Lists how a report differs from these outcomes, `orphans` orphans besides: see `reportCountsProblems`,
+ * `reportEntriesProblems` and `reportImagesProblems`.
+ */
+function reportOutcomeProblems(report: TestReport, expected: Outcomes, configFolder: string, orphans = 0): string[] {
+  return [
+    ...reportCountsProblems(report, expected, orphans),
+    ...reportEntriesProblems(report, expected),
+    ...reportImagesProblems(report, configFolder),
+  ]
+}
+
+/**
+ * Gives the problem when a report's counts aren't these outcomes' with this many orphans, the passes counting the
+ * entries that passed on a retry as flaky, or none.
+ */
+function reportCountsProblems(report: TestReport, expected: Outcomes, orphans: number): string[] {
+  const outcomes = Object.values(expected)
+  const countOf = (outcome: Outcome): number => outcomes.filter((each) => each === outcome).length
+  const counts: TestReportCounts = {
+    passed: countOf('passed'),
+    flaky: report.snapshots.filter(({ flaky }) => flaky).length,
+    differs: countOf('differs'),
+    broken: countOf('broken'),
+    missing: countOf('missing'),
+    orphan: orphans,
+  }
+
+  return isDeepStrictEqual(report.counts, counts)
+    ? []
+    : [`counts are ${JSON.stringify(report.counts)}, expected ${JSON.stringify(counts)}`]
+}
+
+/**
+ * Lists how a report's entries, its orphans' apart, differ from these outcomes: each snapshot that doesn't pass has
+ * an entry with its outcome as the status, and a snapshot that passed has one only when it passed on a retry, so a
+ * plain pass listed is a problem.
+ */
+function reportEntriesProblems(report: TestReport, expected: Outcomes): string[] {
+  const listed = report.snapshots.filter(({ status }) => status !== 'orphan')
+  const plainPasses = listed.filter(({ status, flaky }) => status === 'passed' && !flaky).map(({ id }) => id)
+  const flakyPasses = listed.filter(({ status, flaky }) => status === 'passed' && flaky).map(({ id }) => id)
+  const listedExpected = Object.fromEntries(
+    Object.entries(expected).filter(([key, outcome]) => outcome !== 'passed' || flakyPasses.includes(key)),
+  )
+  const actual = Object.fromEntries(
+    listed.filter(({ id }) => !plainPasses.includes(id)).map((entry) => [entry.id, entry.status]),
+  )
+
+  return [
+    ...outcomeProblems('entries', actual as Outcomes, listedExpected),
+    ...(plainPasses.length === 0 ? [] : [`it lists plain passes: ${plainPasses.join(', ')}`]),
+  ]
+}
+
+/**
+ * Lists how the images a report's entries list differ from the files in its `images/` folder: each listed image that
+ * isn't there, and each file there that no entry lists.
+ */
+function reportImagesProblems(report: TestReport, configFolder: string): string[] {
+  const folder = reportFolderOf(configFolder)
+  const listed = report.snapshots.flatMap(({ images }) => Object.values(images).filter((path) => path !== null))
+  const imagesFolder = join(folder, 'images')
+  const onDisk = existsSync(imagesFolder)
+    ? readdirSync(imagesFolder, { recursive: true })
+        .map((path) => join(imagesFolder, String(path)))
+        .filter(isFile)
+        .map((path) => relative(folder, path).split(sep).join('/'))
+    : []
+
+  return [
+    ...listed.filter((path) => !onDisk.includes(path)).map((path) => `it lists ${path}, which isn't in ${folder}`),
+    ...onDisk.filter((path) => !listed.includes(path)).map((path) => `${folder} holds ${path}, which no entry lists`),
+  ]
+}
+
+/**
+ * Lists what is wrong with the entry of each broken story these give, when the report has one with the status
+ * `broken`: its reason, whether it has an image of its page, any other image, and what else it must hold. A story the
+ * report has no broken entry for is left to `reportEntriesProblems`.
+ */
+function brokenEntryProblems(report: TestReport, brokenStories: BrokenEntry[]): string[] {
+  return brokenStories.flatMap((brokenStory) => {
+    const entry = report.snapshots.find(({ id, status }) => id === brokenStory.storyId && status === 'broken')
+
+    return entry === undefined ? [] : brokenEntryHoldsProblems(entry, brokenStory)
+  })
+}
+
+/**
+ * Lists what a broken story's entry doesn't hold of what `brokenStory` gives: see `brokenEntryProblems`.
+ */
+function brokenEntryHoldsProblems(entry: TestReportEntry, brokenStory: BrokenEntry): string[] {
+  const { storyId, reason, holds, has } = brokenStory
+
+  return [
+    ...problemUnless(entry.reason === reason, `${storyId}'s reason is ${entry.reason}, expected ${reason}`),
+    ...brokenImagesProblems(entry, brokenStory),
+    ...problemUnless(has?.(entry) ?? true, `${storyId}'s entry doesn't hold ${holds}: ${JSON.stringify(entry)}`),
+  ]
+}
+
+/**
+ * Lists what is wrong with a broken story's images: an image of its page where `brokenStory` says it has none, or
+ * none where it has one, and any baseline or diff.
+ */
+function brokenImagesProblems(entry: TestReportEntry, { storyId, pageImage }: BrokenEntry): string[] {
+  const { baseline, snapshot, diff } = entry.images
+  const pageImageText = pageImage ? 'an image of its page' : 'null'
+
+  return [
+    ...problemUnless(
+      (snapshot !== null) === pageImage,
+      `${storyId}'s images.snapshot is ${snapshot}, expected ${pageImageText}`,
+    ),
+    ...problemUnless(
+      baseline === null && diff === null,
+      `${storyId} lists a baseline or diff image: ${baseline}, ${diff}`,
+    ),
+  ]
+}
+
+/**
+ * Gives the problem unless the condition holds, or none when it does.
+ */
+function problemUnless(condition: boolean, problem: string): string[] {
+  return condition ? [] : [problem]
+}
+
+/**
+ * Lists each of these fields of a snapshot's entry that doesn't deeply equal the given value, or the problem that the
+ * report has no entry for the snapshot.
+ */
+function entryFieldProblems(report: TestReport, key: string, fields: Partial<TestReportEntry>): string[] {
+  const entry = report.snapshots.find(({ id }) => id === key)
+
+  if (entry === undefined) {
+    return [`no entry for ${key}`]
+  }
+
+  return Object.entries(fields).flatMap(([field, value]) => {
+    const actual = (entry as unknown as Record<string, unknown>)[field]
+
+    return isDeepStrictEqual(actual, value)
+      ? []
+      : [`${key}'s ${field} is ${JSON.stringify(actual)}, expected ${JSON.stringify(value)}`]
+  })
+}
+
+/**
+ * The images a report entry of the Storybook `react` lists for a snapshot that differed: its baseline, snapshot and
+ * diff, each `images/react/<key>.<kind>.png`.
+ */
+function differingImagesOf(key: string): ReportImages {
+  return {
+    baseline: `images/react/${key}.baseline.png`,
+    snapshot: `images/react/${key}.snapshot.png`,
+    diff: `images/react/${key}.diff.png`,
+  }
+}
+
+/**
+ * Lists every file in a folder and its subfolders, by its path relative to the folder, with its bytes in base64.
+ * Nothing when there's no folder.
+ */
+function folderContentsOf(folder: string): string[] {
+  if (!existsSync(folder)) {
+    return []
+  }
+
+  return readdirSync(folder, { recursive: true })
+    .map(String)
+    .filter((path) => isFile(join(folder, path)))
+    .sort()
+    .map((path) => `${path}: ${readFileSync(join(folder, path)).toString('base64')}`)
+}
+
+/**
  * Runs `test --all` against the committed baselines with the package's config and 2 workers, on a server that lists the
  * stories of the file that fails to load, and checks the run with `committedBaselinesProblems`. The expected outcomes
  * are the ones of every story, those stories' included.
@@ -1644,6 +1988,7 @@ async function checkCommittedBaselines(expected: Outcomes): Promise<string[]> {
     committedBaselinesProblems(
       await runCli(['test', '--all', '--url', server.url, '--workers', String(parallelWorkers)]),
       expected,
+      packageDir,
     ),
   )
 }
@@ -1674,7 +2019,8 @@ async function checkCiStop(expected: Outcomes): Promise<string[]> {
  * stories of the file that fails to load, and checks what it found without capturing. It exits 1, its only snapshot
  * lines are those stories', broken, each saying the file failed to load, its header is the consistency output's,
  * counting every snapshot with an expected outcome, its output has no CI line, and the browser asked for no story page.
- * The expected outcomes are the ones of every story, those stories' included.
+ * Its report is consistency-only, and lists exactly those stories, broken, `load-failed`, with the file's error. The
+ * expected outcomes are the ones of every story, those stories' included.
  */
 async function checkConsistencyOnly(expected: Outcomes): Promise<string[]> {
   return await withStorybookServer({ withLoadFails: true }, async (server) => {
@@ -1683,6 +2029,14 @@ async function checkConsistencyOnly(expected: Outcomes): Promise<string[]> {
     return [
       ...consistencyStopProblems(run, server, expected),
       ...(run.stdout.includes(ciStopLine) ? [`test --consistency prints the CI line${outputOf(run.stdout)}`] : []),
+      ...reportProblems(packageDir, (report) => [
+        ...(report.consistencyOnly ? [] : ['consistencyOnly is false']),
+        ...reportOutcomeProblems(report, outcomesMatching(expected, loadFailsFilter), packageDir),
+        ...brokenEntryProblems(
+          report,
+          brokenEntries.filter(({ storyId }) => loadFailsFilter.test(storyId)),
+        ),
+      ]),
     ]
   })
 }
@@ -1755,7 +2109,8 @@ async function checkShards(expected: Outcomes): Promise<string[]> {
 
 /**
  * Lists what is wrong with one shard's run: `shardHeaderProblems`, it exits with another code than the expected outcomes
- * of its snapshots give, or the browser asked for the page of a story whose stories file the shard has no line for.
+ * of its snapshots give, the browser asked for the page of a story whose stories file the shard has no line for, or
+ * its report, in the package's folder, doesn't name the shard or differs from those outcomes.
  */
 function shardProblems(
   shard: number,
@@ -1774,6 +2129,12 @@ function shardProblems(
     ...(otherPages.length === 0
       ? []
       : [`the browser asked for pages of stories files the shard has no line for: ${otherPages.join(', ')}`]),
+    ...reportProblems(packageDir, (report) => [
+      ...(isDeepStrictEqual(report.shard, { index: shard, total: shardCount })
+        ? []
+        : [`shard is ${JSON.stringify(report.shard)}, expected ${shard}/${shardCount}`]),
+      ...reportOutcomeProblems(report, ownExpected, packageDir),
+    ]),
   ]
 }
 
@@ -1842,10 +2203,21 @@ function storiesFilesOf(run: CliRun, storiesFiles: ReadonlyMap<string, string>):
  * disabled stories, which `index.json` lists, have no line, and the header counts exactly the snapshots with an
  * expected outcome, the modes' included. The story that lists `dark` and `mobile` has exactly 3 lines, and the story
  * with its own list of modes has no line for the meta's `dark`. Outside the Storybook 10 test Storybook, the committed
- * animation baselines are byte-identical to its own.
+ * animation baselines are byte-identical to its own. Its stdout's last line is the report line of the config in
+ * `configFolder`, and the report there counts and lists exactly the expected outcomes, has exactly the images its
+ * entries list, and the entry of each broken readiness, per-story options and capture area story that has an expected
+ * outcome holds what `brokenEntries` gives.
  */
-function committedBaselinesProblems(run: CliRun, expected: Outcomes): string[] {
+function committedBaselinesProblems(run: CliRun, expected: Outcomes, configFolder: string): string[] {
   return [
+    ...reportLineProblems(run, configFolder),
+    ...reportProblems(configFolder, (report) => [
+      ...reportOutcomeProblems(report, expected, configFolder),
+      ...brokenEntryProblems(
+        report,
+        brokenEntries.filter(({ storyId }) => expected[storyId] !== undefined),
+      ),
+    ]),
     ...expectedRunProblems('test', run, expected),
     ...[...readinessLines, ...perStoryOptionsLines, ...captureAreaLines]
       .filter(([storyId]) => !loadFailsFilter.test(storyId) || expected[storyId] !== undefined)
@@ -2003,7 +2375,8 @@ function headerCountProblems(run: CliRun, count: number): string[] {
  * `update` into an empty folder writes every story that isn't broken, `test` then passes them and finds the broken
  * ones missing, and the baselines of the stories expected to pass are byte-identical to the committed ones. Only those
  * have a committed baseline the written one must equal. `update`'s standard error ends with the network warning for the
- * network stories alone. Both commands take 2 workers from the config.
+ * network stories alone. Both commands take 2 workers from the config. `test`'s report counts and lists the outcomes it
+ * gives, its missing entries with no image.
  */
 async function checkUpdateThenTest(expected: Outcomes): Promise<string[]> {
   rmSync(diagnosticsDir, { recursive: true, force: true })
@@ -2025,7 +2398,17 @@ async function checkUpdateThenTest(expected: Outcomes): Promise<string[]> {
 
       const passing = Object.keys(expected).filter((key) => expected[key] === 'passed')
 
-      const retestProblems = await runTestAndCheck(args, mapOutcomes(expected, retestOutcomeOf))
+      const retestExpected = mapOutcomes(expected, retestOutcomeOf)
+      const retest = await runCli(['test', ...args])
+      const retestProblems = [
+        ...expectedRunProblems('test', retest, retestExpected),
+        ...reportProblems(folder, (report) => [
+          ...reportOutcomeProblems(report, retestExpected, folder),
+          ...report.snapshots
+            .filter(({ status, images }) => status === 'missing' && !isDeepStrictEqual(images, noImages))
+            .map(({ id, images }) => `${id} is missing but lists images: ${JSON.stringify(images)}`),
+        ]),
+      ]
       const pagesBefore = server.storyPageRequests().length
       const consistency = await runCli(['test', '--consistency', '--config', config])
 
@@ -2102,15 +2485,6 @@ function expectedRunProblems(command: string, run: CliRun, expected: Outcomes): 
 }
 
 /**
- * Runs `test` locally, without `CI`, and lists how its exit code and outcomes differ from the expected ones.
- */
-async function runTestAndCheck(args: string[], expected: Outcomes): Promise<string[]> {
-  const run = await runCli(['test', ...args])
-
-  return expectedRunProblems('test', run, expected)
-}
-
-/**
  * On one worker, the storage stories run one right after the other on the same page, in index order, so the second
  * passes only when the storage the first filled was cleared between them. `test` against the committed baselines
  * gives their expected outcomes, both passed.
@@ -2180,7 +2554,9 @@ function passedAfterProblems(storyId: string, next: SnapshotLine | undefined): s
  * On one worker, the hazard stories run one after the other in index order, and `test` against the committed baselines
  * gives exactly their expected outcomes. The story that navigates away is broken saying where it went, after its page
  * loaded 3 times. The story that crashes is broken saying its page crashed. The stories after `BeforeUnload` and
- * `Crashes` pass, so a page that a `beforeunload` dialog holds, or a crashed page that isn't replaced, shows.
+ * `Crashes` pass, so a page that a `beforeunload` dialog holds, or a crashed page that isn't replaced, shows. The
+ * report beside the config counts and lists the expected outcomes, and the two broken stories' entries hold what
+ * `hazards.entries` gives.
  */
 async function checkHazards(expected: Outcomes): Promise<string[]> {
   return await withStorybookServer({}, (server) =>
@@ -2193,6 +2569,10 @@ async function checkHazards(expected: Outcomes): Promise<string[]> {
         ...navigatedAwayProblems(run, server),
         ...lineSaysProblems(run, hazards.crashes.storyId, hazards.crashes.says),
         ...hazards.followedByPass.flatMap((storyId) => followedByPassProblems(run, storyId)),
+        ...reportProblems(folder, (report) => [
+          ...reportOutcomeProblems(report, outcomesMatching(expected, hazards.filter), folder),
+          ...brokenEntryProblems(report, hazards.entries),
+        ]),
       ]
     }),
   )
@@ -2230,11 +2610,12 @@ async function checkGrowingMask(): Promise<string[]> {
 /**
  * With one pixel of the card story changed, `test` on that story against the committed baselines fails with a config
  * that sets `tolerance: { pixels: 0 }`: the story differs, its line says `1 differ, 0 allowed`, and the report beside
- * the config holds its baseline, snapshot and diff. With the default tolerance, the same `test` gives the story its
- * expected outcome, passed. Each problem starts with the tolerance its run had.
+ * the config lists it differing by pixels, 1 of 0 allowed with a budget of 0 at scale 1, with its baseline, snapshot and
+ * diff, which it holds. With the default tolerance, the same `test` gives the story its expected outcome, passed. Each
+ * problem starts with the tolerance its run had.
  */
 async function checkOnePixelChange(expected: Outcomes): Promise<string[]> {
-  const { storyId, filter, style, says } = onePixelChange
+  const { storyId, filter, style, says, pixels } = onePixelChange
   const defaultExpected = outcomesMatching(expected, filter)
 
   return await withStorybookServer({ injectIntoIframe: style }, (server) =>
@@ -2246,7 +2627,15 @@ async function checkOnePixelChange(expected: Outcomes): Promise<string[]> {
       const noPixelsProblems = [
         ...expectedRunProblems('test', noPixelsRun, { [storyId]: 'differs' }),
         ...lineSaysProblems(noPixelsRun, storyId, says),
-        ...reportImageProblems(folder, storyId),
+        ...reportProblems(folder, (report) => [
+          ...entryFieldProblems(report, storyId, {
+            status: 'differs',
+            reason: 'pixels',
+            pixels,
+            images: differingImagesOf(storyId),
+          }),
+          ...reportImagesProblems(report, folder),
+        ]),
       ]
       const defaultConfig = writeConfig(folder, server.url, committedBaselines)
       const defaultRun = await runCli([...testArgs, '--config', defaultConfig])
@@ -2257,19 +2646,6 @@ async function checkOnePixelChange(expected: Outcomes): Promise<string[]> {
       ]
     }),
   )
-}
-
-/**
- * Lists each image of a snapshot that the report beside a config in this folder doesn't hold for the Storybook
- * `react`, or none when it holds them all.
- */
-function reportImageProblems(configFolder: string, key: string): string[] {
-  const imagesFolder = join(configFolder, '.visual-check', 'report', 'images', 'react')
-
-  return reportImageKinds
-    .map((kind) => join(imagesFolder, `${key}.${kind}.png`))
-    .filter((path) => !isFile(path))
-    .map((path) => `test wrote no ${path}`)
 }
 
 /**
@@ -2292,8 +2668,9 @@ async function checkFlakyRetries(): Promise<string[]> {
  * Runs `test` on the card story against the committed baselines, with the story's first `changedLoads` page loads
  * changed and a config that sets the run's `retries`. `test` gives the story the run's outcome, and the server is asked
  * for its page the run's number of times. A pass is flaky: its line ends with `· flaky`, `test` lists it under the
- * flaky heading, its counts say `1 passed (1 flaky)`, and the report beside the config keeps its first capture's
- * baseline, snapshot and diff. A snapshot that differs isn't flaky, so `test` lists no flaky snapshot.
+ * flaky heading, its counts say `1 passed (1 flaky)`, and the report beside the config lists it passed, flaky, after as
+ * many attempts as page loads, with its first capture's baseline, snapshot and diff, which it holds. A snapshot that
+ * differs isn't flaky, so `test` lists no flaky snapshot.
  */
 async function flakyRunProblems({ changedLoads, outcome, storyPages, retries }: FlakyRun): Promise<string[]> {
   const { storyId, filter, markup } = flakyChange
@@ -2307,7 +2684,7 @@ async function flakyRunProblems({ changedLoads, outcome, storyPages, retries }: 
       return [
         ...expectedRunProblems('test', run, { [storyId]: outcome }),
         ...storyPageCountProblems(server, storyId, storyPages),
-        ...(outcome === 'passed' ? flakyPassProblems(run, storyId, folder) : notFlakyProblems(run)),
+        ...(outcome === 'passed' ? flakyPassProblems(run, storyId, folder, storyPages) : notFlakyProblems(run)),
       ]
     }),
   )
@@ -2325,13 +2702,22 @@ function storyPageCountProblems(server: StorybookServer, storyId: string, count:
 /**
  * Lists what shows a story's pass isn't flaky in a run of `test` with the Storybook `react`: its line doesn't end with
  * `· flaky`, the flaky heading isn't followed by its name, the counts don't say `1 passed (1 flaky)`, or the report
- * beside the config doesn't hold its images.
+ * beside the config doesn't list it passed, flaky, after this many attempts, with its first capture's images, or
+ * doesn't hold them.
  */
-function flakyPassProblems(run: CliRun, storyId: string, configFolder: string): string[] {
+function flakyPassProblems(run: CliRun, storyId: string, configFolder: string, attempts: number): string[] {
   return [
     ...lineSaysProblems(run, storyId, flakyMark),
     ...stdoutSaysProblems(run, [`${flakyHeading}\n  react  ${storyId}\n`, '1 passed (1 flaky)']),
-    ...reportImageProblems(configFolder, storyId),
+    ...reportProblems(configFolder, (report) => [
+      ...entryFieldProblems(report, storyId, {
+        status: 'passed',
+        flaky: true,
+        attempts,
+        images: differingImagesOf(storyId),
+      }),
+      ...reportImagesProblems(report, configFolder),
+    ]),
   ]
 }
 
@@ -2611,6 +2997,166 @@ async function checkRejectedBeforeCapture(markup: string, texts: string[]): Prom
 }
 
 /**
+ * The report JSON case's three runs, one after the other in one temporary folder, each problem led by the run's name:
+ * see `jsonReporterProblems`, `unreachableStorybookProblems` and `updateJsonProblems`. The second runs after the first,
+ * so the report it replaces held images.
+ */
+async function checkReportJsonAndErrors(): Promise<string[]> {
+  return await withTemporaryFolder(async (folder) => {
+    const jsonReporter = await jsonReporterProblems(folder)
+    const unreachable = await unreachableStorybookProblems(folder)
+    const update = await updateJsonProblems(folder)
+
+    return [
+      ...jsonReporter.map((problem) => `test --reporter json: ${problem}`),
+      ...unreachable.map((problem) => `unreachable Storybook: ${problem}`),
+      ...update.map((problem) => `update --reporter json: ${problem}`),
+    ]
+  })
+}
+
+/**
+ * Copies the committed baselines into the folder's `baselines/`, adds a stray copy of the card story's baseline that no
+ * story calls for, and runs `test --reporter json` on the card story alone. It exits 1 for the orphan, its stdout is
+ * `report.json` exactly, one document on one line, and its stderr's last line is the report line. The report counts
+ * the card story passed and the orphan, and lists the orphan with no story and its baseline copied into the report.
+ */
+async function jsonReporterProblems(folder: string): Promise<string[]> {
+  const { storyId, filter, orphan } = reportJson
+  const baselines = join(folder, 'baselines')
+  const orphanPath = join(baselines, `${orphan}.png`)
+  const orphanImage = `images/react/${orphan}.baseline.png`
+
+  cpSync(committedBaselines, baselines, { recursive: true })
+  cpSync(join(committedBaselines, `${storyId}.png`), orphanPath)
+
+  return await withStorybookServer({}, async (server) => {
+    const config = writeConfig(folder, server.url, baselines)
+    const run = await runCli(['test', '--reporter', 'json', '--filter', filter.source, '--config', config])
+    const reportJsonPath = join(reportFolderOf(folder), 'report.json')
+    const isReportJson = isFile(reportJsonPath) && run.stdout === readFileSync(reportJsonPath, 'utf8')
+
+    return [
+      ...exitCodeProblems('test', run, 1),
+      ...(isReportJson && run.stdout.split('\n').length === 2
+        ? []
+        : [`stdout isn't report.json's one document${outputOf(run.stdout)}`]),
+      ...reportLineProblems(run, folder, 'stderr'),
+      ...reportProblems(folder, (report) => [
+        ...reportOutcomeProblems(report, { [storyId]: 'passed' }, folder, 1),
+        ...entryFieldProblems(report, orphan, {
+          status: 'orphan',
+          story: null,
+          images: { ...noImages, baseline: orphanImage },
+        }),
+        ...(isSameFile(join(reportFolderOf(folder), orphanImage), orphanPath)
+          ? []
+          : [`${orphanImage} isn't the orphan's baseline`]),
+      ]),
+    ]
+  })
+}
+
+/**
+ * With the Storybook's server stopped, `test --all` exits 2, its stderr's last line is the report line, and the report
+ * holds only the error, which names the Storybook `react` at the server's URL, with no entry and no image left from
+ * the report before.
+ */
+async function unreachableStorybookProblems(folder: string): Promise<string[]> {
+  const server = await serveStorybook()
+
+  await server.stop()
+
+  const config = writeConfig(folder, server.url, committedBaselines)
+  const run = await runCli(['test', '--all', '--config', config])
+  const imagesFolder = join(reportFolderOf(folder), 'images')
+
+  return [
+    ...exitCodeProblems('test', run, 2),
+    ...reportLineProblems(run, folder, 'stderr'),
+    ...reportProblems(folder, (report) => errorReportProblems(report, server.url, imagesFolder)),
+  ]
+}
+
+/**
+ * Lists what is wrong with the report of a `test` that exited 2 because nothing answered at the Storybook `react`'s
+ * URL: its error names another list of Storybooks, it has another exit code or an entry, or its images folder holds a
+ * file.
+ */
+function errorReportProblems(report: TestReport, url: string, imagesFolder: string): string[] {
+  const storybooks = report.error?.storybooks
+  const { exitCode, snapshots } = report
+
+  return [
+    ...problemUnless(
+      isDeepStrictEqual(storybooks, [{ name: 'react', url }]),
+      `error.storybooks is ${JSON.stringify(storybooks)}, expected react at ${url}`,
+    ),
+    ...problemUnless(
+      exitCode === 2 && snapshots.length === 0,
+      `it isn't an exit 2 report with no entry: exit ${exitCode}, ${snapshots.length} entries`,
+    ),
+    ...problemUnless(isMissingOrEmpty(imagesFolder), `${imagesFolder} still holds images`),
+  ]
+}
+
+/**
+ * Over a report folder made beforehand, `update --reporter json` on the card story alone, into an empty baselines
+ * folder, on a server that lists that story alone, exits 0, its stdout is one `update` document on one line that
+ * lists the story written because it was missing, and the report folder is left exactly as it was.
+ */
+async function updateJsonProblems(folder: string): Promise<string[]> {
+  const { storyId, filter } = reportJson
+  const reportFolder = reportFolderOf(folder)
+
+  mkdirSync(reportFolder, { recursive: true })
+  writeFileSync(join(reportFolder, 'report.json'), '{"madeBy":"e2e"}\n')
+
+  const before = folderContentsOf(reportFolder)
+
+  return await withStorybookServer({ onlyStory: storyId }, async (server) => {
+    const config = writeConfig(folder, server.url, join(folder, 'update-baselines'))
+    const run = await runCli(['update', '--reporter', 'json', '--filter', filter.source, '--config', config])
+
+    return [
+      ...exitCodeProblems('update', run, 0),
+      ...updateDocumentProblems(run.stdout, storyId),
+      ...(isDeepStrictEqual(folderContentsOf(reportFolder), before) ? [] : ['update changed the report folder']),
+    ]
+  })
+}
+
+/**
+ * Gives the problems with `update`'s stdout when it isn't one `update` document on one line, with no report folder,
+ * whose one entry is the story, written because it was missing, or none.
+ */
+function updateDocumentProblems(stdout: string, storyId: string): string[] {
+  const [line = '', ...rest] = stdout.split('\n')
+  let document: UpdateReport
+
+  try {
+    document = JSON.parse(line) as UpdateReport
+  } catch {
+    return [`stdout isn't a JSON document${outputOf(stdout)}`]
+  }
+
+  const { command, reportDir, snapshots } = document
+  const entries = snapshots.map(({ id, status, reason }) => ({ id, status, reason }))
+
+  return [
+    ...problemUnless(rest.join('\n') === '', `stdout has more than one line${outputOf(stdout)}`),
+    ...problemUnless(
+      command === 'update' && reportDir === null,
+      `the document's command is ${command} and its reportDir ${reportDir}`,
+    ),
+    ...problemUnless(
+      isDeepStrictEqual(entries, [{ id: storyId, status: 'written', reason: 'missing' }]),
+      `the document's entries are ${JSON.stringify(entries)}`,
+    ),
+  ]
+}
+
+/**
  * Inside the image, `platform: 'host'` captures with the image's browser and gives exactly the expected outcomes.
  */
 async function checkHostPlatform(expected: Outcomes): Promise<string[]> {
@@ -2643,7 +3189,7 @@ async function checkArm64Image(expected: Outcomes): Promise<string[]> {
   rmSync(diagnosticsDir, { recursive: true, force: true })
 
   return await testWithPlatform('linux/arm64', (run, _server, configFolder) => {
-    const problems = committedBaselinesProblems(run, expected)
+    const problems = committedBaselinesProblems(run, expected, configFolder)
     const report = join(configFolder, '.visual-check', 'report')
 
     if (problems.length === 0 || !existsSync(report)) {
@@ -3148,6 +3694,10 @@ if (setupProblems.length > 0) {
     {
       name: 'invalid modes: test exits 2 naming the story and the key, for an undeclared global and a pinned one, before any capture',
       run: checkInvalidModes,
+    },
+    {
+      name: 'report json and errors: test --reporter json prints report.json alone and lists an orphan with its baseline; with the server stopped, test exits 2 leaving a report of the error naming react and its URL, with no image; update --reporter json prints its own document and leaves the report folder alone',
+      run: checkReportJsonAndErrors,
     },
     ...(insideImage ? insideImageCases(expected) : outsideImageCases(expected)),
   ])
