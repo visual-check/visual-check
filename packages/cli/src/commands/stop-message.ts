@@ -66,6 +66,7 @@ const baselineFixes: Record<BaselineError['action'], string> = {
 const reportFixes: Record<ReportError['action'], string> = {
   clear: 'Check that visual-check can remove it.',
   write: 'Check that its folder is writable and the disk has room.',
+  copy: "Check that it's a file visual-check can read.",
 }
 
 /**

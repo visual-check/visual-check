@@ -60,6 +60,14 @@ describe('stopMessageOf', () => {
     )
   })
 
+  it('names the baseline a report copy fails to read, its reason and what to do', () => {
+    const error = new ReportError('copy', '/project/baselines/a.png', new Error('gone'))
+
+    expect(stopMessageOf(error, contextOf(), false)).toBe(
+      "visual-check couldn't copy baselines/a.png: gone. Check that it's a file visual-check can read.\n",
+    )
+  })
+
   it('gives the error, the next step and the output for a browser that exited with output', () => {
     const error = new BrowserExitedError({ code: 137, signal: null, error: undefined }, ['out of memory'])
 

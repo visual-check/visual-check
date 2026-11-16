@@ -11,7 +11,16 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { clearReport, ReportError, reportFolderOf, writeFailureImages } from './report-folder.js'
+import { emptyTestCounts, testReportOf } from './report-document.js'
+import {
+  clearReport,
+  copyBaselineToReport,
+  ReportError,
+  reportFolderOf,
+  writeErrorReport,
+  writeReportImages,
+  writeReportJson,
+} from './report-folder.js'
 
 /**
  * The temporary folders the tests made, removed after each test.
@@ -89,12 +98,12 @@ describe('clearReport', () => {
   })
 })
 
-describe('writeFailureImages', () => {
+describe('writeReportImages', () => {
   it("creates the Storybook's images folder and writes each image exactly, named by the key", async () => {
     const folder = join(createFolder(), 'report')
     const imagesFolder = join(folder, 'images', 'web')
 
-    await writeFailureImages(folder, 'web', 'button--primary.dark', images)
+    await writeReportImages(folder, 'web', 'button--primary.dark', images)
 
     expect(readdirSync(imagesFolder).sort()).toEqual([
       'button--primary.dark.baseline.png',
@@ -113,9 +122,9 @@ describe('writeFailureImages', () => {
   it('keeps the images of other snapshots and Storybooks', async () => {
     const folder = join(createFolder(), 'report')
 
-    await writeFailureImages(folder, 'web', 'a', images)
-    await writeFailureImages(folder, 'web', 'b', images)
-    await writeFailureImages(folder, 'docs', 'a', images)
+    await writeReportImages(folder, 'web', 'a', images)
+    await writeReportImages(folder, 'web', 'b', images)
+    await writeReportImages(folder, 'docs', 'a', images)
 
     expect(readdirSync(join(folder, 'images')).sort()).toEqual(['docs', 'web'])
     expect(readdirSync(join(folder, 'images', 'web'))).toHaveLength(6)
@@ -126,7 +135,7 @@ describe('writeFailureImages', () => {
 
     writeFileSync(join(folder, 'images'), '')
 
-    await expect(writeFailureImages(folder, 'web', 'a', images)).rejects.toMatchObject({
+    await expect(writeReportImages(folder, 'web', 'a', images)).rejects.toMatchObject({
       name: 'ReportError',
       action: 'write',
       path: join(folder, 'images', 'web'),
@@ -140,10 +149,104 @@ describe('writeFailureImages', () => {
 
     mkdirSync(path, { recursive: true })
 
-    await expect(writeFailureImages(folder, 'web', 'a', images)).rejects.toMatchObject({
+    await expect(writeReportImages(folder, 'web', 'a', images)).rejects.toMatchObject({
       action: 'write',
       path,
       reason: 'EISDIR: illegal operation on a directory',
     })
+  })
+})
+
+describe('writeReportImages returning paths', () => {
+  it('writes only the images given and returns null for the rest', async () => {
+    const folder = join(createFolder(), 'report')
+
+    const paths = await writeReportImages(folder, 'web', 'a', { snapshot: images.snapshot })
+
+    expect(paths).toEqual({ baseline: null, snapshot: 'images/web/a.snapshot.png', diff: null })
+    expect(readdirSync(join(folder, 'images', 'web'))).toEqual(['a.snapshot.png'])
+  })
+
+  it('returns all three paths in the order baseline, snapshot, diff', async () => {
+    const folder = join(createFolder(), 'report')
+
+    const paths = await writeReportImages(folder, 'web', 'a', images)
+
+    expect(Object.keys(paths)).toEqual(['baseline', 'snapshot', 'diff'])
+    expect(paths).toEqual({
+      baseline: 'images/web/a.baseline.png',
+      snapshot: 'images/web/a.snapshot.png',
+      diff: 'images/web/a.diff.png',
+    })
+  })
+})
+
+describe('copyBaselineToReport', () => {
+  it('copies the baseline and returns its path in the report folder', async () => {
+    const root = createFolder()
+    const folder = join(root, 'report')
+    const baseline = join(root, 'a.png')
+
+    writeFileSync(baseline, images.baseline)
+
+    const path = await copyBaselineToReport(folder, 'web', 'a', baseline)
+
+    expect(path).toBe('images/web/a.baseline.png')
+    expect(new Uint8Array(readFileSync(join(folder, 'images', 'web', 'a.baseline.png')))).toEqual(images.baseline)
+  })
+
+  it('throws a ReportError when the baseline is missing', async () => {
+    const root = createFolder()
+
+    await expect(copyBaselineToReport(join(root, 'report'), 'web', 'a', join(root, 'none.png'))).rejects.toMatchObject({
+      name: 'ReportError',
+      action: 'copy',
+      path: join(root, 'none.png'),
+      reason: 'ENOENT: no such file or directory',
+      message: `Couldn't copy ${join(root, 'none.png')}: ENOENT: no such file or directory.`,
+    })
+  })
+})
+
+describe('report.json', () => {
+  const report = testReportOf({
+    visualCheck: '0.1.0',
+    consistencyOnly: false,
+    exitCode: 2,
+    shard: null,
+    selection: { by: 'all', base: null, changedFiles: null, fallback: null },
+    reportDir: '.visual-check/report',
+    storybooks: [],
+    counts: emptyTestCounts(),
+    snapshots: [],
+    error: { message: 'No Storybook.', storybooks: [] },
+  })
+
+  it('writes the minified document and a newline, creating the folder', async () => {
+    const folder = join(createFolder(), 'report')
+
+    await writeReportJson(folder, report)
+
+    expect(readFileSync(join(folder, 'report.json'), 'utf8')).toBe(`${JSON.stringify(report)}\n`)
+  })
+
+  it('throws a ReportError when the file is a folder', async () => {
+    const folder = createFolder()
+
+    mkdirSync(join(folder, 'report.json'))
+
+    await expect(writeReportJson(folder, report)).rejects.toMatchObject({
+      name: 'ReportError',
+      path: join(folder, 'report.json'),
+    })
+  })
+
+  it('replaces the old report with one that holds only the error', async () => {
+    const folder = join(createFolder(), 'report')
+
+    await writeReportImages(folder, 'web', 'a', images)
+    await writeErrorReport(folder, report)
+
+    expect(readdirSync(folder)).toEqual(['report.json'])
   })
 })

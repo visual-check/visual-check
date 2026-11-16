@@ -1,6 +1,6 @@
 import { baselinePathOf, baselineStemOf, readBaseline } from '../baselines/baseline-files.js'
 import type { BrokenStory, RemoteContentBox, StoryCapture } from '../capture/capture-session.js'
-import { writeFailureImages } from '../report/report-folder.js'
+import { writeReportImages } from '../report/report-folder.js'
 import type { ImageRegion, VisualDiff, VisualDiffResult } from '../visual-diff/visual-diff.js'
 import type { SnapshotToCapture } from './plan-snapshots.js'
 import { remoteContentHintOf } from './remote-content-hint.js'
@@ -242,7 +242,7 @@ export async function testSnapshot(
     return { status: 'passed', detail: `${elapsedMs} ms`, completingMs: capture.completingMs }
   }
 
-  await writeFailureImages(reportFolder, item.storybook.name, baselineStemOf(item.key), {
+  await writeReportImages(reportFolder, item.storybook.name, baselineStemOf(item.key), {
     baseline: bytes,
     snapshot: capture.snapshot,
     diff: result.diff,

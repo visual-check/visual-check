@@ -1,6 +1,7 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { systemReasonOf } from '../system-error/system-reason.js'
+import { type Report, type ReportImages, reportImagePathOf, reportJsonOf } from './report-document.js'
 
 /**
  * The images a differing snapshot leaves in the report, in the order they are written.
@@ -20,12 +21,12 @@ export class ReportError extends Error {
   override name = 'ReportError'
 
   /**
-   * What failed: clearing the report folder or writing a report image.
+   * What failed: clearing the report folder, writing a report file, or copying a baseline.
    */
-  readonly action: 'clear' | 'write'
+  readonly action: 'clear' | 'write' | 'copy'
 
   /**
-   * The report folder's path, or the image's.
+   * The report folder's path, the file's, or for a copy the baseline's.
    */
   readonly path: string
 
@@ -37,7 +38,7 @@ export class ReportError extends Error {
   /**
    * Keeps what failed, the path and the reason the error that caused it gives.
    */
-  constructor(action: 'clear' | 'write', path: string, cause: unknown) {
+  constructor(action: 'clear' | 'write' | 'copy', path: string, cause: unknown) {
     const reason = systemReasonOf(cause)
 
     super(`Couldn't ${action} ${path}: ${reason}.`, { cause })
@@ -52,7 +53,7 @@ export class ReportError extends Error {
  *
  * @public
  */
-export interface FailureImages {
+export interface ReportImageBytes {
   /**
    * The baseline, as stored.
    */
@@ -92,35 +93,118 @@ export async function clearReport(folder: string): Promise<void> {
 }
 
 /**
- * Writes a differing snapshot's images to `images/<storybook>/<stem>.baseline.png`, `.snapshot.png` and `.diff.png` in
- * the report folder, each exactly as given, creating the folders first. The stem is its baseline's: the snapshot's key,
- * shortened when long.
+ * Writes the given images to `images/<storybook>/<stem>.baseline.png`, `.snapshot.png` and `.diff.png` in the report
+ * folder, each exactly as given, creating the folders first. The stem is its baseline's: the snapshot's key, shortened
+ * when long. Images left out aren't written.
+ *
+ * @returns The written images' paths relative to the report folder, `null` for the rest.
  *
  * @throws {ReportError} When a folder or an image can't be written.
  *
  * @public
  */
-export async function writeFailureImages(
+export async function writeReportImages(
   folder: string,
   storybook: string,
   stem: string,
-  images: FailureImages,
-): Promise<void> {
+  images: Partial<ReportImageBytes>,
+): Promise<ReportImages> {
+  const paths: ReportImages = { baseline: null, snapshot: null, diff: null }
   const imagesFolder = join(folder, 'images', storybook)
 
-  try {
-    await mkdir(imagesFolder, { recursive: true })
-  } catch (error) {
-    throw new ReportError('write', imagesFolder, error)
-  }
+  await makeFolder(imagesFolder)
 
   for (const kind of imageKinds) {
+    const bytes = images[kind]
+
+    if (bytes === undefined) {
+      continue
+    }
+
     const path = join(imagesFolder, `${stem}.${kind}.png`)
 
     try {
-      await writeFile(path, images[kind])
+      await writeFile(path, bytes)
     } catch (error) {
       throw new ReportError('write', path, error)
     }
+
+    paths[kind] = reportImagePathOf(storybook, stem, kind)
+  }
+
+  return paths
+}
+
+/**
+ * Copies a baseline to `images/<storybook>/<stem>.baseline.png` in the report folder, creating the folders first.
+ *
+ * @returns The copy's path relative to the report folder.
+ *
+ * @throws {ReportError} When a folder can't be made (`write`) or the baseline can't be copied (`copy`, naming it).
+ *
+ * @public
+ */
+export async function copyBaselineToReport(
+  folder: string,
+  storybook: string,
+  stem: string,
+  baselinePath: string,
+): Promise<string> {
+  const imagesFolder = join(folder, 'images', storybook)
+  const path = join(imagesFolder, `${stem}.baseline.png`)
+
+  await makeFolder(imagesFolder)
+
+  try {
+    await copyFile(baselinePath, path)
+  } catch (error) {
+    throw new ReportError('copy', baselinePath, error)
+  }
+
+  return reportImagePathOf(storybook, stem, 'baseline')
+}
+
+/**
+ * Writes `report.json` in the report folder, creating the folder first.
+ *
+ * @throws {ReportError} When the folder or the file can't be written.
+ *
+ * @public
+ */
+export async function writeReportJson(folder: string, report: Report): Promise<void> {
+  await makeFolder(folder)
+
+  const path = join(folder, 'report.json')
+
+  try {
+    await writeFile(path, `${reportJsonOf(report)}\n`)
+  } catch (error) {
+    throw new ReportError('write', path, error)
+  }
+}
+
+/**
+ * Replaces the report folder with a report that holds only the run's error: the old report is cleared first, so none
+ * of its images linger.
+ *
+ * @throws {ReportError} When the folder can't be cleared or the report can't be written.
+ *
+ * @public
+ */
+export async function writeErrorReport(folder: string, report: Report): Promise<void> {
+  await clearReport(folder)
+  await writeReportJson(folder, report)
+}
+
+/**
+ * Makes a folder and its parents.
+ *
+ * @throws {ReportError} When the folder can't be made.
+ */
+async function makeFolder(folder: string): Promise<void> {
+  try {
+    await mkdir(folder, { recursive: true })
+  } catch (error) {
+    throw new ReportError('write', folder, error)
   }
 }
