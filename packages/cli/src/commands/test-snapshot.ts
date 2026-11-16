@@ -8,6 +8,7 @@ import {
   brokenResultOf,
   type CaptureStory,
   compareWithBaseline,
+  missingResultOf,
   type SnapshotResult,
   storyToCaptureOf,
 } from './snapshot-result.js'
@@ -219,7 +220,7 @@ export async function testSnapshot(
   const bytes = await readBaseline(path)
 
   if (bytes === undefined) {
-    return { status: 'missing', detail: 'missing: no baseline yet; run visual-check update to write it' }
+    return missingResultOf()
   }
 
   const attempt = (options: AttemptOptions): Promise<Attempt> =>

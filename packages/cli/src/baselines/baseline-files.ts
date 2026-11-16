@@ -96,6 +96,8 @@ export function foldedFileNameOf(name: string): string {
 
 /**
  * Gives a baseline's file name without its `.png`: the stem its snapshot's key gave it.
+ *
+ * @public
  */
 export function stemOfFileName(fileName: string): string {
   return fileName.slice(0, -baselineExtension.length)

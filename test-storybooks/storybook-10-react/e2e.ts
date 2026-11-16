@@ -429,7 +429,7 @@ const readinessLines: [storyId: string, says: string][] = [
  * The stories of the stories file that throws as the browser imports it, by the pattern their IDs match. They're
  * broken, `load-failed`, before any baseline is read, so they have none and stay broken in every `test` that lists
  * them. The server leaves them out of `index.json` unless a case asks for them, so only the committed baselines case
- * sees them.
+ * and the CI stop case see them.
  */
 const loadFailsFilter = /^load-fails--/
 
@@ -506,6 +506,17 @@ const modeLines = {
  * The header's count of the snapshots a run takes.
  */
 const headerCountPattern = /^visual-check \S+ · \S+ · (\d+) snapshots? · /m
+
+/**
+ * The header of the consistency output, which a CI `test` prints when it stops before capturing, with its count of
+ * every snapshot the stories call for.
+ */
+const consistencyHeaderPattern = /^visual-check \S+ · test · consistency · (\d+) snapshots?$/m
+
+/**
+ * The line a CI `test` ends its output with when its consistency check finds anything, so it captures nothing.
+ */
+const ciStopLine = 'In CI, test stops before capturing when the consistency check finds anything.'
 
 /**
  * What the warning for a Storybook that ignores the test path's user agent says, wherever it names the Storybook.
@@ -1615,6 +1626,44 @@ async function checkCommittedBaselines(expected: Outcomes): Promise<string[]> {
       expected,
     ),
   )
+}
+
+/**
+ * Runs `test --all` in CI against the committed baselines with the package's config, on a server that lists the
+ * stories of the file that fails to load, and checks that the consistency check stopped it before any capture. It exits
+ * 1, its only snapshot lines are those stories', broken, each saying the file failed to load, its header is the
+ * consistency output's, counting every snapshot with an expected outcome, its output ends with the line that says CI
+ * stops before capturing, and the browser asked for no story page. The expected outcomes are the ones of every story,
+ * those stories' included.
+ */
+async function checkCiStop(expected: Outcomes): Promise<string[]> {
+  return await withStorybookServer({ withLoadFails: true }, async (server) => {
+    const run = await runCli(['test', '--all', '--url', server.url], { ...localEnvironment(), CI: 'true' })
+
+    return [
+      ...expectedRunProblems('test', run, outcomesMatching(expected, loadFailsFilter)),
+      ...perStoryOptionsLines
+        .filter(([storyId]) => loadFailsFilter.test(storyId))
+        .flatMap(([storyId, says]) => lineSaysProblems(run, storyId, says)),
+      ...consistencyHeaderProblems(run, Object.keys(expected).length),
+      ...(run.stdout.endsWith(`\n${ciStopLine}\n`)
+        ? []
+        : [`test's output doesn't end with "${ciStopLine}"${outputOf(run.stdout)}`]),
+      ...capturedProblems(server),
+    ]
+  })
+}
+
+/**
+ * Gives the problem with a run's output when it has no consistency header counting this many snapshots, or none when it
+ * has.
+ */
+function consistencyHeaderProblems(run: CliRun, count: number): string[] {
+  const counted = consistencyHeaderPattern.exec(run.stdout)?.[1]
+
+  return counted === String(count)
+    ? []
+    : [`test's consistency header counts ${counted ?? 'no'} snapshots, expected ${count}${outputOf(run.stdout)}`]
 }
 
 /**
@@ -2816,6 +2865,10 @@ if (setupProblems.length > 0) {
     {
       name: "committed baselines: test gives the expected outcomes, each broken readiness, per-story options and capture area story's line says why, no line for a disabled story, the header counts the expected outcomes, a story listing two modes has 3 lines, a story's own modes leave out the meta's, no test-path warning, the animation baselines are byte-identical to storybook-10-react's",
       run: () => checkCommittedBaselines(everyOutcome),
+    },
+    {
+      name: 'CI stop: in CI, test --all on a server that lists the stories file that fails to load exits 1 before any capture, its only lines are the two load-fails stories, broken, saying the file failed to load, its consistency header counts the expected outcomes, it ends saying CI stops before capturing, no story page is asked for',
+      run: () => checkCiStop(everyOutcome),
     },
     {
       name: `end state: ${endStateRuns} runs of test with pixels: 0 give every animation story its expected outcome`,
