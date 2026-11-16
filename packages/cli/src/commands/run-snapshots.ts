@@ -4,7 +4,7 @@ import type { BrowserPackage } from '../browser/read-browser-package.js'
 import { brokenImageTimeLimitMs, type CaptureSettings } from '../capture/capture-session.js'
 import { runWorkerPool } from '../capture/worker-pool.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
-import { reportFolderOf } from '../report/report-folder.js'
+import { ReportError, reportFolderOf } from '../report/report-folder.js'
 import type { Shard } from '../sharding/shard.js'
 import type { Story } from '../storybook/read-stories.js'
 import { testPathWarningOf } from '../storybook/test-path.js'
@@ -127,36 +127,68 @@ interface SnapshotRun {
 }
 
 /**
- * What a run printed and how it exits.
+ * What a run that finished, or stopped after its consistency check, printed, how it exits and what it found.
  */
-interface SnapshotRunResult {
+interface SnapshotRunEnd {
   /**
-   * The exit code.
+   * The exit code: 0 or 1.
    */
   exitCode: number
   /**
    * The header, a shard's notes, one line per snapshot, for `test` a line per orphan and its flaky snapshots, and the
-   * counts, then for `update` the path of each baseline written and each orphan deleted and its flaky snapshots, or,
-   * for a failure that stopped the run, the header and the lines of the snapshots that finished before it. For a CI
-   * `test` whose consistency check found anything, the consistency output, then a line that says why it captured
-   * nothing. For `test --consistency`, the consistency output alone. Nothing when the run stopped with exit 2 before
-   * any capture, while it planned the snapshots or checked the baselines folders.
+   * counts, then for `update` the path of each baseline written and each orphan deleted and its flaky snapshots. For a
+   * CI `test` whose consistency check found anything, the consistency output, then a line that says why it captured
+   * nothing. For `test --consistency`, the consistency output alone.
    */
   stdout: string
   /**
    * When the first browser exited mid-run, that it exited, whether visual-check relaunches it once, and its last output.
-   * Then, for a run that stopped with exit 2, what stopped it, or for a run that finished, a warning for each Storybook
-   * that seems to ignore the test path, then for `update` the hosts its stories reach. A CI `test` that stopped before
-   * capturing gives only the notice of the exit. Nothing for a run that went on with no exit and no warning.
+   * Then a warning for each Storybook that seems to ignore the test path, then for `update` the hosts its stories
+   * reach. A CI `test` that stopped before capturing gives only the notice of the exit. Nothing for a run that went on
+   * with no exit and no warning.
    */
   stderr: string
   /**
    * What the run found, for the report: the snapshots it took and their results, and each Storybook's orphans, or for
-   * a `test` that stopped after its consistency check what the check found. `undefined` for a run that stopped with
-   * exit 2.
+   * a `test` that stopped after its consistency check what the check found.
    */
-  findings?: RunFindings
+  findings: RunFindings
 }
+
+/**
+ * What a run that stopped with exit 2 printed, and what stopped it.
+ */
+interface SnapshotRunStop {
+  /**
+   * The exit code: 2.
+   */
+  exitCode: 2
+  /**
+   * The header and the lines of the snapshots that finished before the stop. Nothing when the run stopped before any
+   * capture, while it planned the snapshots or checked the baselines folders.
+   */
+  stdout: string
+  /**
+   * When the first browser exited mid-run, that it exited, whether visual-check relaunches it once, and its last
+   * output, then what stopped the run.
+   */
+  stderr: string
+  /**
+   * What stopped the run, as stderr ends with it.
+   */
+  stopMessage: string
+  /**
+   * Whether the report folder is what failed, such as a snapshot's images that couldn't be written, so no report can be
+   * written there.
+   */
+  reportFailed: boolean
+}
+
+/**
+ * What a run printed and how it exits: a run that finished, or stopped after its consistency check, or one that
+ * stopped with exit 2.
+ */
+type SnapshotRunResult = SnapshotRunEnd | SnapshotRunStop
 
 /**
  * The statuses `test`'s counts line names, in order.
@@ -578,7 +610,15 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
     const plan = await planSnapshots(share?.selections ?? run.selections, browser.readOptions, run.config)
 
     if ('problem' in plan) {
-      return { exitCode: 2, stdout: '', stderr: `${exitNoticeOf(browser.firstExit())}${plan.problem}\n` }
+      const stopMessage = `${plan.problem}\n`
+
+      return {
+        exitCode: 2,
+        stdout: '',
+        stderr: `${exitNoticeOf(browser.firstExit())}${stopMessage}`,
+        stopMessage,
+        reportFailed: false,
+      }
     }
 
     const taking = await takingOf(run, tools, plan.snapshots)
@@ -595,15 +635,21 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
       deleted = await deleteStorybookOrphans(baselines)
     }
   } catch (error) {
-    const message = stopMessageOf(error, run, capturedAnyOf(snapshots))
+    const stopMessage = stopMessageOf(error, run, capturedAnyOf(snapshots))
 
-    if (message === undefined) {
+    if (stopMessage === undefined) {
       throw error
     }
 
     const stdout = snapshots === undefined ? '' : printedOf(snapshots, linesOf(snapshots))
 
-    return { exitCode: 2, stdout, stderr: `${exitNoticeOf(browser.firstExit())}${message}` }
+    return {
+      exitCode: 2,
+      stdout,
+      stderr: `${exitNoticeOf(browser.firstExit())}${stopMessage}`,
+      stopMessage,
+      reportFailed: error instanceof ReportError,
+    }
   } finally {
     try {
       await browser.close()

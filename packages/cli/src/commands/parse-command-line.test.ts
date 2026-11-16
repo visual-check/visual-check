@@ -346,3 +346,37 @@ describe('parseCommandLine --shard', () => {
     expect(usageErrorOf('update', '--reporter', 'json').message).toBe("update --reporter json isn't available yet.")
   })
 })
+
+describe('parseCommandLine usage errors of a run', () => {
+  it('names the run of a test whose flags clash, with its --config and --reporter', () => {
+    expect(
+      usageErrorOf('test', '--all', '--filter', 'a', '--config', 'configs/visual-check.config.ts', '--reporter', 'json')
+        .run,
+    ).toEqual({ command: 'test', config: 'configs/visual-check.config.ts', reporter: 'json' })
+  })
+
+  it('names the run of an update given a flag that applies only to test', () => {
+    expect(usageErrorOf('update', '--shard', '1/2').run).toEqual({
+      command: 'update',
+      config: undefined,
+      reporter: undefined,
+    })
+  })
+
+  it('leaves out a --reporter that is itself the problem', () => {
+    expect(usageErrorOf('test', '--reporter', 'nope').run).toEqual({
+      command: 'test',
+      config: undefined,
+      reporter: undefined,
+    })
+  })
+
+  it.each([
+    ['an unknown flag', ['test', '--nope']],
+    ['an unknown command', ['tset', '--all']],
+    ['no command', ['--all']],
+    ['init', ['init', '--all']],
+  ])('names no run for %s', (_, commandLineArguments) => {
+    expect(usageErrorOf(...commandLineArguments).run).toBeUndefined()
+  })
+})

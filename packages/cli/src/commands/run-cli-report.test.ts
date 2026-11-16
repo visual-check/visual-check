@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import type { TestReport, TestReportEntry } from '../report/report-document.js'
@@ -15,6 +15,8 @@ import {
   reportFolderIn,
   reportLine,
   startStorybook,
+  takeUnusedUrl,
+  usageHint,
   version,
   writeStaleReport,
 } from './run-cli.fixture.js'
@@ -352,4 +354,282 @@ describe('runCli test report after the consistency check', () => {
 
     expect(result).toEqual(expected)
   })
+})
+
+/**
+ * The report of a `test` that exits 2 with the given error, as the run in the project's own folder writes it, for a
+ * run whose config wasn't loaded.
+ */
+function errorReportOf(error: TestReport['error'], storybooks: TestReport['storybooks'] = []): TestReport {
+  return {
+    version: 1,
+    visualCheck: version,
+    command: 'test',
+    consistencyOnly: false,
+    exitCode: 2,
+    shard: null,
+    selection: { by: 'all', base: null, changedFiles: null, fallback: null },
+    reportDir: '.visual-check/report',
+    storybooks,
+    counts: { passed: 0, flaky: 0, differs: 0, broken: 0, missing: 0, orphan: 0 },
+    snapshots: [],
+    warnings: [],
+    error,
+  }
+}
+
+/**
+ * The fix a report folder that can't be written asks for.
+ */
+const writableFix = 'Check that its folder is writable and the disk has room.'
+
+describe('runCli test report on exit 2', () => {
+  it('replaces a stale report with one holding the config error, ending stderr with the report line', async () => {
+    const { project } = await createRun(['a'], { a: defaultRunSnapshot }, "colour: 'red'")
+
+    writeStaleReport(project)
+
+    const result = await runCli(['test'], {}, project, fakeBrowser().options)
+    const message = result.stderr.slice(0, -`\n${reportLine}\n`.length)
+
+    expect(message).toMatch(/^visual-check\.config\.mjs is invalid:\n {2}- colour: unknown key\./)
+    expect(result).toEqual({ exitCode: 2, stdout: '', stderr: `${message}\n${reportLine}\n` })
+    expect(readdirSync(reportFolderIn(project))).toEqual(['report.json'])
+    expect(readReport(project)).toEqual(errorReportOf({ message, storybooks: [] }))
+  })
+
+  it('writes the usage error of a test beside the config the search finds, without the hint', async () => {
+    const { project } = await createRun(['a'])
+    const result = await runCli(['test', '--all', '--filter', 'a'], {}, project, fakeBrowser().options)
+    const message = "--all and --filter can't be used together. Pick one."
+
+    expect(result).toEqual({ exitCode: 2, stdout: '', stderr: `${message}\n${usageHint}${reportLine}\n` })
+    expect(readReport(project)).toEqual(errorReportOf({ message, storybooks: [] }))
+  })
+
+  it('writes the usage error beside the config --config gives', async () => {
+    const { project } = await createRun(['a'])
+    const cwd = join(project, 'apps')
+
+    mkdirSync(cwd)
+
+    const result = await runCli(
+      ['test', '--shard', '0/2', '--config', '../visual-check.config.mjs'],
+      {},
+      cwd,
+      fakeBrowser().options,
+    )
+
+    expect(lastLineOf(result.stderr)).toBe('Report: ../.visual-check/report/report.json')
+    expect(readReport(project).error?.message).toMatch(/^--shard takes k\/n/)
+  })
+
+  it('names the unreachable Storybook and its URL in the error', async () => {
+    const url = await takeUnusedUrl()
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
+    })
+    const result = await runCli(['test'], {}, project, fakeBrowser().options)
+    const report = readReport(project)
+
+    expect(result.exitCode).toBe(2)
+    expect(lastLineOf(result.stderr)).toBe(reportLine)
+    expect(report.storybooks).toEqual([{ name: 'web', url }])
+    expect(report.error).toEqual({
+      message: result.stderr.slice(0, -`${reportLine}\n`.length).trim(),
+      storybooks: [{ name: 'web', url }],
+    })
+    expect(report.error?.message).toContain(url)
+  })
+
+  it('wipes the images of a run the browser stops mid-run, keeping the lines it printed', async () => {
+    const { project } = await createRun(['a', 'b'], { a: defaultRunSnapshot, b: defaultRunSnapshot }, 'workers: 1')
+    const { options } = fakeBrowser({
+      a: { browserExits: true },
+      b: { captures: [{ snapshot: otherSnapshot }, { browserExits: true }] },
+    })
+    const result = await runCli(['test'], {}, project, options)
+    const report = readReport(project)
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stdout).toContain('! web  a  broken: The browser exited')
+    expect(lastLineOf(result.stderr)).toBe(reportLine)
+    expect(readdirSync(reportFolderIn(project))).toEqual(['report.json'])
+    expect(report).toMatchObject({ exitCode: 2, snapshots: [], counts: { passed: 0, broken: 0, differs: 0 } })
+    expect(report.error?.message).toMatch(/^The browser was killed by signal SIGKILL while in use\.\n/)
+    expect(report.error?.message).not.toContain('relaunches')
+  })
+
+  it("holds the error of a baseline that can't be decoded, and no results", async () => {
+    const { project } = await createRun(['a'], { a: new TextEncoder().encode('not a PNG file') })
+    const result = await runCli(['test'], {}, project, fakeBrowser().options)
+
+    expect(result.exitCode).toBe(2)
+    expect(readReport(project).error).toEqual({
+      message:
+        "visual-check couldn't decode the baseline .visual-check/baselines/a.png: Input buffer contains unsupported " +
+        'image format. Delete it or restore it from git, then run visual-check again.',
+      storybooks: [],
+    })
+  })
+
+  it('prints only the error document on stdout with --reporter json, dropping the lines printed so far', async () => {
+    const { project } = await createRun(['a', 'b'], { a: defaultRunSnapshot, b: defaultRunSnapshot }, 'workers: 1')
+    const { options } = fakeBrowser({ a: { browserExits: true }, b: { browserExits: true } })
+    const result = await runCli(['test', '--reporter', 'json'], {}, project, options)
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stdout).toBe(readFileSync(join(reportFolderIn(project), 'report.json'), 'utf8'))
+    expect(result.stdout.trimEnd().split('\n')).toHaveLength(1)
+    expect(lastLineOf(result.stderr)).toBe(reportLine)
+  })
+
+  it('writes nothing when no config is found, and prints the error document with no report folder for json', async () => {
+    const project = createProject({})
+    const result = await runCli(['test', '--reporter', 'json'], {}, project, fakeBrowser().options)
+    const message =
+      'No visual-check.config.ts (or .mts, .js, .mjs) found in the current folder or its parents. ' +
+      'Run visual-check init to create one.'
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: `${JSON.stringify({ ...errorReportOf({ message, storybooks: [] }), reportDir: null })}\n`,
+      stderr: `${message}\n`,
+    })
+    expect(existsSync(join(project, '.visual-check'))).toBe(false)
+  })
+
+  it('writes nothing for a usage error when --config gives no config file', async () => {
+    const { project } = await createRun(['a'])
+    const result = await runCli(['test', '--all', '--filter', 'a', '--config', 'missing.mjs'], {}, project)
+
+    expect(result.stderr.endsWith(usageHint)).toBe(true)
+    expect(existsSync(reportFolderIn(project))).toBe(false)
+  })
+
+  it('writes nothing for an unknown flag, which stays plain text', async () => {
+    const { project } = await createRun(['a'])
+    const result = await runCli(['test', '--nope', '--reporter', 'json'], {}, project)
+
+    expect(result.stdout).toBe('')
+    expect(existsSync(reportFolderIn(project))).toBe(false)
+  })
+
+  it('leaves the report folder untouched when update exits 2', async () => {
+    const { project } = await createRun(['a'], {}, "colour: 'red'")
+    const image = writeStaleReport(project)
+    const result = await runCli(['update'], {}, project, fakeBrowser().options)
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stderr).not.toContain('Report:')
+    expect(existsSync(image)).toBe(true)
+    expect(readdirSync(reportFolderIn(project))).toEqual(['images'])
+  })
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    "stops once, writing no error report, when a snapshot's images can't be written mid-run",
+    async () => {
+      const { project, url } = await createRun(['a'], { a: defaultRunSnapshot }, 'retries: 0')
+      const visualCheckFolder = join(project, '.visual-check')
+      const problem = `visual-check couldn't write .visual-check/report/images/web: EACCES: permission denied. ${writableFix}`
+      const browser = fakeBrowser({ a: { snapshot: otherSnapshot } })
+
+      chmodSync(visualCheckFolder, 0o555)
+
+      try {
+        const result = await runCli(['test', '--reporter', 'json'], {}, project, browser.options)
+
+        expect(result).toEqual({
+          exitCode: 2,
+          stdout: `${JSON.stringify({ ...errorReportOf({ message: problem, storybooks: [] }, [{ name: 'web', url }]), reportDir: null })}\n`,
+          stderr: `${problem}\n`,
+        })
+      } finally {
+        chmodSync(visualCheckFolder, 0o755)
+      }
+
+      expect(existsSync(reportFolderIn(project))).toBe(false)
+    },
+  )
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    "keeps the error and adds the report's problem when the error report can't be written",
+    async () => {
+      const { project } = await createRun(['a'], { a: defaultRunSnapshot }, "colour: 'red'")
+      const visualCheckFolder = join(project, '.visual-check')
+      const problem = `visual-check couldn't write .visual-check/report: EACCES: permission denied. ${writableFix}`
+
+      chmodSync(visualCheckFolder, 0o555)
+
+      try {
+        const result = await runCli(['test', '--reporter', 'json'], {}, project, fakeBrowser().options)
+        const message = result.stderr.slice(0, -`\n${problem}\n`.length)
+
+        expect(message).toMatch(/^visual-check\.config\.mjs is invalid:\n/)
+        expect(result).toEqual({
+          exitCode: 2,
+          stdout: `${JSON.stringify({ ...errorReportOf({ message, storybooks: [] }), reportDir: null })}\n`,
+          stderr: `${message}\n${problem}\n`,
+        })
+      } finally {
+        chmodSync(visualCheckFolder, 0o755)
+      }
+
+      expect(existsSync(reportFolderIn(project))).toBe(false)
+    },
+  )
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    "exits 2 with the report's problem, and no error report, when report.json can't be written",
+    async () => {
+      const { project, url } = await createRun(['a'], { a: defaultRunSnapshot })
+      const visualCheckFolder = join(project, '.visual-check')
+      const problem = `visual-check couldn't write .visual-check/report: EACCES: permission denied. ${writableFix}`
+
+      chmodSync(visualCheckFolder, 0o555)
+
+      try {
+        const result = await runCli(['test'], {}, project, fakeBrowser().options)
+        const json = await runCli(['test', '--reporter', 'json'], {}, project, fakeBrowser().options)
+
+        expect(result.exitCode).toBe(2)
+        expect(result.stdout).toContain('1 passed')
+        expect(result.stdout).not.toContain('Report:')
+        expect(result.stderr).toBe(`${problem}\n`)
+        expect(json).toEqual({
+          exitCode: 2,
+          stdout: `${JSON.stringify({ ...errorReportOf({ message: problem, storybooks: [] }, [{ name: 'web', url }]), reportDir: null })}\n`,
+          stderr: `${problem}\n`,
+        })
+      } finally {
+        chmodSync(visualCheckFolder, 0o755)
+      }
+
+      expect(existsSync(reportFolderIn(project))).toBe(false)
+    },
+  )
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    "exits 2 with the report's problem, and no error report, when an orphan's baseline can't be copied",
+    async () => {
+      const { project, folder } = await createRun(['a'], { a: defaultRunSnapshot, gone: defaultRunSnapshot })
+      const orphan = join(folder, 'gone.png')
+
+      chmodSync(orphan, 0o000)
+
+      try {
+        const result = await runCli(['test'], {}, project, fakeBrowser().options)
+
+        expect(result.exitCode).toBe(2)
+        expect(result.stderr).toBe(
+          "visual-check couldn't copy .visual-check/baselines/gone.png: EACCES: permission denied. " +
+            "Check that it's a file visual-check can read.\n",
+        )
+      } finally {
+        chmodSync(orphan, 0o644)
+      }
+
+      expect(existsSync(join(reportFolderIn(project), 'report.json'))).toBe(false)
+    },
+  )
 })

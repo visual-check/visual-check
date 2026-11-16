@@ -649,6 +649,13 @@ export function printed(...lines: string[]): string {
 export const reportLine = 'Report: .visual-check/report/report.json'
 
 /**
+ * Gives what a `test` that exits 2 with its config found prints on stderr: `text`, then the report line.
+ */
+export function withReportLine(text: string): string {
+  return `${text}${reportLine}\n`
+}
+
+/**
  * Builds what a `test` that exits 0 or 1, run in the config's folder, prints on stdout: these lines, then the report
  * line.
  */

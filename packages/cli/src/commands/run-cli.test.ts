@@ -64,6 +64,7 @@ import {
   usageHint,
   version,
   withoutTimes,
+  withReportLine,
   writeMarker,
   writeStaleReport,
 } from './run-cli.fixture.js'
@@ -199,7 +200,9 @@ Other options:
     expect(result.stdout).toBe('')
     expect(result.stderr).toContain(`Storybook docs doesn't answer at ${down}/index.json`)
     expect(result.stderr).not.toContain('Storybook web')
-    expect(result.stderr.endsWith('To check one Storybook on its own, pass --storybook <name>.\n')).toBe(true)
+    expect(
+      result.stderr.endsWith(withReportLine('To check one Storybook on its own, pass --storybook <name>.\n')),
+    ).toBe(true)
   })
 
   it('prints the warnings of Storybooks newer than 11 in config order, and carries on', async () => {
@@ -623,9 +626,10 @@ describe('runCli visual diff', () => {
     expect(result).toEqual({
       exitCode: 2,
       stdout: printed(headerOf('test', 1)),
-      stderr:
+      stderr: withReportLine(
         "visual-check couldn't decode the baseline .visual-check/baselines/a.png: Input buffer contains unsupported " +
-        'image format. Delete it or restore it from git, then run visual-check again.\n',
+          'image format. Delete it or restore it from git, then run visual-check again.\n',
+      ),
     })
   })
 
@@ -638,9 +642,10 @@ describe('runCli visual diff', () => {
     expect({ ...result, stdout: withoutTimes(result.stdout) }).toEqual({
       exitCode: 2,
       stdout: printed(headerOf('test', 2, 1), '✓ web  a  N ms'),
-      stderr:
+      stderr: withReportLine(
         "visual-check couldn't decode the snapshot the browser returned for web  b: Input buffer contains unsupported " +
-        'image format. Run visual-check again, and report it if it keeps happening.\n',
+          'image format. Run visual-check again, and report it if it keeps happening.\n',
+      ),
     })
   })
 
@@ -784,9 +789,10 @@ describe('runCli consistency check', () => {
     expect(result).toEqual({
       exitCode: 2,
       stdout: '',
-      stderr:
+      stderr: withReportLine(
         "visual-check couldn't list the baselines folder .visual-check/baselines: ENOTDIR: not a directory. Check " +
-        "that it's a folder visual-check can read.\n",
+          "that it's a folder visual-check can read.\n",
+      ),
     })
     expect(storyIdsOf(record.urls)).toEqual([])
   })
@@ -994,9 +1000,10 @@ describe('runCli test --consistency', () => {
     expect(result).toEqual({
       exitCode: 2,
       stdout: '',
-      stderr:
+      stderr: withReportLine(
         '--consistency covers every story, so it takes no --all or --filter. Use --storybook to narrow it.\n' +
-        'Run visual-check --help to see the commands and options.\n',
+          'Run visual-check --help to see the commands and options.\n',
+      ),
     })
     expectNothingCaptured(record)
   })
@@ -1321,15 +1328,25 @@ describe('runCli test --shard', () => {
   it.each([
     [['test', '--shard', '0/4'], "--shard takes k/n, two whole numbers with 1 ≤ k ≤ n, such as 2/4. Got '0/4'."],
     [['test', '--shard', '1/2', '--consistency'], '--consistency runs in a job of its own, so it takes no --shard.'],
-    [['update', '--shard', '1/2'], '--shard applies only to test.'],
-  ])('exits 2 for %j', async (commandLine, message) => {
+  ])('exits 2 for %j, writing the error report', async (commandLine, message) => {
     const { project } = await createShardedRun()
 
     expect(await runCli(commandLine, {}, project, noLaunch)).toEqual({
       exitCode: 2,
       stdout: '',
-      stderr: `${message}\n${usageHint}`,
+      stderr: withReportLine(`${message}\n${usageHint}`),
     })
+  })
+
+  it('exits 2 for update --shard, writing no report', async () => {
+    const { project } = await createShardedRun()
+
+    expect(await runCli(['update', '--shard', '1/2'], {}, project, noLaunch)).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr: `--shard applies only to test.\n${usageHint}`,
+    })
+    expect(existsSync(reportFolderIn(project))).toBe(false)
   })
 
   it("exits 2 when the Storybook doesn't answer", async () => {
@@ -1353,9 +1370,10 @@ describe('runCli test --shard', () => {
     expect(await runCli(['test', '--shard', '1/2'], {}, project, noLaunch)).toEqual({
       exitCode: 2,
       stdout: '',
-      stderr:
+      stderr: withReportLine(
         "visual-check couldn't list the baselines folder .visual-check/baselines: ENOTDIR: not a directory. Check " +
-        "that it's a folder visual-check can read.\n",
+          "that it's a folder visual-check can read.\n",
+      ),
     })
   })
 })
@@ -2114,11 +2132,12 @@ describe('runCli per-story options', () => {
     expect(result).toEqual({
       exitCode: 2,
       stdout: '',
-      stderr:
+      stderr: withReportLine(
         'Storybook web has invalid per-story options:\n' +
-        "  - a: visualCheck.tolerance.pixels: must be a whole number of 0 or more, or a string from '0%' to '100%'. Got -1.\n" +
-        '  - c: visualCheck.disable: must be true or false. Got "yes".\n' +
-        invalidOptionsFix,
+          "  - a: visualCheck.tolerance.pixels: must be a whole number of 0 or more, or a string from '0%' to '100%'. Got -1.\n" +
+          '  - c: visualCheck.disable: must be true or false. Got "yes".\n' +
+          invalidOptionsFix,
+      ),
     })
     expect(storyIdsOf(record.urls)).toEqual([])
     expect(record.closed).toBe(true)
@@ -2132,10 +2151,11 @@ describe('runCli per-story options', () => {
     expect(result).toEqual({
       exitCode: 2,
       stdout: '',
-      stderr:
+      stderr: withReportLine(
         'Storybook web has invalid per-story options:\n' +
-        '  - b: visualCheck.modes.Dark: a mode name takes lowercase letters, digits and -. Rename it in <configDir>/visual-check.ts.\n' +
-        invalidOptionsFix,
+          '  - b: visualCheck.modes.Dark: a mode name takes lowercase letters, digits and -. Rename it in <configDir>/visual-check.ts.\n' +
+          invalidOptionsFix,
+      ),
     })
     expect(storyIdsOf(record.urls)).toEqual([])
     expect(record.closed).toBe(true)
@@ -2148,7 +2168,7 @@ describe('runCli per-story options', () => {
 
     expect(result.exitCode).toBe(2)
     expect(result.stderr).toBe(
-      `Storybook web has invalid per-story options:\n  - b: ${disableIssue}\n${invalidOptionsFix}`,
+      withReportLine(`Storybook web has invalid per-story options:\n  - b: ${disableIssue}\n${invalidOptionsFix}`),
     )
   })
 
@@ -2170,10 +2190,11 @@ describe('runCli per-story options', () => {
     expect(result).toEqual({
       exitCode: 2,
       stdout: '',
-      stderr:
+      stderr: withReportLine(
         `Storybook web has invalid per-story options:\n  - a: ${disableIssue}\n` +
-        `Storybook docs has invalid per-story options:\n  - c: ${disableIssue}\n` +
-        invalidOptionsFix,
+          `Storybook docs has invalid per-story options:\n  - c: ${disableIssue}\n` +
+          invalidOptionsFix,
+      ),
     })
     expect(record.reads.map(({ url }) => url)).toEqual([previewOf(web), previewOf(quick), previewOf(docs)])
   })
@@ -2245,12 +2266,13 @@ describe('runCli per-story options', () => {
     expect(result).toEqual({
       exitCode: 2,
       stdout: '',
-      stderr:
+      stderr: withReportLine(
         relaunchNotice +
-        printed(
-          `Storybook docs's preview started at ${previewOf(docs)} but never became ready within readyTimeout ` +
-            '(4000 ms). Open it to see why, or raise readyTimeout.',
-        ),
+          printed(
+            `Storybook docs's preview started at ${previewOf(docs)} but never became ready within readyTimeout ` +
+              '(4000 ms). Open it to see why, or raise readyTimeout.',
+          ),
+      ),
     })
     expect(record.reads.map(({ browser, url }) => [browser, url])).toEqual([
       [1, previewOf(web)],
@@ -2265,7 +2287,7 @@ describe('runCli per-story options', () => {
     const { options, record } = fakeBrowser({}, { read: { exitingBrowsers: [1, 2] } })
     const result = await runCli(['test'], {}, project, options)
 
-    expect(result).toEqual({ exitCode: 2, stdout: '', stderr: `${relaunchNotice}${secondExitMessage}` })
+    expect(result).toEqual({ exitCode: 2, stdout: '', stderr: withReportLine(`${relaunchNotice}${secondExitMessage}`) })
     expect(record.launches).toHaveLength(2)
     expect(storyIdsOf(record.urls)).toEqual([])
     expect(record.driverCloses).toBe(2)
@@ -2644,24 +2666,22 @@ describe('runCli retries and flaky snapshots', () => {
     expect(readFileSync(join(images, 'a.diff.png'))).toEqual(firstDiff)
   })
 
-  it("stops with exit 2 when the relaunched browser exits during a retry, keeping the first capture's images", async () => {
+  it("stops with exit 2 when the relaunched browser exits during a retry, wiping the first capture's images", async () => {
     const { project } = await createRun(['a', 'b'], { a: defaultRunSnapshot, b: defaultRunSnapshot }, 'workers: 1')
     const { options, record } = fakeBrowser({
       a: { browserExits: true },
       b: { captures: [{ snapshot: otherSnapshot }, { browserExits: true }] },
     })
     const result = await runCli(['test'], {}, project, options)
-    const images = join(reportFolderIn(project), 'images', 'web')
 
     expect(result).toEqual({
       exitCode: 2,
       stdout: printed(headerOf('test', 2, 1), `! web  a  ${browserExitedDetail}`),
-      stderr: `${relaunchNotice}${secondExitMessage}`,
+      stderr: withReportLine(`${relaunchNotice}${secondExitMessage}`),
     })
     expect(record.launches).toHaveLength(2)
     expect(storyIdsOf(record.urls)).toEqual(['a', 'b', 'b'])
-    expect(readdirSync(images).sort()).toEqual(['b.baseline.png', 'b.diff.png', 'b.snapshot.png'])
-    expect(new Uint8Array(readFileSync(join(images, 'b.snapshot.png')))).toEqual(otherSnapshot)
+    expect(readdirSync(reportFolderIn(project))).toEqual(['report.json'])
   })
 
   it('retries a snapshot whose size differs from its baseline', async () => {
@@ -3115,7 +3135,7 @@ describe('runCli remote content hint', () => {
     expect(result).toEqual({
       exitCode: 2,
       stdout: printed(headerOf('test', 3, 1), squareLine, ...unsplashHint, `! web  b  ${browserExitedDetail}`),
-      stderr: `${relaunchNotice}${secondExitMessage}`,
+      stderr: withReportLine(`${relaunchNotice}${secondExitMessage}`),
     })
   })
 })
@@ -3170,7 +3190,9 @@ describe('runCli baseline file names', () => {
     expect(result).toEqual({
       exitCode: 2,
       stdout: '',
-      stderr: printed(clashLineOf('web', `${composedId}.png`, composedId, decomposedId), foldedNamesNote, clashFix),
+      stderr: withReportLine(
+        printed(clashLineOf('web', `${composedId}.png`, composedId, decomposedId), foldedNamesNote, clashFix),
+      ),
     })
     expect(storyIdsOf(record.urls)).toEqual([])
     expect(existsSync(image)).toBe(false)
@@ -3212,7 +3234,7 @@ describe('runCli baseline file names', () => {
     expect(result).toEqual({
       exitCode: 2,
       stdout: '',
-      stderr: printed(clashLineOf('web', 'a.png', 'a', 'A'), foldedNamesNote, clashFix),
+      stderr: withReportLine(printed(clashLineOf('web', 'a.png', 'a', 'A'), foldedNamesNote, clashFix)),
     })
     expect(storyIdsOf(record.urls)).toEqual([])
   })
@@ -3231,15 +3253,16 @@ describe('runCli baseline file names', () => {
     expect(result).toEqual({
       exitCode: 2,
       stdout: '',
-      stderr:
+      stderr: withReportLine(
         relaunchNotice +
-        printed(
-          clashLineOf('web', 'a.png', 'a', 'A'),
-          foldedNamesNote,
-          clashLineOf('docs', `${composedId}.png`, composedId, decomposedId),
-          foldedNamesNote,
-          clashFix,
-        ),
+          printed(
+            clashLineOf('web', 'a.png', 'a', 'A'),
+            foldedNamesNote,
+            clashLineOf('docs', `${composedId}.png`, composedId, decomposedId),
+            foldedNamesNote,
+            clashFix,
+          ),
+      ),
     })
   })
 
@@ -3493,7 +3516,7 @@ describe('runCli warning when a Storybook ignores the test path', () => {
     const result = await runCli(['test'], {}, project, options)
 
     expect(result.exitCode).toBe(2)
-    expect(result.stderr).toBe(`${relaunchNotice}${secondExitMessage}`)
+    expect(result.stderr).toBe(withReportLine(`${relaunchNotice}${secondExitMessage}`))
   })
 })
 
@@ -3625,13 +3648,15 @@ describe('runCli launching the browser', () => {
     expect(await runCli(['test'], {}, project, options)).toEqual({
       exitCode: 2,
       stdout: '',
-      stderr: printed(
-        'The browser exited with code 127 before it answered.',
-        "The browser's output below may say why. Check that Docker can run images for linux/amd64, then run " +
-          'visual-check again.',
-        "The browser's last output:",
-        '  exec: not found',
-        '  bye',
+      stderr: withReportLine(
+        printed(
+          'The browser exited with code 127 before it answered.',
+          "The browser's output below may say why. Check that Docker can run images for linux/amd64, then run " +
+            'visual-check again.',
+          "The browser's last output:",
+          '  exec: not found',
+          '  bye',
+        ),
       ),
     })
     expect(launches).toBe(1)
@@ -3644,9 +3669,11 @@ describe('runCli launching the browser', () => {
     })
 
     expect((await runCli(['test'], {}, project, failingLaunch(error))).stderr).toBe(
-      printed(
-        "The browser didn't answer its version call within 30 s.",
-        'Check that Docker can run images for linux/arm64, then run visual-check again.',
+      withReportLine(
+        printed(
+          "The browser didn't answer its version call within 30 s.",
+          'Check that Docker can run images for linux/arm64, then run visual-check again.',
+        ),
       ),
     )
   })
@@ -3661,9 +3688,8 @@ describe('runCli launching the browser', () => {
     expect(await runCli(['test'], {}, project, { ...noLaunch, probeDocker })).toEqual({
       exitCode: 2,
       stdout: '',
-      stderr: printed(
-        "Docker's daemon isn't running.",
-        "Start or install Docker, or set platform: 'host' in the config.",
+      stderr: withReportLine(
+        printed("Docker's daemon isn't running.", "Start or install Docker, or set platform: 'host' in the config."),
       ),
     })
   })
@@ -3676,7 +3702,7 @@ describe('runCli launching the browser', () => {
     expect(await runCli(['test'], {}, project, { ...noLaunch, probeDocker, insideContainer: true })).toEqual({
       exitCode: 2,
       stdout: '',
-      stderr: printed('Switch Docker to Linux containers.'),
+      stderr: withReportLine(printed('Switch Docker to Linux containers.')),
     })
   })
 
@@ -3687,10 +3713,12 @@ describe('runCli launching the browser', () => {
 
     expect(result.exitCode).toBe(2)
     expect(result.stderr).toBe(
-      printed(
-        'No docker command.',
-        "Start or install Docker, or set platform: 'host' in the config.",
-        `Inside a container, run visual-check in a job container on visual-check's image, ${browserPackage.imageReference}, which needs no Docker.`,
+      withReportLine(
+        printed(
+          'No docker command.',
+          "Start or install Docker, or set platform: 'host' in the config.",
+          `Inside a container, run visual-check in a job container on visual-check's image, ${browserPackage.imageReference}, which needs no Docker.`,
+        ),
       ),
     )
   })
@@ -3903,7 +3931,7 @@ describe('runCli launching the browser', () => {
     expect(withoutTimes(result.stdout)).toBe(
       printed(headerOf('test', 5, 1), '✓ web  a  N ms', `! web  b  ${browserExitedDetail}`, '✓ web  c  N ms'),
     )
-    expect(result.stderr).toBe(`${relaunchNotice}${secondExitMessage}`)
+    expect(result.stderr).toBe(withReportLine(`${relaunchNotice}${secondExitMessage}`))
     expect(record.launches).toHaveLength(2)
     expect(storyIdsOf(record.urls)).toEqual(['a', 'b', 'c', 'd'])
     expect(record.driverCloses).toBe(2)
@@ -3938,7 +3966,7 @@ describe('runCli launching the browser', () => {
         '✓ web  c  N ms',
       ),
     )
-    expect(result.stderr).toBe(`${relaunchNotice}${secondExitMessage}`)
+    expect(result.stderr).toBe(withReportLine(`${relaunchNotice}${secondExitMessage}`))
     expect(record.events.filter((event) => !event.startsWith('close')).sort()).toEqual([
       'a on 1',
       'b on 1',
@@ -3961,7 +3989,7 @@ describe('runCli launching the browser', () => {
 
     expect(result.exitCode).toBe(2)
     expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 3, 1), '✓ web  a  N ms', '✓ web  b  N ms'))
-    expect(result.stderr).toBe(`${relaunchNotice}${secondExitMessage}`)
+    expect(result.stderr).toBe(withReportLine(`${relaunchNotice}${secondExitMessage}`))
     expect(record.launches).toHaveLength(2)
     expect(storyIdsOf(record.urls)).toEqual(['a', 'b'])
   })
@@ -4000,14 +4028,16 @@ describe('runCli launching the browser', () => {
       printed(headerOf('test', 4, 2), `! web  a  ${browserExitedDetail}`, `! web  b  ${browserExitedDetail}`),
     )
     expect(result.stderr).toBe(
-      relaunchNotice +
-        printed(
-          'The browser exited with code 127 before it answered.',
-          "The browser's output below may say why. Check that Docker can run images for linux/amd64, then run " +
-            'visual-check again.',
-          "The browser's last output:",
-          '  exec: not found',
-        ),
+      withReportLine(
+        relaunchNotice +
+          printed(
+            'The browser exited with code 127 before it answered.',
+            "The browser's output below may say why. Check that Docker can run images for linux/amd64, then run " +
+              'visual-check again.',
+            "The browser's last output:",
+            '  exec: not found',
+          ),
+      ),
     )
     expect(record.launches).toHaveLength(2)
     expect(record.driverCloses).toBe(1)
@@ -4051,7 +4081,7 @@ describe('runCli launching the browser', () => {
       const result = await runCli(['test'], {}, project, failingLaunch(launchError))
 
       expect(result.exitCode).toBe(2)
-      expect(result.stderr).toBe(`${amd64Problem}${outputBlock}`)
+      expect(result.stderr).toBe(withReportLine(`${amd64Problem}${outputBlock}`))
     })
 
     it('exits 2 with the platform problem when the browser exits on the first capture', async () => {
@@ -4060,7 +4090,7 @@ describe('runCli launching the browser', () => {
       const result = await runCli(['test'], {}, project, options)
 
       expect(result.exitCode).toBe(2)
-      expect(result.stderr).toBe(`${amd64Problem}${outputBlock}`)
+      expect(result.stderr).toBe(withReportLine(`${amd64Problem}${outputBlock}`))
     })
 
     it('breaks the story and relaunches as for any exit when the browser exits after another capture finished', async () => {
@@ -4096,7 +4126,7 @@ describe('runCli launching the browser', () => {
       const result = await runCli(['test'], {}, project, options)
 
       expect(result.exitCode).toBe(2)
-      expect(result.stderr).toBe(`${amd64Problem}${outputBlock}`)
+      expect(result.stderr).toBe(withReportLine(`${amd64Problem}${outputBlock}`))
       expect(record.launches).toHaveLength(1)
     })
 
@@ -4108,7 +4138,7 @@ describe('runCli launching the browser', () => {
       })
 
       expect(result.exitCode).toBe(2)
-      expect(result.stderr).toBe(`${amd64Problem}${outputBlock}`)
+      expect(result.stderr).toBe(withReportLine(`${amd64Problem}${outputBlock}`))
     })
 
     it("gives the usual message inside visual-check's image for platform 'host'", async () => {
@@ -4129,7 +4159,7 @@ describe('runCli launching the browser', () => {
       const result = await runCli(['test'], {}, project, failingLaunch(exited))
 
       expect(result.exitCode).toBe(2)
-      expect(result.stderr).toBe(`${amd64Problem}${outputBlock}`)
+      expect(result.stderr).toBe(withReportLine(`${amd64Problem}${outputBlock}`))
     })
 
     it('gives the platform problem for `update` when the browser exits before any capture', async () => {
@@ -4147,7 +4177,7 @@ describe('runCli launching the browser', () => {
       const result = await runCli(['test'], {}, project, options)
 
       expect(result.exitCode).toBe(2)
-      expect(result.stderr).toBe(`${amd64Problem}${outputBlock}`)
+      expect(result.stderr).toBe(withReportLine(`${amd64Problem}${outputBlock}`))
     })
 
     it('gives the platform problem when a story before the exit has no baseline, as it has no capture', async () => {
@@ -4156,7 +4186,7 @@ describe('runCli launching the browser', () => {
       const result = await runCli(['test'], {}, project, options)
 
       expect(result.exitCode).toBe(2)
-      expect(result.stderr).toBe(`${amd64Problem}${outputBlock}`)
+      expect(result.stderr).toBe(withReportLine(`${amd64Problem}${outputBlock}`))
     })
 
     it('names linux/amd64 as the fix when the config sets linux/arm64', async () => {
@@ -4164,9 +4194,11 @@ describe('runCli launching the browser', () => {
       const result = await runCli(['test'], {}, project, failingLaunch(launchError))
 
       expect(result.stderr).toBe(
-        "The browser exited before its first capture because its graphics process can't start: this machine can't " +
-          'run linux/arm64, as happens when Docker emulates it with QEMU.\n' +
-          `Set platform to 'linux/amd64' in the config, which changes it for the whole project.\n${outputBlock}`,
+        withReportLine(
+          "The browser exited before its first capture because its graphics process can't start: this machine can't " +
+            'run linux/arm64, as happens when Docker emulates it with QEMU.\n' +
+            `Set platform to 'linux/amd64' in the config, which changes it for the whole project.\n${outputBlock}`,
+        ),
       )
     })
   })
@@ -4212,9 +4244,11 @@ describe('runCli launching the browser', () => {
     expect(await runCli(['test'], {}, project, windowsOnArm)).toEqual({
       exitCode: 2,
       stdout: '',
-      stderr: printed(
-        "Chrome for Testing has no build for Windows on Arm, so platform: 'host' can't run here. " +
-          "Set platform to 'linux/arm64' in the config to run the browser in visual-check's container.",
+      stderr: withReportLine(
+        printed(
+          "Chrome for Testing has no build for Windows on Arm, so platform: 'host' can't run here. " +
+            "Set platform to 'linux/arm64' in the config to run the browser in visual-check's container.",
+        ),
       ),
     })
     expect(requests).toEqual([])
@@ -4312,11 +4346,13 @@ describe('runCli launching the browser', () => {
 
       expect(result.exitCode).toBe(2)
       expect(result.stderr).toBe(
-        printed(
-          'The browser exited with code 127 before it answered.',
-          `The browser's output below may say why. ${check}, then run visual-check again.`,
-          "The browser's last output:",
-          `  ${loaderLine}`,
+        withReportLine(
+          printed(
+            'The browser exited with code 127 before it answered.',
+            `The browser's output below may say why. ${check}, then run visual-check again.`,
+            "The browser's last output:",
+            `  ${loaderLine}`,
+          ),
         ),
       )
     },
@@ -4434,9 +4470,11 @@ describe('runCli launching the browser', () => {
     })
 
     expect(result.stderr).toBe(
-      printed(
-        "The browser didn't answer its version call within 30 s.",
-        `Check that ${browserPackage.headlessShell} starts in this container, then run visual-check again.`,
+      withReportLine(
+        printed(
+          "The browser didn't answer its version call within 30 s.",
+          `Check that ${browserPackage.headlessShell} starts in this container, then run visual-check again.`,
+        ),
       ),
     )
   })
@@ -4474,9 +4512,11 @@ describe('runCli launching the browser', () => {
     expect(result.exitCode).toBe(2)
     expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 3, 1), '✓ web  a  N ms'))
     expect(result.stderr).toBe(
-      printed(
-        "visual-check couldn't read the baseline .visual-check/baselines/b.png: EISDIR: illegal operation on a " +
-          "directory. Check that it's a file visual-check can read.",
+      withReportLine(
+        printed(
+          "visual-check couldn't read the baseline .visual-check/baselines/b.png: EISDIR: illegal operation on a " +
+            "directory. Check that it's a file visual-check can read.",
+        ),
       ),
     )
     expect(record.pageCloses).toBe(2)

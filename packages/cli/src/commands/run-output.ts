@@ -54,6 +54,23 @@ export function cliOutputOf(
 }
 
 /**
+ * Composes what a `test` that exits 2 prints on each stream. stderr keeps its text and ends with `tail`: the report
+ * line when the report was written, else what kept it from being written, or nothing. With `--reporter json`, stdout
+ * holds the report's JSON document alone and the human lines are dropped. With any other reporter, stdout keeps them.
+ */
+export function stopOutputOf(
+  output: { stdout: string; stderr: string },
+  report: Report,
+  reporter: Reporter | undefined,
+  tail: string,
+): { stdout: string; stderr: string } {
+  return {
+    stdout: reporter === 'json' ? `${reportJsonOf(report)}\n` : output.stdout,
+    stderr: `${output.stderr}${tail}`,
+  }
+}
+
+/**
  * Builds a counts line, such as `2 written · 1 kept`: each label with its count, in the order given, leaving out zero
  * counts except the first.
  */

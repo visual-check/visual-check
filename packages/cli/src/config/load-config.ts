@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs'
-import { extname, relative, resolve } from 'node:path'
+import { relative, resolve } from 'node:path'
 import { createJiti, type JitiOptions } from 'jiti'
 import { ConfigError } from './config-error.js'
-import { configFileNames, findConfig, isFile } from './find-config.js'
+import { findConfig, hasConfigExtension, isFile } from './find-config.js'
 import { type ResolvedConfig, resolveConfig } from './resolve-config.js'
 import { validateConfig } from './validate-config.js'
 
@@ -88,7 +88,7 @@ function checkGivenPath(givenPath: string, cwd: string): string {
   const path = resolve(cwd, givenPath)
   const displayPath = displayPathOf(path, cwd)
 
-  if (!configFileNames.some((name) => extname(name) === extname(path))) {
+  if (!hasConfigExtension(path)) {
     throw new ConfigError(
       `Can't use ${displayPath} as a config: a config is a .ts, .mts, .js or .mjs file, and JSON and YAML aren't ` +
         'supported. Write visual-check.config.ts and pass its path to --config.',
@@ -145,14 +145,24 @@ async function importDefault(path: string, displayPath: string): Promise<unknown
  * environment variables say.
  *
  * @throws {ConfigError} When no config is found, when `--config` gives a path that isn't a config file, when the
- * config can't be loaded, when it's invalid or can't be used, and when `storybook` or `url` can't be used.
+ * config can't be loaded, when it's invalid or can't be used, and when `storybook` or `url` can't be used. Once the
+ * config is found, the error names its path as `configPath`.
  *
  * @public
  */
 export async function loadConfig(options: LoadConfigOptions): Promise<ResolvedConfig> {
   const path = options.path === undefined ? searchConfig(options.cwd) : checkGivenPath(options.path, options.cwd)
   const displayPath = displayPathOf(path, options.cwd)
-  const config = validateConfig(await importDefault(path, displayPath), displayPath)
 
-  return resolveConfig(config, { ...options, path })
+  try {
+    const config = validateConfig(await importDefault(path, displayPath), displayPath)
+
+    return resolveConfig(config, { ...options, path })
+  } catch (error) {
+    if (error instanceof ConfigError) {
+      throw new ConfigError(error.message, { cause: error.cause, configPath: path })
+    }
+
+    throw error
+  }
 }

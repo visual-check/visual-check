@@ -358,3 +358,41 @@ describe('loadConfig failures', () => {
     expect(message).toContain('colour: unknown key.')
   })
 })
+
+describe('loadConfig failures and the config path', () => {
+  it('names the config found in a failure after the search', async () => {
+    const root = createProject({ 'visual-check.config.ts': "throw new Error('No Storybook here')\n" })
+    const error = await configErrorOf(root)
+
+    expect(error.configPath).toBe(join(root, 'visual-check.config.ts'))
+    expect((error.cause as Error).message).toBe('No Storybook here')
+  })
+
+  it('names the given config in a failure to validate it', async () => {
+    const root = createProject({ 'configs/visual-check.config.ts': 'export default { colour: 1 }\n' })
+
+    expect((await configErrorOf(root, { path: 'configs/visual-check.config.ts' })).configPath).toBe(
+      join(root, 'configs/visual-check.config.ts'),
+    )
+  })
+
+  it('names the config in a failure to resolve it', async () => {
+    const root = createProject({ 'visual-check.config.ts': minimalConfig })
+    const error = await configErrorOf(root, { storybook: 'docs' })
+
+    expect(error.message).toMatch(/^--storybook docs isn't a Storybook in visual-check\.config\.ts\./)
+    expect(error.configPath).toBe(join(root, 'visual-check.config.ts'))
+  })
+
+  it('names no config when the search finds none', async () => {
+    const root = createProject({})
+
+    expect((await configErrorOf(root)).configPath).toBeUndefined()
+  })
+
+  it('names no config when --config gives no file', async () => {
+    const root = createProject({ 'visual-check.config.ts': minimalConfig })
+
+    expect((await configErrorOf(root, { path: 'missing.ts' })).configPath).toBeUndefined()
+  })
+})

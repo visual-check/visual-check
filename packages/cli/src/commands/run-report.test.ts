@@ -5,7 +5,14 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { ResolvedStorybook } from '../config/resolve-config.js'
 import type { StorybookBaselines } from './consistency-check.js'
 import type { SnapshotToCapture } from './plan-snapshots.js'
-import { type RunFindings, selectionOf, type TestReportFacts, testReportFor } from './run-report.js'
+import {
+  type RunFindings,
+  selectionOf,
+  type TestErrorReportFacts,
+  type TestReportFacts,
+  testErrorReportOf,
+  testReportFor,
+} from './run-report.js'
 import { missingResultOf, type SnapshotResult } from './snapshot-result.js'
 
 const folders: string[] = []
@@ -149,5 +156,57 @@ describe('selectionOf', () => {
     expect(selectionOf({ kind: 'default' })).toEqual({ by: 'all', ...unknown })
     expect(selectionOf({ kind: 'all' })).toEqual({ by: 'all', ...unknown })
     expect(selectionOf({ kind: 'filter', pattern: /button/ })).toEqual({ by: 'filter', ...unknown })
+  })
+})
+
+/**
+ * What an error report of a run that stopped at an unreachable Storybook is built from.
+ */
+const errorFacts: TestErrorReportFacts = {
+  version: '1.2.3',
+  consistencyOnly: false,
+  shard: { index: 2, total: 3 },
+  selection: { kind: 'filter', pattern: /button/ },
+  storybooks: [
+    { name: 'docs', url: 'http://docs.test' },
+    { name: 'web', url: 'http://web.test' },
+  ],
+  message:
+    '\nNothing answers at http://web.test/index.json.\nTo check one Storybook on its own, pass --storybook <name>.\n',
+  unreachable: [{ name: 'web', url: 'http://web.test' }],
+  written: true,
+}
+
+describe('testErrorReportOf', () => {
+  it('holds the error, trimmed, with the unreachable Storybooks, and no results', () => {
+    expect(testErrorReportOf(errorFacts)).toEqual({
+      version: 1,
+      visualCheck: '1.2.3',
+      command: 'test',
+      consistencyOnly: false,
+      exitCode: 2,
+      shard: { index: 2, total: 3 },
+      selection: { by: 'filter', base: null, changedFiles: null, fallback: null },
+      reportDir: '.visual-check/report',
+      storybooks: [
+        { name: 'docs', url: 'http://docs.test' },
+        { name: 'web', url: 'http://web.test' },
+      ],
+      counts: { passed: 0, flaky: 0, differs: 0, broken: 0, missing: 0, orphan: 0 },
+      snapshots: [],
+      warnings: [],
+      error: {
+        message:
+          'Nothing answers at http://web.test/index.json.\nTo check one Storybook on its own, pass --storybook <name>.',
+        storybooks: [{ name: 'web', url: 'http://web.test' }],
+      },
+    })
+  })
+
+  it("gives no report folder when the report isn't written", () => {
+    expect(testErrorReportOf({ ...errorFacts, shard: undefined, written: false })).toMatchObject({
+      shard: null,
+      reportDir: null,
+    })
   })
 })

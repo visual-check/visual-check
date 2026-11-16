@@ -2,7 +2,10 @@ import { basename, dirname } from 'node:path'
 import { stemOfFileName } from '../baselines/baseline-files.js'
 import type { ResolvedStorybook } from '../config/resolve-config.js'
 import {
+  emptyTestCounts,
   type ReportSelection,
+  type ReportShard,
+  type ReportStorybook,
   reportDir,
   type TestReport,
   type TestReportEntry,
@@ -88,6 +91,13 @@ export function selectionOf(selection: Selection): ReportSelection {
 }
 
 /**
+ * Gives the report's shard: its index and total, or `null` for a run that isn't sharded.
+ */
+function reportShardOf(shard: Shard | undefined): ReportShard | null {
+  return shard === undefined ? null : { index: shard.index, total: shard.total }
+}
+
+/**
  * Gives the entry of each orphan, in config order then file name order, after copying its baseline into the report
  * folder.
  *
@@ -137,7 +147,7 @@ export async function testReportFor(facts: TestReportFacts): Promise<TestReport>
     visualCheck: facts.version,
     consistencyOnly: facts.consistencyOnly,
     exitCode: facts.exitCode,
-    shard: facts.shard === undefined ? null : { index: facts.shard.index, total: facts.shard.total },
+    shard: reportShardOf(facts.shard),
     selection: selectionOf(facts.selection),
     reportDir,
     storybooks: facts.storybooks.map(({ name, url }) => ({ name, url })),
@@ -147,5 +157,69 @@ export async function testReportFor(facts: TestReportFacts): Promise<TestReport>
     ),
     snapshots: [...entries, ...orphans],
     error: null,
+  })
+}
+
+/**
+ * What the report of a `test` that exits 2 is built from.
+ *
+ * @public
+ */
+export interface TestErrorReportFacts {
+  /**
+   * The CLI's version.
+   */
+  version: string
+  /**
+   * Whether the run is `test --consistency`.
+   */
+  consistencyOnly: boolean
+  /**
+   * The shard the run is, or `undefined` for a run that isn't sharded.
+   */
+  shard: Shard | undefined
+  /**
+   * How the run picked its stories.
+   */
+  selection: Selection
+  /**
+   * The Storybooks in the run, in config order. None when the run stopped before its config was loaded.
+   */
+  storybooks: readonly ReportStorybook[]
+  /**
+   * What stopped the run, as printed.
+   */
+  message: string
+  /**
+   * The Storybooks where nothing answers, in config order.
+   */
+  unreachable: readonly ReportStorybook[]
+  /**
+   * Whether the report is written to the report folder.
+   */
+  written: boolean
+}
+
+/**
+ * Builds the report of a `test` that exits 2: the error, its message trimmed, with the unreachable Storybooks, and no
+ * results. Its `reportDir` is `null` when it isn't written.
+ *
+ * @public
+ */
+export function testErrorReportOf(facts: TestErrorReportFacts): TestReport {
+  return testReportOf({
+    visualCheck: facts.version,
+    consistencyOnly: facts.consistencyOnly,
+    exitCode: 2,
+    shard: reportShardOf(facts.shard),
+    selection: selectionOf(facts.selection),
+    reportDir: facts.written ? reportDir : null,
+    storybooks: facts.storybooks.map(({ name, url }) => ({ name, url })),
+    counts: emptyTestCounts(),
+    snapshots: [],
+    error: {
+      message: facts.message.trim(),
+      storybooks: facts.unreachable.map(({ name, url }) => ({ name, url })),
+    },
   })
 }

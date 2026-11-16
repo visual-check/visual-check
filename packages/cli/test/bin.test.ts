@@ -207,10 +207,11 @@ function entryOf(id: string, fields: Record<string, unknown> = {}): Record<strin
 /**
  * What a run prints on standard error once it reaches the browser, which it launches in a container to read the
  * per-story options of a Storybook with stories: the stub `docker` fails the image's pull, so the run exits 2 with the
- * pull's failure and both fixes, before printing anything on standard output.
+ * pull's failure and both fixes, then the path of the report that holds the error, before printing anything on
+ * standard output.
  */
 const pullFailure =
-  /^docker pull of \S+ for linux\/amd64 failed with exit code 1\.[^\n]*\nStart or install Docker, or set platform: 'host' in the config\.\n$/
+  /^docker pull of \S+ for linux\/amd64 failed with exit code 1\.[^\n]*\nStart or install Docker, or set platform: 'host' in the config\.\nReport: \.visual-check\/report\/report\.json\n$/
 
 afterAll(() => {
   rmSync(stubDockerDir, { recursive: true, force: true })
@@ -395,6 +396,25 @@ describe('visual-check binary reaching Storybooks', () => {
     expect(Date.now() - started).toBeLessThan(2_000)
     expect(result.stderr).toContain(`Storybook web doesn't answer at ${down}/index.json (ECONNREFUSED)`)
     expect(result.stderr).not.toContain('--storybook')
+  })
+
+  it('exits 2 for a Storybook that is down, writing a report whose error names it', async () => {
+    const down = await takeUnusedUrl()
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${down}' } } }\n`,
+    })
+    const result = await runAsynchronously({ cwd: project }, 'test', '--reporter', 'json')
+    const report = JSON.parse(readFileSync(join(project, '.visual-check', 'report', 'report.json'), 'utf8')) as {
+      exitCode: number
+      error: { message: string; storybooks: { name: string; url: string }[] }
+    }
+
+    expect(result.status).toBe(2)
+    expect(result.stdout).toBe(`${JSON.stringify(report)}\n`)
+    expect(result.stderr.endsWith('Report: .visual-check/report/report.json\n')).toBe(true)
+    expect(report.exitCode).toBe(2)
+    expect(report.error.storybooks).toEqual([{ name: 'web', url: down }])
+    expect(report.error.message).toContain(`Storybook web doesn't answer at ${down}/index.json (ECONNREFUSED)`)
   })
 
   it('exits 2 with both fixes when there is no docker command, before it looks at a Storybook', async () => {
