@@ -8,12 +8,14 @@ import { BrowserExitedError, BrowserLaunchError } from '../capture/driver/driver
 import type { ResolvedConfig } from '../config/resolve-config.js'
 import { ContainerError } from '../container/container-error.js'
 import { ReportError } from '../report/report-folder.js'
+import { VisualDiffError } from '../visual-diff/visual-diff.js'
 import type { BrowserPlace } from './browser-route.js'
 import { dockerProblemOf } from './docker-problem.js'
 import { missingLibraryOf } from './missing-library.js'
 import { platformProblemOf } from './platform-problem.js'
 import type { FirstBrowserExit } from './run-browser.js'
 import { displayPathOf } from './run-output.js'
+import { SnapshotDecodeError } from './snapshot-result.js'
 
 /**
  * What the exit-2 messages need to know about a run, apart from the error that stopped it.
@@ -179,8 +181,29 @@ function browserStopMessageOf(
 }
 
 /**
+ * Gives what to print when the visual diff can't run: sharp's reason and to reinstall its build for this machine, or
+ * the reason a thread stopped and the next step.
+ */
+function visualDiffStopMessageOf(error: VisualDiffError): string {
+  if (error.kind === 'sharp-unavailable') {
+    return (
+      `visual-check couldn't load sharp, which it compares images with: ${error.reason}. ` +
+      `Reinstall your dependencies on this machine so sharp's build for ${process.platform}-${process.arch} is ` +
+      'installed, then run visual-check again.\n'
+    )
+  }
+
+  return (
+    `A visual diff thread stopped: ${error.reason}.\n` +
+    'Running out of memory is a common cause. Free some memory, or set fewer workers so fewer images are compared at ' +
+    'once, then run visual-check again.\n'
+  )
+}
+
+/**
  * Gives what to print for an error that stops the run with exit 2: a baseline that can't be read, decoded, written or
- * deleted, a baselines folder that can't be listed, a report folder that can't be cleared or written to, Docker's
+ * deleted, a baselines folder that can't be listed, a report folder that can't be cleared or written to, a snapshot
+ * the browser returned that can't be decoded, sharp that can't be loaded, a visual diff thread that stopped, Docker's
  * error, a failed download, a failed launch's or a browser exit's with the next step and the browser's last output, or
  * a version mismatch. A browser that fails or exits before any capture, with output saying its graphics process can't
  * start, gives the platform problem for its container's platform, or the config's inside visual-check's image unless
@@ -204,6 +227,17 @@ export function stopMessageOf(error: unknown, context: StopContext, capturedAny:
       `visual-check couldn't ${error.action} ${displayPathOf(context.cwd, error.path)}: ${error.reason}. ` +
       `${reportFixes[error.action]}\n`
     )
+  }
+
+  if (error instanceof SnapshotDecodeError) {
+    return (
+      `visual-check couldn't decode the snapshot the browser returned for ${error.storybook}  ${error.key}: ` +
+      `${error.reason}. Run visual-check again, and report it if it keeps happening.\n`
+    )
+  }
+
+  if (error instanceof VisualDiffError) {
+    return visualDiffStopMessageOf(error)
   }
 
   if (error instanceof BrowserLaunchError || error instanceof BrowserExitedError) {

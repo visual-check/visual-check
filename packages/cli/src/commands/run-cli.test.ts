@@ -619,6 +619,21 @@ describe('runCli visual diff', () => {
     })
   })
 
+  it("stops with exit 2, naming the snapshot after the lines printed so far, when a differing snapshot can't be decoded", async () => {
+    const { project } = await createRun(['a', 'b'], { a: defaultRunSnapshot, b: defaultRunSnapshot })
+    const notPng = new TextEncoder().encode('not a PNG')
+    const { options } = fakeBrowser({ b: { snapshot: notPng } })
+    const result = await runCli(['test', '--workers', '1'], {}, project, options)
+
+    expect({ ...result, stdout: withoutTimes(result.stdout) }).toEqual({
+      exitCode: 2,
+      stdout: printed(headerOf('test', 2, 1), '✓ web  a  N ms'),
+      stderr:
+        "visual-check couldn't decode the snapshot the browser returned for web  b: Input buffer contains unsupported " +
+        'image format. Run visual-check again, and report it if it keeps happening.\n',
+    })
+  })
+
   it("stops with exit 2 before any capture when the report folder can't be cleared", async () => {
     const url = await startStorybook(['a'])
     const project = createProject({

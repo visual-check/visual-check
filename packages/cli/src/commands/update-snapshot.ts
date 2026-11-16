@@ -6,7 +6,7 @@ import type { SnapshotToCapture } from './plan-snapshots.js'
 import {
   brokenResultOf,
   type CaptureStory,
-  compareForStory,
+  compareCaptures,
   compareWithBaseline,
   type SnapshotResult,
   storyToCaptureOf,
@@ -109,9 +109,9 @@ interface LatestCheck {
  * that captured a snapshot, so only the latest attempt's comparison counts.
  *
  * @throws {BaselineError} When the files differ and the baseline can't be decoded, through the session's capture.
- * @throws {ImageDecodeError} When the snapshot can't be decoded, which the browser's PNG files rule out.
- * @throws {Error} When a visual diff thread stops mid-comparison, or when the page wasn't captured again although it
- * was asked for, which the capture session rules out.
+ * @throws {SnapshotDecodeError} When the snapshot can't be decoded, which the browser's PNG files rule out.
+ * @throws {VisualDiffError} When sharp can't be loaded, or a visual diff thread stops mid-comparison.
+ * @throws {Error} When the page wasn't captured again although it was asked for, which the capture session rules out.
  */
 async function firstLoadOf(
   item: SnapshotToCapture,
@@ -165,8 +165,8 @@ async function firstLoadOf(
  * Whether a later capture of a snapshot agrees with an earlier one: it differs from it by no more than the story's
  * tolerance, at its viewport's device scale factor, and has the same size.
  *
- * @throws {ImageDecodeError} When a capture can't be decoded, which the browser's PNG files rule out.
- * @throws {Error} When a visual diff thread stops mid-comparison.
+ * @throws {SnapshotDecodeError} When either capture can't be decoded, which the browser's PNG files rule out.
+ * @throws {VisualDiffError} When sharp can't be loaded, or a visual diff thread stops mid-comparison.
  */
 async function capturesAgree(
   visualDiff: VisualDiff,
@@ -174,15 +174,15 @@ async function capturesAgree(
   earlier: Uint8Array,
   later: Uint8Array,
 ): Promise<boolean> {
-  return (await compareForStory(visualDiff, item, earlier, later)).outcome === 'passed'
+  return (await compareCaptures(visualDiff, item, earlier, later)).outcome === 'passed'
 }
 
 /**
  * Gives the broken story of a first load whose page changed after its capture: the page captured again disagrees with
  * the snapshot. Gives `undefined` when they agree.
  *
- * @throws {ImageDecodeError} When a capture can't be decoded, which the browser's PNG files rule out.
- * @throws {Error} When a visual diff thread stops mid-comparison.
+ * @throws {SnapshotDecodeError} When either capture can't be decoded, which the browser's PNG files rule out.
+ * @throws {VisualDiffError} When sharp can't be loaded, or a visual diff thread stops mid-comparison.
  */
 async function changedAfterCaptureOf(
   visualDiff: VisualDiff,
@@ -190,7 +190,7 @@ async function changedAfterCaptureOf(
   snapshot: Uint8Array,
   capturedAgain: Uint8Array,
 ): Promise<BrokenStory | undefined> {
-  const result = await compareForStory(visualDiff, item, snapshot, capturedAgain)
+  const result = await compareCaptures(visualDiff, item, snapshot, capturedAgain)
 
   if (result.outcome === 'passed') {
     return undefined
@@ -234,9 +234,9 @@ const unstableStory: BrokenStory = {
  * completing time and hosts are the first load's.
  *
  * @throws {BaselineError} When the baseline can't be read, decoded or written.
- * @throws {ImageDecodeError} When a snapshot can't be decoded, which the browser's PNG files rule out.
- * @throws {Error} When a visual diff thread stops mid-comparison, or when the first load's page wasn't captured again,
- * which the capture session rules out.
+ * @throws {SnapshotDecodeError} When a snapshot can't be decoded, which the browser's PNG files rule out.
+ * @throws {VisualDiffError} When sharp can't be loaded, or a visual diff thread stops mid-comparison.
+ * @throws {Error} When the first load's page wasn't captured again, which the capture session rules out.
  */
 export async function updateSnapshot(
   item: SnapshotToCapture,

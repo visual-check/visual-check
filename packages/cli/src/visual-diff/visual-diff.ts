@@ -215,6 +215,45 @@ export class ImageDecodeError extends Error {
 }
 
 /**
+ * What stopped the visual diff: sharp failing to load on the main thread, or a thread stopping or failing mid-task.
+ *
+ * @public
+ */
+export type VisualDiffErrorKind = 'sharp-unavailable' | 'thread-stopped'
+
+/**
+ * The visual diff can't run: sharp didn't load on the main thread, or a thread stopped or failed mid-task, as happens
+ * when it runs out of memory.
+ *
+ * @public
+ */
+export class VisualDiffError extends Error {
+  /**
+   * The class's name, so a stack trace or a log line reads `VisualDiffError`.
+   */
+  override name = 'VisualDiffError'
+
+  /**
+   * What failed: sharp's load, or a thread.
+   */
+  readonly kind: VisualDiffErrorKind
+
+  /**
+   * Why, such as `Could not load the "sharp" module using the linux-x64 runtime` or `exit code 134`.
+   */
+  readonly reason: string
+
+  /**
+   * Keeps what failed and why.
+   */
+  constructor(kind: VisualDiffErrorKind, reason: string) {
+    super(kind === 'sharp-unavailable' ? `Couldn't load sharp: ${reason}.` : `A visual diff thread stopped: ${reason}.`)
+    this.kind = kind
+    this.reason = reason
+  }
+}
+
+/**
  * Compares snapshots with their baselines in a pool of threads.
  *
  * @public
@@ -224,6 +263,7 @@ export interface VisualDiff {
    * Compares a snapshot with its baseline by the tolerance. Identical files pass at once.
    *
    * @throws {ImageDecodeError} When the files differ and one of them can't be decoded.
+   * @throws {VisualDiffError} When sharp can't be loaded, or the comparison's thread stops or fails.
    * @throws {Error} When the visual diff is closed.
    */
   compare: (request: VisualDiffRequest) => Promise<VisualDiffResult>
@@ -231,6 +271,7 @@ export interface VisualDiff {
    * Decodes a baseline on a thread, as a comparison decodes it, to check that it can be. Gives the decoder's reason
    * when it can't, such as `Input buffer contains unsupported image format`, or `undefined` when it can.
    *
+   * @throws {VisualDiffError} When sharp can't be loaded, or the check's thread stops or fails.
    * @throws {Error} When the visual diff is closed.
    */
   undecodableReasonOf: (file: Uint8Array) => Promise<string | undefined>
@@ -284,11 +325,11 @@ export function diffThreadCount(cpus: number): number {
 }
 
 /**
- * Settles `job` with what its thread answered.
+ * Settles `job` with what its thread answered. A thread's error means it couldn't finish the task.
  */
 function settle(job: Job, reply: ThreadReply): void {
   if ('error' in reply) {
-    job.reject(new Error(reply.error))
+    job.reject(new VisualDiffError('thread-stopped', reply.error))
   } else {
     job.resolve(reply.result)
   }
@@ -351,6 +392,21 @@ function decodeCheckOf(result: ThreadResult): string | undefined {
  */
 function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error))
+}
+
+/**
+ * Gives why sharp failed to load: the message's lines before the solutions sharp lists, joined by `; `, since
+ * visual-check says what to do itself.
+ */
+function loadReasonOf(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  const [reason = message] = message.split(/\n\s*Possible solutions:/)
+
+  return reason
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+    .join('; ')
 }
 
 /**
@@ -417,8 +473,8 @@ export function createThreadPool(script: URL, threadLimit: number, load: () => P
   }
 
   /**
-   * Starts a thread. When it stops, its job is rejected, and a new thread takes the next waiting job unless the pool
-   * is closed.
+   * Starts a thread. When it stops, its job is rejected, with a `VisualDiffError` unless the pool closed it, and a new
+   * thread takes the next waiting job unless the pool is closed.
    */
   const start = (): Thread => {
     const thread: Thread = { worker: new Worker(script, { workerData: threadMarker }) }
@@ -437,7 +493,7 @@ export function createThreadPool(script: URL, threadLimit: number, load: () => P
       thread.job?.reject(
         closed
           ? new Error('The visual diff closed before the comparison finished.')
-          : (thread.failure ?? new Error(`A visual diff thread stopped with exit code ${code}.`)),
+          : new VisualDiffError('thread-stopped', thread.failure?.message ?? `exit code ${code}`),
       )
 
       const next = queue.shift()
@@ -453,12 +509,17 @@ export function createThreadPool(script: URL, threadLimit: number, load: () => P
 
   /**
    * Loads sharp on the main thread the first time it's called, and gives the same load after that. A failed load
-   * fails every comparison that needs a thread.
+   * fails every comparison that needs a thread with a `VisualDiffError`.
    */
   const loadOnce = async (): Promise<void> => {
-    loading ??= load().then(() => {
-      loaded = true
-    })
+    loading ??= load().then(
+      () => {
+        loaded = true
+      },
+      (error: unknown) => {
+        throw new VisualDiffError('sharp-unavailable', loadReasonOf(error))
+      },
+    )
 
     await loading
   }

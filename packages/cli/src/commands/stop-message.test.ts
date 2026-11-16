@@ -6,7 +6,9 @@ import { BrowserDownloadError } from '../browser-download/browser-download-error
 import { BrowserExitedError, BrowserLaunchError } from '../capture/driver/driver.js'
 import { ContainerError } from '../container/container-error.js'
 import { ReportError } from '../report/report-folder.js'
-import { type StopContext, stopMessageOf } from './stop-message.js'
+import { VisualDiffError } from '../visual-diff/visual-diff.js'
+import { SnapshotDecodeError } from './snapshot-result.js'
+import { exitNoticeOf, type StopContext, stopMessageOf } from './stop-message.js'
 
 /**
  * The browser package every context holds.
@@ -126,14 +128,76 @@ describe('stopMessageOf', () => {
     expect(stopMessageOf(new BrowserMismatchError('Wrong build.'), contextOf(), false)).toBe('Wrong build.\n')
   })
 
-  it('gives the Docker problem for a container error', () => {
+  it("gives the Docker problem for a container error, with the browser package's image inside a container", () => {
     const error = new ContainerError('Docker is not running.')
 
-    expect(stopMessageOf(error, contextOf(), false)).toMatch(/^Docker is not running\.\n/)
+    expect(stopMessageOf(error, contextOf({ insideContainer: true }), false)).toBe(
+      "Docker is not running.\nStart or install Docker, or set platform: 'host' in the config.\n" +
+        "Inside a container, run visual-check in a job container on visual-check's image, " +
+        'ghcr.io/visual-check/chromium:157.0.0@sha256:0, which needs no Docker.\n',
+    )
+  })
+
+  it("names the snapshot and the decoder's reason for a snapshot that can't be decoded", () => {
+    const error = new SnapshotDecodeError(
+      'web',
+      'button--primary.dark',
+      'Input buffer contains unsupported image format',
+    )
+
+    expect(stopMessageOf(error, contextOf(), true)).toBe(
+      "visual-check couldn't decode the snapshot the browser returned for web  button--primary.dark: Input buffer " +
+        'contains unsupported image format. Run visual-check again, and report it if it keeps happening.\n',
+    )
+  })
+
+  it("names sharp's reason and the machine's build for sharp that can't be loaded", () => {
+    const error = new VisualDiffError('sharp-unavailable', 'Could not load the "sharp" module')
+
+    expect(stopMessageOf(error, contextOf(), true)).toBe(
+      'visual-check couldn\'t load sharp, which it compares images with: Could not load the "sharp" module. ' +
+        `Reinstall your dependencies on this machine so sharp's build for ${process.platform}-${process.arch} is ` +
+        'installed, then run visual-check again.\n',
+    )
+  })
+
+  it('gives the reason and the next step for a visual diff thread that stopped', () => {
+    const error = new VisualDiffError('thread-stopped', 'exit code 134')
+
+    expect(stopMessageOf(error, contextOf(), true)).toBe(
+      'A visual diff thread stopped: exit code 134.\n' +
+        'Running out of memory is a common cause. Free some memory, or set fewer workers so fewer images are ' +
+        'compared at once, then run visual-check again.\n',
+    )
   })
 
   it('gives undefined for any other error', () => {
     expect(stopMessageOf(new Error('boom'), contextOf(), false)).toBeUndefined()
     expect(stopMessageOf('boom', contextOf(), false)).toBeUndefined()
+  })
+})
+
+describe('exitNoticeOf', () => {
+  it("gives nothing when the browser didn't exit", () => {
+    expect(exitNoticeOf(undefined)).toBe('')
+  })
+
+  it('says the browser is relaunched, then gives its last output', () => {
+    const error = new BrowserExitedError({ code: 137, signal: null, error: undefined }, ['out of memory'])
+
+    expect(exitNoticeOf({ error, relaunched: true })).toBe(
+      'The browser exited with code 137 while in use.\n' +
+        'visual-check relaunches it once for the rest of the run.\n' +
+        "The browser's last output:\n  out of memory\n",
+    )
+  })
+
+  it("says the browser wasn't relaunched when no story needed it, without output when there is none", () => {
+    const error = new BrowserExitedError({ code: 137, signal: null, error: undefined }, [])
+
+    expect(exitNoticeOf({ error, relaunched: false })).toBe(
+      'The browser exited with code 137 while in use.\n' +
+        "No story left needed a capture, so visual-check didn't relaunch the browser.\n",
+    )
   })
 })

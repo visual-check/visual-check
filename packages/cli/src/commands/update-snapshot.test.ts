@@ -32,6 +32,11 @@ const grey = new Uint8Array(await greyPng(10, 10, 128))
 const darkGrey = new Uint8Array(await greyPng(10, 10, 64))
 
 /**
+ * A file the browser could return that isn't a PNG file, so it can't be decoded.
+ */
+const notPng = new TextEncoder().encode('not a PNG')
+
+/**
  * `black` with 3 white pixels: within the default tolerance of `black`, beyond it of `white`.
  */
 const threeWhite = new Uint8Array(await greyPng(10, 10, 0, whitePixels(3, 10)))
@@ -643,4 +648,24 @@ describe('updateSnapshot', () => {
       action: 'decode',
     })
   })
+})
+
+describe('updateSnapshot with a capture that cannot be decoded', () => {
+  it.each([
+    ['earlier', [{ snapshot: notPng }, { snapshot: black }]],
+    ['later', [{ snapshot: black }, { snapshot: notPng }]],
+  ] as const)(
+    'rejects with a SnapshotDecodeError naming the snapshot when the %s of two loads is not a PNG',
+    async (_, loads) => {
+      const { item } = snapshotOf()
+      const fake = fakeCapturesOf([...loads])
+
+      await expect(updateSnapshot(item, fake.captureStory, tools)).rejects.toMatchObject({
+        name: 'SnapshotDecodeError',
+        storybook: 'web',
+        key: 'a',
+        reason: 'Input buffer contains unsupported image format',
+      })
+    },
+  )
 })

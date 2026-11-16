@@ -122,8 +122,8 @@ function regionsAround(boxes: readonly RemoteContentBox[], margin: number): Imag
  * capture's alone: it leaves out the browser's launch and the comparison.
  *
  * @throws {BaselineError} When the files differ and the baseline can't be decoded.
- * @throws {ImageDecodeError} When the snapshot can't be decoded, which the browser's PNG files rule out.
- * @throws {Error} When a visual diff thread stops mid-comparison.
+ * @throws {SnapshotDecodeError} When the snapshot can't be decoded, which the browser's PNG files rule out.
+ * @throws {VisualDiffError} When sharp can't be loaded, or a visual diff thread stops mid-comparison.
  */
 async function attemptOf(
   item: SnapshotToCapture,
@@ -208,8 +208,8 @@ function remoteHostsOf(retry: Attempt | undefined): string[] | undefined {
  *
  * @throws {BaselineError} When the baseline can't be read or decoded.
  * @throws {ReportError} When an image can't be written to the report folder.
- * @throws {ImageDecodeError} When the snapshot can't be decoded, which the browser's PNG files rule out.
- * @throws {Error} When a visual diff thread stops mid-comparison.
+ * @throws {SnapshotDecodeError} When the snapshot can't be decoded, which the browser's PNG files rule out.
+ * @throws {VisualDiffError} When sharp can't be loaded, or a visual diff thread stops mid-comparison.
  */
 export async function testSnapshot(
   item: SnapshotToCapture,
