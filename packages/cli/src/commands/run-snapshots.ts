@@ -1,3 +1,4 @@
+import { dirname } from 'node:path'
 import { BaselineError } from '../baselines/baseline-error.js'
 import { baselinePathOf } from '../baselines/baseline-files.js'
 import { BrowserMismatchError, runImageOf } from '../browser/browser-version.js'
@@ -11,6 +12,7 @@ import { runWorkerPool } from '../capture/worker-pool.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
 import { ContainerError } from '../container/container-error.js'
 import { ReportError, reportFolderOf } from '../report/report-folder.js'
+import type { Shard } from '../sharding/shard.js'
 import type { Story } from '../storybook/read-stories.js'
 import { testPathWarningOf } from '../storybook/test-path.js'
 import { createVisualDiff } from '../visual-diff/visual-diff.js'
@@ -25,6 +27,7 @@ import { type PlannedSnapshot, planSnapshots } from './plan-snapshots.js'
 import { platformProblemOf } from './platform-problem.js'
 import { type FirstBrowserExit, type RunBrowser, runBrowserOf } from './run-browser.js'
 import { countsLineOf, displayPathOf, snapshotCountOf, snapshotLineOf, snapshotNameOf } from './run-output.js'
+import { type ShardShare, shardHeaderPartOf, shardNotesOf, shardShareOf } from './shard-share.js'
 import { brokenResultOf, type CaptureStory, type SnapshotResult, type SnapshotStatus } from './snapshot-result.js'
 import { type Taking, testPlanOf } from './test-plan.js'
 import { type TestTools, testSnapshot } from './test-snapshot.js'
@@ -74,6 +77,11 @@ interface SnapshotRun {
    * `update`.
    */
   consistencyOnly: boolean
+  /**
+   * The shard `test --shard` runs, which takes only its share of the stories files and runs no consistency check, or
+   * `undefined` for a run that isn't sharded. Always `undefined` for `update` and `test --consistency`.
+   */
+  shard: Shard | undefined
   /**
    * The resolved config.
    */
@@ -136,12 +144,12 @@ interface SnapshotRunResult {
    */
   exitCode: number
   /**
-   * The header, one line per snapshot, for `test` a line per orphan and its flaky snapshots, and the counts, then for
-   * `update` the path of each baseline written and each orphan deleted and its flaky snapshots, or, for a failure that
-   * stopped the run, the header and the lines of the snapshots that finished before it. For a CI `test` whose
-   * consistency check found anything, the consistency output, then a line that says why it captured nothing. For
-   * `test --consistency`, the consistency output alone. Nothing when the run stopped with exit 2 before any capture,
-   * while it planned the snapshots, checked the baselines folders or cleared the report folder.
+   * The header, a shard's notes, one line per snapshot, for `test` a line per orphan and its flaky snapshots, and the
+   * counts, then for `update` the path of each baseline written and each orphan deleted and its flaky snapshots, or,
+   * for a failure that stopped the run, the header and the lines of the snapshots that finished before it. For a CI
+   * `test` whose consistency check found anything, the consistency output, then a line that says why it captured
+   * nothing. For `test --consistency`, the consistency output alone. Nothing when the run stopped with exit 2 before
+   * any capture, while it planned the snapshots, checked the baselines folders or cleared the report folder.
    */
   stdout: string
   /**
@@ -223,6 +231,10 @@ interface PlannedSnapshots {
    */
   header: string
   /**
+   * The notes printed after the header, before any snapshot line: a shard's, else none.
+   */
+  notes: string[]
+  /**
    * Each snapshot, in config order and then `index.json` order, then each story's default capture and its modes in
    * order.
    */
@@ -234,13 +246,19 @@ interface PlannedSnapshots {
 }
 
 /**
- * Builds the header: the CLI's version, the command, how many snapshots the run takes and how many workers it runs.
+ * A shard's share of the run, with each Storybook narrowed to the shard's stories files.
  */
-function headerOf(run: SnapshotRun, count: number): string {
+type RunShare = ShardShare<StorybookSelection>
+
+/**
+ * Builds the header: the CLI's version, the command, for a shard which one it is and how many stories files it was
+ * dealt, how many snapshots the run takes and how many workers it runs.
+ */
+function headerOf(run: SnapshotRun, share: RunShare | undefined, count: number): string {
   const snapshots = snapshotCountOf(count)
   const workers = `${run.workers} ${run.workers === 1 ? 'worker' : 'workers'}`
 
-  return `visual-check ${run.version} · ${run.command} · ${snapshots} · ${workers}`
+  return `visual-check ${run.version} · ${run.command}${shardHeaderPartOf(share)} · ${snapshots} · ${workers}`
 }
 
 /**
@@ -400,6 +418,7 @@ async function takingOf(run: SnapshotRun, tools: SnapshotTools, planned: Planned
         cwd: run.cwd,
         ci: run.ci,
         consistencyOnly: run.consistencyOnly,
+        sharded: run.shard !== undefined,
         storybooks: run.selections.map(({ storybook }) => storybook),
       },
       planned,
@@ -594,10 +613,15 @@ function stopMessageOf(error: unknown, run: SnapshotRun, capturedAny: boolean): 
 }
 
 /**
- * Gives the planned snapshots with the header that counts them, and no result yet.
+ * Gives the planned snapshots with the header that counts them, a shard's notes, and no result yet.
  */
-function plannedSnapshotsOf(run: SnapshotRun, items: PlannedSnapshot[]): PlannedSnapshots {
-  return { header: headerOf(run, items.length), items, results: items.map(() => undefined) }
+function plannedSnapshotsOf(run: SnapshotRun, share: RunShare | undefined, items: PlannedSnapshot[]): PlannedSnapshots {
+  return {
+    header: headerOf(run, share, items.length),
+    notes: shardNotesOf(share, items.length),
+    items,
+    results: items.map(() => undefined),
+  }
 }
 
 /**
@@ -629,10 +653,10 @@ function flakyLinesOf(command: SnapshotRun['command'], { items, results }: Plann
 }
 
 /**
- * Writes the header and the lines, each ending with a newline.
+ * Writes the header, the notes and the lines, each ending with a newline.
  */
 function printedOf(snapshots: PlannedSnapshots, lines: string[]): string {
-  return [snapshots.header, ...lines].map((line) => `${line}\n`).join('')
+  return [snapshots.header, ...snapshots.notes, ...lines].map((line) => `${line}\n`).join('')
 }
 
 /**
@@ -669,17 +693,26 @@ async function takeSnapshots(
  * `<story-id>.<mode>.png` for a mode, a key over 240 bytes shortened to its first 223 bytes, `-` and 16 hex characters
  * of its SHA-256. `test` compares each snapshot with its baseline by the story's tolerance, at the viewport's device
  * scale factor, and never captures a missing baseline. It clears the report folder, `.visual-check/report` beside the
- * config file, once the snapshots are planned and the consistency check has run, and writes the baseline, snapshot and
- * visual diff of each snapshot whose first capture differs there. A snapshot that differs is captured again, up to the
- * config's `retries` more times; one that passes on a retry passes, flaky, and its line ends with `· flaky`. One that
- * still differs by pixels on its first capture and its last retry, with every differing pixel of the last retry inside
- * its remote content, give or take the device scale factor rounded up, gets a hint under its line: the hosts, a mask
- * line for each and the docs page. The hint never changes the exit code. After the lines, `test` lists the flaky
- * snapshots by name under a heading, when there are any, and its counts say how many passes are flaky. A flaky snapshot
- * never fails the run.
+ * config file, once the snapshots are planned and, except on a shard, the consistency check has run, and writes the
+ * baseline, snapshot and visual diff of each snapshot whose first capture differs there. A snapshot that differs is
+ * captured again, up to the config's `retries` more times; one that passes on a retry passes, flaky, and its line ends
+ * with `· flaky`. One that still differs by pixels on its first capture and its last retry, with every differing pixel
+ * of the last retry inside its remote content, give or take the device scale factor rounded up, gets a hint under its
+ * line: the hosts, a mask line for each and the docs page. The hint never changes the exit code. After the lines,
+ * `test` lists the flaky snapshots by name under a heading, when there are any, and its counts say how many passes are
+ * flaky. A flaky snapshot never fails the run.
  *
- * Every `test` runs the consistency check once the snapshots are planned, and `test --consistency` runs only that
- * check: `test-plan.ts` has the rules.
+ * Every `test` but a shard's runs the consistency check once the snapshots are planned, and `test --consistency` runs
+ * only that check: `test-plan.ts` has the rules.
+ *
+ * A shard of `test --shard k/n` takes only its share of the stories files. Before anything is read or launched, it
+ * lists each Storybook's baselines folder; one that can't be listed stops the run with exit 2, printing nothing on
+ * stdout. It then splits the stories files that hold a selected story across the shards. Each Storybook is then
+ * narrowed to the shard's files, its selected stories and the stories its options read covers alike, so a Storybook
+ * with no file in the shard isn't read. A shard runs no consistency check. Its header names the shard and how many
+ * stories files it was dealt, and is followed by a note that missing baselines and orphans are left to
+ * `test --consistency`, then, when it takes no snapshot, a note that it has nothing to capture; such a shard exits 0. A
+ * shard dealt no stories file launches no browser.
  *
  * `update` also takes every snapshot outside the selection whose baseline is missing, so it writes every missing
  * baseline of the Storybooks in the run. A story outside the selection whose stories file didn't load is taken, and
@@ -713,9 +746,10 @@ async function takeSnapshots(
  * Each story of a stories file that failed to load, or didn't load within readyTimeout, is one broken snapshot,
  * `load-failed`, with no mode, no capture and no baseline read.
  *
- * Planning also stops the run with exit 2, before any baselines folder is listed, the report folder is cleared or
- * anything is captured, on two snapshots of one Storybook whose baselines would be one file, selected or not. Stderr
- * names the first such pair in each Storybook, in config order.
+ * Planning also stops the run with exit 2, before the report folder is cleared or anything is captured, on two
+ * snapshots of one Storybook whose baselines would be one file, selected or not, and on a shard only among its own
+ * stories files. Outside a shard, that's before any baselines folder is listed. Stderr names the first such pair in
+ * each Storybook, in config order.
  *
  * When the browser exits, every story in flight is broken, `browser-exited`, the browser is relaunched once at the next
  * read or story that needs it, and the run goes on; stderr then says so, with the browser's last output, whatever the
@@ -756,7 +790,10 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
   let deleted: string[] = []
 
   try {
-    const plan = await planSnapshots(run.selections, browser.readOptions, run.config)
+    const share =
+      run.shard === undefined ? undefined : await shardShareOf(run.selections, dirname(run.config.path), run.shard)
+
+    const plan = await planSnapshots(share?.selections ?? run.selections, browser.readOptions, run.config)
 
     if ('problem' in plan) {
       return { exitCode: 2, stdout: '', stderr: `${exitNoticeOf(browser.firstExit())}${plan.problem}\n` }
@@ -769,7 +806,7 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
     }
 
     baselines = taking.baselines
-    snapshots = plannedSnapshotsOf(run, taking.taken)
+    snapshots = plannedSnapshotsOf(run, share, taking.taken)
     await takeSnapshots(run, browser, snapshots, tools)
 
     if (tools.command === 'update') {

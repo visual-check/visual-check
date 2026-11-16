@@ -1,5 +1,6 @@
 import { parseArgs } from 'node:util'
 import { findStorybookUrlProblem, mayHoldLogin, serveStorybookFix } from '../config/find-storybook-url-problem.js'
+import type { Shard } from '../sharding/shard.js'
 
 /**
  * A command line that can't be run: an unknown command or flag, a missing, empty or extra argument, a flag that doesn't
@@ -46,6 +47,10 @@ export interface RunOptions {
    * Always `false` for `update`.
    */
   consistency: boolean
+  /**
+   * The shard `--shard` gives, or `undefined` when the flag isn't given. Always `undefined` for `update`.
+   */
+  shard: Shard | undefined
 }
 
 /**
@@ -60,12 +65,12 @@ export type CommandLine =
 /**
  * The flags `init` doesn't take, in the order a message names the first one given.
  */
-const flagsInitRejects = ['all', 'filter', 'storybook', 'url', 'config', 'workers', 'consistency'] as const
+const flagsInitRejects = ['all', 'filter', 'storybook', 'url', 'config', 'workers', 'consistency', 'shard'] as const
 
 /**
  * The flags that take a value, which can't be empty.
  */
-const flagsWithValue = ['filter', 'storybook', 'url', 'config', 'workers'] as const
+const flagsWithValue = ['filter', 'storybook', 'url', 'config', 'workers', 'shard'] as const
 
 /**
  * Turns a thrown value into its message.
@@ -113,6 +118,7 @@ function parseCommandLineArguments(commandLineArguments: string[]) {
       config: { type: 'string' },
       workers: { type: 'string' },
       consistency: { type: 'boolean' },
+      shard: { type: 'string' },
       help: { type: 'boolean' },
       version: { type: 'boolean' },
     },
@@ -205,12 +211,68 @@ function consistencyFlagOf(
 }
 
 /**
+ * Reads a `k/n` shard: two whole numbers of 1 or more, written in digits, with k no greater than n.
+ */
+function parseShard(value: string): Shard | undefined {
+  const match = /^([1-9]\d*)\/([1-9]\d*)$/.exec(value)
+
+  if (!match) {
+    return undefined
+  }
+
+  const index = Number(match[1])
+  const total = Number(match[2])
+
+  if (!Number.isSafeInteger(index) || !Number.isSafeInteger(total) || index > total) {
+    return undefined
+  }
+
+  return { index, total }
+}
+
+/**
+ * Reads the `--shard` flag for `test` into a shard: `k/n`, two whole numbers written in digits, with 1 ≤ k ≤ n.
+ * `--filter`, `--all` and `--storybook` narrow the run before the split, so they are accepted. `--consistency` runs in
+ * a job of its own, so it is rejected, as `--affected` must be once it exists: affected stories differ between
+ * machines, so the shards wouldn't agree on the split.
+ *
+ * @throws {UsageError} When it's given to `update` or with `--consistency`, or the value isn't `k/n` in range.
+ */
+function shardFlagOf(
+  command: 'test' | 'update',
+  values: { shard?: string | undefined; consistency?: boolean | undefined },
+): Shard | undefined {
+  const { shard } = values
+
+  if (shard === undefined) {
+    return undefined
+  }
+
+  if (command === 'update') {
+    throw new UsageError('--shard applies only to test.')
+  }
+
+  if (values.consistency) {
+    throw new UsageError('--consistency runs in a job of its own, so it takes no --shard.')
+  }
+
+  const parsed = parseShard(shard)
+
+  if (parsed === undefined) {
+    throw new UsageError(`--shard takes k/n, two whole numbers with 1 ≤ k ≤ n, such as 2/4. Got '${shard}'.`)
+  }
+
+  return parsed
+}
+
+/**
  * Reads the command line into the command it names and its options.
  *
  * @throws {UsageError} For an unknown command or flag, a missing, empty or extra argument, a flag that doesn't apply to
- * the command, flags that clash, a `--url` that isn't an http(s) URL or holds a login, a `--filter` that isn't a regular
- * expression, a `--workers` that isn't a whole number of 1 or more, and `--consistency` on `update` or with `--all` or
- * `--filter`. `--help` anywhere before a `--` separator wins, so it never throws.
+ * the command, flags that clash, a `--url` that isn't an http(s) URL or holds a login, a `--filter` that isn't a
+ * regular expression, a `--workers` that isn't a whole number of 1 or more, `--consistency` on `update` or with `--all`
+ * or `--filter`, and a `--shard` that isn't `k/n` with 1 ≤ k ≤ n, or is on `update` or with `--consistency`.
+ * `--help` anywhere before a `--` separator wins, so it never throws.
  */
 export function parseCommandLine(commandLineArguments: string[]): CommandLine {
   if (asksForHelp(commandLineArguments)) {
@@ -272,6 +334,7 @@ export function parseCommandLine(commandLineArguments: string[]): CommandLine {
   checkUrlFlag(values.url)
 
   const consistency = consistencyFlagOf(command, values)
+  const shard = shardFlagOf(command, values)
 
   return {
     command,
@@ -282,6 +345,7 @@ export function parseCommandLine(commandLineArguments: string[]): CommandLine {
       config: values.config,
       workers: workersFlagOf(values.workers),
       consistency,
+      shard,
     },
   }
 }

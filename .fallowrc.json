@@ -32,6 +32,7 @@
       { "name": "cli/commands", "patterns": ["packages/cli/src/commands/**"] },
       { "name": "cli/config", "patterns": ["packages/cli/src/config/**"] },
       { "name": "cli/report", "patterns": ["packages/cli/src/report/**"] },
+      { "name": "cli/sharding", "patterns": ["packages/cli/src/sharding/**"] },
       { "name": "cli/storybook", "patterns": ["packages/cli/src/storybook/**"] },
       { "name": "cli/system-error", "patterns": ["packages/cli/src/system-error/**"] },
       { "name": "cli/visual-diff", "patterns": ["packages/cli/src/visual-diff/**"] },
@@ -64,12 +65,14 @@
           "cli/config",
           "cli/container",
           "cli/report",
+          "cli/sharding",
           "cli/storybook",
           "cli/visual-diff"
         ]
       },
       { "from": "cli/config", "allow": [] },
       { "from": "cli/report", "allow": ["cli/system-error"] },
+      { "from": "cli/sharding", "allow": ["cli/baselines", "cli/storybook"] },
       { "from": "cli/storybook", "allow": [] },
       { "from": "cli/system-error", "allow": [] },
       { "from": "cli/visual-diff", "allow": ["cli/config"] },
