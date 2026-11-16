@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   addDevDependenciesCommandOf,
+  commandLineOf,
   isPackageManager,
   lockfileNames,
   packageManagerOf,
   runScriptCommandOf,
   scriptsOf,
-  storybookBinCommandOf,
+  storybookCommandOf,
 } from './package-manager.js'
 
 describe('packageManagerOf', () => {
@@ -89,10 +90,15 @@ describe('commands', () => {
   })
 
   it('runs the storybook binary', () => {
-    expect(storybookBinCommandOf('pnpm')).toEqual(['pnpm', 'exec', 'storybook'])
-    expect(storybookBinCommandOf('npm')).toEqual(['npx', 'storybook'])
-    expect(storybookBinCommandOf('yarn')).toEqual(['yarn', 'storybook'])
-    expect(storybookBinCommandOf('bun')).toEqual(['bunx', 'storybook'])
+    expect(storybookCommandOf('pnpm', ['dev'])).toEqual({ command: 'pnpm', args: ['exec', 'storybook', 'dev'] })
+    expect(storybookCommandOf('npm', ['dev'])).toEqual({ command: 'npx', args: ['storybook', 'dev'] })
+    expect(storybookCommandOf('yarn', ['dev'])).toEqual({ command: 'yarn', args: ['storybook', 'dev'] })
+    expect(storybookCommandOf('bun', [])).toEqual({ command: 'bunx', args: ['storybook'] })
+  })
+
+  it('shows a command line with single spaces', () => {
+    expect(commandLineOf({ command: 'pnpm', args: ['add', '--save-dev', 'a@1'] })).toBe('pnpm add --save-dev a@1')
+    expect(commandLineOf({ command: 'pnpm', args: [] })).toBe('pnpm')
   })
 
   it('adds dev dependencies', () => {

@@ -1,12 +1,13 @@
 import { findStorybookUrlProblem, serveStorybookFix } from '../config/find-storybook-url-problem.js'
 import type { DetectedProject, DetectedStorybook } from './detect-project.js'
 import {
+  commandLineOf,
   isJsonObject,
   isPackageManager,
   type PackageManager,
   runScriptCommandOf,
   scriptsOf,
-  storybookBinCommandOf,
+  storybookCommandOf,
 } from './package-manager.js'
 import type { Prompter } from './prompter.js'
 import { defaultConfigDir } from './storybook-scripts.js'
@@ -307,14 +308,11 @@ async function askStartCommand(
     return runScriptCommandOf(packageManager, storybook.startScript.script)
   }
 
-  const words = [...storybookBinCommandOf(packageManager), 'dev', '-p', String(urlPortOf(url))]
-
-  if (storybook.configDir !== defaultConfigDir) {
-    words.push('-c', storybook.configDir)
-  }
+  const configArgs = storybook.configDir === defaultConfigDir ? [] : ['-c', storybook.configDir]
+  const command = storybookCommandOf(packageManager, ['dev', '-p', String(urlPortOf(url)), ...configArgs])
 
   return prompter.text(`Command that starts ${name}`, {
-    defaultValue: words.join(' '),
+    defaultValue: commandLineOf(command),
   })
 }
 

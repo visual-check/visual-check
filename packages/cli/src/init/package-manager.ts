@@ -161,22 +161,6 @@ export function runScriptCommandOf(packageManager: PackageManager, script: strin
 }
 
 /**
- * The command words that run the project's `storybook` binary.
- */
-export function storybookBinCommandOf(packageManager: PackageManager): string[] {
-  switch (packageManager) {
-    case 'pnpm':
-      return ['pnpm', 'exec', 'storybook']
-    case 'npm':
-      return ['npx', 'storybook']
-    case 'yarn':
-      return ['yarn', 'storybook']
-    case 'bun':
-      return ['bunx', 'storybook']
-  }
-}
-
-/**
  * A command to run: the program and its arguments.
  */
 export interface CommandLine {
@@ -204,4 +188,27 @@ export function addDevDependenciesCommandOf(packageManager: PackageManager, spec
     case 'bun':
       return { command: 'bun', args: ['add', '--dev', ...specs] }
   }
+}
+
+/**
+ * The command that runs the project's `storybook` binary with `args`, such as `['dev', '-p', '6006']`.
+ */
+export function storybookCommandOf(packageManager: PackageManager, args: readonly string[]): CommandLine {
+  switch (packageManager) {
+    case 'pnpm':
+      return { command: 'pnpm', args: ['exec', 'storybook', ...args] }
+    case 'npm':
+      return { command: 'npx', args: ['storybook', ...args] }
+    case 'yarn':
+      return { command: 'yarn', args: ['storybook', ...args] }
+    case 'bun':
+      return { command: 'bunx', args: ['storybook', ...args] }
+  }
+}
+
+/**
+ * Returns the command line as shown to the user: the program and its arguments joined with single spaces.
+ */
+export function commandLineOf({ command, args }: CommandLine): string {
+  return [command, ...args].join(' ')
 }
