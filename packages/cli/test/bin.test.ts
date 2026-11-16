@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
+import type { TestReport } from '../src/index.js'
 
 const binaryPath = fileURLToPath(new URL('../dist/bin.js', import.meta.url))
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }
@@ -404,17 +405,31 @@ describe('visual-check binary reaching Storybooks', () => {
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${down}' } } }\n`,
     })
     const result = await runAsynchronously({ cwd: project }, 'test', '--reporter', 'json')
-    const report = JSON.parse(readFileSync(join(project, '.visual-check', 'report', 'report.json'), 'utf8')) as {
-      exitCode: number
-      error: { message: string; storybooks: { name: string; url: string }[] }
-    }
+    const report = JSON.parse(
+      readFileSync(join(project, '.visual-check', 'report', 'report.json'), 'utf8'),
+    ) as TestReport
 
     expect(result.status).toBe(2)
     expect(result.stdout).toBe(`${JSON.stringify(report)}\n`)
     expect(result.stderr.endsWith('Report: .visual-check/report/report.json\n')).toBe(true)
-    expect(report.exitCode).toBe(2)
-    expect(report.error.storybooks).toEqual([{ name: 'web', url: down }])
-    expect(report.error.message).toContain(`Storybook web doesn't answer at ${down}/index.json (ECONNREFUSED)`)
+    expect(report).toEqual({
+      version: 1,
+      visualCheck: version,
+      command: 'test',
+      consistencyOnly: false,
+      exitCode: 2,
+      shard: null,
+      selection: { by: 'all', base: null, changedFiles: null, fallback: null },
+      reportDir: '.visual-check/report',
+      storybooks: [{ name: 'web', url: down }],
+      counts: { passed: 0, flaky: 0, differs: 0, broken: 0, missing: 0, orphan: 0 },
+      snapshots: [],
+      warnings: [],
+      error: {
+        message: expect.stringContaining(`Storybook web doesn't answer at ${down}/index.json (ECONNREFUSED)`),
+        storybooks: [{ name: 'web', url: down }],
+      },
+    } satisfies TestReport)
   })
 
   it('exits 2 with both fixes when there is no docker command, before it looks at a Storybook', async () => {
@@ -503,7 +518,21 @@ describe('visual-check binary reaching Storybooks', () => {
 
     expect(result.status).toBe(0)
     expect(result.stdout.trimEnd().split('\n')).toHaveLength(1)
-    expect(JSON.parse(result.stdout)).toMatchObject({ version: 1, command: 'test', exitCode: 0 })
+    expect(JSON.parse(result.stdout) as TestReport).toEqual({
+      version: 1,
+      visualCheck: version,
+      command: 'test',
+      consistencyOnly: false,
+      exitCode: 0,
+      shard: null,
+      selection: { by: 'all', base: null, changedFiles: null, fallback: null },
+      reportDir: '.visual-check/report',
+      storybooks: [{ name: 'web', url }],
+      counts: { passed: 0, flaky: 0, differs: 0, broken: 0, missing: 0, orphan: 0 },
+      snapshots: [],
+      warnings: [],
+      error: null,
+    } satisfies TestReport)
     expect(result.stderr).toBe('Report: .visual-check/report/report.json\n')
   })
 
