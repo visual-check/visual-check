@@ -72,7 +72,7 @@
         ]
       },
       { "from": "cli/config", "allow": [] },
-      { "from": "cli/init", "allow": ["cli/config", "cli/storybook"] },
+      { "from": "cli/init", "allow": ["cli/config", "cli/container", "cli/storybook"] },
       { "from": "cli/report", "allow": ["cli/system-error"] },
       { "from": "cli/sharding", "allow": ["cli/baselines", "cli/storybook"] },
       { "from": "cli/storybook", "allow": [] },

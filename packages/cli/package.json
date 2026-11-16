@@ -24,6 +24,7 @@
     "test:unit": "vitest run"
   },
   "dependencies": {
+    "fallow": "3.42.0",
     "jiti": "^2.7.0",
     "pixelmatch": "^8.0.0",
     "sharp": "^0.35.5",

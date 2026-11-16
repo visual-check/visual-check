@@ -38,6 +38,9 @@ importers:
 
   packages/cli:
     dependencies:
+      fallow:
+        specifier: 3.42.0
+        version: 3.42.0
       jiti:
         specifier: ^2.7.0
         version: 2.7.0

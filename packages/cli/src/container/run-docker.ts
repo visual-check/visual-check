@@ -1,6 +1,6 @@
 import { type ChildProcessByStdio, spawn } from 'node:child_process'
 import type { Readable } from 'node:stream'
-import { ContainerError } from './container-error.js'
+import { ContainerError, DockerMissingError } from './container-error.js'
 
 /**
  * What a missing `docker` command says.
@@ -11,7 +11,8 @@ const noDockerMessage = "visual-check runs the browser in Docker, and there's no
  * Runs `docker` with these arguments and resolves with its exit code. What it writes goes to `onStdout` and `onStderr`
  * as it arrives. With `timeoutMs`, a `docker` that is still running by then is killed.
  *
- * @throws {ContainerError} When `docker` can't be started, or doesn't finish within `timeoutMs`.
+ * @throws {ContainerError} When `docker` can't be started (a `DockerMissingError` when it isn't on PATH), or doesn't
+ * finish within `timeoutMs`.
  */
 export function runDocker(
   args: readonly string[],
@@ -43,9 +44,9 @@ export function runDocker(
     child.on('error', (error: NodeJS.ErrnoException) => {
       clearTimeout(timer)
       reject(
-        new ContainerError(
-          error.code === 'ENOENT' ? noDockerMessage : `visual-check couldn't run docker: ${error.message}.`,
-        ),
+        error.code === 'ENOENT'
+          ? new DockerMissingError(noDockerMessage)
+          : new ContainerError(`visual-check couldn't run docker: ${error.message}.`),
       )
     })
     child.on('close', (code) => {
