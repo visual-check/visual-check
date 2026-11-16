@@ -18,6 +18,7 @@ import type { BrowserPlace } from './browser-route.js'
 import { dockerProblemOf } from './docker-problem.js'
 import type { LaunchBrowser } from './launch-browser.js'
 import { missingLibraryOf } from './missing-library.js'
+import { networkWarningOf } from './network-warning.js'
 import { type PlannedSnapshot, planSnapshots, type SnapshotToCapture } from './plan-snapshots.js'
 import { platformProblemOf } from './platform-problem.js'
 import { type FirstBrowserExit, type RunBrowser, runBrowserOf } from './run-browser.js'
@@ -138,7 +139,8 @@ interface SnapshotRunResult {
   /**
    * When the first browser exited mid-run, that it exited, whether visual-check relaunches it once, and its last output.
    * Then, for a run that stopped with exit 2, what stopped it, or for a run that finished, a warning for each Storybook
-   * that seems to ignore the test path. Nothing for a run that went on with no exit and no warning.
+   * that seems to ignore the test path, then for `update` the hosts its stories reach. Nothing for a run that went on
+   * with no exit and no warning.
    */
   stderr: string
 }
@@ -241,15 +243,18 @@ function headerOf(run: SnapshotRun, count: number): string {
 }
 
 /**
- * Builds the session's settings from the config.
+ * Builds the session's settings from the config. Only `update` lists the hosts a story reaches.
  */
-function captureSettingsOf(config: ResolvedConfig): CaptureSettings {
+function captureSettingsOf(run: SnapshotRun): CaptureSettings {
+  const { config } = run
+
   return {
     readyTimeoutMs: config.readyTimeout,
     timezone: config.timezone,
     locale: config.locale,
     colorScheme: config.colorScheme,
     maskColor: config.maskColor,
+    listHosts: run.command === 'update',
   }
 }
 
@@ -291,14 +296,14 @@ async function updateSnapshot(
     return brokenResultOf(capture.broken)
   }
 
-  const { snapshot, completingMs } = capture
+  const { snapshot, completingMs, hosts } = capture
   const path = baselinePathOf(item.storybook.baselines, item.key)
   const baseline = await readBaseline(path)
 
   if (baseline === undefined) {
     await writeBaseline(path, snapshot)
 
-    return { status: 'written', detail: 'written: missing', completingMs }
+    return { status: 'written', detail: 'written: missing', completingMs, hosts }
   }
 
   const result = await compareWithBaseline(visualDiff, item, baseline, snapshot, path)
@@ -306,10 +311,10 @@ async function updateSnapshot(
   if (result.outcome === 'differs') {
     await writeBaseline(path, snapshot)
 
-    return { status: 'written', detail: `written: differs: ${result.message}`, completingMs }
+    return { status: 'written', detail: `written: differs: ${result.message}`, completingMs, hosts }
   }
 
-  return { status: 'kept', detail: 'kept', completingMs }
+  return { status: 'kept', detail: 'kept', completingMs, hosts }
 }
 
 /**
@@ -317,6 +322,25 @@ async function updateSnapshot(
  */
 function countOf(statuses: readonly SnapshotStatus[], counted: SnapshotStatus): number {
   return statuses.filter((status) => status === counted).length
+}
+
+/**
+ * Warns, for `update`, about the hosts its stories send real network requests to and the hosts whose remote content
+ * they show, apart from the ones the config silences. Gives nothing for `test`, or when no host is left. Broken
+ * snapshots reach no host.
+ */
+function networkWarningsOf(run: SnapshotRun, snapshots: PlannedSnapshots): string {
+  if (run.command !== 'update') {
+    return ''
+  }
+
+  const taken = snapshots.items.flatMap(({ storybook, story }, index) => {
+    const hosts = snapshots.results[index]?.hosts
+
+    return hosts === undefined ? [] : [{ storybook: storybook.name, storyId: story.id, hosts }]
+  })
+
+  return networkWarningOf(taken, run.config.silenceHosts)
 }
 
 /**
@@ -691,7 +715,12 @@ async function takeSnapshots(
  * A run that finishes ends stderr with a warning for each Storybook, in config order, whose captured snapshots'
  * `completing` render steps took a median of 50 ms or more: it seems to ignore the test path. For `update` on Windows,
  * stderr ends with one more warning when a baseline it wrote has a path longer than 260 characters: it names each such
- * path and the git setting `core.longpaths`. The warnings never change the exit code.
+ * path and the git setting `core.longpaths`. A finished `update` ends stderr with one more block: a line for each host
+ * its stories sent real network requests to, then a line for each host whose remote content they show, each kind
+ * sorted by host name, with the count and the first three IDs of the stories that reach it. A story whose snapshot was
+ * written or kept counts once however many modes it has, and a broken one counts for nothing. The config's
+ * `silenceHosts` leaves both kinds of host out. Only `update` watches requests: `test` never does and prints no such
+ * block. The warnings never change the exit code.
  *
  * @throws {Error} Any other error, after closing the sessions and the browsers.
  */
@@ -700,7 +729,7 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
     browserPackage: run.browserPackage,
     configImage: run.config.image,
     place: run.place,
-    settings: captureSettingsOf(run.config),
+    settings: captureSettingsOf(run),
     environment: run.environment,
     progress: run.progress,
   })
@@ -759,6 +788,7 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
     stderr:
       exitNoticeOf(browser.firstExit()) +
       testPathWarningsOf(run.selections, snapshots.items, snapshots.results) +
-      longPathWarningsOf(run, snapshots),
+      longPathWarningsOf(run, snapshots) +
+      networkWarningsOf(run, snapshots),
   }
 }

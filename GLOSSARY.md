@@ -72,6 +72,10 @@ _Avoid_: Ignore region, hidden element
 What a story shows from an origin other than its Storybook's: images and embedded pages.
 _Avoid_: External assets, third-party content, CDN images
 
+**Real network request**:
+A `fetch`, XHR, WebSocket or EventSource request a story sends to an origin other than its Storybook's that goes over the network or to the HTTP cache, not one a service worker answers itself.
+_Avoid_: External request, live request, unmocked request, third-party request
+
 **Broken story**:
 A story that can't be captured: its stories file fails to load, or it errors, crashes its page, is in flight when the browser exits, never becomes ready, navigates away, or doesn't render the same way twice.
 _Avoid_: Failed story, errored story

@@ -137,6 +137,7 @@ function pageOf(fake: FakeDriver, behaviour: FakeBehaviour): Page {
         throw behaviour.closeError
       }
     },
+    requestHosts: () => [],
   }
 }
 
@@ -158,7 +159,14 @@ describe('checkProxyReach', () => {
     await checkProxyReach(fake.driver, proxy)
 
     expect(fake.setups).toEqual([
-      { userAgentSuffix: '', timezone: 'UTC', locale: 'en-US', colorScheme: 'light', initScript: '' },
+      {
+        userAgentSuffix: '',
+        timezone: 'UTC',
+        locale: 'en-US',
+        colorScheme: 'light',
+        initScript: '',
+        watchRequests: false,
+      },
     ])
     expect(fake.gotos).toEqual([[proxy.checkUrl, 30_000]])
     expect(fake.pageCloses).toBe(1)

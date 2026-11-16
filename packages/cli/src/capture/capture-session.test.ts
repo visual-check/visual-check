@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { finishedAnswer, timedOutAnswer } from '../storybook/preview-script.fixture.js'
 import { storyWaitExpression } from '../storybook/preview-script.js'
 import { waitHookExpression } from '../storybook/wait-hook.js'
-import { type CaptureSettings, openCaptureSession, remoteContentBoxesOf } from './capture-session.js'
+import { type CaptureSettings, openCaptureSession, remoteContentBoxesOf, remoteHostsOf } from './capture-session.js'
 import {
   BrowserExitedError,
   CaptureTooLargeError,
@@ -25,6 +25,7 @@ const settings: CaptureSettings = {
   locale: 'pl-PL',
   colorScheme: 'dark',
   maskColor: '#00FF00',
+  listHosts: false,
 }
 
 /**
@@ -75,7 +76,7 @@ describe('openCaptureSession', () => {
     expect(driver.setups).toEqual([])
   })
 
-  it("opens its page with the settings, Storybook's test-runner user agent and the page script", async () => {
+  it("opens its page with the settings, Storybook's test-runner user agent and the page script, watching no requests", async () => {
     const driver = new FakeDriver()
 
     await openCaptureSession(driver, settings).capture(primary)
@@ -86,8 +87,16 @@ describe('openCaptureSession', () => {
         locale: 'pl-PL',
         colorScheme: 'dark',
         initScript: pageInitScript,
+        watchRequests: false,
       },
     ])
+  })
+
+  it('watches requests on its page when the settings list hosts', async () => {
+    const driver = new FakeDriver()
+
+    await openCaptureSession(driver, { ...settings, listHosts: true }).capture(primary)
+    expect(driver.setups[0]?.watchRequests).toBe(true)
   })
 
   it('keeps using its page while captures succeed', async () => {
@@ -98,6 +107,138 @@ describe('openCaptureSession', () => {
     await session.capture(secondary)
     expect(driver.setups).toHaveLength(1)
     expect(driver.methods()).not.toContain('1:close')
+  })
+})
+
+describe('the hosts of a capture', () => {
+  const listing = { ...settings, listHosts: true }
+
+  it("are the page's request hosts, read after the capture, and the hosts of the remote content found", async () => {
+    let captured = false
+    const remote = [
+      { host: 'images.example.com', x: 1, y: 2, width: 3, height: 4 },
+      { host: 'cdn.example.com:8443', x: 5, y: 6, width: 7, height: 8 },
+      { host: 'images.example.com', x: 9, y: 9, width: 9, height: 9 },
+    ]
+    const driver = new FakeDriver({
+      pages: [
+        {
+          capturePrep: async () => ({ outcome: 'ready', box: null, remote }),
+          capture: async () => {
+            captured = true
+
+            return defaultSnapshot
+          },
+          requestHosts: () => (captured ? ['api.example.com'] : []),
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, listing).capture(primary)).toEqual({
+      snapshot: defaultSnapshot,
+      hosts: { requests: ['api.example.com'], remoteContent: ['images.example.com', 'cdn.example.com:8443'] },
+    })
+    expect(driver.calls).toContainEqual({
+      page: 1,
+      method: 'evaluate',
+      args: [
+        prepareCaptureExpression({ element: null, masks: [], maskColor: '#00FF00', findRemote: true }, 10_000),
+        11_000,
+      ],
+    })
+  })
+
+  it("leave out the remote content the story's host masks cover", async () => {
+    const remote = [
+      { host: 'images.example.com', x: 1, y: 2, width: 3, height: 4 },
+      { host: 'fonts.example.com', x: 5, y: 6, width: 7, height: 8 },
+    ]
+    const driver = new FakeDriver({ pages: [{ capturePrep: async () => ({ outcome: 'ready', box: null, remote }) }] })
+    const story = { ...primary, masks: [{ name: 'images', host: 'Images.Example.com' }] }
+
+    expect(await openCaptureSession(driver, listing).capture(story)).toEqual({
+      snapshot: defaultSnapshot,
+      hosts: { requests: [], remoteContent: ['fonts.example.com'] },
+    })
+  })
+
+  it('come without remote content boxes unless the story asks for them', async () => {
+    const remote = [{ host: 'images.example.com', x: 1, y: 2, width: 3, height: 4 }]
+    const driver = new FakeDriver({ pages: [{ capturePrep: async () => ({ outcome: 'ready', box: null, remote }) }] })
+    const capture = await openCaptureSession(driver, listing).capture(primary)
+
+    expect(capture).toEqual({
+      snapshot: defaultSnapshot,
+      hosts: { requests: [], remoteContent: ['images.example.com'] },
+    })
+    expect(capture).not.toHaveProperty('remoteContent')
+  })
+
+  it('come with the remote content boxes too when the story asks for them', async () => {
+    const remote = [{ host: 'images.example.com', x: 1, y: 2, width: 3, height: 4 }]
+    const driver = new FakeDriver({ pages: [{ capturePrep: async () => ({ outcome: 'ready', box: null, remote }) }] })
+    const story = { ...primary, findRemoteContent: true, viewport: { ...primary.viewport, deviceScaleFactor: 1 } }
+
+    expect(await openCaptureSession(driver, listing).capture(story)).toEqual({
+      snapshot: defaultSnapshot,
+      remoteContent: [{ host: 'images.example.com', x: 1, y: 2, width: 3, height: 4 }],
+      hosts: { requests: [], remoteContent: ['images.example.com'] },
+    })
+  })
+
+  it('list no remote content when the page gives none, as when its search timed out', async () => {
+    expect(await openCaptureSession(new FakeDriver(), listing).capture(primary)).toEqual({
+      snapshot: defaultSnapshot,
+      hosts: { requests: [], remoteContent: [] },
+    })
+  })
+
+  it('are left out of the snapshot when the settings do not list them', async () => {
+    const driver = new FakeDriver({ pages: [{ requestHosts: () => ['api.example.com'] }] })
+    const capture = await openCaptureSession(driver, settings).capture(primary)
+
+    expect(capture).toStrictEqual({ snapshot: defaultSnapshot, completingMs: undefined })
+    expect(driver.setups[0]?.watchRequests).toBe(false)
+  })
+})
+
+describe('remoteHostsOf', () => {
+  it('lists each host once, in the order found', () => {
+    const remote = [
+      { host: 'images.example.com', x: 0, y: 0, width: 1, height: 1 },
+      { host: 'cdn.example.com:8443', x: 0, y: 0, width: 1, height: 1 },
+      { host: 'images.example.com', x: 2, y: 2, width: 1, height: 1 },
+      { host: 'fonts.example.com', x: 0, y: 0, width: 1, height: 1 },
+    ]
+
+    expect(remoteHostsOf(remote, [])).toEqual(['images.example.com', 'cdn.example.com:8443', 'fonts.example.com'])
+  })
+
+  it('leaves out a host a host mask covers by its host or its hostname, in lowercase', () => {
+    const remote = [
+      { host: 'images.example.com', x: 0, y: 0, width: 1, height: 1 },
+      { host: 'cdn.example.com:8443', x: 0, y: 0, width: 1, height: 1 },
+      { host: 'api.example.com:9000', x: 0, y: 0, width: 1, height: 1 },
+      { host: 'fonts.example.com', x: 0, y: 0, width: 1, height: 1 },
+    ]
+    const masks = [
+      { name: 'images', host: 'Images.Example.com' },
+      { name: 'cdn', host: 'cdn.example.com' },
+      { name: 'api', host: 'api.example.com:9000' },
+      { name: 'fonts', selector: 'fonts.example.com' },
+    ]
+
+    expect(remoteHostsOf(remote, masks)).toEqual(['fonts.example.com'])
+  })
+
+  it('keeps a host with a port when the mask names another port', () => {
+    const remote = [{ host: 'cdn.example.com:8443', x: 0, y: 0, width: 1, height: 1 }]
+
+    expect(remoteHostsOf(remote, [{ name: 'cdn', host: 'cdn.example.com:9000' }])).toEqual(['cdn.example.com:8443'])
+  })
+
+  it('lists none when the remote content is unknown', () => {
+    expect(remoteHostsOf(undefined, [])).toEqual([])
   })
 })
 

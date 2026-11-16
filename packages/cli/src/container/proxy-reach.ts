@@ -30,6 +30,7 @@ const neutralSetup: PageSetup = {
   locale: 'en-US',
   colorScheme: 'light',
   initScript: '',
+  watchRequests: false,
 }
 
 /**

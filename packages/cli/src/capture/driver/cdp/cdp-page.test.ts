@@ -65,6 +65,22 @@ const sessionId = 'session-1'
 const targetId = 'target-1'
 
 /**
+ * The session the fake browser attaches the first page's service worker in, after the page's own.
+ */
+const workerSessionId = 'session-2'
+
+/**
+ * The parameters a watched page turns the Network domain on with, in its session and its service workers' sessions:
+ * no body kept.
+ */
+const networkEnableParams = { maxTotalBufferSize: 0, maxResourceBufferSize: 0, maxPostDataSize: 0 }
+
+/**
+ * A URL of another origin than the story's that a story's script requests.
+ */
+const apiUrl = 'https://api.example.com/users'
+
+/**
  * The fonts a page on Linux uses.
  */
 const linuxFonts = {
@@ -192,6 +208,58 @@ function navigatedAway(url: string, gotoUrl = storyUrl): Record<string, unknown>
  */
 function createdTarget(type: string, browserContextId: string, newTargetId: string): Record<string, unknown> {
   return { targetInfo: { targetId: newTargetId, type, browserContextId } }
+}
+
+/**
+ * Launches a driver on a fake browser with these options, opens a page that watches its requests, and loads the story
+ * in it.
+ */
+async function openWatchedPage(options: FakeBrowserOptions = {}): Promise<{ browser: FakeBrowser; page: Page }> {
+  const { browser, driver } = await launch(options)
+  const page = await driver.newPage({ ...pageSetup, watchRequests: true })
+
+  await page.goto(storyUrl, 1000)
+
+  return { browser, page }
+}
+
+/**
+ * Has the fake browser say that a request of this resource type, `Fetch` by default, is sent to `url`, in the first
+ * page's session or the one given.
+ */
+function sendRequest(fake: FakeBrowser, requestId: string, url: string, type = 'Fetch', session = sessionId): void {
+  fake.emit('Network.requestWillBeSent', { requestId, type, request: { url, method: 'GET' } }, session)
+}
+
+/**
+ * Has the fake browser say that a request of the first page's session got this response.
+ */
+function receiveResponse(fake: FakeBrowser, requestId: string, response: Record<string, unknown>): void {
+  fake.emit('Network.responseReceived', { requestId, type: 'Fetch', response: { url: '', ...response } }, sessionId)
+}
+
+/**
+ * Has the fake browser say that the first page opened a WebSocket to `url`.
+ */
+function openSocket(fake: FakeBrowser, requestId: string, url: string): void {
+  fake.emit('Network.webSocketCreated', { requestId, url }, sessionId)
+}
+
+/**
+ * Has the first page's session report a service worker of its browser context, and waits until the page has attached
+ * to it and taken in the browser's answer to the Network domain in its session.
+ */
+async function attachWorker(fake: FakeBrowser): Promise<void> {
+  reportWorker(fake)
+  await flushUntil(() => sentOf(fake, 'Network.enable').length === 2)
+  await flush()
+}
+
+/**
+ * Has the first page's session report a service worker of its browser context.
+ */
+function reportWorker(fake: FakeBrowser): void {
+  fake.emit('Target.targetCreated', createdTarget('service_worker', 'context-1', 'target-worker'), sessionId)
 }
 
 /**
@@ -1796,6 +1864,322 @@ describe('when the page navigates away after a goto loaded', () => {
     const failure = await page.evaluate('new Promise(() => {})', 50).catch((error: unknown) => error)
 
     expect(failure).toBeInstanceOf(PageTimeoutError)
+  })
+})
+
+describe('Page.requestHosts', () => {
+  it('turns on no Network domain and attaches to no service worker when the setup has watchRequests off', async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    browser.emit('Target.targetCreated', createdTarget('service_worker', 'context-1', 'target-worker'), sessionId)
+    sendRequest(browser, 'request-1', apiUrl)
+    openSocket(browser, 'request-2', 'wss://socket.example.com/live')
+    await flush()
+    expect(sent(browser).filter((command) => command.method.startsWith('Network.'))).toEqual([])
+    expect(sentOf(browser, 'Target.attachToTarget')).toHaveLength(1)
+    expect(sentOf(browser, 'Target.setDiscoverTargets')).toEqual([
+      {
+        method: 'Target.setDiscoverTargets',
+        params: { discover: true, filter: [{ type: 'page' }] },
+        sessionId: undefined,
+      },
+    ])
+    expect(page.requestHosts()).toEqual([])
+  })
+
+  it("turns the Network domain on and has the page's session report service workers, in its setup", async () => {
+    const { browser } = await openWatchedPage()
+
+    expect(sentOf(browser, 'Network.enable')).toEqual([
+      { method: 'Network.enable', params: networkEnableParams, sessionId },
+    ])
+    expect(sentOf(browser, 'Target.setDiscoverTargets').slice(1)).toEqual([
+      {
+        method: 'Target.setDiscoverTargets',
+        params: { discover: true, filter: [{ type: 'service_worker' }] },
+        sessionId,
+      },
+    ])
+  })
+
+  it.each(['Fetch', 'XHR', 'EventSource'])('counts a %s request to another origin', async (type) => {
+    const { browser, page } = await openWatchedPage()
+
+    sendRequest(browser, 'request-1', apiUrl, type)
+    receiveResponse(browser, 'request-1', { fromServiceWorker: false })
+    await flush()
+    expect(page.requestHosts()).toEqual(['api.example.com'])
+  })
+
+  it('counts a WebSocket to another origin', async () => {
+    const { browser, page } = await openWatchedPage()
+
+    openSocket(browser, 'request-1', 'wss://socket.example.com/live')
+    await flush()
+    expect(page.requestHosts()).toEqual(['socket.example.com'])
+  })
+
+  it("counts no request or WebSocket to the story's own origin", async () => {
+    const { browser, page } = await openWatchedPage()
+
+    sendRequest(browser, 'request-1', `${storyOrigin}/api/users`)
+    receiveResponse(browser, 'request-1', { fromServiceWorker: false })
+    openSocket(browser, 'request-2', 'ws://storybook:6006/storybook-server-channel')
+    await flush()
+    expect(page.requestHosts()).toEqual([])
+  })
+
+  it.each(['Image', 'Stylesheet', 'Font', 'Script', 'Document', 'Other'])('counts no %s request', async (type) => {
+    const { browser, page } = await openWatchedPage()
+
+    sendRequest(browser, 'request-1', apiUrl, type)
+    receiveResponse(browser, 'request-1', { fromServiceWorker: false })
+    await flush()
+    expect(page.requestHosts()).toEqual([])
+  })
+
+  it("counts no URL that doesn't go over the network", async () => {
+    const { browser, page } = await openWatchedPage()
+
+    sendRequest(browser, 'request-1', 'data:application/json,{}')
+    sendRequest(browser, 'request-2', 'blob:http://storybook:6006/1234')
+    await flush()
+    expect(page.requestHosts()).toEqual([])
+  })
+
+  it('counts a request to another port of the same host name, naming the port', async () => {
+    const { browser, page } = await openWatchedPage()
+
+    sendRequest(browser, 'request-1', 'http://storybook:6007/api')
+    receiveResponse(browser, 'request-1', { fromServiceWorker: false })
+    await flush()
+    expect(page.requestHosts()).toEqual(['storybook:6007'])
+  })
+
+  it('names each host once, in lower case, without its default port, in the order first sent', async () => {
+    const { browser, page } = await openWatchedPage()
+
+    sendRequest(browser, 'request-1', 'https://B.example.com:443/one')
+    sendRequest(browser, 'request-2', 'https://a.example.com/two')
+    sendRequest(browser, 'request-3', 'https://b.example.com/three')
+    await flush()
+    expect(page.requestHosts()).toEqual(['b.example.com', 'a.example.com'])
+  })
+
+  it('counts a response from the HTTP cache', async () => {
+    const { browser, page } = await openWatchedPage()
+
+    sendRequest(browser, 'request-1', apiUrl)
+    receiveResponse(browser, 'request-1', { fromServiceWorker: false, fromDiskCache: true })
+    await flush()
+    expect(page.requestHosts()).toEqual(['api.example.com'])
+  })
+
+  it('counts no response a service worker built itself', async () => {
+    const { browser, page } = await openWatchedPage()
+
+    sendRequest(browser, 'request-1', apiUrl)
+    receiveResponse(browser, 'request-1', { fromServiceWorker: true, serviceWorkerResponseSource: 'fallback-code' })
+    await flush()
+    expect(page.requestHosts()).toEqual([])
+  })
+
+  it("attaches to a service worker of the page's context at the browser level, and watches its requests", async () => {
+    const { browser } = await openWatchedPage()
+
+    await attachWorker(browser)
+    expect(sentOf(browser, 'Target.attachToTarget').slice(1)).toEqual([
+      { method: 'Target.attachToTarget', params: { targetId: 'target-worker', flatten: true }, sessionId: undefined },
+    ])
+    expect(sentOf(browser, 'Network.enable').slice(1)).toEqual([
+      { method: 'Network.enable', params: networkEnableParams, sessionId: workerSessionId },
+    ])
+  })
+
+  it('attaches to no service worker of another browser context', async () => {
+    const { browser } = await openWatchedPage()
+
+    browser.emit('Target.targetCreated', createdTarget('service_worker', 'context-2', 'target-other'), sessionId)
+    browser.emit('Target.targetCreated', createdTarget('shared_worker', 'context-1', 'target-shared'), sessionId)
+    await flush()
+    expect(sentOf(browser, 'Target.attachToTarget')).toHaveLength(1)
+  })
+
+  it('counts a response through a service worker that passed the request on', async () => {
+    const { browser, page } = await openWatchedPage()
+
+    await attachWorker(browser)
+    sendRequest(browser, 'request-1', apiUrl)
+    sendRequest(browser, 'worker-request-1', apiUrl, 'Fetch', workerSessionId)
+    receiveResponse(browser, 'request-1', { fromServiceWorker: true, serviceWorkerResponseSource: 'network' })
+    await flush()
+    expect(page.requestHosts()).toEqual(['api.example.com'])
+  })
+
+  it('counts a pending request a service worker passed on', async () => {
+    const { browser, page } = await openWatchedPage()
+
+    await attachWorker(browser)
+    sendRequest(browser, 'request-1', apiUrl)
+    sendRequest(browser, 'worker-request-1', apiUrl, 'Fetch', workerSessionId)
+    await flush()
+    expect(page.requestHosts()).toEqual(['api.example.com'])
+  })
+
+  it('counts a pending or failed request while no service worker is attached', async () => {
+    const { browser, page } = await openWatchedPage()
+
+    sendRequest(browser, 'request-1', 'https://pending.example.com/')
+    sendRequest(browser, 'request-2', 'https://failed.example.com/')
+    browser.emit('Network.loadingFailed', { requestId: 'request-2', errorText: 'net::ERR_FAILED' }, sessionId)
+    await flush()
+    expect(page.requestHosts()).toEqual(['pending.example.com', 'failed.example.com'])
+  })
+
+  it('counts no pending or failed request no attached service worker passed on', async () => {
+    const { browser, page } = await openWatchedPage()
+
+    await attachWorker(browser)
+    sendRequest(browser, 'request-1', 'https://pending.example.com/')
+    sendRequest(browser, 'request-2', 'https://failed.example.com/')
+    browser.emit('Network.loadingFailed', { requestId: 'request-2', errorText: 'net::ERR_FAILED' }, sessionId)
+    await flush()
+    expect(page.requestHosts()).toEqual([])
+  })
+
+  it("counts a pending request again once the service worker's session detached", async () => {
+    const { browser, page } = await openWatchedPage()
+
+    await attachWorker(browser)
+    sendRequest(browser, 'request-1', apiUrl)
+    browser.emit('Target.detachedFromTarget', { sessionId: workerSessionId, targetId: 'target-worker' })
+    await flush()
+    expect(page.requestHosts()).toEqual(['api.example.com'])
+  })
+
+  it("counts no request a document sent before the goto's own document committed", async () => {
+    const { browser, driver } = await launch({
+      handlers: {
+        'Page.navigate': (command: ReceivedCommand, fake: FakeBrowser) => {
+          sendRequest(fake, 'request-2', 'https://leaving.example.com/')
+          sendRequest(fake, 'worker-request-1', 'https://passed.example.com/', 'Fetch', workerSessionId)
+          navigateAndLoadOnce(command, fake)
+          sendRequest(fake, 'request-3', 'https://passed.example.com/')
+          receiveResponse(fake, 'request-3', { fromServiceWorker: true })
+          sendRequest(fake, 'request-4', apiUrl)
+          receiveResponse(fake, 'request-4', { fromServiceWorker: false })
+        },
+      },
+    })
+    const page = await driver.newPage({ ...pageSetup, watchRequests: true })
+
+    await attachWorker(browser)
+    sendRequest(browser, 'request-1', 'https://before.example.com/')
+    receiveResponse(browser, 'request-1', { fromServiceWorker: false })
+    await flush()
+    await page.goto(storyUrl, 1000)
+    expect(page.requestHosts()).toEqual(['api.example.com'])
+  })
+
+  it('counts a pending request while the Network domain of the only service worker is unanswered', async () => {
+    const { browser, page } = await openWatchedPage({
+      handlers: {
+        'Network.enable': (command: ReceivedCommand, fake: FakeBrowser) => {
+          if (command.sessionId === sessionId) {
+            fake.reply(command, {})
+          }
+        },
+      },
+    })
+
+    reportWorker(browser)
+    await flushUntil(() => sentOf(browser, 'Network.enable').length === 2)
+    sendRequest(browser, 'request-1', apiUrl)
+    await flush()
+    expect(page.requestHosts()).toEqual(['api.example.com'])
+  })
+
+  it('keeps a redirected request in the place it was first sent, with the URL it went to last', async () => {
+    const { browser, page } = await openWatchedPage()
+
+    sendRequest(browser, 'request-1', `${storyOrigin}/api/login`)
+    sendRequest(browser, 'request-2', 'https://first.example.com/')
+    sendRequest(browser, 'request-1', 'https://auth.example.com/callback')
+    await flush()
+    expect(page.requestHosts()).toEqual(['auth.example.com', 'first.example.com'])
+  })
+
+  it("ignores requests, WebSockets and responses of another page's session", async () => {
+    const { browser, page } = await openWatchedPage()
+    const otherSessionId = 'session-other'
+
+    await attachWorker(browser)
+    sendRequest(browser, 'request-1', apiUrl)
+    sendRequest(browser, 'request-2', 'https://other.example.com/', 'Fetch', otherSessionId)
+    browser.emit(
+      'Network.webSocketCreated',
+      { requestId: 'request-3', url: 'wss://socket.example.com/' },
+      otherSessionId,
+    )
+    browser.emit(
+      'Network.responseReceived',
+      { requestId: 'request-1', type: 'Fetch', response: { url: apiUrl, fromServiceWorker: false } },
+      otherSessionId,
+    )
+    await flush()
+    expect(page.requestHosts()).toEqual([])
+  })
+
+  it('ignores a pass-on from a session it never attached', async () => {
+    const { browser, page } = await openWatchedPage()
+
+    await attachWorker(browser)
+    sendRequest(browser, 'request-1', apiUrl)
+    sendRequest(browser, 'worker-request-1', apiUrl, 'Fetch', 'session-unattached')
+    await flush()
+    expect(page.requestHosts()).toEqual([])
+  })
+
+  it.each([
+    [
+      'the discovery of service workers',
+      'Target.setDiscoverTargets',
+      (command: ReceivedCommand, fake: FakeBrowser) =>
+        command.sessionId === undefined ? fake.reply(command, {}) : fake.fail(command, -32000, 'Not allowed'),
+    ],
+    [
+      'the attach to a service worker',
+      'Target.attachToTarget',
+      (command: ReceivedCommand, fake: FakeBrowser) => {
+        if (command.params.targetId === 'target-worker') {
+          fake.fail(command, -32000, 'No target with given id')
+        } else {
+          fake.sessionTargets.set(sessionId, String(command.params.targetId))
+          fake.reply(command, { sessionId })
+        }
+      },
+    ],
+    [
+      "the Network domain in a service worker's session",
+      'Network.enable',
+      (command: ReceivedCommand, fake: FakeBrowser) =>
+        command.sessionId === sessionId ? fake.reply(command, {}) : fake.fail(command, -32000, 'Not allowed'),
+    ],
+  ])('survives a failure of %s, and watches no service worker', async (_what, method, handler: CommandHandler) => {
+    const { browser, page } = await openWatchedPage({ handlers: { [method]: handler } })
+
+    if (method !== 'Target.setDiscoverTargets') {
+      reportWorker(browser)
+      await flushUntil(() => browser.timesReceived(method) === 2)
+    }
+
+    await flush()
+    await expect(page.evaluate('1', 1000)).resolves.toBeUndefined()
+    openSocket(browser, 'request-1', 'wss://socket.example.com/live')
+    sendRequest(browser, 'request-2', apiUrl)
+    await flush()
+    expect(page.requestHosts()).toEqual(['socket.example.com', 'api.example.com'])
   })
 })
 

@@ -16,6 +16,7 @@ const settings: CaptureSettings = {
   locale: 'pl-PL',
   colorScheme: 'dark',
   maskColor: '#FF00FF',
+  listHosts: true,
 }
 
 /**
@@ -64,10 +65,11 @@ function exitOf(): BrowserExitedError {
 }
 
 describe('readStoryOptions', () => {
-  it("sets the page up as a capture page, and loads the preview within readyTimeout, giving the read twice that and the page's margin", async () => {
+  it("sets the page up as a capture page that never watches requests, and loads the preview within readyTimeout, giving the read twice that and the page's margin", async () => {
     const { driver } = await readWith()
 
-    expect(driver.setups).toEqual([pageSetupOf(settings)])
+    expect(driver.setups).toEqual([{ ...pageSetupOf(settings), watchRequests: false }])
+    expect(pageSetupOf(settings).watchRequests).toBe(true)
     expect(driver.calls.map(({ method }) => method)).toEqual(['goto', 'evaluate', 'close'])
     expect(driver.calls[0]?.args).toEqual([request.previewUrl, 15_000])
     expect(driver.calls[1]?.args).toEqual([optionsReadExpression(files, 15_000), 31_000])

@@ -1,5 +1,5 @@
 import { BaselineError } from '../baselines/baseline-error.js'
-import type { BrokenStory, StoryCapture, StoryToCapture } from '../capture/capture-session.js'
+import type { BrokenStory, StoryCapture, StoryHosts, StoryToCapture } from '../capture/capture-session.js'
 import type { StoryMask } from '../capture/prepare-capture.js'
 import type { StoryOptions } from '../config/story-options.js'
 import { storyUrlOf } from '../storybook/read-stories.js'
@@ -18,7 +18,8 @@ export type SnapshotStatus = 'passed' | 'differs' | 'missing' | 'broken' | 'writ
 
 /**
  * One snapshot's status, the text its line ends with and, for a captured snapshot, how long Storybook's `completing`
- * render step took. A snapshot that differs can carry a hint, printed under its line.
+ * render step took and, for `update`, the hosts its story reaches. A snapshot that differs can carry a hint, printed
+ * under its line.
  */
 export interface SnapshotResult {
   /**
@@ -34,6 +35,11 @@ export interface SnapshotResult {
    * captured, or whose page didn't see the step.
    */
   completingMs?: number | undefined
+  /**
+   * The hosts the story reaches, for an `update` snapshot that was written or kept. `undefined` for a snapshot that
+   * wasn't, and for any `test` snapshot, since `test` doesn't list hosts.
+   */
+  hosts?: StoryHosts | undefined
   /**
    * Whether the snapshot passed only on a retry, after its first capture differed.
    */

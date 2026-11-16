@@ -176,7 +176,10 @@ export async function runCli(
  * the route the five rules give, from the container the CLI runs in, Docker's engine and the OS. Then it reads and
  * checks the per-story options of every story each Storybook's index lists, whatever the selection, and captures the
  * selected stories that aren't disabled. `update` also captures the snapshots outside the selection whose baselines
- * are missing, then deletes the orphans of the Storybooks in the run.
+ * are missing, then deletes the orphans of the Storybooks in the run. A finished `update` ends stderr with a warning
+ * for the hosts its stories send real network requests to and the hosts whose remote content they show, grouped by
+ * host with the first story IDs of each. The config's `silenceHosts` leaves hosts out. `test` never watches requests.
+ * The warning never changes the exit code.
  *
  * @throws {ConfigError} When the config can't be found, loaded or used.
  */

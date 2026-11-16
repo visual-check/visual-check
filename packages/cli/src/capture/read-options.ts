@@ -281,7 +281,8 @@ export async function readStoryOptions(
   let page: Page
 
   try {
-    page = await driver.newPage(pageSetupOf(settings))
+    // The options-read page never watches requests: only the pages that capture stories list hosts.
+    page = await driver.newPage({ ...pageSetupOf(settings), watchRequests: false })
   } catch (error) {
     return problemOf(
       error,

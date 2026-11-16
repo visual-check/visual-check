@@ -102,6 +102,7 @@ function fakeBrowserOf(version: string = browserPackage.chromium): FakeBrowser {
       close: async () => {
         fake.openPages -= 1
       },
+      requestHosts: () => [],
     }
   }
   const fake: FakeBrowser = {
@@ -196,6 +197,7 @@ function runBrowserWith(...browsers: (FakeBrowser | Promise<FakeBrowser> | Error
         locale: 'en-US',
         colorScheme: 'light',
         maskColor: '#FF00FF',
+        listHosts: false,
       },
       progress: () => undefined,
     },

@@ -1,7 +1,8 @@
-// The service worker of the remote content story `ServiceWorkerMocked`, registered with the scope `/sw-scope/`, so it
-// controls only `/sw-scope/frame.html` and never another story's page. It answers a request whose URL has the marker
-// `visual-check-e2e-mocked` with `mocked.png`, which it fetches itself and wraps in a response of its own, so the
-// response isn't opaque, as a mocking library's isn't. It leaves every other request alone, so the browser fetches it.
+// The service worker of the remote content story `ServiceWorkerMocked` and the network story `MockedFetch`, registered
+// with the scope `/sw-scope/`, so it controls only the frames in this folder, `frame.html` and `fetch.html`, and never
+// another story's page. It answers a request whose URL has the marker `visual-check-e2e-mocked`, an image's or a
+// `fetch`'s, with `mocked.png`, which it fetches itself and wraps in a response of its own, so the response isn't
+// opaque, as a mocking library's isn't. It leaves every other request alone, so the browser fetches it.
 
 /**
  * The marker in the URL of a request the worker mocks.

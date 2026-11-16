@@ -13,6 +13,7 @@ const pageSetup: PageSetup = {
   locale: 'pl-PL',
   colorScheme: 'dark',
   initScript: 'window.__visualCheck = true',
+  watchRequests: false,
 }
 
 /**
@@ -76,6 +77,7 @@ function fakeDriverOf(proxyPort: () => number, behaviour: FakeBehaviour = {}): F
     capture: async () => new Uint8Array(),
     clearStorage: async () => undefined,
     close: async () => undefined,
+    requestHosts: () => [],
   }
   const driver: Driver = {
     version: '157.0.8103.78',

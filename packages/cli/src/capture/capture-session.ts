@@ -63,6 +63,11 @@ export interface CaptureSettings {
    * The colour masks are painted in: `#RGB` or `#RRGGBB`.
    */
   maskColor: string
+  /**
+   * Whether each capture also lists the hosts its story sends real network requests to and shows remote content from.
+   * It turns on the page's request watching, so only `update` sets it.
+   */
+  listHosts: boolean
 }
 
 /**
@@ -94,8 +99,9 @@ export interface StoryToCapture {
    */
   masks?: readonly StoryMask[]
   /**
-   * Whether the capture also brings back the remote content the snapshot shows. Without it, no remote content search
-   * runs for it, unless a host mask needs one.
+   * Whether the capture also brings back the remote content the snapshot shows. Without it, the snapshot comes
+   * without it, and no remote content search runs for it unless a host mask needs one or the session's settings ask
+   * to list hosts.
    */
   findRemoteContent?: boolean
 }
@@ -213,8 +219,26 @@ export type BrokenStory =
     }
 
 /**
- * What capturing a story gave: its snapshot, with how long Storybook's `completing` render step took and, when the story
- * asked for it, the remote content it shows, or, for a broken story, why it can't be captured.
+ * The hosts a story reaches, as a capture lists them.
+ *
+ * @public
+ */
+export interface StoryHosts {
+  /**
+   * The hosts the story's page sent real network requests to, as the page reports them, each once.
+   */
+  requests: string[]
+  /**
+   * The hosts of the remote content the story shows, each once, in the order found, without the hosts one of the
+   * story's host masks covers. None when the remote content search didn't answer in time.
+   */
+  remoteContent: string[]
+}
+
+/**
+ * What capturing a story gave: its snapshot, with how long Storybook's `completing` render step took, the remote
+ * content it shows when the story asked for it and the hosts it reaches when the session lists them, or, for a broken
+ * story, why it can't be captured.
  *
  * @public
  */
@@ -234,6 +258,10 @@ export type StoryCapture =
        * answered in time. Without it, the remote content is unknown.
        */
       remoteContent?: RemoteContentBox[]
+      /**
+       * The hosts the story reaches. Present exactly when the session's settings ask to list hosts.
+       */
+      hosts?: StoryHosts
     }
   | {
       /**
@@ -605,6 +633,79 @@ export function remoteContentBoxesOf(
 }
 
 /**
+ * The host a page's remote content item comes from without its port: `cdn.example.com:8443` gives `cdn.example.com`.
+ * A host without a port, such as `images.example.com` or `[::1]`, stays as it is.
+ */
+function hostnameOf(host: string): string {
+  return host.replace(/:\d+$/, '')
+}
+
+/**
+ * Lists the hosts of the remote content a story shows, from what the capture preparation found: each item's host,
+ * once, in the order found. It leaves out a host one of the story's host masks covers, as the page matches them: the
+ * mask's host, in lowercase, is the item's host or its hostname. Without `remote`, when the search didn't answer in
+ * time, it lists none.
+ */
+export function remoteHostsOf(remote: readonly PageRemoteContent[] | undefined, masks: readonly StoryMask[]): string[] {
+  if (remote === undefined) {
+    return []
+  }
+
+  const maskedHosts = masks.flatMap((mask) => ('host' in mask ? [mask.host.toLowerCase()] : []))
+  const hosts: string[] = []
+
+  for (const item of remote) {
+    const masked = maskedHosts.includes(item.host) || maskedHosts.includes(hostnameOf(item.host))
+
+    if (!masked && !hosts.includes(item.host)) {
+      hosts.push(item.host)
+    }
+  }
+
+  return hosts
+}
+
+/**
+ * What the page prepared a capture with.
+ */
+interface PreparedCapture {
+  /**
+   * What to capture: the element's box, or the full page.
+   */
+  area: CaptureArea
+  /**
+   * The remote content the page gives, when the capture asked for it and the search answered in time. Without it, the
+   * remote content is unknown.
+   */
+  remote: PageRemoteContent[] | undefined
+}
+
+/**
+ * What a snapshot comes with besides its bytes, read right after the capture: the remote content it shows, in pixels
+ * of its image, when the story asked for it with `findRemoteContent` and the page gave it, and the hosts the story
+ * reaches when the settings ask to list hosts.
+ */
+function capturedExtrasOf(
+  page: Page,
+  story: StoryToCapture,
+  settings: CaptureSettings,
+  prepared: PreparedCapture,
+): { remoteContent?: RemoteContentBox[]; hosts?: StoryHosts } {
+  const hosts = settings.listHosts
+    ? { requests: page.requestHosts(), remoteContent: remoteHostsOf(prepared.remote, story.masks ?? []) }
+    : undefined
+  const remoteContent =
+    story.findRemoteContent === true && prepared.remote !== undefined
+      ? remoteContentBoxesOf(prepared.remote, prepared.area, story.viewport.deviceScaleFactor)
+      : undefined
+
+  return {
+    ...(remoteContent === undefined ? {} : { remoteContent }),
+    ...(hosts === undefined ? {} : { hosts }),
+  }
+}
+
+/**
  * Captures a story on an open page: sets the story's viewport, loads the story, waits until Storybook reports it
  * finished with nothing gone wrong, waits for its images and fonts, runs its wait hook, brings it to its end state,
  * measures its element, paints its masks, hides the caret and captures the element's box, or the full page when the
@@ -612,7 +713,9 @@ export function remoteContentBoxesOf(
  * end state changed anything, they're checked again before the masks. Loading, the waits, the hook, the end state,
  * those checks and the masks share readyTimeout, each getting only what's left of it. When the story asks for it with
  * `findRemoteContent`, the snapshot comes with the remote content it shows, unless the search didn't answer in time.
- * A story that can't be captured comes back as a broken story. Rejects only with a `BrowserExitedError`.
+ * When the settings ask to list hosts, it also gives the hosts the page sent requests to, read once the capture is
+ * done, and the hosts of the remote content the story shows, from the same search as the host masks. A story that
+ * can't be captured comes back as a broken story. Rejects only with a `BrowserExitedError`.
  */
 async function captureOnPage(page: Page, story: StoryToCapture, settings: CaptureSettings): Promise<StoryCapture> {
   const deadline = performance.now() + settings.readyTimeoutMs
@@ -681,12 +784,10 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
 
   /**
    * Measures the story's element, paints its masks and hides the caret. Gives what to capture: the element's box, or
-   * the full page when the story has no element, with the remote content the page gives when the story asked for it.
-   * Gives why the story can't be captured instead when that failed.
+   * the full page when the story has no element, with the remote content the page gives when the story asked for it
+   * or the settings ask to list hosts. Gives why the story can't be captured instead when that failed.
    */
-  const prepareCapture = async (): Promise<
-    { area: CaptureArea; remote: PageRemoteContent[] | undefined } | { broken: BrokenStory }
-  > => {
+  const prepareCapture = async (): Promise<PreparedCapture | { broken: BrokenStory }> => {
     step = 'masks'
 
     const element = story.element ?? null
@@ -694,7 +795,7 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
       element,
       masks: story.masks ?? [],
       maskColor: settings.maskColor,
-      findRemote: story.findRemoteContent === true,
+      findRemote: story.findRemoteContent === true || settings.listHosts,
     }
     const prep = readCapturePrep(await waitInPage((limit) => prepareCaptureExpression(request, limit)))
 
@@ -732,16 +833,8 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
     step = 'capture'
 
     const snapshot = await page.capture(prepared.area)
-    const captured = { snapshot, completingMs: wait.completingMs }
 
-    if (prepared.remote === undefined) {
-      return captured
-    }
-
-    return {
-      ...captured,
-      remoteContent: remoteContentBoxesOf(prepared.remote, prepared.area, story.viewport.deviceScaleFactor),
-    }
+    return { snapshot, completingMs: wait.completingMs, ...capturedExtrasOf(page, story, settings, prepared) }
   } catch (error) {
     if (error instanceof BrowserExitedError) {
       throw error
@@ -766,7 +859,8 @@ function navigatedAway(capture: StoryCapture): boolean {
 
 /**
  * Gives how a page is set up for the settings: a user agent ending in `StorybookTestRunner`, the settings' time zone,
- * locale and colour scheme, and the page script. A capture page and a page that reads options are set up the same way.
+ * locale and colour scheme, the page script, and the watching of its real network requests when the settings list
+ * hosts. A capture page is set up this way.
  */
 export function pageSetupOf(settings: CaptureSettings): PageSetup {
   return {
@@ -775,6 +869,7 @@ export function pageSetupOf(settings: CaptureSettings): PageSetup {
     locale: settings.locale,
     colorScheme: settings.colorScheme,
     initScript: pageInitScript,
+    watchRequests: settings.listHosts,
   }
 }
 

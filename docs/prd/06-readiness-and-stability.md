@@ -144,8 +144,8 @@ A broken story counts toward exit 1, and the run goes on. Errors and timeouts ar
   - an ancestor's `overflow` doesn't clip what the search finds.
 - **Service worker mocks:** they're told apart only in a document a service worker controls, by whether the image would taint a canvas. A response the worker built itself doesn't, so it isn't remote. A passthrough of a cross-origin image does, so it is. A check that fails counts as remote.
 - **Not covered:** remote `<video src>`, `<object>` and `<embed>`, sandboxed `srcdoc` frames without `allow-same-origin`, and transformed frames.
-- **Cost:** on a page of about 10,400 elements with 300 remote images, the search takes about 23 ms natively and 50–60 ms in the amd64 image under emulation. Only stories with a host mask, and retries, pay it.
-- One in-page search finds it. Host masks and the hint below share it, and it costs nothing unless one of them needs it.
+- **Cost:** on a page of about 10,400 elements with 300 remote images, the search takes about 23 ms natively and 50–60 ms in the amd64 image under emulation. In `test` only stories with a host mask, and retries, pay it; `update` pays it for every story, for its remote content warning.
+- One in-page search finds it. Host masks, the hint below and `update`'s remote content warning share it, and it costs nothing unless one of them needs it.
 - **The hint:** when every differing pixel of a failing snapshot lies inside remote content, give or take 1 px for anti-aliased edges, the failure carries a hint. It names the hosts, shows the mask line and links the docs page.
   - Example: "Differs only inside remote content from images.unsplash.com. A CDN can serve different bytes to different machines.", then the mask line `{ host: 'images.unsplash.com' }`.
   - It's a hint and never a pass. Exit codes don't change.
