@@ -519,6 +519,16 @@ const consistencyHeaderPattern = /^visual-check \S+ · test · consistency · (\
 const ciStopLine = 'In CI, test stops before capturing when the consistency check finds anything.'
 
 /**
+ * How many shards the sharding case splits `test` into.
+ */
+const shardCount = 4
+
+/**
+ * The line a shard prints right after its header, since it skips the consistency check.
+ */
+const consistencyLeftNote = 'Missing baselines and orphans are left to test --consistency.'
+
+/**
  * What the warning for a Storybook that ignores the test path's user agent says, wherever it names the Storybook.
  */
 const testPathWarning = 'StorybookTestRunner user agent'
@@ -1697,6 +1707,125 @@ function consistencyHeaderProblems(run: CliRun, count: number): string[] {
 }
 
 /**
+ * Runs `test --shard k/4` for k from 1 to 4, one after the other, against the committed baselines with the package's
+ * config and 2 workers, each on a server of its own that lists the stories of the file that fails to load. Each shard
+ * is checked with `shardProblems`. Together the shards print exactly one line for each snapshot with an expected
+ * outcome, with that outcome, and each stories file `index.json` lists has lines in exactly one shard. The expected
+ * outcomes are the ones of every story, those stories' included.
+ */
+async function checkShards(expected: Outcomes): Promise<string[]> {
+  const storiesFiles = readStoriesFiles()
+  const runs: CliRun[] = []
+  const problems: string[] = []
+
+  for (let shard = 1; shard <= shardCount; shard += 1) {
+    const { run, storyPages } = await withStorybookServer({ withLoadFails: true }, async (server) => ({
+      run: await runCli([
+        'test',
+        '--shard',
+        `${shard}/${shardCount}`,
+        '--url',
+        server.url,
+        '--workers',
+        String(parallelWorkers),
+      ]),
+      storyPages: server.storyPageRequests(),
+    }))
+
+    runs.push(run)
+    problems.push(
+      ...shardProblems(shard, run, storyPages, expected, storiesFiles).map(
+        (problem) => `shard ${shard}/${shardCount}: ${problem}`,
+      ),
+    )
+  }
+
+  return [...problems, ...shardedSnapshotProblems(runs, expected), ...shardedFileProblems(runs, storiesFiles)]
+}
+
+/**
+ * Lists what is wrong with one shard's run: `shardHeaderProblems`, it exits with another code than the expected outcomes
+ * of its snapshots give, or the browser asked for the page of a story whose stories file the shard has no line for.
+ */
+function shardProblems(
+  shard: number,
+  run: CliRun,
+  storyPages: string[],
+  expected: Outcomes,
+  storiesFiles: ReadonlyMap<string, string>,
+): string[] {
+  const ownExpected = Object.fromEntries(Object.entries(expected).filter(([key]) => key in run.outcomes))
+  const ownFiles = storiesFilesOf(run, storiesFiles)
+  const otherPages = [...new Set(storyPages)].filter((storyId) => !ownFiles.has(storiesFiles.get(storyId) ?? ''))
+
+  return [
+    ...shardHeaderProblems(shard, run),
+    ...exitCodeProblems('test', run, exitCodeOf(ownExpected)),
+    ...(otherPages.length === 0
+      ? []
+      : [`the browser asked for pages of stories files the shard has no line for: ${otherPages.join(', ')}`]),
+  ]
+}
+
+/**
+ * Lists what is wrong with the start of a shard's output: its header doesn't name the shard, or the line after it
+ * isn't the note that the consistency check is left to `test --consistency`.
+ */
+function shardHeaderProblems(shard: number, run: CliRun): string[] {
+  const [header = '', note] = run.stdout.split('\n')
+  const shardPart = `· test · shard ${shard}/${shardCount} ·`
+
+  return [
+    ...(header.startsWith('visual-check ') && header.includes(shardPart)
+      ? []
+      : [`test's header doesn't say "${shardPart}": ${header}`]),
+    ...(note === consistencyLeftNote
+      ? []
+      : [`test's line after its header isn't "${consistencyLeftNote}"${outputOf(run.stdout)}`]),
+  ]
+}
+
+/**
+ * Lists how the shards' snapshot lines, taken together, differ from the expected outcomes: each snapshot whose outcome
+ * isn't the expected one or that no shard printed, and each snapshot more than one line gives, with the shards that
+ * printed them.
+ */
+function shardedSnapshotProblems(runs: CliRun[], expected: Outcomes): string[] {
+  const lines = runs.flatMap((run, index) => run.snapshots.map(({ key }) => ({ key, shard: index + 1 })))
+  const keys = [...new Set(lines.map(({ key }) => key))].sort()
+
+  return [
+    ...outcomeProblems('the shards', Object.fromEntries(runs.flatMap((run) => Object.entries(run.outcomes))), expected),
+    ...keys.flatMap((key) => {
+      const shards = lines.filter((line) => line.key === key).map(({ shard }) => shard)
+
+      return shards.length === 1 ? [] : [`${key} has ${shards.length} lines, in shards ${shards.join(', ')}`]
+    }),
+  ]
+}
+
+/**
+ * Lists each stories file `index.json` lists that has snapshot lines in no shard, or in more than one, with the
+ * shards.
+ */
+function shardedFileProblems(runs: CliRun[], storiesFiles: ReadonlyMap<string, string>): string[] {
+  const filesOfShards = runs.map((run) => storiesFilesOf(run, storiesFiles))
+
+  return [...new Set(storiesFiles.values())].sort().flatMap((file) => {
+    const shards = filesOfShards.flatMap((files, index) => (files.has(file) ? [index + 1] : []))
+
+    return shards.length === 1 ? [] : [`${file} has lines in ${shards.length} shards, expected 1: ${shards.join(', ')}`]
+  })
+}
+
+/**
+ * Gives the stories file of each story a run has a snapshot line for.
+ */
+function storiesFilesOf(run: CliRun, storiesFiles: ReadonlyMap<string, string>): Set<string> {
+  return new Set(run.snapshots.flatMap(({ storyId }) => storiesFiles.get(storyId) ?? []))
+}
+
+/**
  * Lists what is wrong with a run of `test --all` against the committed baselines. It gives exactly the expected
  * outcomes. Each broken readiness, per-story options and capture area story that has an expected outcome has a line
  * that says why, and standard error has no test-path warning, since every page is on Storybook's test path. The
@@ -1830,7 +1959,7 @@ async function checkEndStateRuns(expected: Outcomes): Promise<string[]> {
  * or one the run printed a line for. None when `index.json` lists each of them and none has a line.
  */
 function disabledStoryProblems(run: CliRun): string[] {
-  const indexed = readIndexedStoryIds()
+  const indexed = [...readStoriesFiles().keys()]
 
   return disabledStories.flatMap((storyId) => [
     ...(indexed.includes(storyId) ? [] : [`index.json doesn't list ${storyId}`]),
@@ -1841,12 +1970,14 @@ function disabledStoryProblems(run: CliRun): string[] {
 }
 
 /**
- * Reads the ID of every entry the static build's `index.json` lists.
+ * Reads the stories file, its `importPath`, of every entry the static build's `index.json` lists, by the entry's ID.
  */
-function readIndexedStoryIds(): string[] {
-  const { entries } = JSON.parse(readFileSync(join(staticDir, 'index.json'), 'utf8')) as { entries: object }
+function readStoriesFiles(): Map<string, string> {
+  const { entries } = JSON.parse(readFileSync(join(staticDir, 'index.json'), 'utf8')) as {
+    entries: Record<string, { importPath: string }>
+  }
 
-  return Object.keys(entries)
+  return new Map(Object.entries(entries).map(([storyId, { importPath }]) => [storyId, importPath]))
 }
 
 /**
@@ -2929,6 +3060,10 @@ if (setupProblems.length > 0) {
     {
       name: 'consistency only: test --consistency on a server that lists the stories file that fails to load exits 1 without capturing, its only lines are the two load-fails stories, broken, saying the file failed to load, its consistency header counts the expected outcomes, no story page is asked for',
       run: () => checkConsistencyOnly(everyOutcome),
+    },
+    {
+      name: `shards: test --shard k/${shardCount} for each k, on a server that lists the stories file that fails to load, names its shard in its header and notes the consistency check is left to test --consistency, exits with the code its snapshots' expected outcomes give, asks only for story pages of its own stories files; together the shards print one line for each snapshot with its expected outcome, and each stories file has lines in exactly one shard`,
+      run: () => checkShards(everyOutcome),
     },
     {
       name: `end state: ${endStateRuns} runs of test with pixels: 0 give every animation story its expected outcome`,
