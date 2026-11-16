@@ -8,6 +8,7 @@ import {
   CaptureTooLargeError,
   PageCrashedError,
   PageLoadError,
+  type PageMessage,
   PageNavigatedAwayError,
   PageTimeoutError,
 } from './driver/driver.js'
@@ -136,6 +137,7 @@ describe('the hosts of a capture', () => {
 
     expect(await openCaptureSession(driver, listing).capture(primary)).toEqual({
       snapshot: defaultSnapshot,
+      console: [],
       hosts: { requests: ['api.example.com'], remoteContent: ['images.example.com', 'cdn.example.com:8443'] },
     })
     expect(driver.calls).toContainEqual({
@@ -158,6 +160,7 @@ describe('the hosts of a capture', () => {
 
     expect(await openCaptureSession(driver, listing).capture(story)).toEqual({
       snapshot: defaultSnapshot,
+      console: [],
       hosts: { requests: [], remoteContent: ['fonts.example.com'] },
     })
   })
@@ -169,6 +172,7 @@ describe('the hosts of a capture', () => {
 
     expect(capture).toEqual({
       snapshot: defaultSnapshot,
+      console: [],
       hosts: { requests: [], remoteContent: ['images.example.com'] },
     })
     expect(capture).not.toHaveProperty('remoteContent')
@@ -181,6 +185,7 @@ describe('the hosts of a capture', () => {
 
     expect(await openCaptureSession(driver, listing).capture(story)).toEqual({
       snapshot: defaultSnapshot,
+      console: [],
       remoteContent: [{ host: 'images.example.com', x: 1, y: 2, width: 3, height: 4 }],
       hosts: { requests: [], remoteContent: ['images.example.com'] },
     })
@@ -189,6 +194,7 @@ describe('the hosts of a capture', () => {
   it('list no remote content when the page gives none, as when its search timed out', async () => {
     expect(await openCaptureSession(new FakeDriver(), listing).capture(primary)).toEqual({
       snapshot: defaultSnapshot,
+      console: [],
       hosts: { requests: [], remoteContent: [] },
     })
   })
@@ -197,7 +203,7 @@ describe('the hosts of a capture', () => {
     const driver = new FakeDriver({ pages: [{ requestHosts: () => ['api.example.com'] }] })
     const capture = await openCaptureSession(driver, settings).capture(primary)
 
-    expect(capture).toStrictEqual({ snapshot: defaultSnapshot, completingMs: undefined })
+    expect(capture).toStrictEqual({ snapshot: defaultSnapshot, completingMs: undefined, console: [] })
     expect(driver.setups[0]?.watchRequests).toBe(false)
   })
 })
@@ -262,7 +268,10 @@ describe('a capture', () => {
   it('checks images and fonts again before the masks when the end state changed anything', async () => {
     const driver = new FakeDriver({ pages: [{ endStateWait: async () => settledAnswer(true) }] })
 
-    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({ snapshot: defaultSnapshot })
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      snapshot: defaultSnapshot,
+      console: [],
+    })
     expect(driver.calls.slice(3)).toEqual([
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [waitHookExpression('button--primary', 10_000), 11_000] },
@@ -341,7 +350,7 @@ describe('a capture', () => {
     const driver = new FakeDriver({ pages: [{ capture: async () => bytes }] })
     const capture = await openCaptureSession(driver, settings).capture(primary)
 
-    expect(capture).toEqual({ snapshot: bytes })
+    expect(capture).toEqual({ snapshot: bytes, console: [] })
     expect('snapshot' in capture && capture.snapshot).toBe(bytes)
   })
 
@@ -350,6 +359,7 @@ describe('a capture', () => {
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toStrictEqual({
       snapshot: defaultSnapshot,
+      console: [],
       completingMs: 104,
     })
   })
@@ -359,6 +369,7 @@ describe('a capture', () => {
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toStrictEqual({
       snapshot: defaultSnapshot,
+      console: [],
       completingMs: undefined,
     })
   })
@@ -373,7 +384,10 @@ describe("the story's wait hook", () => {
   it('runs after images and fonts, and captures straight away when the story has none', async () => {
     const driver = new FakeDriver()
 
-    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({ snapshot: defaultSnapshot })
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      snapshot: defaultSnapshot,
+      console: [],
+    })
     expect(driver.calls.slice(3)).toEqual([
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [waitHookExpression('button--primary', 10_000), 11_000] },
@@ -386,7 +400,10 @@ describe("the story's wait hook", () => {
   it('checks images and fonts again once it ran, then captures', async () => {
     const driver = new FakeDriver({ pages: [{ waitHook: async () => ran }] })
 
-    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({ snapshot: defaultSnapshot })
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      snapshot: defaultSnapshot,
+      console: [],
+    })
     expect(driver.calls.slice(3)).toEqual([
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [waitHookExpression('button--primary', 10_000), 11_000] },
@@ -450,7 +467,10 @@ describe("the story's wait hook", () => {
   ])('makes a broken story, %s, of a wait hook %s', async (reason, _what, answer, message) => {
     const driver = new FakeDriver({ pages: [{ waitHook: async () => answer }] })
 
-    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({ broken: { reason, message } })
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: { reason, message },
+      console: [],
+    })
     expect(driver.methods()).toEqual(['1:setViewport', '1:goto', '1:evaluate', '1:evaluate', '1:evaluate', '1:close'])
   })
 
@@ -511,7 +531,7 @@ describe("the story's wait hook", () => {
   ])('makes a broken story of %s once it ran, saying it was after the hook', async (_what, answer, broken) => {
     const driver = new FakeDriver({ pages: [checkedAfterTheHook(async () => answer)] })
 
-    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({ broken })
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({ broken, console: [] })
     expect(driver.methods()).not.toContain('1:capture')
   })
 
@@ -534,6 +554,7 @@ describe("the story's wait hook", () => {
         message:
           "The story wasn't ready within readyTimeout (10000 ms): its page stopped answering while its wait hook ran.",
       },
+      console: [],
     })
   })
 
@@ -554,6 +575,7 @@ describe("the story's wait hook", () => {
         message:
           "The page crashed while running the story's wait hook, usually because it ran out of memory. Fewer workers leave each page more memory.",
       },
+      console: [],
     })
   })
 
@@ -574,6 +596,7 @@ describe("the story's wait hook", () => {
         message:
           "The story wasn't ready within readyTimeout (10000 ms): its page stopped answering while visual-check waited for its images and fonts after its wait hook.",
       },
+      console: [],
     })
   })
 
@@ -592,6 +615,7 @@ describe("the story's wait hook", () => {
         message:
           'The page crashed while waiting for images and fonts after its wait hook, usually because it ran out of memory. Fewer workers leave each page more memory.',
       },
+      console: [],
     })
   })
 
@@ -604,6 +628,7 @@ describe("the story's wait hook", () => {
         message:
           "Waiting for images and fonts after its wait hook failed: The wait for images and fonts in the page gave an answer visual-check doesn't know: 42.",
       },
+      console: [],
     })
   })
 
@@ -616,6 +641,7 @@ describe("the story's wait hook", () => {
         message:
           "Running the story's wait hook failed: The wait hook in the page gave an answer visual-check doesn't know: 42.",
       },
+      console: [],
     })
   })
 
@@ -624,7 +650,7 @@ describe("the story's wait hook", () => {
     const session = openCaptureSession(driver, settings)
 
     expect(await session.capture(primary)).toHaveProperty('broken.reason', 'wait-threw')
-    expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot })
+    expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot, console: [] })
     expect(driver.setups).toHaveLength(2)
     expect(driver.methods()).toContain('1:close')
     expect(driver.methods()).not.toContain('2:clearStorage')
@@ -699,7 +725,7 @@ describe('the masks', () => {
     const box = { x: 8, y: 16, width: 320, height: 200 }
     const driver = new FakeDriver({ pages: [{ capturePrep: async () => ({ outcome: 'ready', box }) }] })
 
-    expect(await openCaptureSession(driver, settings).capture(card)).toEqual({ snapshot: defaultSnapshot })
+    expect(await openCaptureSession(driver, settings).capture(card)).toEqual({ snapshot: defaultSnapshot, console: [] })
     expect(driver.calls.at(-1)).toEqual({ page: 1, method: 'capture', args: [box] })
   })
 
@@ -764,7 +790,7 @@ describe('the masks', () => {
   ])('make a broken story when %s, capturing nothing and closing the page', async (_what, answer, broken) => {
     const driver = new FakeDriver({ pages: [{ capturePrep: async () => answer }] })
 
-    expect(await openCaptureSession(driver, settings).capture(card)).toEqual({ broken })
+    expect(await openCaptureSession(driver, settings).capture(card)).toEqual({ broken, console: [] })
     expect(driver.methods()).not.toContain('1:capture')
     expect(driver.methods().at(-1)).toBe('1:close')
   })
@@ -776,6 +802,7 @@ describe('the masks', () => {
 
     expect(await openCaptureSession(driver, settings).capture({ ...primary, element: '[data-id="a"]' })).toEqual({
       broken: { reason: 'element-missing', message: 'The element selector "[data-id=\\"a\\"]" matched nothing.' },
+      console: [],
     })
   })
 
@@ -798,6 +825,7 @@ describe('the masks', () => {
         message:
           "The story wasn't ready within readyTimeout (10000 ms): its page stopped answering while visual-check painted its masks and hid the caret.",
       },
+      console: [],
     })
     expect(driver.methods().at(-1)).toBe('1:close')
   })
@@ -819,6 +847,7 @@ describe('the masks', () => {
         message:
           'The page crashed while painting its masks and hiding the caret, usually because it ran out of memory. Fewer workers leave each page more memory.',
       },
+      console: [],
     })
   })
 })
@@ -845,14 +874,14 @@ describe('the remote content', () => {
     const capture = await openCaptureSession(driver, settings).capture(primary)
 
     expect(driver.calls[6]?.args).toEqual([plainPrepExpression(10_000), 11_000])
-    expect(capture).toEqual({ snapshot: defaultSnapshot })
+    expect(capture).toEqual({ snapshot: defaultSnapshot, console: [] })
     expect(capture).not.toHaveProperty('remoteContent')
   })
 
   it('is not given when the story asks for it but the page gives none, as when its search timed out', async () => {
     const capture = await openCaptureSession(new FakeDriver(), settings).capture(retried)
 
-    expect(capture).toEqual({ snapshot: defaultSnapshot })
+    expect(capture).toEqual({ snapshot: defaultSnapshot, console: [] })
     expect(capture).not.toHaveProperty('remoteContent')
   })
 
@@ -863,6 +892,7 @@ describe('the remote content', () => {
 
     expect(await openCaptureSession(driver, settings).capture(story)).toEqual({
       snapshot: defaultSnapshot,
+      console: [],
       completingMs: undefined,
       remoteContent: [{ host: 'images.example.com:8443', x: 10, y: 20, width: 31, height: 41 }],
     })
@@ -875,6 +905,7 @@ describe('the remote content', () => {
 
     expect(await openCaptureSession(driver, settings).capture({ ...retried, element: '#card' })).toEqual({
       snapshot: defaultSnapshot,
+      console: [],
       completingMs: undefined,
       remoteContent: [{ host: 'images.example.com', x: 4, y: 9, width: 11, height: 7 }],
     })
@@ -1004,7 +1035,7 @@ describe("clearing the previous story's storage", () => {
     const session = openCaptureSession(driver, settings)
 
     await session.capture(primary)
-    expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot })
+    expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot, console: [] })
     expect(driver.methods().slice(8)).toEqual([
       '1:clearStorage',
       '1:close',
@@ -1030,6 +1061,7 @@ describe('a broken story', () => {
         message:
           'Storybook reported the story finished with status "error", as it does when a loader, beforeEach or the render throws, or when a check such as accessibility fails.',
       },
+      console: [],
     })
     expect(driver.methods()).not.toContain('1:capture')
   })
@@ -1062,7 +1094,10 @@ describe('a broken story', () => {
   ])('is %s for a story %s, saying so', async (reason, _what, answer, message) => {
     const driver = new FakeDriver({ pages: [{ storyWait: async () => finishedAnswer(answer) }] })
 
-    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({ broken: { reason, message } })
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: { reason, message },
+      console: [],
+    })
     expect(driver.methods()).not.toContain('1:capture')
   })
 
@@ -1092,6 +1127,7 @@ describe('a broken story', () => {
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
       broken: { reason: 'timeout', message: `The story wasn't ready within readyTimeout (10000 ms): ${doing}.` },
+      console: [],
     })
   })
 
@@ -1104,6 +1140,7 @@ describe('a broken story', () => {
         message:
           "visual-check's page script didn't run in the story's page, so it couldn't wait for the story to finish.",
       },
+      console: [],
     })
   })
 
@@ -1116,6 +1153,7 @@ describe('a broken story', () => {
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
       broken: { reason: 'timeout', message: `The story wasn't ready within readyTimeout (10000 ms): ${doing}.` },
+      console: [],
     })
     expect(driver.methods()).not.toContain('1:capture')
   })
@@ -1131,6 +1169,7 @@ describe('a broken story', () => {
           "The story's fonts hadn't loaded within readyTimeout (10000 ms). Still loading: Never Loads 400 normal, Slow 700 italic.",
         faces,
       },
+      console: [],
     })
     expect(driver.methods()).not.toContain('1:capture')
   })
@@ -1143,6 +1182,7 @@ describe('a broken story', () => {
         reason: 'timeout',
         message: "The story wasn't ready within readyTimeout (10000 ms): document.fonts.ready hadn't resolved.",
       },
+      console: [],
     })
   })
 
@@ -1155,6 +1195,7 @@ describe('a broken story', () => {
         message:
           "visual-check's page script didn't run in the story's page, so it couldn't wait for its images and fonts.",
       },
+      console: [],
     })
   })
 
@@ -1177,6 +1218,7 @@ describe('a broken story', () => {
         message:
           "The story wasn't ready within readyTimeout (10000 ms): its page stopped answering while visual-check waited for its images and fonts.",
       },
+      console: [],
     })
   })
 
@@ -1189,6 +1231,7 @@ describe('a broken story', () => {
         message:
           "Waiting for images and fonts failed: The wait for images and fonts in the page gave an answer visual-check doesn't know: 42.",
       },
+      console: [],
     })
   })
 
@@ -1201,6 +1244,7 @@ describe('a broken story', () => {
         message:
           "The story wasn't ready within readyTimeout (10000 ms): visual-check was still finishing its animations.",
       },
+      console: [],
     })
     expect(driver.methods()).not.toContain('1:capture')
   })
@@ -1214,6 +1258,7 @@ describe('a broken story', () => {
         message:
           "The story wasn't ready within readyTimeout (10000 ms): visual-check was still putting its media on their first frame.",
       },
+      console: [],
     })
     expect(driver.methods()).not.toContain('1:capture')
   })
@@ -1226,6 +1271,7 @@ describe('a broken story', () => {
         reason: 'error',
         message: "visual-check's page script didn't run in the story's page, so it couldn't bring it to its end state.",
       },
+      console: [],
     })
   })
 
@@ -1248,6 +1294,7 @@ describe('a broken story', () => {
         message:
           "The story wasn't ready within readyTimeout (10000 ms): its page stopped answering while visual-check brought it to its end state.",
       },
+      console: [],
     })
   })
 
@@ -1260,6 +1307,7 @@ describe('a broken story', () => {
         message:
           "Bringing the story to its end state failed: The end state in the page gave an answer visual-check doesn't know: 42.",
       },
+      console: [],
     })
   })
 
@@ -1284,6 +1332,7 @@ describe('a broken story', () => {
         message:
           "The story wasn't ready within readyTimeout (10000 ms): 1 of its images was still loading after its end state.",
       },
+      console: [],
     })
     expect(driver.methods()).not.toContain('1:capture')
   })
@@ -1306,6 +1355,7 @@ describe('a broken story', () => {
         reason: 'timeout',
         message: "The story wasn't ready within readyTimeout (10000 ms): its page was still loading.",
       },
+      console: [],
     })
   })
 
@@ -1328,6 +1378,7 @@ describe('a broken story', () => {
         message:
           "The story wasn't ready within readyTimeout (10000 ms): its page stopped answering while visual-check waited for the story to finish.",
       },
+      console: [],
     })
   })
 
@@ -1349,6 +1400,7 @@ describe('a broken story', () => {
         reason: 'error',
         message: `Loading the story failed: The page couldn't load ${primary.url}: net::ERR_CONNECTION_RESET.`,
       },
+      console: [],
     })
   })
 
@@ -1368,6 +1420,7 @@ describe('a broken story', () => {
         reason: 'error',
         message: "Setting the viewport failed: The page didn't set its viewport within 30 s.",
       },
+      console: [],
     })
   })
 
@@ -1387,6 +1440,7 @@ describe('a broken story', () => {
         reason: 'error',
         message: `Loading the story failed: The page couldn't load ${primary.url}: net::ERR_CONNECTION_REFUSED.`,
       },
+      console: [],
     })
   })
 
@@ -1410,6 +1464,7 @@ describe('a broken story', () => {
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
       broken: { reason: 'error', message: `${step} failed: The browser said no.` },
+      console: [],
     })
   })
 
@@ -1422,6 +1477,7 @@ describe('a broken story', () => {
         message:
           "Waiting for the story to finish failed: The Storybook wait in the page gave an answer visual-check doesn't know: 42.",
       },
+      console: [],
     })
   })
 
@@ -1442,6 +1498,7 @@ describe('a broken story', () => {
         message:
           'The page crashed while loading the story, usually because it ran out of memory. Fewer workers leave each page more memory.',
       },
+      console: [],
     })
   })
 
@@ -1469,6 +1526,7 @@ describe('a broken story', () => {
         message: `The story navigated away to ${shown}. Await the new page before clicking.`,
         url,
       },
+      console: [],
     })
   })
 
@@ -1487,6 +1545,7 @@ describe('a broken story', () => {
         message: 'The story navigated away to /next. Await the new page before clicking.',
         url: 'http://localhost:6006/next',
       },
+      console: [],
     })
   })
 
@@ -1507,6 +1566,7 @@ describe('a broken story', () => {
         message:
           'The page crashed while waiting for the story to finish, usually because it ran out of memory. Fewer workers leave each page more memory.',
       },
+      console: [],
     })
   })
 
@@ -1523,6 +1583,7 @@ describe('a broken story', () => {
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
       broken: { reason: 'error', message: "Capturing the snapshot failed: The page didn't capture within 30 s." },
+      console: [],
     })
   })
 
@@ -1543,6 +1604,7 @@ describe('a broken story', () => {
         message:
           'The capture is 2560 × 40000 device pixels, over 32,767 on a side. Set element to capture part of the story, or use a smaller viewport.',
       },
+      console: [],
     })
     expect(driver.methods()).toContain('1:close')
   })
@@ -1565,6 +1627,7 @@ describe('a broken story', () => {
         message:
           'The capture is 1280 × 40000 device pixels, over 32,767 on a side. Capture a smaller element, or use a smaller viewport.',
       },
+      console: [],
     })
   })
 
@@ -1596,7 +1659,7 @@ describe('a broken story', () => {
     const session = openCaptureSession(driver, settings)
 
     await session.capture(primary)
-    expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot })
+    expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot, console: [] })
     expect(driver.methods()).toEqual([
       '1:setViewport',
       '1:goto',
@@ -1638,7 +1701,7 @@ describe('a broken story', () => {
     const session = openCaptureSession(driver, settings)
 
     expect(await session.capture(primary)).toHaveProperty('broken.reason', 'crashed')
-    expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot })
+    expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot, console: [] })
   })
 
   it('tries to open a page again after one failed to open', async () => {
@@ -1655,7 +1718,7 @@ describe('a broken story', () => {
     const session = openCaptureSession(driver, settings)
 
     await session.capture(primary)
-    expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot })
+    expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot, console: [] })
   })
 })
 
@@ -1703,6 +1766,7 @@ describe('a story that navigates away', () => {
         message: 'The story navigated away to /three. Await the new page before clicking.',
         url: 'http://localhost:6006/three',
       },
+      console: [],
     })
     expect(driver.setups).toHaveLength(3)
     expect(driver.methods()).toEqual([...navigatedAwayAt(1), ...navigatedAwayAt(2), ...navigatedAwayAt(3)])
@@ -1711,7 +1775,10 @@ describe('a story that navigates away', () => {
   it('gives the snapshot of a retry that captured, keeping that page', async () => {
     const driver = new FakeDriver({ pages: [navigatesAway('http://localhost:6006/one')] })
 
-    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({ snapshot: defaultSnapshot })
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      snapshot: defaultSnapshot,
+      console: [],
+    })
     expect(driver.methods()).toEqual([...navigatedAwayAt(1), ...capturedOn(2)])
   })
 
@@ -1720,7 +1787,7 @@ describe('a story that navigates away', () => {
     const session = openCaptureSession(driver, settings)
 
     await session.capture(primary)
-    expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot })
+    expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot, console: [] })
     expect(driver.setups).toHaveLength(2)
     expect(driver.methods()).toEqual([...navigatedAwayAt(1), ...capturedOn(2), '2:clearStorage', ...capturedOn(2)])
   })
@@ -1881,6 +1948,7 @@ describe('capturing the same page again', () => {
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toStrictEqual({
       snapshot: first,
+      console: [],
       completingMs: undefined,
     })
     expect(driver.methods()).toEqual(capturedOn(1))
@@ -1906,9 +1974,10 @@ describe('capturing the same page again', () => {
 
     expect(await session.capture({ ...primary, captureAgainIf: async () => false })).toStrictEqual({
       snapshot: first,
+      console: [],
       completingMs: undefined,
     })
-    expect(await session.capture(secondary)).toEqual({ snapshot: again })
+    expect(await session.capture(secondary)).toEqual({ snapshot: again, console: [] })
     expect(driver.methods()).toEqual([...capturedOn(1), '1:clearStorage', ...capturedOn(1)])
   })
 
@@ -1928,7 +1997,7 @@ describe('capturing the same page again', () => {
       })
       const capture = await openCaptureSession(driver, settings).capture({ ...story, captureAgainIf: async () => true })
 
-      expect(capture).toStrictEqual({ snapshot: first, completingMs: undefined, capturedAgain: again })
+      expect(capture).toStrictEqual({ snapshot: first, completingMs: undefined, console: [], capturedAgain: again })
       expect('snapshot' in capture && capture.capturedAgain).toBe(again)
       expect(driver.methods()).toEqual([...capturedOn(1), '1:capture'])
       expect(driver.calls.slice(-2)).toEqual([
@@ -1943,7 +2012,7 @@ describe('capturing the same page again', () => {
     const session = openCaptureSession(driver, settings)
 
     await session.capture({ ...primary, captureAgainIf: async () => true })
-    expect(await session.capture(secondary)).toEqual({ snapshot: again })
+    expect(await session.capture(secondary)).toEqual({ snapshot: again, console: [] })
     expect(driver.setups).toHaveLength(1)
     expect(driver.methods()).toEqual([...capturedOn(1), '1:capture', '1:clearStorage', ...capturedOn(1)])
   })
@@ -1973,6 +2042,7 @@ describe('capturing the same page again', () => {
 
     expect(await openCaptureSession(driver, { ...settings, listHosts: true }).capture(story)).toStrictEqual({
       snapshot: first,
+      console: [],
       completingMs: 104,
       remoteContent: [{ host: 'images.example.com', x: 1, y: 2, width: 3, height: 4 }],
       hosts: { requests: ['api.example.com'], remoteContent: ['images.example.com'] },
@@ -2012,7 +2082,7 @@ describe('capturing the same page again', () => {
 
       expect(
         await openCaptureSession(driver, settings).capture({ ...primary, captureAgainIf: async () => true }),
-      ).toEqual({ broken: { reason, message } })
+      ).toEqual({ broken: { reason, message }, console: [] })
       expect(driver.methods()).toEqual([...capturedOn(1), '1:capture', '1:close'])
     },
   )
@@ -2043,7 +2113,7 @@ describe('capturing the same page again', () => {
 
     await expect(session.capture({ ...primary, captureAgainIf })).rejects.toBe(failure)
     expect(driver.methods()).toEqual([...capturedOn(1), '1:close'])
-    expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot })
+    expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot, console: [] })
     expect(driver.setups).toHaveLength(2)
   })
 
@@ -2103,6 +2173,7 @@ describe('capturing the same page again', () => {
 
     expect(await openCaptureSession(driver, settings).capture({ ...primary, captureAgainIf })).toStrictEqual({
       snapshot: first,
+      console: [],
       completingMs: undefined,
       capturedAgain: again,
     })
@@ -2124,11 +2195,164 @@ describe('capturing the same page again', () => {
 
     expect(await openCaptureSession(driver, settings).capture({ ...primary, captureAgainIf })).toStrictEqual({
       snapshot: retried,
+      console: [],
       completingMs: undefined,
       capturedAgain: retried,
     })
     expect(captureAgainIf.mock.calls).toEqual([[first], [retried]])
     expect(driver.methods()).toEqual([...capturedOn(1), '1:capture', '1:close', ...capturedOn(2), '2:capture'])
+  })
+})
+
+describe('the console messages of a capture', () => {
+  /**
+   * A console message a page sent, named by `text`.
+   */
+  const logged = (text: string): PageMessage => ({ kind: 'console.log', text })
+
+  /**
+   * A page that gives `sent` as its messages until it's closed, and none after, answering the rest as `behaviour`
+   * says.
+   */
+  const sendingUntilClosed = (sent: PageMessage[], behaviour: FakePageBehaviour = {}): FakePageBehaviour => {
+    let closed = false
+
+    return {
+      ...behaviour,
+      close: async () => {
+        closed = true
+      },
+      messages: () => (closed ? [] : sent),
+    }
+  }
+
+  it("come with the snapshot, as the page gives them once it's captured", async () => {
+    let captured = false
+    const driver = new FakeDriver({
+      pages: [
+        {
+          capture: async () => {
+            captured = true
+
+            return defaultSnapshot
+          },
+          messages: () => (captured ? [logged('captured')] : []),
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toStrictEqual({
+      snapshot: defaultSnapshot,
+      completingMs: undefined,
+      console: [logged('captured')],
+    })
+  })
+
+  it('come with the first snapshot when the page is captured again', async () => {
+    const driver = new FakeDriver({ pages: [{ messages: () => [logged('a line')] }] })
+    const capture = await openCaptureSession(driver, settings).capture({
+      ...primary,
+      captureAgainIf: async () => true,
+    })
+
+    expect(capture).toMatchObject({ console: [logged('a line')], capturedAgain: defaultSnapshot })
+  })
+
+  it('come with a broken story that Storybook reports failed, read before its page closes', async () => {
+    const driver = new FakeDriver({
+      pages: [
+        sendingUntilClosed([logged('render failed')], { storyWait: async () => finishedAnswer({ status: 'error' }) }),
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toMatchObject({
+      broken: { reason: 'error' },
+      console: [logged('render failed')],
+    })
+    expect(driver.methods()).toContain('1:close')
+  })
+
+  it('come with a broken story whose step failed, read before its page closes', async () => {
+    const driver = new FakeDriver({
+      pages: [
+        sendingUntilClosed([logged('crashing')], {
+          goto: async () => {
+            throw new PageCrashedError()
+          },
+        }),
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toMatchObject({
+      broken: { reason: 'crashed' },
+      console: [logged('crashing')],
+    })
+  })
+
+  it('come with a broken story whose second capture failed, read before its page closes', async () => {
+    let captures = 0
+    const driver = new FakeDriver({
+      pages: [
+        sendingUntilClosed([logged('captured twice')], {
+          capture: async () => {
+            captures += 1
+
+            if (captures === 2) {
+              throw new PageCrashedError()
+            }
+
+            return defaultSnapshot
+          },
+        }),
+      ],
+    })
+
+    expect(
+      await openCaptureSession(driver, settings).capture({ ...primary, captureAgainIf: async () => true }),
+    ).toMatchObject({ broken: { reason: 'crashed' }, console: [logged('captured twice')] })
+  })
+
+  it('are those of the last attempt of a story that navigates away', async () => {
+    const navigatesAway = (text: string): FakePageBehaviour =>
+      sendingUntilClosed([logged(text)], {
+        goto: async () => {
+          throw new PageNavigatedAwayError('http://localhost:6006/away', 'The page navigated away.')
+        },
+      })
+    const driver = new FakeDriver({ pages: [navigatesAway('one'), navigatesAway('two'), navigatesAway('three')] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toMatchObject({
+      broken: { reason: 'navigated-away' },
+      console: [logged('three')],
+    })
+  })
+
+  it('are those of the retry that captured, for a story that navigated away first', async () => {
+    const driver = new FakeDriver({
+      pages: [
+        sendingUntilClosed([logged('one')], {
+          goto: async () => {
+            throw new PageNavigatedAwayError('http://localhost:6006/away', 'The page navigated away.')
+          },
+        }),
+        { messages: () => [logged('two')] },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toMatchObject({
+      snapshot: defaultSnapshot,
+      console: [logged('two')],
+    })
+  })
+
+  it("are left out of a broken story whose page didn't open", async () => {
+    const driver = new FakeDriver({
+      newPage: async () => {
+        throw new Error("The browser didn't open a page within 30 s.")
+      },
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).not.toHaveProperty('console')
   })
 })
 

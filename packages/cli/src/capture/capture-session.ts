@@ -9,6 +9,7 @@ import {
   maxCaptureSide,
   type Page,
   PageCrashedError,
+  type PageMessage,
   PageNavigatedAwayError,
   type PageSetup,
   PageTimeoutError,
@@ -255,9 +256,10 @@ export interface StoryHosts {
 }
 
 /**
- * What capturing a story gave: its snapshot, with how long Storybook's `completing` render step took, the remote
- * content it shows when the story asked for it, the hosts it reaches when the session lists them and the same page
- * captured again when the story's `captureAgainIf` asked for it, or, for a broken story, why it can't be captured.
+ * What capturing a story gave: its snapshot, with how long Storybook's `completing` render step took, the console
+ * messages and errors its page sent, the remote content it shows when the story asked for it, the hosts it reaches
+ * when the session lists them and the same page captured again when the story's `captureAgainIf` asked for it, or, for
+ * a broken story, why it can't be captured and, when it had a page, what its page sent.
  *
  * @public
  */
@@ -272,6 +274,12 @@ export type StoryCapture =
        * 100 or more off it. `undefined` when the page didn't see both the `completing` and `completed` steps.
        */
       completingMs: number | undefined
+      /**
+       * The last 50 console messages and errors the story's page sent from the load of the story in the attempt that
+       * captured it, as the page gives them right after the first capture, before the story's `captureAgainIf` is
+       * called.
+       */
+      console: PageMessage[]
       /**
        * The remote content the snapshot shows, when the story asked for it with `findRemoteContent` and the search
        * answered in time. Without it, the remote content is unknown.
@@ -293,6 +301,12 @@ export type StoryCapture =
        * Why the story can't be captured.
        */
       broken: BrokenStory
+      /**
+       * The last 50 console messages and errors the story's page sent from the start of the attempt that broke, read
+       * before the page is closed, from the document the story went to too when it navigated away. Left out when the
+       * story had no page: a page that couldn't be opened, or a browser that exited.
+       */
+      console?: PageMessage[]
     }
 
 /**
@@ -760,16 +774,26 @@ interface CapturedSnapshot {
  * When the settings ask to list hosts, it also gives the hosts the page sent requests to, read once the capture is
  * done, and the hosts of the remote content the story shows, from the same search as the host masks. Gives the area
  * the snapshot was captured from beside it, and leaves the story's `captureAgainIf` to the caller. A story that can't
- * be captured comes back as a broken story. Rejects only with a `BrowserExitedError`.
+ * be captured comes back as a broken story. Either way it comes with the console messages and errors the page sent,
+ * read once the capture is done or the story broke, while the page is still open. Rejects only with a
+ * `BrowserExitedError`.
  */
 async function captureOnPage(
   page: Page,
   story: StoryToCapture,
   settings: CaptureSettings,
-): Promise<CapturedSnapshot | { broken: BrokenStory }> {
+): Promise<CapturedSnapshot | Extract<StoryCapture, { broken: BrokenStory }>> {
   const deadline = performance.now() + settings.readyTimeoutMs
   const timeLeft = (): number => Math.max(0, Math.ceil(deadline - performance.now()))
   let step: Step = 'viewport'
+
+  /**
+   * Gives the broken story with the messages the page sent.
+   */
+  const brokenBy = (broken: BrokenStory): Extract<StoryCapture, { broken: BrokenStory }> => ({
+    broken,
+    console: page.messages(),
+  })
 
   /**
    * Evaluates a wait in the page, built by `expressionFor` for what's left of readyTimeout, and gives the page's
@@ -864,19 +888,19 @@ async function captureOnPage(
     const wait = readStoryWait(await waitInPage((limit) => storyWaitExpression(story.id, limit)))
 
     if (wait.outcome !== 'finished') {
-      return { broken: describeStoryWait(wait, settings.readyTimeoutMs) }
+      return brokenBy(describeStoryWait(wait, settings.readyTimeoutMs))
     }
 
     const broken = (await checkAssets('assets')) ?? (await runWaitHook()) ?? (await bringToEndState())
 
     if (broken !== undefined) {
-      return { broken }
+      return brokenBy(broken)
     }
 
     const prepared = await prepareCapture()
 
     if ('broken' in prepared) {
-      return prepared
+      return brokenBy(prepared.broken)
     }
 
     step = 'capture'
@@ -884,7 +908,12 @@ async function captureOnPage(
     const snapshot = await page.capture(prepared.area)
 
     return {
-      result: { snapshot, completingMs: wait.completingMs, ...capturedExtrasOf(page, story, settings, prepared) },
+      result: {
+        snapshot,
+        completingMs: wait.completingMs,
+        console: page.messages(),
+        ...capturedExtrasOf(page, story, settings, prepared),
+      },
       area: prepared.area,
     }
   } catch (error) {
@@ -892,7 +921,7 @@ async function captureOnPage(
       throw error
     }
 
-    return { broken: describeFailure(error, step, story, settings.readyTimeoutMs) }
+    return brokenBy(describeFailure(error, step, story, settings.readyTimeoutMs))
   }
 }
 
@@ -901,9 +930,9 @@ async function captureOnPage(
  * resolves true, captures the area the snapshot was captured from again at once, doing nothing to the page in between,
  * bound by the driver's own capture limit, and gives the snapshot with the second capture as `capturedAgain`. Gives the
  * snapshot as it is when the story has no `captureAgainIf` or it resolves false. A second capture that fails comes back
- * as a broken story. Rejects with a `BrowserExitedError` when the browser exits during the second capture, and with
- * whatever `captureAgainIf` rejects with: it runs outside the handling that turns the page's failures into a broken
- * story.
+ * as a broken story, with the messages the page sent, read again. Rejects with a `BrowserExitedError` when the browser
+ * exits during the second capture, and with whatever `captureAgainIf` rejects with: it runs outside the handling that
+ * turns the page's failures into a broken story.
  */
 async function captureAgainIfAsked(
   page: Page,
@@ -924,7 +953,10 @@ async function captureAgainIfAsked(
       throw error
     }
 
-    return { broken: describeFailure(error, 'capture-again', story, settings.readyTimeoutMs) }
+    return {
+      broken: describeFailure(error, 'capture-again', story, settings.readyTimeoutMs),
+      console: page.messages(),
+    }
   }
 }
 

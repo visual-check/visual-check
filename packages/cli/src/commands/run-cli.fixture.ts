@@ -8,6 +8,7 @@ import {
   BrowserExitedError,
   BrowserLaunchError,
   type Driver,
+  type PageMessage,
   type PageSetup,
   type PageViewport,
 } from '../capture/driver/driver.js'
@@ -128,6 +129,10 @@ export interface FakeStory {
    * The hosts its page reports real network requests to. None when not given.
    */
   requestHosts?: string[]
+  /**
+   * The console messages and errors its page sends. None when not given.
+   */
+  messages?: PageMessage[]
   /**
    * Whether the browser exits while capturing it.
    */
@@ -535,6 +540,7 @@ export function fakeDriverOf({
           record.events.push(`close page on ${browser}`)
         },
         requestHosts: () => (setup.watchRequests ? (story.requestHosts ?? []) : []),
+        messages: () => [...(story.messages ?? [])],
       }
     },
     close: async () => {

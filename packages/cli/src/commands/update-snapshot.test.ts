@@ -224,7 +224,7 @@ function fakeCapturesOf(loads: readonly FakeLoad[]): FakeCaptures {
       }
 
       const { snapshot, later = snapshot, completingMs, hosts } = load
-      const capture: StoryCapture = { snapshot, completingMs, ...(hosts === undefined ? {} : { hosts }) }
+      const capture: StoryCapture = { snapshot, completingMs, console: [], ...(hosts === undefined ? {} : { hosts }) }
 
       return (await ask(snapshot)) && load.ignoresAgain !== true ? { ...capture, capturedAgain: later } : capture
     },
