@@ -1,0 +1,174 @@
+/**
+ * The package managers `init` sets a project up for.
+ */
+export type PackageManager = 'npm' | 'pnpm' | 'yarn' | 'bun'
+
+/**
+ * The `package.json` fields `init` reads. Each is `unknown`, because a manifest is user-written JSON: read it
+ * defensively.
+ */
+export interface Manifest {
+  /**
+   * The package name.
+   */
+  name?: unknown
+  /**
+   * The `packageManager` field, such as `pnpm@9.12.3`.
+   */
+  packageManager?: unknown
+  /**
+   * The `devEngines` field, which may hold a `packageManager` entry.
+   */
+  devEngines?: unknown
+  /**
+   * The scripts, by name.
+   */
+  scripts?: unknown
+  /**
+   * The `dependencies`, by name.
+   */
+  dependencies?: unknown
+  /**
+   * The `devDependencies`, by name.
+   */
+  devDependencies?: unknown
+  /**
+   * The `optionalDependencies`, by name.
+   */
+  optionalDependencies?: unknown
+  /**
+   * The `peerDependencies`, by name.
+   */
+  peerDependencies?: unknown
+}
+
+/**
+ * The package managers a manifest field may name.
+ */
+const packageManagerNames: readonly PackageManager[] = ['npm', 'pnpm', 'yarn', 'bun']
+
+/**
+ * The lockfiles that show a package manager, in the order `init` tries them.
+ */
+const lockfileOwners: readonly (readonly [string, PackageManager])[] = [
+  ['pnpm-lock.yaml', 'pnpm'],
+  ['yarn.lock', 'yarn'],
+  ['package-lock.json', 'npm'],
+  ['npm-shrinkwrap.json', 'npm'],
+  ['bun.lock', 'bun'],
+  ['bun.lockb', 'bun'],
+]
+
+/**
+ * The names of the lockfiles `init` looks for in the project root.
+ */
+export const lockfileNames: readonly string[] = lockfileOwners.map(([name]) => name)
+
+/**
+ * Returns the package manager a name stands for, or `undefined` for a name `init` doesn't know.
+ */
+function knownPackageManager(name: unknown): PackageManager | undefined {
+  return packageManagerNames.find((known) => known === name)
+}
+
+/**
+ * Reads the `packageManager` field: the part of `pnpm@9.12.3` or `yarn@4.1.0+sha512...` before the first `@`.
+ */
+function fromPackageManagerField(value: unknown): PackageManager | undefined {
+  return typeof value === 'string' ? knownPackageManager(value.split('@')[0]) : undefined
+}
+
+/**
+ * Reads the `devEngines.packageManager` field: an object with a `name`, or an array of them. Returns the first known
+ * name.
+ */
+function fromDevEngines(devEngines: unknown): PackageManager | undefined {
+  if (typeof devEngines !== 'object' || devEngines === null) {
+    return undefined
+  }
+
+  const field = (devEngines as { packageManager?: unknown }).packageManager
+  const entries: unknown[] = Array.isArray(field) ? field : [field]
+
+  for (const entry of entries) {
+    const name = typeof entry === 'object' && entry !== null ? (entry as { name?: unknown }).name : undefined
+    const known = knownPackageManager(name)
+
+    if (known !== undefined) {
+      return known
+    }
+  }
+
+  return undefined
+}
+
+/**
+ * Returns the package manager of the first lockfile name in `lockfiles`, in the order `init` tries them.
+ */
+function fromLockfiles(lockfiles: readonly string[]): PackageManager | undefined {
+  return lockfileOwners.find(([name]) => lockfiles.includes(name))?.[1]
+}
+
+/**
+ * Finds the package manager of a project: the manifest's `packageManager`, then its `devEngines.packageManager`, then
+ * the lockfiles found in the root. A name `init` doesn't know is skipped. Returns `undefined` when nothing shows one.
+ */
+export function packageManagerOf(manifest: Manifest, lockfiles: readonly string[]): PackageManager | undefined {
+  return (
+    fromPackageManagerField(manifest.packageManager) ?? fromDevEngines(manifest.devEngines) ?? fromLockfiles(lockfiles)
+  )
+}
+
+/**
+ * The command that runs a `package.json` script, such as `pnpm run visual:test`. All four package managers take the
+ * same form.
+ */
+export function runScriptCommandOf(packageManager: PackageManager, script: string): string {
+  return `${packageManager} run ${script}`
+}
+
+/**
+ * The command words that run the project's `storybook` binary.
+ */
+export function storybookBinCommandOf(packageManager: PackageManager): string[] {
+  switch (packageManager) {
+    case 'pnpm':
+      return ['pnpm', 'exec', 'storybook']
+    case 'npm':
+      return ['npx', 'storybook']
+    case 'yarn':
+      return ['yarn', 'storybook']
+    case 'bun':
+      return ['bunx', 'storybook']
+  }
+}
+
+/**
+ * A command to run: the program and its arguments.
+ */
+export interface CommandLine {
+  /**
+   * The program to run.
+   */
+  command: string
+  /**
+   * The arguments to pass it.
+   */
+  args: string[]
+}
+
+/**
+ * The command that adds `specs`, such as `@visual-check/cli@1.2.3`, to `devDependencies`.
+ */
+export function addDevDependenciesCommandOf(packageManager: PackageManager, specs: readonly string[]): CommandLine {
+  switch (packageManager) {
+    case 'npm':
+      return { command: 'npm', args: ['install', '--save-dev', ...specs] }
+    case 'pnpm':
+      return { command: 'pnpm', args: ['add', '--save-dev', ...specs] }
+    case 'yarn':
+      return { command: 'yarn', args: ['add', '--dev', ...specs] }
+    case 'bun':
+      return { command: 'bun', args: ['add', '--dev', ...specs] }
+  }
+}

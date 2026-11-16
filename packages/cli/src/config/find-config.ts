@@ -14,6 +14,8 @@ export const configFileNames = [
 /**
  * Whether a path is a file, or a link to one. A folder, a missing path or one that can't be read, such as a link that
  * loops, isn't.
+ *
+ * @public
  */
 export function isFile(path: string): boolean {
   try {
