@@ -245,13 +245,16 @@ async function readStorybookOptions(
 }
 
 /**
- * Says why the stories of a file that didn't load are broken.
+ * Says why the stories of a file that didn't load are broken, keeping the file's error, or the readyTimeout it didn't
+ * load within.
  */
 function loadFailedOf(file: Exclude<FileOptions, { outcome: 'loaded' }>, readyTimeoutMs: number): BrokenStory {
   if (file.outcome === 'timed-out') {
     return {
       reason: 'load-failed',
       message: `Its stories file ${file.importPath} didn't load within readyTimeout (${readyTimeoutMs} ms).`,
+      loadError: undefined,
+      readyTimeoutMs,
     }
   }
 
@@ -260,6 +263,8 @@ function loadFailedOf(file: Exclude<FileOptions, { outcome: 'loaded' }>, readyTi
   return {
     reason: 'load-failed',
     message: file.message === '' ? `${failed}.` : `${failed}: ${failureReasonOf(file.message)}`,
+    loadError: file.message === '' ? undefined : file.message,
+    readyTimeoutMs: undefined,
   }
 }
 

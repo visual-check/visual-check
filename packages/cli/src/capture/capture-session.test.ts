@@ -27,6 +27,7 @@ const settings: CaptureSettings = {
   colorScheme: 'dark',
   maskColor: '#00FF00',
   listHosts: false,
+  brokenImageTimeLimitMs: 5_000,
 }
 
 /**
@@ -439,36 +440,41 @@ describe("the story's wait hook", () => {
       'that threw, saying what it threw',
       { outcome: 'threw', text: 'Error: The data never came.' },
       "The story's wait hook threw Error: The data never came.",
+      {},
     ],
     [
       'timeout',
       "that hadn't finished within readyTimeout",
       { outcome: 'timed-out' },
       "The story wasn't ready within readyTimeout (10000 ms): its wait hook hadn't finished.",
+      { readyTimeoutMs: 10000 },
     ],
     [
       'error',
       "whose context visual-check couldn't build",
       { outcome: 'context-failed', text: 'Error: No context.' },
       "visual-check couldn't read the story's wait hook or build its context: Error: No context.",
+      {},
     ],
     [
       'error',
       "that couldn't run because Storybook's preview had no render of the story",
       { outcome: 'no-render' },
       "Storybook's preview had no render of the story to run its wait hook with.",
+      {},
     ],
     [
       'error',
       "that couldn't run because the page script didn't run",
       { outcome: 'script-missing' },
       "visual-check's page script didn't run in the story's page, so it couldn't run its wait hook.",
+      {},
     ],
-  ])('makes a broken story, %s, of a wait hook %s', async (reason, _what, answer, message) => {
+  ])('makes a broken story, %s, of a wait hook %s', async (reason, _what, answer, message, details) => {
     const driver = new FakeDriver({ pages: [{ waitHook: async () => answer }] })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: { reason, message },
+      broken: { reason, message, ...details },
       console: [],
     })
     expect(driver.methods()).toEqual(['1:setViewport', '1:goto', '1:evaluate', '1:evaluate', '1:evaluate', '1:close'])
@@ -498,6 +504,7 @@ describe("the story's wait hook", () => {
         reason: 'timeout',
         message:
           "The story wasn't ready within readyTimeout (10000 ms): 1 of its images was still loading after its wait hook.",
+        readyTimeoutMs: 10000,
       },
     ],
     [
@@ -507,6 +514,7 @@ describe("the story's wait hook", () => {
         reason: 'timeout',
         message:
           "The story wasn't ready within readyTimeout (10000 ms): document.fonts.ready hadn't resolved after its wait hook.",
+        readyTimeoutMs: 10000,
       },
     ],
     [
@@ -517,6 +525,7 @@ describe("the story's wait hook", () => {
         message:
           "The story's fonts hadn't loaded within readyTimeout (10000 ms) after its wait hook. Still loading: Inter 400 normal.",
         faces: ['Inter 400 normal'],
+        readyTimeoutMs: 10000,
       },
     ],
     [
@@ -553,6 +562,7 @@ describe("the story's wait hook", () => {
         reason: 'timeout',
         message:
           "The story wasn't ready within readyTimeout (10000 ms): its page stopped answering while its wait hook ran.",
+        readyTimeoutMs: 10000,
       },
       console: [],
     })
@@ -595,6 +605,7 @@ describe("the story's wait hook", () => {
         reason: 'timeout',
         message:
           "The story wasn't ready within readyTimeout (10000 ms): its page stopped answering while visual-check waited for its images and fonts after its wait hook.",
+        readyTimeoutMs: 10000,
       },
       console: [],
     })
@@ -760,6 +771,7 @@ describe('the masks', () => {
         reason: 'timeout',
         message:
           "The story wasn't ready within readyTimeout (10000 ms): visual-check was still looking for remote content to mask.",
+        readyTimeoutMs: 10000,
       },
     ],
     [
@@ -824,6 +836,7 @@ describe('the masks', () => {
         reason: 'timeout',
         message:
           "The story wasn't ready within readyTimeout (10000 ms): its page stopped answering while visual-check painted its masks and hid the caret.",
+        readyTimeoutMs: 10000,
       },
       console: [],
     })
@@ -1068,17 +1081,28 @@ describe('a broken story', () => {
 
   it.each([
     [
-      'play-threw',
       'whose play function threw, even though Storybook reports it finished well',
-      { errors: [{ event: 'playFunctionThrewException', text: 'Error: boom' }] },
+      { errors: [{ event: 'playFunctionThrewException', text: 'Error: boom', stack: ['at play (a.js:1)'] }] },
       "The story's play function threw Error: boom.",
+      ['at play (a.js:1)'],
     ],
     [
-      'play-threw',
       'whose play function left unhandled errors',
-      { status: 'error', errors: [{ event: 'unhandledErrorsWhilePlaying', text: 'Error: late' }] },
+      { status: 'error', errors: [{ event: 'unhandledErrorsWhilePlaying', text: 'Error: late', stack: [] }] },
       "The story's play function left unhandled errors: Error: late.",
+      [],
     ],
+  ])('is play-threw for a story %s, keeping its stack', async (_what, answer, message, stack) => {
+    const driver = new FakeDriver({ pages: [{ storyWait: async () => finishedAnswer(answer) }] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: { reason: 'play-threw', message, stack },
+      console: [],
+    })
+    expect(driver.methods()).not.toContain('1:capture')
+  })
+
+  it.each([
     [
       'error',
       'that threw as it rendered',
@@ -1126,7 +1150,11 @@ describe('a broken story', () => {
     const driver = new FakeDriver({ pages: [{ storyWait: async () => answer }] })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: { reason: 'timeout', message: `The story wasn't ready within readyTimeout (10000 ms): ${doing}.` },
+      broken: {
+        reason: 'timeout',
+        message: `The story wasn't ready within readyTimeout (10000 ms): ${doing}.`,
+        readyTimeoutMs: 10000,
+      },
       console: [],
     })
   })
@@ -1152,7 +1180,11 @@ describe('a broken story', () => {
     const driver = new FakeDriver({ pages: [{ assetsWait: async () => imagesTimedOutAnswer(pending) }] })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
-      broken: { reason: 'timeout', message: `The story wasn't ready within readyTimeout (10000 ms): ${doing}.` },
+      broken: {
+        reason: 'timeout',
+        message: `The story wasn't ready within readyTimeout (10000 ms): ${doing}.`,
+        readyTimeoutMs: 10000,
+      },
       console: [],
     })
     expect(driver.methods()).not.toContain('1:capture')
@@ -1168,6 +1200,7 @@ describe('a broken story', () => {
         message:
           "The story's fonts hadn't loaded within readyTimeout (10000 ms). Still loading: Never Loads 400 normal, Slow 700 italic.",
         faces,
+        readyTimeoutMs: 10000,
       },
       console: [],
     })
@@ -1181,6 +1214,7 @@ describe('a broken story', () => {
       broken: {
         reason: 'timeout',
         message: "The story wasn't ready within readyTimeout (10000 ms): document.fonts.ready hadn't resolved.",
+        readyTimeoutMs: 10000,
       },
       console: [],
     })
@@ -1217,6 +1251,7 @@ describe('a broken story', () => {
         reason: 'timeout',
         message:
           "The story wasn't ready within readyTimeout (10000 ms): its page stopped answering while visual-check waited for its images and fonts.",
+        readyTimeoutMs: 10000,
       },
       console: [],
     })
@@ -1243,6 +1278,7 @@ describe('a broken story', () => {
         reason: 'timeout',
         message:
           "The story wasn't ready within readyTimeout (10000 ms): visual-check was still finishing its animations.",
+        readyTimeoutMs: 10000,
       },
       console: [],
     })
@@ -1257,6 +1293,7 @@ describe('a broken story', () => {
         reason: 'timeout',
         message:
           "The story wasn't ready within readyTimeout (10000 ms): visual-check was still putting its media on their first frame.",
+        readyTimeoutMs: 10000,
       },
       console: [],
     })
@@ -1293,6 +1330,7 @@ describe('a broken story', () => {
         reason: 'timeout',
         message:
           "The story wasn't ready within readyTimeout (10000 ms): its page stopped answering while visual-check brought it to its end state.",
+        readyTimeoutMs: 10000,
       },
       console: [],
     })
@@ -1331,6 +1369,7 @@ describe('a broken story', () => {
         reason: 'timeout',
         message:
           "The story wasn't ready within readyTimeout (10000 ms): 1 of its images was still loading after its end state.",
+        readyTimeoutMs: 10000,
       },
       console: [],
     })
@@ -1354,6 +1393,7 @@ describe('a broken story', () => {
       broken: {
         reason: 'timeout',
         message: "The story wasn't ready within readyTimeout (10000 ms): its page was still loading.",
+        readyTimeoutMs: 10000,
       },
       console: [],
     })
@@ -1377,6 +1417,7 @@ describe('a broken story', () => {
         reason: 'timeout',
         message:
           "The story wasn't ready within readyTimeout (10000 ms): its page stopped answering while visual-check waited for the story to finish.",
+        readyTimeoutMs: 10000,
       },
       console: [],
     })
@@ -1603,6 +1644,7 @@ describe('a broken story', () => {
         reason: 'too-tall',
         message:
           'The capture is 2560 × 40000 device pixels, over 32,767 on a side. Set element to capture part of the story, or use a smaller viewport.',
+        size: { width: 2560, height: 40_000 },
       },
       console: [],
     })
@@ -1626,6 +1668,7 @@ describe('a broken story', () => {
         reason: 'too-tall',
         message:
           'The capture is 1280 × 40000 device pixels, over 32,767 on a side. Capture a smaller element, or use a smaller viewport.',
+        size: { width: 1280, height: 40_000 },
       },
       console: [],
     })
@@ -2353,6 +2396,147 @@ describe('the console messages of a capture', () => {
     })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).not.toHaveProperty('console')
+  })
+})
+
+describe('the image of a broken story', () => {
+  /**
+   * A story that asks for an image of its page when it breaks.
+   */
+  const imaged = { ...primary, imageWhenBroken: true }
+
+  /**
+   * The image a page gives of a broken story.
+   */
+  const image = new Uint8Array([7, 7, 7])
+
+  /**
+   * A page that breaks the story as `breaking` says, and captures `image` once the story broke.
+   */
+  const breakingWith = (breaking: FakePageBehaviour): FakePageBehaviour => ({
+    capture: async () => image,
+    ...breaking,
+  })
+
+  it.each([
+    ['error', { storyWait: async () => finishedAnswer({ status: 'error' }) }],
+    [
+      'play-threw',
+      { storyWait: async () => finishedAnswer({ errors: [{ event: 'playFunctionThrewException', text: 'Error' }] }) },
+    ],
+    ['timeout', { assetsWait: async () => imagesTimedOutAnswer(1) }],
+    ['fonts-not-loaded', { assetsWait: async () => fontsTimedOutAnswer(['Inter 400 normal']) }],
+    ['wait-threw', { waitHook: async () => ({ outcome: 'threw', text: 'Error: no data' }) }],
+    ['element-missing', { capturePrep: async () => ({ outcome: 'element-missing', found: 'nothing' }) }],
+  ])(
+    'is the full page captured once a story is broken with %s, before its page is closed',
+    async (reason, breaking) => {
+      const driver = new FakeDriver({ pages: [breakingWith(breaking)] })
+      const capture = await openCaptureSession(driver, settings).capture({ ...imaged, element: '#card' })
+
+      expect(capture).toMatchObject({ broken: { reason }, console: [], image })
+      expect(driver.calls.filter((call) => call.method === 'capture').map((call) => call.args)).toEqual([['full-page']])
+      expect(driver.methods().slice(-2)).toEqual(['1:capture', '1:close'])
+    },
+  )
+
+  it.each([
+    [
+      'crashed',
+      {
+        waitHook: async () => {
+          throw new PageCrashedError()
+        },
+      },
+    ],
+    [
+      'too-tall',
+      {
+        capture: async () => {
+          throw new CaptureTooLargeError(2560, 40_000)
+        },
+      },
+    ],
+    [
+      'navigated-away',
+      {
+        waitHook: async () => {
+          throw new PageNavigatedAwayError('http://localhost:6006/next', 'The page navigated to /next.')
+        },
+      },
+    ],
+  ])("isn't captured for a story broken with %s", async (reason, breaking) => {
+    const driver = new FakeDriver({ pages: [breaking, breaking, breaking] })
+    const capture = await openCaptureSession(driver, settings).capture(imaged)
+
+    expect(capture).toMatchObject({ broken: { reason } })
+    expect(capture).not.toHaveProperty('image')
+    expect(driver.methods().filter((method) => method.endsWith(':capture'))).toHaveLength(reason === 'too-tall' ? 1 : 0)
+  })
+
+  it("isn't captured for a story that doesn't ask for it", async () => {
+    const driver = new FakeDriver({ pages: [breakingWith({ assetsWait: async () => imagesTimedOutAnswer(1) })] })
+    const capture = await openCaptureSession(driver, settings).capture(primary)
+
+    expect(capture).toMatchObject({ broken: { reason: 'timeout' } })
+    expect(capture).not.toHaveProperty('image')
+    expect(driver.methods()).not.toContain('1:capture')
+  })
+
+  it('is left out when its capture fails, and the page is still closed', async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          assetsWait: async () => imagesTimedOutAnswer(1),
+          capture: async () => {
+            throw new Error('Page.captureScreenshot failed.')
+          },
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(imaged)).toStrictEqual({
+      broken: {
+        reason: 'timeout',
+        message: "The story wasn't ready within readyTimeout (10000 ms): 1 of its images was still loading.",
+        readyTimeoutMs: 10000,
+      },
+      console: [],
+    })
+    expect(driver.methods().slice(-1)).toEqual(['1:close'])
+  })
+
+  it("is left out when its capture doesn't finish within the settings' time limit", async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          assetsWait: async () => imagesTimedOutAnswer(1),
+          capture: async () => await new Promise<Uint8Array>(() => undefined),
+        },
+      ],
+    })
+    const capture = await openCaptureSession(driver, { ...settings, brokenImageTimeLimitMs: 10 }).capture(imaged)
+
+    expect(capture).toMatchObject({ broken: { reason: 'timeout' } })
+    expect(capture).not.toHaveProperty('image')
+    expect(driver.methods().slice(-1)).toEqual(['1:close'])
+  })
+
+  it('rejects the capture when the browser exits while it is captured', async () => {
+    const exited = new BrowserExitedError({ code: 1, signal: null, error: undefined }, [])
+    const driver = new FakeDriver({
+      pages: [
+        {
+          assetsWait: async () => imagesTimedOutAnswer(1),
+          capture: async () => {
+            throw exited
+          },
+        },
+      ],
+    })
+
+    await expect(openCaptureSession(driver, settings).capture(imaged)).rejects.toBe(exited)
+    expect(driver.methods()).not.toContain('1:close')
   })
 })
 

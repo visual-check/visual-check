@@ -204,6 +204,7 @@ function runBrowserWith(...browsers: (FakeBrowser | Promise<FakeBrowser> | Error
         colorScheme: 'light',
         maskColor: '#FF00FF',
         listHosts: false,
+        brokenImageTimeLimitMs: 5_000,
       },
       progress: () => undefined,
     },

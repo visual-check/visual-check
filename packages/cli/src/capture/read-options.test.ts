@@ -17,6 +17,7 @@ const settings: CaptureSettings = {
   colorScheme: 'dark',
   maskColor: '#FF00FF',
   listHosts: true,
+  brokenImageTimeLimitMs: 5_000,
 }
 
 /**

@@ -83,6 +83,10 @@ interface AttemptOptions {
    * Whether the capture also brings back the remote content the snapshot shows.
    */
   findRemoteContent: boolean
+  /**
+   * Whether a broken story comes with an image of its page, when its page still shows something.
+   */
+  imageWhenBroken: boolean
 }
 
 /**
@@ -130,10 +134,10 @@ async function attemptOf(
   captureStory: CaptureStory,
   visualDiff: VisualDiff,
   baseline: Baseline,
-  { findRemoteContent }: AttemptOptions,
+  { findRemoteContent, imageWhenBroken }: AttemptOptions,
 ): Promise<Attempt> {
   let started = performance.now()
-  const capture = await captureStory({ ...storyToCaptureOf(item), findRemoteContent }, () => {
+  const capture = await captureStory({ ...storyToCaptureOf(item), findRemoteContent, imageWhenBroken }, () => {
     started = performance.now()
   })
 
@@ -203,8 +207,9 @@ function remoteHostsOf(retry: Attempt | undefined): string[] | undefined {
  * the snapshot differs with its first capture's message, and the report keeps that capture's images. When both the
  * first capture and the last retry differ by pixels, and every differing pixel of the last retry lies inside its remote
  * content, give or take the device scale factor rounded up, the result carries a hint that names those hosts. A broken
- * first capture isn't retried. It asks for a capture only once it has read the baseline. A pass's time is the passing
- * capture's alone: it leaves out the browser's launch and the comparison.
+ * first capture isn't retried. The first capture asks for an image of the story's page should it break; retries don't,
+ * since a broken retry keeps the first capture's images. It asks for a capture only once it has read the baseline. A
+ * pass's time is the passing capture's alone: it leaves out the browser's launch and the comparison.
  *
  * @throws {BaselineError} When the baseline can't be read or decoded.
  * @throws {ReportError} When an image can't be written to the report folder.
@@ -225,7 +230,7 @@ export async function testSnapshot(
 
   const attempt = (options: AttemptOptions): Promise<Attempt> =>
     attemptOf(item, captureStory, visualDiff, { bytes, path }, options)
-  const first = await attempt({ findRemoteContent: false })
+  const first = await attempt({ findRemoteContent: false, imageWhenBroken: true })
 
   if ('broken' in first) {
     return brokenResultOf(first.broken)
@@ -243,7 +248,7 @@ export async function testSnapshot(
     diff: result.diff,
   })
 
-  const retried = await retryOf(retries, () => attempt({ findRemoteContent: true }))
+  const retried = await retryOf(retries, () => attempt({ findRemoteContent: true, imageWhenBroken: false }))
 
   if ('failed' in retried) {
     const hosts = result.reason === 'pixels' ? remoteHostsOf(retried.failed) : undefined

@@ -52,7 +52,12 @@ function brokenOf(storybook: ResolvedStorybook, id: string): PlannedSnapshot {
     mode: undefined,
     key: id,
     selected: false,
-    broken: { reason: 'load-failed', message: 'Its stories file ./broken.stories.tsx failed to load: Error: boom.' },
+    broken: {
+      reason: 'load-failed',
+      message: 'Its stories file ./broken.stories.tsx failed to load: Error: boom.',
+      loadError: 'Error: boom',
+      readyTimeoutMs: undefined,
+    },
   }
 }
 

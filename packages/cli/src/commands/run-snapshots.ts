@@ -1,7 +1,7 @@
 import { dirname } from 'node:path'
 import { baselinePathOf } from '../baselines/baseline-files.js'
 import type { BrowserPackage } from '../browser/read-browser-package.js'
-import type { CaptureSettings } from '../capture/capture-session.js'
+import { brokenImageTimeLimitMs, type CaptureSettings } from '../capture/capture-session.js'
 import { runWorkerPool } from '../capture/worker-pool.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
 import { reportFolderOf } from '../report/report-folder.js'
@@ -224,6 +224,7 @@ function captureSettingsOf(run: SnapshotRun): CaptureSettings {
     colorScheme: config.colorScheme,
     maskColor: config.maskColor,
     listHosts: run.command === 'update',
+    brokenImageTimeLimitMs,
   }
 }
 

@@ -2002,13 +2002,16 @@ describe('runCli warning about real network requests and remote content', () => 
     expect(result.exitCode).toBe(0)
   })
 
-  it('counts a broken story for nothing', async () => {
+  it('counts a broken story for nothing, and never captures its page', async () => {
     const { project } = await createRun(['a'])
-    const { options } = fakeBrowser({ a: { broken: true, requestHosts: ['api.example.com'], remote: shown('x.test') } })
+    const { options, record } = fakeBrowser({
+      a: { broken: true, requestHosts: ['api.example.com'], remote: shown('x.test') },
+    })
     const result = await runCli(['update'], {}, project, options)
 
     expect(result.exitCode).toBe(1)
     expect(result.stderr).toBe('')
+    expect(record.captures).toEqual([])
   })
 
   it('never lists hosts in test, and sets up every page without watching requests', async () => {
@@ -2661,7 +2664,7 @@ describe('runCli retries and flaky snapshots', () => {
     expect(storyIdsOf(record.urls)).toEqual(['a', 'a'])
   })
 
-  it("doesn't retry a broken story", async () => {
+  it("doesn't retry a broken story, and captures its page as it broke", async () => {
     const { project } = await createRun(['a'], { a: defaultRunSnapshot })
     const { options, record } = fakeBrowser({ a: { captures: [{ broken: true }, {}] } })
     const result = await runCli(['test'], {}, project, options)
@@ -2669,6 +2672,7 @@ describe('runCli retries and flaky snapshots', () => {
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toBe(printed(headerOf('test', 1), `! web  a  ${brokenDetail}`, '0 passed · 1 broken'))
     expect(storyIdsOf(record.urls)).toEqual(['a'])
+    expect(record.captures.map(({ id, onLoad }) => [id, onLoad])).toEqual([['a', 1]])
   })
 
   it("stops retrying at a broken retry, failing the snapshot with its first capture's message", async () => {
@@ -2681,6 +2685,8 @@ describe('runCli retries and flaky snapshots', () => {
       printed(headerOf('test', 1), '✗ web  a  differs: 100 differ, 20 allowed', '0 passed · 1 differs'),
     )
     expect(storyIdsOf(record.urls)).toEqual(['a', 'a'])
+    // The broken retry's page isn't captured: the snapshot keeps its first capture's images.
+    expect(record.captures.map(({ id, onLoad }) => [id, onLoad])).toEqual([['a', 1]])
   })
 
   it('never captures a missing baseline', async () => {
