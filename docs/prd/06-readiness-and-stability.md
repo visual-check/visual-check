@@ -103,7 +103,7 @@ Notes:
 - A retry that comes back broken ends the retries. The snapshot fails with the first attempt's diff, not as broken.
 - A flaky snapshot never fails a run. Every `test` and `update` lists its flaky snapshots by name at the end: in the terminal, in the GitHub step summary and in the JSON ([Report and output](13-report-and-output.md)).
 - Retries are for visual diffs only. Errors and timeouts aren't retried, and a story that navigates away has its own two retries.
-- `update` doesn't use `retries`. It has its own stability checks, and a snapshot there is flaky when its two loads disagreed and a third decided ([Baselines and update](10-baselines-and-update.md)).
+- `update` doesn't use `retries`. It has its own stability checks, and a snapshot there is flaky when its loads disagreed and another load decided: a third load, or a second load within tolerance of a failing baseline ([Baselines and update](10-baselines-and-update.md)).
 
 ## Broken stories
 

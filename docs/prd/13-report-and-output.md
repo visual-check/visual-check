@@ -77,7 +77,7 @@ Each entry:
 | `status`                                 | For `test`: `passed`, `differs`, `broken`, `missing`, `orphan`. For `update`: `written`, `deleted`, `broken`                                                 |
 | `reason`                                 | For `differs`: `pixels` or `size`. For `broken`: a code from [Readiness and stability](06-readiness-and-stability.md). For `written`: `missing` or `differs` |
 | `message`                                | One line for people                                                                                                                                          |
-| `flaky`                                  | `true` when it passed on a retry, or needed a third load in `update`                                                                                         |
+| `flaky`                                  | `true` when it passed on a retry, or in `update` when another load decided                                                                                   |
 | `attempts`                               | How many captures it took                                                                                                                                    |
 | `pixels`                                 | `{ differ, allowed, budget, scale }`, with `budget` as written: `20` or `"0.1%"`                                                                             |
 | `size`                                   | `null`, or `{ baseline: [w, h], snapshot: [w, h] }` on a size difference                                                                                     |
