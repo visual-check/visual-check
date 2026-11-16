@@ -44,7 +44,7 @@ export default defineConfig({
 | `colorScheme`                 | `'light'`                                            | Or `'dark'`. Emulated in the browser                                                         |
 | `workers`                     | `'auto'`                                             | A number, or `{ local, ci }`. One pool for the whole run                                     |
 | `readyTimeout`                | `10_000` ms                                          | A number, or `{ local, ci }`                                                                 |
-| `retries`                     | `1`                                                  | How many more times a failing snapshot is captured before it fails. The same for every story |
+| `retries`                     | `1`                                                  | How many more times a differing snapshot is captured before failing. The same for each story |
 | `silenceHosts`                | `[]`                                                 | Exact hosts or `*.example.com`. Silences `update`'s two warnings                             |
 | `affected.selectAll`          | `[]`                                                 | Globs, relative to the config file. A changed file that matches selects every story          |
 | `affected.ignore`             | `[]`                                                 | Globs, relative to the config file. A changed file that matches selects nothing              |

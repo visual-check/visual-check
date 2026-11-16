@@ -165,7 +165,9 @@ export interface Config {
    */
   readyTimeout?: number | LocalAndCi<number>
   /**
-   * How many more times a failing snapshot is captured before it fails. Defaults to `1`.
+   * How many more times `test` captures a snapshot that differs from its baseline before it fails. The first capture
+   * that passes makes it pass, flaky. A broken story isn't retried, and `update` doesn't use it. `0` turns retries off.
+   * Defaults to `1`.
    */
   retries?: number
   /**

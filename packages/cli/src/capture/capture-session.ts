@@ -23,7 +23,7 @@ import {
   prepareCaptureExpression,
   readAssetsReadiness,
 } from './page-script.js'
-import { type CapturePrep, readCapturePrep, type StoryMask } from './prepare-capture.js'
+import { type CapturePrep, type PageRemoteContent, readCapturePrep, type StoryMask } from './prepare-capture.js'
 
 /**
  * How much longer than a wait in the page the driver waits for its answer, in ms. The wait in the page gives up first
@@ -93,6 +93,41 @@ export interface StoryToCapture {
    * The masks painted over the story before its capture, in order. None without it.
    */
   masks?: readonly StoryMask[]
+  /**
+   * Whether the capture also brings back the remote content the snapshot shows. Without it, no remote content search
+   * runs for it, unless a host mask needs one.
+   */
+  findRemoteContent?: boolean
+}
+
+/**
+ * Remote content a snapshot shows: one box per element and host, in pixels of the snapshot's image.
+ *
+ * @public
+ */
+export interface RemoteContentBox {
+  /**
+   * The host it comes from, such as `images.example.com`, with its port when the URL has one.
+   */
+  host: string
+  /**
+   * The distance from the image's left edge to the box's, in whole pixels. It can be below 0, or past the image, for
+   * content outside the capture area.
+   */
+  x: number
+  /**
+   * The distance from the image's top edge to the box's, in whole pixels. It can be below 0, or past the image, for
+   * content outside the capture area.
+   */
+  y: number
+  /**
+   * The box's width, in whole pixels.
+   */
+  width: number
+  /**
+   * The box's height, in whole pixels.
+   */
+  height: number
 }
 
 /**
@@ -178,8 +213,8 @@ export type BrokenStory =
     }
 
 /**
- * What capturing a story gave: its snapshot, with how long Storybook's `completing` render step took, or, for a broken
- * story, why it can't be captured.
+ * What capturing a story gave: its snapshot, with how long Storybook's `completing` render step took and, when the story
+ * asked for it, the remote content it shows, or, for a broken story, why it can't be captured.
  *
  * @public
  */
@@ -194,6 +229,11 @@ export type StoryCapture =
        * 100 or more off it. `undefined` when the page didn't see both the `completing` and `completed` steps.
        */
       completingMs: number | undefined
+      /**
+       * The remote content the snapshot shows, when the story asked for it with `findRemoteContent` and the search
+       * answered in time. Without it, the remote content is unknown.
+       */
+      remoteContent?: RemoteContentBox[]
     }
   | {
       /**
@@ -543,13 +583,36 @@ function describeFailure(error: unknown, step: Step, story: StoryToCapture, read
 }
 
 /**
+ * Converts the page's remote content boxes, in CSS pixels of the top document, to pixels of the snapshot's image:
+ * measured from the capture area's origin, the element's box or the document's for the full page, times
+ * `deviceScaleFactor`, and out to whole pixels, the left and top edges rounded down and the right and bottom edges up.
+ */
+export function remoteContentBoxesOf(
+  remote: readonly PageRemoteContent[],
+  area: CaptureArea,
+  deviceScaleFactor: number,
+): RemoteContentBox[] {
+  const origin = area === 'full-page' ? { x: 0, y: 0 } : area
+
+  return remote.map((item) => {
+    const left = Math.floor((item.x - origin.x) * deviceScaleFactor)
+    const top = Math.floor((item.y - origin.y) * deviceScaleFactor)
+    const right = Math.ceil((item.x + item.width - origin.x) * deviceScaleFactor)
+    const bottom = Math.ceil((item.y + item.height - origin.y) * deviceScaleFactor)
+
+    return { host: item.host, x: left, y: top, width: right - left, height: bottom - top }
+  })
+}
+
+/**
  * Captures a story on an open page: sets the story's viewport, loads the story, waits until Storybook reports it
  * finished with nothing gone wrong, waits for its images and fonts, runs its wait hook, brings it to its end state,
  * measures its element, paints its masks, hides the caret and captures the element's box, or the full page when the
  * story has no element. When the story has a wait hook, its images and fonts are checked again after it, and when the
  * end state changed anything, they're checked again before the masks. Loading, the waits, the hook, the end state,
- * those checks and the masks share readyTimeout, each getting only what's left of it. A story that can't be captured
- * comes back as a broken story. Rejects only with a `BrowserExitedError`.
+ * those checks and the masks share readyTimeout, each getting only what's left of it. When the story asks for it with
+ * `findRemoteContent`, the snapshot comes with the remote content it shows, unless the search didn't answer in time.
+ * A story that can't be captured comes back as a broken story. Rejects only with a `BrowserExitedError`.
  */
 async function captureOnPage(page: Page, story: StoryToCapture, settings: CaptureSettings): Promise<StoryCapture> {
   const deadline = performance.now() + settings.readyTimeoutMs
@@ -618,20 +681,28 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
 
   /**
    * Measures the story's element, paints its masks and hides the caret. Gives what to capture: the element's box, or
-   * the full page when the story has no element. Gives why the story can't be captured instead when that failed.
+   * the full page when the story has no element, with the remote content the page gives when the story asked for it.
+   * Gives why the story can't be captured instead when that failed.
    */
-  const prepareCapture = async (): Promise<{ area: CaptureArea } | { broken: BrokenStory }> => {
+  const prepareCapture = async (): Promise<
+    { area: CaptureArea; remote: PageRemoteContent[] | undefined } | { broken: BrokenStory }
+  > => {
     step = 'masks'
 
     const element = story.element ?? null
-    const request = { element, masks: story.masks ?? [], maskColor: settings.maskColor }
+    const request = {
+      element,
+      masks: story.masks ?? [],
+      maskColor: settings.maskColor,
+      findRemote: story.findRemoteContent === true,
+    }
     const prep = readCapturePrep(await waitInPage((limit) => prepareCaptureExpression(request, limit)))
 
     if (prep.outcome !== 'ready') {
       return { broken: describeCapturePrep(prep, element, settings.readyTimeoutMs) }
     }
 
-    return { area: prep.box ?? 'full-page' }
+    return { area: prep.box ?? 'full-page', remote: request.findRemote ? prep.remote : undefined }
   }
 
   try {
@@ -660,7 +731,17 @@ async function captureOnPage(page: Page, story: StoryToCapture, settings: Captur
 
     step = 'capture'
 
-    return { snapshot: await page.capture(prepared.area), completingMs: wait.completingMs }
+    const snapshot = await page.capture(prepared.area)
+    const captured = { snapshot, completingMs: wait.completingMs }
+
+    if (prepared.remote === undefined) {
+      return captured
+    }
+
+    return {
+      ...captured,
+      remoteContent: remoteContentBoxesOf(prepared.remote, prepared.area, story.viewport.deviceScaleFactor),
+    }
   } catch (error) {
     if (error instanceof BrowserExitedError) {
       throw error

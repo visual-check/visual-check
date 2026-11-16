@@ -39,6 +39,30 @@ export interface ImageSize {
 }
 
 /**
+ * A rectangle of a snapshot, in image pixels. A pixel lies inside when `x <= px < x + width` and `y <= py < y + height`.
+ *
+ * @public
+ */
+export interface ImageRegion {
+  /**
+   * The left edge, a whole number.
+   */
+  x: number
+  /**
+   * The top edge, a whole number.
+   */
+  y: number
+  /**
+   * The width, a whole number.
+   */
+  width: number
+  /**
+   * The height, a whole number.
+   */
+  height: number
+}
+
+/**
  * A snapshot to compare with its baseline.
  *
  * @public
@@ -60,6 +84,11 @@ export interface VisualDiffRequest {
    * The device scale factor the snapshot was captured at, which a count of CSS pixels scales with.
    */
   scale: number
+  /**
+   * Rectangles of the snapshot, in image pixels. When the comparison fails by pixels, the failure says whether every
+   * differing pixel lies inside one of them.
+   */
+  regions?: readonly ImageRegion[]
 }
 
 /**
@@ -100,6 +129,11 @@ export interface VisualDiffFailure {
    * The visual diff, as a PNG file.
    */
   diff: Uint8Array
+  /**
+   * The indexes of the regions that hold a differing pixel, in ascending order. Set only on a pixels failure when
+   * regions were given and every differing pixel lies inside some region.
+   */
+  regionsHit?: number[]
 }
 
 /**
@@ -269,9 +303,12 @@ function messageOf(task: ThreadTask): ThreadTask {
     return { kind: 'decode', file: task.file }
   }
 
-  const { baseline, snapshot, tolerance, scale } = task.request
+  const { baseline, snapshot, tolerance, scale, regions } = task.request
 
-  return { kind: 'compare', request: { baseline, snapshot, tolerance, scale } }
+  return {
+    kind: 'compare',
+    request: { baseline, snapshot, tolerance, scale, ...(regions === undefined ? {} : { regions }) },
+  }
 }
 
 /**

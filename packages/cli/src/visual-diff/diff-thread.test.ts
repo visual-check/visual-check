@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { allowedPixels, checkDecodable, compareImages, pixelsMessage, sizeMessage } from './diff-thread.js'
 import { decodePng, greyPng, pixelAt, whitePixels } from './images.fixture.js'
+import type { ImageRegion } from './visual-diff.js'
 
 /**
  * The default tolerance.
@@ -148,6 +149,109 @@ describe('compareImages', () => {
     expect([diff.width, diff.height]).toEqual([3, 2])
     expect(pixelAt(diff.pixels, 3, 2, 0)).toEqual([0, 180, 216, 255])
     expect(pixelAt(diff.pixels, 3, 2, 1)).toEqual([0, 180, 216, 255])
+  })
+
+  describe('with regions', () => {
+    /**
+     * Two regions of a 6×4 image: the left 2×4 columns, and the right 2×4 columns.
+     */
+    const regions = [
+      { x: 0, y: 0, width: 2, height: 4 },
+      { x: 4, y: 0, width: 2, height: 4 },
+    ]
+
+    /**
+     * Compares a grey 6×4 baseline with a snapshot that has `changes` set to black, by pixels 0 and `regions`.
+     */
+    async function compareWithRegions(
+      changes: readonly { x: number; y: number }[],
+      given: readonly ImageRegion[] = regions,
+    ): Promise<Awaited<ReturnType<typeof compareImages>>> {
+      const baseline = await greyPng(6, 4, 128)
+      const snapshot = await greyPng(
+        6,
+        4,
+        128,
+        changes.map((change) => ({ ...change, rgba: [0, 0, 0, 255] })),
+      )
+
+      return compareImages({
+        baseline,
+        snapshot,
+        tolerance: { ...defaults, pixels: 0 },
+        scale: 1,
+        regions: given,
+      })
+    }
+
+    it.each([
+      ['inside region 0', [{ x: 1, y: 2 }], [0]],
+      ['inside region 1 of two', [{ x: 4, y: 0 }], [1]],
+      [
+        'in both regions',
+        [
+          { x: 0, y: 3 },
+          { x: 5, y: 1 },
+        ],
+        [0, 1],
+      ],
+    ] as const)('gives the regions hit by pixels %s', async (_name, changes, expected) => {
+      expect(await compareWithRegions(changes)).toMatchObject({ reason: 'pixels', regionsHit: expected })
+    })
+
+    it('gives every overlapping region that holds a differing pixel', async () => {
+      const overlapping = [
+        { x: 0, y: 0, width: 3, height: 4 },
+        { x: 2, y: 0, width: 3, height: 4 },
+      ]
+
+      expect(await compareWithRegions([{ x: 2, y: 1 }], overlapping)).toMatchObject({ regionsHit: [0, 1] })
+    })
+
+    it('gives no regions hit when one differing pixel lies outside every region', async () => {
+      const result = await compareWithRegions([
+        { x: 1, y: 2 },
+        { x: 2, y: 2 },
+      ])
+
+      expect(result).toMatchObject({ reason: 'pixels', differ: 2 })
+      expect(result).not.toHaveProperty('regionsHit')
+    })
+
+    it('gives no regions hit when no regions are given', async () => {
+      const baseline = await greyPng(6, 4, 128)
+      const snapshot = await greyPng(6, 4, 128, [{ x: 1, y: 2, rgba: [0, 0, 0, 255] }])
+
+      const result = await compareImages({ baseline, snapshot, tolerance: { ...defaults, pixels: 0 }, scale: 1 })
+
+      expect(result).toMatchObject({ reason: 'pixels' })
+      expect(result).not.toHaveProperty('regionsHit')
+    })
+
+    it('gives no regions hit on a size difference', async () => {
+      const baseline = await greyPng(2, 2, 128)
+      const snapshot = await greyPng(2, 3, 128)
+
+      const result = await compareImages({
+        baseline,
+        snapshot,
+        tolerance: defaults,
+        scale: 1,
+        regions: [{ x: 0, y: 0, width: 2, height: 3 }],
+      })
+
+      expect(result).toMatchObject({ reason: 'size' })
+      expect(result).not.toHaveProperty('regionsHit')
+    })
+
+    it('passes within tolerance whatever the regions', async () => {
+      const baseline = await greyPng(6, 4, 128)
+      const snapshot = await greyPng(6, 4, 128, [{ x: 3, y: 3, rgba: [0, 0, 0, 255] }])
+
+      expect(await compareImages({ baseline, snapshot, tolerance: defaults, scale: 1, regions })).toEqual({
+        outcome: 'passed',
+      })
+    })
   })
 
   it.each([
