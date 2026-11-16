@@ -2,7 +2,8 @@
 // what the CLI reports. It works in the folder it starts in, so each test Storybook runs this same file from its own
 // folder, as `node ../storybook-10-react/e2e.ts`. Run it with `pnpm turbo run e2e --filter <package name>`, which builds
 // the CLI and the Storybook first, with TEST_STORYBOOK_IMAGE naming the browser image. It prints one line per case,
-// then each of its problems, and exits 1 when any case fails. Turbo hands the arguments after `--` to this script, as in
+// then each of its problems, and exits 1 when any case fails. Every run of the CLI is without `CI` in its environment,
+// so what a case gives doesn't depend on where it runs. Turbo hands the arguments after `--` to this script, as in
 // `pnpm turbo run e2e --filter <package name> -- --host`.
 //
 // With `--inside-image` it runs inside visual-check's amd64 browser image, where the CLI starts the browser itself: it
@@ -19,7 +20,8 @@
 //
 // With `--arm64` it runs one case, with TEST_STORYBOOK_IMAGE naming an arm64 build of the browser image: `test` with
 // the platform `linux/arm64` and the default tolerance gives the expected outcomes against the committed baselines,
-// which are written on amd64.
+// which are written on amd64. It makes the committed baselines case's checks, on a server that leaves out the stories
+// of the file that fails to load.
 import { type ChildProcessByStdio, spawn, spawnSync } from 'node:child_process'
 import {
   accessSync,
@@ -264,9 +266,8 @@ const updateMaxLoads = 3
 /**
  * The stability cases: `update` on the card story alone, by its ID and the pattern that matches only it, each on a
  * server of its own whose `index.json` lists only that story. `update` takes every snapshot whose baseline is missing
- * whatever the selection, and the stories whose file fails to load have none, so with every story listed they would be
- * broken and fail every run. The server adds each case's markup to the story's page loads, load by load, and counts
- * them. Its cases:
+ * whatever the selection, so with every story listed it would write the baselines of all the others. The server adds
+ * each case's markup to the story's page loads, load by load, and counts them. Its cases:
  *
  * - `keptFlaky`: the deliberate change's stylesheet in the first load only, with the baseline there. The first load
  *   differs from the baseline and the second is within tolerance of it, so the baseline is kept, flaky.
@@ -426,13 +427,16 @@ const readinessLines: [storyId: string, says: string][] = [
 
 /**
  * The stories of the stories file that throws as the browser imports it, by the pattern their IDs match. They're
- * broken, `load-failed`, before any baseline is read, so they have none and stay broken in every `test`.
+ * broken, `load-failed`, before any baseline is read, so they have none and stay broken in every `test` that lists
+ * them. The server leaves them out of `index.json` unless a case asks for them, so only the committed baselines case
+ * sees them.
  */
 const loadFailsFilter = /^load-fails--/
 
 /**
  * What the line of each broken per-story options story says, in its reason's own wording: what the `wait` hook threw,
- * and that the story's file failed to load, with what the file threw.
+ * and that the story's file failed to load, with what the file threw. The load failure's lines are checked only in a
+ * run that lists those stories.
  */
 const perStoryOptionsLines: [storyId: string, says: string][] = [
   ['wait--throws', "The story's wait hook threw Error: visual-check: wait threw"],
@@ -623,9 +627,15 @@ interface ServeOptions {
   holdStoryPages?: boolean
   /**
    * The one story `index.json` lists, leaving out every other entry, so a run's Storybook has that story alone. Every
-   * entry is listed when not given.
+   * entry is listed when not given, but for the stories of the file that fails to load, unless `withLoadFails` is set.
    */
   onlyStory?: string
+  /**
+   * Whether `index.json` lists the stories of the stories file that fails to load. It leaves them out when not given,
+   * so a run's Storybook has no story that is broken before it is captured. The cases that check the load failure
+   * list them.
+   */
+  withLoadFails?: boolean
 }
 
 /**
@@ -1085,8 +1095,7 @@ function withMarkup(page: Buffer, markup: string | undefined): Buffer | string {
 
 /**
  * Answers a request for a URL path with the static build's file, or 404 when it names no file there. An
- * `iframe.html` gets the markup, when there is any, and `index.json` lists only the story `onlyStory` names, when it
- * names one.
+ * `iframe.html` gets the markup, when there is any, and `index.json` lists the entries the options leave in it.
  */
 function serveFile(
   pathname: string,
@@ -1111,7 +1120,7 @@ function serveFile(
 
 /**
  * Gives a static file's body as the server changes it: an `iframe.html` with the markup, when there is any, and
- * `index.json` with only the entry `onlyStory` names.
+ * `index.json` with the entries the options leave in it.
  */
 function changedBodyOf(
   pathname: string,
@@ -1123,21 +1132,27 @@ function changedBodyOf(
     return withMarkup(body, markup)
   }
 
-  if (pathname === '/index.json' && options.onlyStory !== undefined) {
-    return withOnlyEntry(body, options.onlyStory)
+  if (pathname === '/index.json') {
+    return withListedEntries(body, options)
   }
 
   return body
 }
 
 /**
- * Gives `index.json` with only the entry of the story, or with no entry when it doesn't list the story.
+ * Gives `index.json` with the entries the options leave in it. The entries of the stories file that fails to load are
+ * left out unless `withLoadFails` is set. Then, when `onlyStory` names a story, only its entry is left, or none when
+ * the entries left don't list it.
  */
-function withOnlyEntry(index: Buffer, storyId: string): string {
+function withListedEntries(index: Buffer, options: ServeOptions): string {
   const parsed = JSON.parse(index.toString('utf8')) as { entries: Record<string, unknown> }
-  const entry = parsed.entries[storyId]
+  const listed = Object.entries(parsed.entries).filter(
+    ([storyId]) =>
+      (options.withLoadFails === true || !loadFailsFilter.test(storyId)) &&
+      (options.onlyStory === undefined || storyId === options.onlyStory),
+  )
 
-  return JSON.stringify({ ...parsed, entries: entry === undefined ? {} : { [storyId]: entry } })
+  return JSON.stringify({ ...parsed, entries: Object.fromEntries(listed) })
 }
 
 /**
@@ -1308,9 +1323,10 @@ function snapshotKeyOf(storyId: string, mode: string | undefined): string {
 }
 
 /**
- * Runs the built CLI to the end, or until the time limit kills it, and reads its outcomes.
+ * Runs the built CLI to the end, or until the time limit kills it, and reads its outcomes. The environment is the
+ * machine's without `CI`, unless the caller gives its own, so a run gives the same outcomes in CI and outside it.
  */
-async function runCli(args: string[], env: NodeJS.ProcessEnv = process.env): Promise<CliRun> {
+async function runCli(args: string[], env: NodeJS.ProcessEnv = localEnvironment()): Promise<CliRun> {
   return await followCli(startCli(args, env)).finished
 }
 
@@ -1415,10 +1431,10 @@ function exitCodeOf(outcomes: Outcomes): number {
 }
 
 /**
- * Changes each snapshot's outcome with `change`, which gets the outcome and the snapshot's key.
+ * Changes each snapshot's outcome with `change`.
  */
-function mapOutcomes(outcomes: Outcomes, change: (outcome: Outcome, key: string) => Outcome): Outcomes {
-  return Object.fromEntries(Object.entries(outcomes).map(([key, outcome]) => [key, change(outcome, key)]))
+function mapOutcomes(outcomes: Outcomes, change: (outcome: Outcome) => Outcome): Outcomes {
+  return Object.fromEntries(Object.entries(outcomes).map(([key, outcome]) => [key, change(outcome)]))
 }
 
 /**
@@ -1432,14 +1448,9 @@ function updateOutcomeOf(outcome: Outcome): Outcome {
 /**
  * What `test` gives a story with this expected `test` outcome right after `update` into an empty folder: a broken
  * story has no baseline, so it's missing, because `test` never captures a story without one, and any other passes.
- * The stories of the stories file that fails to load stay broken, since they're broken before any baseline is read.
  */
-function retestOutcomeOf(outcome: Outcome, key: string): Outcome {
-  if (outcome !== 'broken') {
-    return 'passed'
-  }
-
-  return loadFailsFilter.test(key) ? 'broken' : 'missing'
+function retestOutcomeOf(outcome: Outcome): Outcome {
+  return outcome === 'broken' ? 'missing' : 'passed'
 }
 
 /**
@@ -1471,7 +1482,8 @@ function baselineProblems(written: string, keys: string[]): string[] {
 }
 
 /**
- * The environment without `CI`, which `update` refuses to run under.
+ * The environment without `CI`, which `update` refuses to run under, and under which `test` stops before it captures
+ * when its consistency check finds anything. It's what every run of the CLI gets unless a case gives its own.
  */
 function localEnvironment(): NodeJS.ProcessEnv {
   const environment = { ...process.env }
@@ -1592,11 +1604,12 @@ async function waitUntil(condition: () => boolean, timeoutMilliseconds: number):
 }
 
 /**
- * Runs `test --all` against the committed baselines with the package's config and 2 workers, and checks the run with
- * `committedBaselinesProblems`.
+ * Runs `test --all` against the committed baselines with the package's config and 2 workers, on a server that lists the
+ * stories of the file that fails to load, and checks the run with `committedBaselinesProblems`. The expected outcomes
+ * are the ones of every story, those stories' included.
  */
 async function checkCommittedBaselines(expected: Outcomes): Promise<string[]> {
-  return await withStorybookServer({}, async (server) =>
+  return await withStorybookServer({ withLoadFails: true }, async (server) =>
     committedBaselinesProblems(
       await runCli(['test', '--all', '--url', server.url, '--workers', String(parallelWorkers)]),
       expected,
@@ -1606,19 +1619,19 @@ async function checkCommittedBaselines(expected: Outcomes): Promise<string[]> {
 
 /**
  * Lists what is wrong with a run of `test --all` against the committed baselines. It gives exactly the expected
- * outcomes. Each broken readiness, per-story options and capture area story's line says why, and standard error has
- * no test-path warning, since every page is on Storybook's test path. The disabled stories, which `index.json` lists,
- * have no line, and the header counts exactly the snapshots with an expected outcome, the modes' included. The story
- * that lists `dark` and `mobile` has exactly 3 lines, and the story with its own list of modes has no line for the
- * meta's `dark`. Outside the Storybook 10 test Storybook, the committed animation baselines are byte-identical to its
- * own.
+ * outcomes. Each broken readiness, per-story options and capture area story that has an expected outcome has a line
+ * that says why, and standard error has no test-path warning, since every page is on Storybook's test path. The
+ * disabled stories, which `index.json` lists, have no line, and the header counts exactly the snapshots with an
+ * expected outcome, the modes' included. The story that lists `dark` and `mobile` has exactly 3 lines, and the story
+ * with its own list of modes has no line for the meta's `dark`. Outside the Storybook 10 test Storybook, the committed
+ * animation baselines are byte-identical to its own.
  */
 function committedBaselinesProblems(run: CliRun, expected: Outcomes): string[] {
   return [
     ...expectedRunProblems('test', run, expected),
-    ...[...readinessLines, ...perStoryOptionsLines, ...captureAreaLines].flatMap(([storyId, says]) =>
-      lineSaysProblems(run, storyId, says),
-    ),
+    ...[...readinessLines, ...perStoryOptionsLines, ...captureAreaLines]
+      .filter(([storyId]) => !loadFailsFilter.test(storyId) || expected[storyId] !== undefined)
+      .flatMap(([storyId, says]) => lineSaysProblems(run, storyId, says)),
     ...noTestPathWarningProblems(run.stderr),
     ...storybook10AnimationProblems(),
     ...disabledStoryProblems(run),
@@ -1768,10 +1781,9 @@ function headerCountProblems(run: CliRun, count: number): string[] {
 
 /**
  * `update` into an empty folder writes every story that isn't broken, `test` then passes them and finds the broken
- * ones missing, apart from the stories of the file that fails to load, which stay broken, and the baselines of the
- * stories expected to pass are byte-identical to the committed ones. Only those have a committed baseline the written
- * one must equal. `update`'s standard error ends with the network warning for the network stories alone. Both commands
- * take 2 workers from the config.
+ * ones missing, and the baselines of the stories expected to pass are byte-identical to the committed ones. Only those
+ * have a committed baseline the written one must equal. `update`'s standard error ends with the network warning for the
+ * network stories alone. Both commands take 2 workers from the config.
  */
 async function checkUpdateThenTest(expected: Outcomes): Promise<string[]> {
   rmSync(diagnosticsDir, { recursive: true, force: true })
@@ -1780,7 +1792,7 @@ async function checkUpdateThenTest(expected: Outcomes): Promise<string[]> {
     withTemporaryFolder(async (folder) => {
       const baselines = join(folder, 'baselines')
       const args = ['--all', '--config', writeConfig(folder, server.url, baselines)]
-      const update = await runCli(['update', ...args], localEnvironment())
+      const update = await runCli(['update', ...args])
       const updateProblems = [
         ...expectedRunProblems('update', update, mapOutcomes(expected, updateOutcomeOf)),
         ...networkWarningProblems(update.stderr, server),
@@ -1837,7 +1849,7 @@ function expectedRunProblems(command: string, run: CliRun, expected: Outcomes): 
  * Runs `test` locally, without `CI`, and lists how its exit code and outcomes differ from the expected ones.
  */
 async function runTestAndCheck(args: string[], expected: Outcomes): Promise<string[]> {
-  const run = await runCli(['test', ...args], localEnvironment())
+  const run = await runCli(['test', ...args])
 
   return expectedRunProblems('test', run, expected)
 }
@@ -2111,7 +2123,7 @@ async function checkUpdateStability(stabilityRun: StabilityRun): Promise<string[
       }
 
       const config = writeConfig(folder, server.url, baselines)
-      const run = await runCli(['update', '--filter', filter.source, '--config', config], localEnvironment())
+      const run = await runCli(['update', '--filter', filter.source, '--config', config])
 
       return [
         ...expectedRunProblems('update', run, { [storyId]: outcome }),
@@ -2399,7 +2411,7 @@ async function withHeldRun<T>(args: string[], use: (run: HeldRun) => Promise<T>)
   const before = new Set(visualCheckContainers('all'))
 
   return await withStorybookServer({ holdStoryPages: true }, async (server) => {
-    const cli = followCli(startCli([...args, '--url', server.url], process.env))
+    const cli = followCli(startCli([...args, '--url', server.url], localEnvironment()))
 
     try {
       return await use({ server, cli, before })
@@ -2745,6 +2757,14 @@ function readExpectedOutcomes(): Outcomes {
 }
 
 /**
+ * Leaves out the expected outcomes of the stories of the file that fails to load, which the server doesn't list unless
+ * a case asks for them.
+ */
+function withoutLoadFails(expected: Outcomes): Outcomes {
+  return Object.fromEntries(Object.entries(expected).filter(([key]) => !loadFailsFilter.test(key)))
+}
+
+/**
  * Runs every case, prints its result, and resolves with whether all of them passed.
  */
 async function runCases(cases: Case[]): Promise<boolean> {
@@ -2788,20 +2808,21 @@ if (setupProblems.length > 0) {
 } else if (onHost) {
   process.exitCode = (await runHostCases()) ? 0 : 1
 } else if (onArm64Image) {
-  process.exitCode = (await runCases(arm64ImageCases(readExpectedOutcomes()))) ? 0 : 1
+  process.exitCode = (await runCases(arm64ImageCases(withoutLoadFails(readExpectedOutcomes())))) ? 0 : 1
 } else {
-  const expected = readExpectedOutcomes()
+  const everyOutcome = readExpectedOutcomes()
+  const expected = withoutLoadFails(everyOutcome)
   const passed = await runCases([
     {
       name: "committed baselines: test gives the expected outcomes, each broken readiness, per-story options and capture area story's line says why, no line for a disabled story, the header counts the expected outcomes, a story listing two modes has 3 lines, a story's own modes leave out the meta's, no test-path warning, the animation baselines are byte-identical to storybook-10-react's",
-      run: () => checkCommittedBaselines(expected),
+      run: () => checkCommittedBaselines(everyOutcome),
     },
     {
       name: `end state: ${endStateRuns} runs of test with pixels: 0 give every animation story its expected outcome`,
       run: () => checkEndStateRuns(expected),
     },
     {
-      name: "update then test: update writes every story that isn't broken, test passes them and finds the broken ones missing, apart from the ones whose file fails to load, the baselines match the committed ones, update warns about the network stories alone",
+      name: "update then test: update writes every story that isn't broken, test passes them and finds the broken ones missing, the baselines match the committed ones, update warns about the network stories alone",
       run: () => checkUpdateThenTest(expected),
     },
     {
