@@ -38,7 +38,7 @@ interface UpdatePlan {
 }
 
 /**
- * What `update` did, for the block that ends its output.
+ * What `update` did, for the counts and path lines of the block that ends its output.
  */
 interface UpdateSummary {
   /**
@@ -186,9 +186,10 @@ export async function deleteStorybookOrphans(storybooks: readonly StorybookOrpha
 }
 
 /**
- * Builds the block that ends `update`'s output: the counts of written, deleted and kept baselines and broken
- * snapshots, each but the first left out at zero, then `written <path>` for each baseline written, then `deleted
- * <path>` for each orphan deleted, with paths relative to the folder the CLI runs in.
+ * Builds the counts and path lines that open the block ending `update`'s output, which the flaky snapshots follow: the
+ * counts of written, deleted and kept baselines and broken snapshots, each but the first left out at zero, then
+ * `written <path>` for each baseline written, then `deleted <path>` for each orphan deleted, with paths relative to the
+ * folder the CLI runs in.
  */
 export function updateEndLinesOf(cwd: string, summary: UpdateSummary): string[] {
   const counts = countsLineOf([

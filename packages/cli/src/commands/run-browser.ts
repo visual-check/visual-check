@@ -81,6 +81,9 @@ export interface RunBrowser {
    * `started`, when given, is called once the browser is up and the worker's session is open, just before the
    * capture, so the caller can time the capture without the launch.
    *
+   * When the story's `captureAgainIf` rejects, the worker's session closes its page and the capture rejects with the
+   * same error, whatever it is, such as a `BaselineError`.
+   *
    * @throws {ContainerError} When Docker can't be run, the image can't be pulled, or the browser can't reach the proxy,
    * at the launch or the relaunch.
    * @throws {BrowserDownloadError} When the headless shell can't be downloaded to the host.
@@ -90,6 +93,7 @@ export interface RunBrowser {
    * @throws {BrowserExitedError} When the browser exits while it is checked to reach the proxy, when the relaunched
    * browser exits during the capture or has exited before it, and when the first browser's exit says this machine
    * can't run the platform.
+   * @throws {Error} Whatever the story's `captureAgainIf` rejects with.
    */
   capture: (worker: number, story: StoryToCapture, started?: () => void) => Promise<StoryCapture>
   /**

@@ -118,7 +118,7 @@ const noMarker: RunCliOptions = { imageMarkerPath: absentMarkerPath }
 /**
  * The options every run gets: a Docker probe and a machine that both have 4 CPUs and 16 GiB, an engine that isn't
  * Docker Desktop's, Linux on x64, and no container around the run, so no test runs the real `docker` or reads the
- * machine it runs on.
+ * machine it runs on. `update` captures a page again at once, so no test waits a second for it.
  */
 const hostOptions = {
   probeDocker: async () => ({ cpus: 4, memoryBytes: 16 * 2 ** 30, desktop: false }),
@@ -127,6 +127,7 @@ const hostOptions = {
   os: 'linux',
   arch: 'x64',
   findKnownContainer: async () => undefined,
+  recaptureDelayMs: 0,
 } satisfies RunCliOptions
 
 /**
@@ -157,6 +158,10 @@ interface FakeStory {
    */
   snapshot?: Uint8Array
   /**
+   * The snapshot its page gives when captured again on the same load. `snapshot` when not given.
+   */
+  snapshotLater?: Uint8Array
+  /**
    * Whether Storybook reports the story finished with an error, which makes it a broken story.
    */
   broken?: boolean
@@ -174,7 +179,7 @@ interface FakeStory {
   browserExits?: boolean
   /**
    * Whether the browser exits once it has captured the story, before the worker takes its next story, so no capture is
-   * in flight.
+   * in flight. In `update`, a capture of the same page again on that load then meets the exit.
    */
   browserExitsAfter?: boolean
   /**
@@ -332,10 +337,16 @@ interface FakeBrowserRecord {
   driverCloses: number
   /**
    * What happened to each browser, in order, each browser numbered by its launch from 1: `<id> on <n>` as a story's
-   * capture finishes on browser n, whether it captured or the browser exited, `close page on <n>` as a page of browser n
-   * closes, and `close <n>` as browser n closes.
+   * capture finishes on browser n, whether it captured or the browser exited, `<id> again on <n>` as a later capture of
+   * the same load of its page does, `close page on <n>` as a page of browser n closes, and `close <n>` as browser n
+   * closes.
    */
   events: string[]
+  /**
+   * Every capture that finished, in order: the story's ID, which capture of its page's load it was, counting from 1,
+   * and when it finished, by `performance.now()`.
+   */
+  captures: { id: string; onLoad: number; at: number }[]
 }
 
 /**
@@ -353,6 +364,7 @@ function newRecord(): FakeBrowserRecord {
     closed: false,
     driverCloses: 0,
     events: [],
+    captures: [],
   }
 }
 
@@ -451,6 +463,7 @@ function fakeDriverOf({
       let story: FakeStory = {}
       let id = ''
       let pageUrl = ''
+      let capturesOnLoad = 0
 
       /**
        * Answers the options read of the files it asks for, as `read` says, recording it. The browser exits instead
@@ -480,6 +493,7 @@ function fakeDriverOf({
         goto: async (url) => {
           failIfGone()
           pageUrl = url
+          capturesOnLoad = 0
           record.urls.push(url)
 
           const { searchParams } = new URL(url)
@@ -529,6 +543,10 @@ function fakeDriverOf({
           )
         },
         capture: async () => {
+          capturesOnLoad += 1
+
+          const onLoad = capturesOnLoad
+
           gateOf(gates, `capturing ${id}`).resolve()
           await Promise.all((story.waitsForCapturing ?? []).map((other) => gateOf(gates, `capturing ${other}`).promise))
 
@@ -544,9 +562,12 @@ function fakeDriverOf({
               throw exit(story)
             }
 
-            return story.snapshot ?? defaultSnapshot
+            const snapshot = story.snapshot ?? defaultSnapshot
+
+            return onLoad === 1 ? snapshot : (story.snapshotLater ?? snapshot)
           } finally {
-            record.events.push(`${id} on ${browser}`)
+            record.events.push(onLoad === 1 ? `${id} on ${browser}` : `${id} again on ${browser}`)
+            record.captures.push({ id, onLoad, at: performance.now() })
             gateOf(gates, `settled ${id}`).resolve()
 
             if (story.browserExitsAfter === true) {
@@ -1586,7 +1607,8 @@ describe('runCli update', () => {
       ),
       stderr: '',
     })
-    expect(storyIdsOf(record.urls)).toEqual(['a', 'b', 'e', 'f'])
+    // Every baseline written takes two loads, and a kept one takes one.
+    expect(storyIdsOf(record.urls).sort()).toEqual(['a', 'a', 'b', 'b', 'e', 'e', 'f'])
     expect(readdirSync(folder).sort()).toEqual(['a.png', 'b.png', 'c.png', 'd.png', 'e.png', 'f.png'])
     expect(new Uint8Array(readFileSync(join(folder, 'a.png')))).toEqual(otherSnapshot)
     expect(new Uint8Array(readFileSync(join(folder, 'c.png')))).toEqual(defaultSnapshot)
@@ -1721,7 +1743,7 @@ describe('runCli update', () => {
       ),
       stderr: '',
     })
-    expect(storyIdsOf(record.urls)).toEqual(['a'])
+    expect(storyIdsOf(record.urls)).toEqual(['a', 'a'])
     expect(readdirSync(docsFolder).sort()).toEqual(['e.png', 'gone.png'])
     expect(new Uint8Array(readFileSync(join(docsFolder, 'e.png')))).toEqual(otherSnapshot)
   })
@@ -1838,7 +1860,7 @@ describe('runCli update', () => {
         'written .visual-check/baselines/b.dark.png',
       ),
     )
-    expect(storyIdsOf(record.urls)).toEqual(['a', 'b'])
+    expect(storyIdsOf(record.urls).sort()).toEqual(['a', 'b', 'b'])
     expect(new Uint8Array(readFileSync(join(folder, 'b.png')))).toEqual(defaultSnapshot)
     expect(new Uint8Array(readFileSync(join(folder, 'b.dark.png')))).toEqual(darkSnapshot)
   })
@@ -2112,7 +2134,8 @@ describe('runCli warning about real network requests and remote content', () => 
 
     await runCli(['update'], {}, project, options)
 
-    expect(record.preparations.map(({ findRemote }) => findRemote)).toEqual([true, true])
+    // Each missing baseline takes two loads.
+    expect(record.preparations.map(({ findRemote }) => findRemote)).toEqual([true, true, true, true])
   })
 })
 
@@ -2545,15 +2568,22 @@ describe('runCli modes', () => {
 
     await runCli(['update'], {}, project, options)
 
+    // Each missing baseline takes two loads, one after the other.
     expect(record.viewports).toEqual([
       { width: 1280, height: 900, deviceScaleFactor: 1, touch: false },
       { width: 1280, height: 900, deviceScaleFactor: 1, touch: false },
+      { width: 1280, height: 900, deviceScaleFactor: 1, touch: false },
+      { width: 1280, height: 900, deviceScaleFactor: 1, touch: false },
+      { width: 375, height: 900, deviceScaleFactor: 2, touch: true },
       { width: 375, height: 900, deviceScaleFactor: 2, touch: true },
     ])
     expect(record.urls).toEqual([
       previewOf(url),
       `${url}/iframe.html?id=a&viewMode=story`,
+      `${url}/iframe.html?id=a&viewMode=story`,
       `${url}/iframe.html?id=a&viewMode=story&globals=theme%3Adark`,
+      `${url}/iframe.html?id=a&viewMode=story&globals=theme%3Adark`,
+      `${url}/iframe.html?id=a&viewMode=story`,
       `${url}/iframe.html?id=a&viewMode=story`,
     ])
   })
@@ -2795,6 +2825,143 @@ describe('runCli retries and flaky snapshots', () => {
         '3 passed (2 flaky) · 1 differs',
       ),
     )
+  })
+})
+
+/**
+ * The heading `update` lists its flaky snapshots under.
+ */
+const updateFlakyHeading = 'Flaky snapshots, whose loads disagreed:'
+
+/**
+ * A mid grey PNG file of the same size as `defaultSnapshot`, whose 100 pixels all differ from `defaultSnapshot`'s and
+ * from `otherSnapshot`'s.
+ */
+const greySnapshot = new Uint8Array(await greyPng(10, 10, 128))
+
+/**
+ * The detail of a story whose page changed by 100 pixels in the second after its first capture.
+ */
+const changedDetail =
+  'broken: The story changed in the second after its capture: 100 differ, 20 allowed. Use its wait hook to wait ' +
+  'until it settles.'
+
+/**
+ * The detail of a story none of whose 3 loads agreed.
+ */
+const unstableDetail = "broken: No two of the story's 3 loads agreed, so its baseline wasn't written."
+
+describe('runCli update stability checks', () => {
+  it('lists the flaky snapshots after the written and deleted paths, and exits 0', async () => {
+    const { project, folder } = await createRun(['a', 'b', 'c'], { a: defaultSnapshot, gone: defaultSnapshot })
+    const { options, record } = fakeBrowser({
+      a: { captures: [{ snapshot: otherSnapshot }, {}] },
+      b: { captures: [{}, { snapshot: otherSnapshot }, { snapshot: otherSnapshot }] },
+    })
+    const result = await runCli(['update'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 0,
+      stdout: printed(
+        headerOf('update', 3),
+        '✓ web  a  kept · flaky',
+        '✓ web  b  written: missing · flaky',
+        '✓ web  c  written: missing',
+        '2 written · 1 deleted · 1 kept',
+        'written .visual-check/baselines/b.png',
+        'written .visual-check/baselines/c.png',
+        'deleted .visual-check/baselines/gone.png',
+        updateFlakyHeading,
+        '  web  a',
+        '  web  b',
+      ),
+      stderr: '',
+    })
+    expect(new Uint8Array(readFileSync(join(folder, 'a.png')))).toEqual(defaultSnapshot)
+    expect(new Uint8Array(readFileSync(join(folder, 'b.png')))).toEqual(otherSnapshot)
+    expect(storyIdsOf(record.urls).sort()).toEqual(['a', 'a', 'b', 'b', 'b', 'c', 'c'])
+  })
+
+  it('breaks a story that changed after its capture and ones whose loads never agree, writes nothing, and exits 1', async () => {
+    const { project, folder } = await createRun(['a', 'b', 'c'], { a: otherSnapshot, c: otherSnapshot })
+    const { options, record } = fakeBrowser({
+      a: { snapshotLater: greySnapshot },
+      b: { captures: [{}, { snapshot: otherSnapshot }, { snapshot: greySnapshot }] },
+      c: { captures: [{}, { snapshot: greySnapshot }, { snapshot: otherSnapshot }] },
+    })
+    const result = await runCli(['update'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: printed(
+        headerOf('update', 3),
+        `! web  a  ${changedDetail}`,
+        `! web  b  ${unstableDetail}`,
+        `! web  c  ${unstableDetail}`,
+        '0 written · 3 broken',
+      ),
+      stderr: '',
+    })
+    expect(readdirSync(folder).sort()).toEqual(['a.png', 'c.png'])
+    expect(new Uint8Array(readFileSync(join(folder, 'a.png')))).toEqual(otherSnapshot)
+    expect(new Uint8Array(readFileSync(join(folder, 'c.png')))).toEqual(otherSnapshot)
+    expect(storyIdsOf(record.urls).sort()).toEqual(['a', 'b', 'b', 'b', 'c', 'c', 'c'])
+  })
+
+  it('loads a story at most 3 times, whatever retries says', async () => {
+    const { project } = await createRun(['a'], {}, 'retries: 5')
+    const { options, record } = fakeBrowser({
+      a: { captures: [{}, { snapshot: otherSnapshot }, { snapshot: greySnapshot }] },
+    })
+    const result = await runCli(['update'], {}, project, options)
+
+    expect(result.stdout).toBe(printed(headerOf('update', 1), `! web  a  ${unstableDetail}`, '0 written · 1 broken'))
+    expect(storyIdsOf(record.urls)).toEqual(['a', 'a', 'a'])
+  })
+
+  it('keeps a baseline within tolerance after one load and one capture', async () => {
+    const { project } = await createRun(['a'], { a: defaultSnapshot })
+    const { options, record } = fakeBrowser({ a: { snapshotLater: otherSnapshot } })
+    const result = await runCli(['update'], {}, project, options)
+
+    expect(result.stdout).toBe(printed(headerOf('update', 1), '✓ web  a  kept', '0 written · 1 kept'))
+    expect(record.captures.map(({ id, onLoad }) => [id, onLoad])).toEqual([['a', 1]])
+  })
+
+  it('captures the same page again on the first load only, the delay after its first capture', async () => {
+    const { project } = await createRun(['a'])
+    const { options, record } = fakeBrowser()
+    const result = await runCli(['update'], {}, project, { ...options, recaptureDelayMs: 50 })
+    const times = record.captures.map(({ at }) => at)
+
+    expect(result.exitCode).toBe(0)
+    expect(record.captures.map(({ onLoad }) => onLoad)).toEqual([1, 2, 1])
+    expect((times[1] ?? 0) - (times[0] ?? 0)).toBeGreaterThanOrEqual(45)
+  })
+
+  it('never captures a page twice on one load in test', async () => {
+    const { project } = await createRun(['a', 'b'], { a: defaultSnapshot, b: defaultSnapshot })
+    const { options, record } = fakeBrowser({
+      a: { snapshotLater: otherSnapshot },
+      b: { snapshotLater: otherSnapshot, captures: [{ snapshot: otherSnapshot }, {}] },
+    })
+    const result = await runCli(['test'], {}, project, options)
+
+    expect(withoutTimes(result.stdout)).toBe(
+      printed(
+        headerOf('test', 2),
+        '✓ web  a  N ms',
+        '✓ web  b  N ms · flaky',
+        flakyHeading,
+        '  web  b',
+        '2 passed (1 flaky)',
+      ),
+    )
+    expect(record.captures.map(({ id, onLoad }) => [id, onLoad]).sort()).toEqual([
+      ['a', 1],
+      ['b', 1],
+      ['b', 1],
+    ])
   })
 })
 
@@ -3246,8 +3413,11 @@ describe('runCli capture area and masks', () => {
     const result = await runCli(['update'], {}, project, run)
 
     expect(result.exitCode).toBe(0)
+    // Each missing baseline takes two loads.
     expect(record.preparations.map(({ id, element }) => [id, element]).sort()).toEqual([
       ['a', '#card'],
+      ['a', '#card'],
+      ['b', null],
       ['b', null],
     ])
   })
@@ -3452,7 +3622,11 @@ describe('runCli launching the browser', () => {
 
     await runCli(['update'], {}, project, options)
 
-    expect(record.viewports).toEqual([{ width: 800, height: 600, deviceScaleFactor: 2, touch: true }])
+    // The missing baseline takes two loads.
+    expect(record.viewports).toEqual([
+      { width: 800, height: 600, deviceScaleFactor: 2, touch: true },
+      { width: 800, height: 600, deviceScaleFactor: 2, touch: true },
+    ])
     expect(record.setups).toMatchObject([
       { timezone: 'Europe/Warsaw', locale: 'pl-PL', colorScheme: 'dark' },
       { timezone: 'Europe/Warsaw', locale: 'pl-PL', colorScheme: 'dark' },
@@ -3758,7 +3932,8 @@ describe('runCli launching the browser', () => {
 
   it("says the browser wasn't relaunched when it exits after the last story", async () => {
     const { project } = await createRun(['a', 'b'], {}, 'workers: 1')
-    const { options, record } = fakeBrowser({ b: { browserExitsAfter: true } })
+    // b's missing baseline takes two loads, so the browser exits after the second load's capture, the run's last.
+    const { options, record } = fakeBrowser({ b: { captures: [{}, { browserExitsAfter: true }] } })
     const result = await runCli(['update'], {}, project, options)
 
     expect(result.exitCode).toBe(0)

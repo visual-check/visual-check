@@ -23,6 +23,7 @@ import { parseCommandLine, type RunOptions, UsageError } from './parse-command-l
 import { readImageFit } from './read-image-fit.js'
 import { runSnapshots } from './run-snapshots.js'
 import { selectStories } from './select-stories.js'
+import { defaultRecaptureDelayMs } from './update-snapshot.js'
 
 /**
  * The help text `--help` prints.
@@ -100,6 +101,11 @@ export interface RunCliOptions {
    * container's root, and for `KUBERNETES_SERVICE_HOST`, which Kubernetes sets in every pod. A test gives its answer.
    */
   insideContainer?: boolean
+  /**
+   * How long after a snapshot's first capture `update` captures the same page again, to check it isn't still changing,
+   * in ms. 1,000 by default. A test gives a shorter one.
+   */
+  recaptureDelayMs?: number
   /**
    * Writes progress as it happens, such as an image pull's or a download's. Progress is dropped when it isn't given.
    */
@@ -238,14 +244,28 @@ async function runTestOrUpdate(
       allStories: stories,
     })),
     cwd,
-    os: cliOptions.os ?? process.platform,
     insideContainer,
     environment,
-    launchBrowser: cliOptions.launchBrowser ?? createLaunchBrowser(),
-    progress: cliOptions.progress ?? (() => undefined),
+    ...runDefaultsOf(cliOptions),
   })
 
   return { ...result, stderr: `${warnings}${result.stderr}` }
+}
+
+/**
+ * Gives what the CLI's caller can give a `test` or `update` run once its checks have passed, each with its default
+ * when the caller gives none: the OS, how the browser is launched, how long `update` waits before it captures a page
+ * again, and where progress goes.
+ */
+function runDefaultsOf(
+  cliOptions: RunCliOptions,
+): Required<Pick<RunCliOptions, 'os' | 'launchBrowser' | 'recaptureDelayMs' | 'progress'>> {
+  return {
+    os: cliOptions.os ?? process.platform,
+    launchBrowser: cliOptions.launchBrowser ?? createLaunchBrowser(),
+    recaptureDelayMs: cliOptions.recaptureDelayMs ?? defaultRecaptureDelayMs,
+    progress: cliOptions.progress ?? (() => undefined),
+  }
 }
 
 /**

@@ -166,6 +166,10 @@ export interface RemoteContentBox {
  * - `element-missing`: the story's `element` selector matched nothing, or an element whose box is of zero size.
  * - `browser-exited`: the browser exited while the story was in flight. The run's browser gives it; a capture session
  *   rejects with a `BrowserExitedError` instead.
+ * - `changed-after-capture`: the story's page, captured again a second after its first capture on one load, had
+ *   changed beyond its tolerance, so `update` wrote no baseline. `update` gives it; a capture session never does.
+ * - `unstable`: no two of the 3 loads `update` made of the story agreed within its tolerance, so it wrote no baseline.
+ *   `update` gives it; a capture session never does.
  *
  * @public
  */
@@ -181,12 +185,14 @@ export type BrokenReason =
   | 'too-tall'
   | 'element-missing'
   | 'browser-exited'
+  | 'changed-after-capture'
+  | 'unstable'
 
 /**
  * A story that can't be captured: why, and a one-line message for people saying so. A capture session gives one for a
  * story it can't capture, and the run gives one for a story in flight when its browser exits and for each story of a
- * stories file that didn't load. A story whose fonts didn't load also keeps the faces still loading, and a story that
- * navigated away keeps where it went.
+ * stories file that didn't load. `update` gives one for a story that doesn't render the same way twice. A story whose
+ * fonts didn't load also keeps the faces still loading, and a story that navigated away keeps where it went.
  *
  * @public
  */
