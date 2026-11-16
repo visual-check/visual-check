@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   addDevDependenciesCommandOf,
+  isPackageManager,
   lockfileNames,
   packageManagerOf,
   runScriptCommandOf,
+  scriptsOf,
   storybookBinCommandOf,
 } from './package-manager.js'
 
@@ -106,5 +108,28 @@ describe('commands', () => {
     })
     expect(addDevDependenciesCommandOf('yarn', specs)).toEqual({ command: 'yarn', args: ['add', '--dev', ...specs] })
     expect(addDevDependenciesCommandOf('bun', specs)).toEqual({ command: 'bun', args: ['add', '--dev', ...specs] })
+  })
+})
+
+describe('scriptsOf', () => {
+  it('keeps the scripts that are text, in key order', () => {
+    expect(Object.entries(scriptsOf({ scripts: { b: 'x', a: 1, c: null, d: 'y' } }))).toEqual([
+      ['b', 'x'],
+      ['d', 'y'],
+    ])
+  })
+
+  it.each([undefined, null, 'x', ['a'], 3])('gives none for scripts that are %j', (scripts) => {
+    expect(scriptsOf({ scripts })).toEqual({})
+  })
+})
+
+describe('isPackageManager', () => {
+  it.each(['npm', 'pnpm', 'yarn', 'bun'])('knows %s', (name) => {
+    expect(isPackageManager(name)).toBe(true)
+  })
+
+  it.each(['pip', 'NPM', '', undefined, 3])('does not know %j', (value) => {
+    expect(isPackageManager(value)).toBe(false)
   })
 })

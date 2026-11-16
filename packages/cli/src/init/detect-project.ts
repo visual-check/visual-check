@@ -3,7 +3,14 @@ import { dirname, join, resolve } from 'node:path'
 import { isFile } from '../config/find-config.js'
 import { readInstalledStorybookVersion } from '../storybook/storybook-version.js'
 import { type ListFiles, mainFileOnDiskIn, nameConfigDirs, storybookConfigDirsOf } from './find-storybooks.js'
-import { isJsonObject, lockfileNames, type Manifest, type PackageManager, packageManagerOf } from './package-manager.js'
+import {
+  isJsonObject,
+  lockfileNames,
+  type Manifest,
+  type PackageManager,
+  packageManagerOf,
+  scriptsOf,
+} from './package-manager.js'
 import { type StorybookCall, startScriptOf, storybookCallsOf } from './storybook-scripts.js'
 
 /**
@@ -126,17 +133,6 @@ function readManifest(path: string): ManifestRead {
   } catch (error) {
     return { manifest: {}, problem: error instanceof Error ? error.message : String(error) }
   }
-}
-
-/**
- * Returns the manifest's scripts that are text, in key order.
- */
-function scriptsOf(manifest: Manifest): Record<string, string> {
-  if (typeof manifest.scripts !== 'object' || manifest.scripts === null) {
-    return {}
-  }
-
-  return Object.fromEntries(Object.entries(manifest.scripts).filter(([, command]) => typeof command === 'string'))
 }
 
 /**

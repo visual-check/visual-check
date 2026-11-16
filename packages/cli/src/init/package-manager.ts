@@ -50,9 +50,35 @@ export function isJsonObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Returns the manifest's scripts that are text, in key order. A script that isn't text is left out.
+ */
+export function scriptsOf(manifest: Manifest): Record<string, string> {
+  if (!isJsonObject(manifest.scripts)) {
+    return {}
+  }
+
+  const scripts: Record<string, string> = {}
+
+  for (const [name, command] of Object.entries(manifest.scripts)) {
+    if (typeof command === 'string') {
+      scripts[name] = command
+    }
+  }
+
+  return scripts
+}
+
+/**
  * The package managers a manifest field may name.
  */
 const packageManagerNames: readonly PackageManager[] = ['npm', 'pnpm', 'yarn', 'bun']
+
+/**
+ * Returns whether `value` is the name of a package manager `init` knows.
+ */
+export function isPackageManager(value: unknown): value is PackageManager {
+  return packageManagerNames.some((known) => known === value)
+}
 
 /**
  * The lockfiles that show a package manager, in the order `init` tries them.
