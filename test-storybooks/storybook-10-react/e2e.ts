@@ -275,8 +275,10 @@ const updateMaxLoads = 3
  * - `unstable`: a different card background in each load, red, green, then blue, with the baseline there. No two of
  *   the 3 loads agree, so the story is broken.
  * - `changedAfterCapture`: a script in each of the 3 loads `update` can make that adds a fixed clock, 48 px text at the
- *   bottom left, and sets its text to `Date.now()` every 50 ms, with the baseline there. The first load's page,
- *   captured again a second later, differs by pixels, so the story is broken after 1 load.
+ *   bottom left, and sets its text to `Date.now()` at once and every 50 ms after, with the baseline there. The text
+ *   must be there from the start: a fast machine captures the first load before a first tick, and an empty clock
+ *   matches the baseline, which `update` keeps without a check. The first load's page differs from the baseline, and
+ *   captured again a second later it differs by pixels, so the story is broken after 1 load.
  */
 const updateStability = {
   storyId: deliberateChange.storyId,
@@ -318,7 +320,7 @@ const updateStability = {
         '<script>addEventListener("DOMContentLoaded", () => { ' +
         'const clock = document.body.appendChild(document.createElement("div")); ' +
         'clock.style.cssText = "position: fixed; left: 16px; bottom: 16px; font: 48px monospace; color: #000"; ' +
-        'setInterval(() => { clock.textContent = String(Date.now()) }, 50) })</script>',
+        'const tick = () => { clock.textContent = String(Date.now()) }; tick(); setInterval(tick, 50) })</script>',
     ),
     hasBaseline: true,
     outcome: 'broken',
