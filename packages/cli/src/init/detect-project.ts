@@ -3,7 +3,7 @@ import { dirname, join, resolve } from 'node:path'
 import { isFile } from '../config/find-config.js'
 import { readInstalledStorybookVersion } from '../storybook/storybook-version.js'
 import { type ListFiles, mainFileOnDiskIn, nameConfigDirs, storybookConfigDirsOf } from './find-storybooks.js'
-import { lockfileNames, type Manifest, type PackageManager, packageManagerOf } from './package-manager.js'
+import { isJsonObject, lockfileNames, type Manifest, type PackageManager, packageManagerOf } from './package-manager.js'
 import { type StorybookCall, startScriptOf, storybookCallsOf } from './storybook-scripts.js'
 
 /**
@@ -50,8 +50,8 @@ export interface DetectedProject {
    */
   manifestPath: string
   /**
-   * What is wrong with the root's `package.json`: the parse error, or that it isn't a JSON object. `undefined` when it
-   * is fine. `manifest` is `{}` otherwise.
+   * What is wrong with the root's `package.json`: the parse error, that it isn't a JSON object, or that its
+   * `scripts` isn't one. `undefined` when it is fine. `manifest` is `{}` otherwise.
    */
   manifestProblem: string | undefined
   /**
@@ -107,15 +107,19 @@ interface ManifestRead {
 }
 
 /**
- * Reads a `package.json`. A file that can't be read or parsed, or isn't a JSON object, gives an empty manifest and the
- * problem.
+ * Reads a `package.json`. A file that can't be read or parsed, isn't a JSON object or has `scripts` that isn't one,
+ * gives an empty manifest and the problem.
  */
 function readManifest(path: string): ManifestRead {
   try {
     const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
 
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    if (!isJsonObject(parsed)) {
       return { manifest: {}, problem: 'the file must hold a JSON object' }
+    }
+
+    if (parsed.scripts !== undefined && !isJsonObject(parsed.scripts)) {
+      return { manifest: {}, problem: '"scripts" must be an object' }
     }
 
     return { manifest: parsed as Manifest, problem: undefined }

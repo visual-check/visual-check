@@ -43,6 +43,13 @@ export interface Manifest {
 }
 
 /**
+ * Returns whether `value` is a JSON object: not `null`, not an array, not a text or a number.
+ */
+export function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
  * The package managers a manifest field may name.
  */
 const packageManagerNames: readonly PackageManager[] = ['npm', 'pnpm', 'yarn', 'bun']

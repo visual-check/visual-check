@@ -96,6 +96,15 @@ describe('detectProject', () => {
     expect(project?.manifestProblem).toBe('the file must hold a JSON object')
   })
 
+  it.each(['"nope"', '[]', 'null', '7'])('reports scripts that are not an object: %s', async (scripts) => {
+    const root = createProject({ 'package.json': `{"scripts":${scripts}}` })
+
+    const project = await detectProject(root, listProjectFiles)
+
+    expect(project?.manifest).toEqual({})
+    expect(project?.manifestProblem).toBe('"scripts" must be an object')
+  })
+
   it('reports no problem for a good package.json', async () => {
     const root = createProject({ 'package.json': '{}' })
 
