@@ -12,6 +12,7 @@ const defaultOptions = {
   workers: undefined,
   consistency: false,
   shard: undefined,
+  reporter: undefined,
 }
 
 /**
@@ -70,7 +71,7 @@ describe('parseCommandLine', () => {
     expect(usageErrorOf('test', '--', '--help').message).toBe("Unexpected argument '--help'.")
   })
 
-  it.each(['filter', 'storybook', 'url', 'config', 'shard'])('rejects an empty --%s', (flag) => {
+  it.each(['filter', 'storybook', 'url', 'config', 'shard', 'reporter'])('rejects an empty --%s', (flag) => {
     expect(usageErrorOf('test', `--${flag}=`).message).toBe(`--${flag} needs a value.`)
     expect(usageErrorOf('test', `--${flag}`, '').message).toBe(`--${flag} needs a value.`)
   })
@@ -96,6 +97,7 @@ describe('parseCommandLine', () => {
     ['--workers', ['--workers', '2']],
     ['--consistency', ['--consistency']],
     ['--shard', ['--shard', '2/4']],
+    ['--reporter', ['--reporter', 'json']],
   ])('rejects %s for init', (flag, flagArguments) => {
     expect(usageErrorOf('init', ...flagArguments).message).toBe(`${flag} doesn't apply to init.`)
   })
@@ -318,5 +320,82 @@ describe('parseCommandLine --shard', () => {
 
     expect(usageErrorOf('test', '--consistency', '--shard', '2/4').message).toBe(message)
     expect(usageErrorOf('test', '--consistency', '--shard', 'nope').message).toBe(message)
+  })
+
+  it.each(['live', 'log', 'json'] as const)('parses --reporter %s for test', (reporter) => {
+    expect(parseCommandLine(['test', '--reporter', reporter])).toEqual({
+      command: 'test',
+      options: { ...defaultOptions, reporter },
+    })
+  })
+
+  it.each(['live', 'log', 'json'] as const)('parses --reporter %s for update', (reporter) => {
+    expect(parseCommandLine(['update', '--reporter', reporter])).toEqual({
+      command: 'update',
+      options: { ...defaultOptions, reporter },
+    })
+  })
+
+  it.each(['nope', 'JSON', 'json,log'])('rejects --reporter %j, naming the value', (value) => {
+    expect(usageErrorOf('test', '--reporter', value).message).toBe(
+      `--reporter takes live, log or json. Got '${value}'.`,
+    )
+  })
+})
+
+describe('parseCommandLine usage errors of a run', () => {
+  it('names the run of a test whose flags clash, with its --config and --reporter', () => {
+    expect(
+      usageErrorOf('test', '--all', '--filter', 'a', '--config', 'configs/visual-check.config.ts', '--reporter', 'json')
+        .run,
+    ).toEqual({ command: 'test', config: 'configs/visual-check.config.ts', reporter: 'json' })
+  })
+
+  it('names the run of an update given a flag that applies only to test', () => {
+    expect(usageErrorOf('update', '--shard', '1/2').run).toEqual({
+      command: 'update',
+      config: undefined,
+      reporter: undefined,
+    })
+  })
+
+  it('leaves out a --reporter that is itself the problem', () => {
+    expect(usageErrorOf('test', '--reporter', 'nope').run).toEqual({
+      command: 'test',
+      config: undefined,
+      reporter: undefined,
+    })
+  })
+
+  it.each([
+    ['an unknown flag', ['test', '--bogus'], 'test', undefined, undefined],
+    ['json and an unknown flag', ['test', '--reporter', 'json', '--bogus'], 'test', undefined, 'json'],
+    ['log and an unknown flag', ['test', '--bogus', '--reporter', 'log'], 'test', undefined, 'log'],
+    ['an unknown reporter and flag', ['test', '--bogus', '--reporter', 'nope'], 'test', undefined, undefined],
+    [
+      'a config and an unknown flag',
+      ['update', '--bogus', '--reporter=json', '--config', 'c.mjs'],
+      'update',
+      'c.mjs',
+      'json',
+    ],
+    ['a flag missing its value', ['test', '--reporter', 'json', '--config'], 'test', undefined, 'json'],
+    ['a flag whose value is another flag', ['test', '--filter', '--reporter', 'json'], 'test', undefined, 'json'],
+    ['a config whose value is another flag', ['test', '--config', '--reporter=log'], 'test', undefined, 'log'],
+  ] as const)(
+    'names the run of a command line with %s that fails to parse, as far as its flags tell',
+    (_, commandLineArguments, command, config, reporter) => {
+      expect(usageErrorOf(...commandLineArguments).run).toEqual({ command, config, reporter })
+    },
+  )
+
+  it.each([
+    ['an unknown flag with no command', ['--nope', '--reporter', 'json']],
+    ['an unknown flag of init', ['init', '--nope', '--reporter', 'json']],
+    ['an unknown command', ['tset', '--all']],
+    ['no command', ['--all']],
+    ['init', ['init', '--all']],
+  ])('names no run for %s', (_, commandLineArguments) => {
+    expect(usageErrorOf(...commandLineArguments).run).toBeUndefined()
   })
 })

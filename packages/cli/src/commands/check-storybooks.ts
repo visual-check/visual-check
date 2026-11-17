@@ -44,7 +44,21 @@ interface CheckedStorybook<T extends StorybookInRun> {
  */
 type StorybookChecks<T extends StorybookInRun> =
   | { storybooks: CheckedStorybook<T>[]; warnings: string[] }
-  | { problems: string[]; warnings: string[] }
+  | { problems: string[]; unreachable: UnreachableStorybook[]; warnings: string[] }
+
+/**
+ * A Storybook where nothing answers, named as the report names it.
+ */
+interface UnreachableStorybook {
+  /**
+   * The name the config gives the Storybook.
+   */
+  name: string
+  /**
+   * Where the Storybook should be served.
+   */
+  url: string
+}
 
 /**
  * What checking one Storybook gave: the version warning if it has one, and either the checked Storybook or the problem
@@ -52,7 +66,7 @@ type StorybookChecks<T extends StorybookInRun> =
  */
 type StorybookOutcome<T extends StorybookInRun> = { warning: string | undefined } & (
   | CheckedStorybook<T>
-  | { problem: string; unreachable: boolean }
+  | { storybook: T; problem: string; unreachable: boolean }
 )
 
 /**
@@ -70,7 +84,7 @@ async function checkOneStorybook<T extends StorybookInRun>(storybook: T, cwd: st
     return { storybook, version: check.version, stories: await readStories(storybook, cwd), warning }
   } catch (error) {
     if (error instanceof StorybookError) {
-      return { problem: error.message, unreachable: error instanceof StorybookUnreachableError, warning }
+      return { storybook, problem: error.message, unreachable: error instanceof StorybookUnreachableError, warning }
     }
 
     throw error
@@ -80,8 +94,8 @@ async function checkOneStorybook<T extends StorybookInRun>(storybook: T, cwd: st
 /**
  * Checks every Storybook in the run: the version of its installed `storybook`, then its stories from `index.json`.
  * Each Storybook that passes comes back with both. Every Storybook is checked, and every problem is reported, in
- * config order. With several Storybooks in the run and one of them unreachable, the problems end with a line that
- * suggests `--storybook`.
+ * config order, with the Storybooks where nothing answers, by name and URL. With several Storybooks in the run and one
+ * of them unreachable, the problems end with a line that suggests `--storybook`.
  *
  * @throws {Error} When a check fails in a way that isn't a Storybook's problem.
  */
@@ -103,10 +117,13 @@ export async function checkStorybooks<T extends StorybookInRun>(
   }
 
   const problems = failed.map((outcome) => outcome.problem)
+  const unreachable = failed.flatMap(({ unreachable, storybook }) =>
+    unreachable ? [{ name: storybook.name, url: storybook.url }] : [],
+  )
 
-  if (failed.some((outcome) => outcome.unreachable) && storybooks.length > 1) {
+  if (unreachable.length > 0 && storybooks.length > 1) {
     problems.push('To check one Storybook on its own, pass --storybook <name>.')
   }
 
-  return { problems, warnings }
+  return { problems, unreachable, warnings }
 }

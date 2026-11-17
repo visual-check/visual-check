@@ -3,12 +3,16 @@ import {
   type CaptureArea,
   type CaptureBox,
   CaptureTooLargeError,
+  type ConsoleMessage,
+  consoleMessageFunction,
+  keptConsoleMessages,
   maxCaptureSide,
   type Page,
   PageCrashedError,
   type PageSetup,
   PageTimeoutError,
   type PageViewport,
+  readConsoleMessage,
 } from '../driver.js'
 import { type CdpConnection, type CdpEvent, isRecord } from './cdp-connection.js'
 import { fontFamiliesOf } from './font-families.js'
@@ -192,6 +196,49 @@ function popupIdOf(event: CdpEvent, ids: PageIds): string | undefined {
 }
 
 /**
+ * Gives the id of the execution context a `Runtime.executionContextCreated` event reports when it is the main world of
+ * a document of the main frame, whose id is the page's target id, or undefined for any other event or context, such as
+ * a subframe's or an isolated world's.
+ */
+function mainWorldContextOf(event: CdpEvent, mainFrameId: string): number | undefined {
+  const { context } = event.params
+
+  if (
+    event.method !== 'Runtime.executionContextCreated' ||
+    !isRecord(context) ||
+    typeof context.id !== 'number' ||
+    !isRecord(context.auxData)
+  ) {
+    return undefined
+  }
+
+  const { frameId, isDefault } = context.auxData
+
+  return frameId === mainFrameId && isDefault === true ? context.id : undefined
+}
+
+/**
+ * Reads the message a `Runtime.bindingCalled` event carries when the page script called the message function in one
+ * of `contexts`, or undefined for any other event, another function's call, a call from another context or a payload
+ * it can't read.
+ */
+function consoleMessageOf(event: CdpEvent, contexts: ReadonlySet<number>): ConsoleMessage | undefined {
+  const { name, payload, executionContextId } = event.params
+
+  if (
+    event.method !== 'Runtime.bindingCalled' ||
+    name !== consoleMessageFunction ||
+    typeof payload !== 'string' ||
+    typeof executionContextId !== 'number' ||
+    !contexts.has(executionContextId)
+  ) {
+    return undefined
+  }
+
+  return readConsoleMessage(payload)
+}
+
+/**
  * Asks the browser to dispose a browser context, closing its pages. Resolves once the browser has answered, either way,
  * or after 5 s.
  */
@@ -227,6 +274,12 @@ interface PageIds {
  * It follows the document each `goto` loads, and fails with a `PageNavigatedAwayError` once its main frame commits a
  * new document. A call the browser fails as that document comes, while a navigation of the main frame to a new
  * document is pending, such as a link the page follows or its `history.back()`, fails with one too.
+ *
+ * It keeps the console messages and errors the page script sends through the message function, a binding the Runtime
+ * domain reports calls to. Chromium 157 reports none while that domain is off, so it turns the domain on in its
+ * session, which also has the browser report each console call and exception on its own: the page ignores those. It
+ * keeps only the calls from the main world of a document of the main frame created since the last `goto` started, so
+ * a call the document before it makes as that `goto` runs doesn't count.
  *
  * When its setup asks it to watch requests, it also turns the Network domain on in its session and attaches to the
  * service workers of its browser context, as `RequestWatch` describes, and listens to their sessions too. Otherwise it
@@ -303,6 +356,17 @@ class CdpPage implements Page {
   private viewport: PageViewport | undefined
 
   /**
+   * The last 50 messages the page script sent since the last `goto` started, oldest first.
+   */
+  private recentConsoleMessages: ConsoleMessage[] = []
+
+  /**
+   * The execution contexts whose messages count: the main world of each document of the main frame created since the
+   * last `goto` started, or since the page opened before any.
+   */
+  private readonly messageContexts = new Set<number>()
+
+  /**
    * Watches the page's session for a crash, a detach, its main frame's navigations and its dialogs, the browser for its
    * popups, and the connection for its close. Watches the page's requests and service workers too when `watchRequests`
    * says so.
@@ -317,9 +381,11 @@ class CdpPage implements Page {
 
   /**
    * Sets the page up once: the font table of the browser's OS, the user agent, the emulated time zone, locale, colour
-   * scheme, motion and focus, and the init script, and denies downloads and every permission in the page's browser
-   * context. When the page watches requests, it also turns the Network domain on in its session and has the session
-   * report service workers. A failed discovery never fails the setup. The commands go in parallel.
+   * scheme, motion and focus, the message function and the init script, and denies downloads and every permission in
+   * the page's browser context. When the page watches requests, it also turns the Network domain on in its session and
+   * has the session report service workers. A failed discovery never fails the setup. The commands go in parallel, but
+   * the browser takes a session's commands in order, so the message function is in every document before the init
+   * script runs there, including after a navigation.
    */
   async setUp(browserUserAgent: string, system: BrowserSystem, setup: PageSetup): Promise<void> {
     await this.unlessFailed(
@@ -340,6 +406,8 @@ class CdpPage implements Page {
           ],
         }),
         this.send('Emulation.setFocusEmulationEnabled', { enabled: true }),
+        this.send('Runtime.enable'),
+        this.send('Runtime.addBinding', { name: consoleMessageFunction }),
         this.send('Page.addScriptToEvaluateOnNewDocument', { source: setup.initScript }),
         this.connection.send('Browser.setDownloadBehavior', {
           behavior: 'deny',
@@ -390,12 +458,15 @@ class CdpPage implements Page {
    * stops listening once it settles. Forgets the document the last `goto` loaded at once, and follows the new one from
    * the moment its load event is taken in, so a commit right behind that event already counts. Once it has settled, it
    * stops the navigation, so a load that a late answer to `Page.navigate` reveals after the `goto` failed doesn't count.
+   * Forgets the messages the page sent before it.
    */
   async goto(url: string, timeoutMs: number): Promise<void> {
     this.throwIfFailed()
     this.loadedDocument = undefined
     this.gotoOrigin = undefined
     this.requestWatch?.reset()
+    this.recentConsoleMessages = []
+    this.messageContexts.clear()
 
     const navigation = new MainFrameNavigation(url, this.ids.targetId, this.loaderIds, (later: readonly CdpEvent[]) =>
       this.followLoadedDocument(url, later),
@@ -484,6 +555,13 @@ class CdpPage implements Page {
   }
 
   /**
+   * Gives a copy of the last 50 messages the page script sent since the last `goto` started, oldest first.
+   */
+  consoleMessages(): ConsoleMessage[] {
+    return [...this.recentConsoleMessages]
+  }
+
+  /**
    * Closes the page: fails every call in flight and every later one, stops listening, and disposes the page's browser
    * context. Resolves once the browser has answered, either way, or after 5 s. Calling it again returns the same
    * promise.
@@ -510,7 +588,8 @@ class CdpPage implements Page {
 
   /**
    * Fails the page when an event says it can no longer be used or that it navigated away from the document its last
-   * `goto` loaded, handles its dialogs and popups, and, when it watches requests, tells the watch about the event.
+   * `goto` loaded, keeps a message the page script sent, handles its dialogs and popups, and, when it watches requests,
+   * tells the watch about the event.
    */
   private watch(event: CdpEvent): void {
     const failure = pageFailureOf(event, this.ids.sessionId)
@@ -518,6 +597,8 @@ class CdpPage implements Page {
     if (failure !== undefined) {
       this.fail(failure)
     }
+
+    this.keepMessage(event)
 
     if (event.sessionId === this.ids.sessionId) {
       this.followMainFrame(event)
@@ -563,6 +644,31 @@ class CdpPage implements Page {
     if (left !== undefined) {
       this.fail(left)
     }
+  }
+
+  /**
+   * Notes the main world of each new document of the main frame that the page's session reports, and keeps the message
+   * a `Runtime.bindingCalled` event of the session carries from one of those, if it carries one, with the 49 before it.
+   */
+  private keepMessage(event: CdpEvent): void {
+    if (event.sessionId !== this.ids.sessionId) {
+      return
+    }
+
+    const context = mainWorldContextOf(event, this.ids.targetId)
+
+    if (context !== undefined) {
+      this.messageContexts.add(context)
+    }
+
+    const message = consoleMessageOf(event, this.messageContexts)
+
+    if (message === undefined) {
+      return
+    }
+
+    this.recentConsoleMessages.push(message)
+    this.recentConsoleMessages.splice(0, this.recentConsoleMessages.length - keptConsoleMessages)
   }
 
   /**

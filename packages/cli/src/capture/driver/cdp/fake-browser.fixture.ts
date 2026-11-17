@@ -135,6 +135,22 @@ export function childFrame(targetId: string, url: string): Record<string, unknow
 }
 
 /**
+ * The main world of a document of the frame with this id, as `Runtime.executionContextCreated` describes it, or of
+ * another world when `isDefault` is false.
+ */
+export function executionContext(id: number, frameId: string, isDefault = true): Record<string, unknown> {
+  return {
+    context: {
+      id,
+      origin: '',
+      name: isDefault ? '' : 'isolated',
+      uniqueId: `context-${id}`,
+      auxData: { isDefault, type: isDefault ? 'default' : 'isolated', frameId },
+    },
+  }
+}
+
+/**
  * Replies to a command with an empty result.
  */
 function answerEmpty(command: ReceivedCommand, browser: FakeBrowser): void {
@@ -173,19 +189,21 @@ function addInitScript(command: ReceivedCommand, browser: FakeBrowser): void {
 }
 
 /**
- * Navigates the main frame the way Chromium does when the page loads: `Page.frameNavigated`, the reply, then
- * `Page.loadEventFired`, all in the command's session. Its loader is `loader-1` for the first navigation, `loader-2`
- * for the next, and so on.
+ * Navigates the main frame the way Chromium does when the page loads: `Page.frameNavigated`, the creation of the new
+ * document's main world, the reply, then `Page.loadEventFired`, all in the command's session. Its loader is `loader-1`
+ * and its main world's context is 1 for the first navigation, `loader-2` and 2 for the next, and so on.
  */
 function navigateAndLoad(command: ReceivedCommand, browser: FakeBrowser): void {
   const targetId = browser.sessionTargets.get(String(command.sessionId)) ?? ''
-  const loaderId = `loader-${browser.timesReceived(command.method)}`
+  const navigation = browser.timesReceived(command.method)
+  const loaderId = `loader-${navigation}`
 
   browser.emit(
     'Page.frameNavigated',
     { frame: mainFrame(targetId, String(command.params.url), loaderId) },
     command.sessionId,
   )
+  browser.emit('Runtime.executionContextCreated', executionContext(navigation, targetId), command.sessionId)
   browser.reply(command, { frameId: targetId, loaderId })
   browser.emit('Page.loadEventFired', { timestamp: 1 }, command.sessionId)
 }
@@ -235,6 +253,8 @@ const defaultHandlers: Record<string, CommandHandler> = {
   'Emulation.setLocaleOverride': answerEmpty,
   'Emulation.setEmulatedMedia': answerEmpty,
   'Emulation.setFocusEmulationEnabled': answerEmpty,
+  'Runtime.enable': answerEmpty,
+  'Runtime.addBinding': answerEmpty,
   'Page.addScriptToEvaluateOnNewDocument': addInitScript,
   'Emulation.setDeviceMetricsOverride': answerEmpty,
   'Emulation.setTouchEmulationEnabled': answerEmpty,

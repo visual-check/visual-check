@@ -1,9 +1,11 @@
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import type { BrokenStory } from '../capture/capture-session.js'
 import type { ResolvedStorybook } from '../config/resolve-config.js'
 import type { ConsistencyCheck } from './consistency-check.js'
 import { consistencyOutputOf, orphanLabelOf, orphanLinesOf } from './consistency-output.js'
 import type { PlannedSnapshot } from './plan-snapshots.js'
+import { brokenResultOf, missingResultOf } from './snapshot-result.js'
 
 /**
  * The folder the CLI runs in.
@@ -43,6 +45,16 @@ function snapshotOf(storybook: ResolvedStorybook, id: string, mode?: string): Pl
 }
 
 /**
+ * Why each story of `./broken.stories.tsx` is broken.
+ */
+const loadFailed: BrokenStory = {
+  reason: 'load-failed',
+  message: 'Its stories file ./broken.stories.tsx failed to load: Error: boom.',
+  loadError: 'Error: boom',
+  readyTimeoutMs: undefined,
+}
+
+/**
  * Builds the planned broken snapshot of a story whose stories file didn't load.
  */
 function brokenOf(storybook: ResolvedStorybook, id: string): PlannedSnapshot {
@@ -52,7 +64,7 @@ function brokenOf(storybook: ResolvedStorybook, id: string): PlannedSnapshot {
     mode: undefined,
     key: id,
     selected: false,
-    broken: { reason: 'load-failed', message: 'Its stories file ./broken.stories.tsx failed to load: Error: boom.' },
+    broken: loadFailed,
   }
 }
 
@@ -127,6 +139,8 @@ describe('consistencyOutputOf', () => {
         'visual-check 1.2.3 · test · consistency · 2 snapshots',
         'Consistent: every baseline the stories call for is there, and none is an orphan.',
       ),
+      items: [],
+      results: [],
     })
   })
 
@@ -165,6 +179,8 @@ describe('consistencyOutputOf', () => {
           'delete it',
         '2 missing · 1 broken · 2 orphans',
       ),
+      items: [missingMode, broken, missingDocs],
+      results: [missingResultOf(), brokenResultOf(loadFailed, { attempts: 0 }), missingResultOf()],
     })
   })
 

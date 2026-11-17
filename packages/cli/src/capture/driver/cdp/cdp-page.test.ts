@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   type BrowserSystem,
   CaptureTooLargeError,
+  type ConsoleMessage,
+  consoleMessageFunction,
   type Driver,
   type Page,
   PageLoadError,
@@ -15,6 +17,7 @@ import {
   childFrame,
   defaultCaptureData,
   defaultVersionReply,
+  executionContext,
   FakeBrowser,
   type FakeBrowserOptions,
   mainFrame,
@@ -298,6 +301,34 @@ async function hasSettled(promise: Promise<unknown>): Promise<boolean> {
 }
 
 /**
+ * Has the fake browser say that the execution context `contextId` of the first page, or of the session given, called
+ * the message function, or the function named `name`, with `payload`, as the page script does for each console
+ * message or error it records. The fake browser's first navigation creates context 1, its second context 2, and so on.
+ */
+function sendMessage(
+  fake: FakeBrowser,
+  payload: string,
+  contextId: number,
+  { session = sessionId, name = consoleMessageFunction }: { session?: string; name?: string } = {},
+): void {
+  fake.emit('Runtime.bindingCalled', { name, payload, executionContextId: contextId }, session)
+}
+
+/**
+ * The payload the page script sends for a `console.log` of `text`.
+ */
+function logged(text: string): string {
+  return JSON.stringify({ kind: 'console.log', text })
+}
+
+/**
+ * A `console.log` message of `text`, as `Page.consoleMessages` gives it.
+ */
+function logMessage(text: string): ConsoleMessage {
+  return { kind: 'console.log', text }
+}
+
+/**
  * A phone-sized viewport with touch.
  */
 const touchViewport = { width: 375, height: 667, deviceScaleFactor: 2, touch: true }
@@ -350,6 +381,8 @@ describe('Driver.newPage', () => {
         sessionId,
       },
       { method: 'Emulation.setFocusEmulationEnabled', params: { enabled: true }, sessionId },
+      { method: 'Runtime.enable', params: {}, sessionId },
+      { method: 'Runtime.addBinding', params: { name: '__visualCheckMessage' }, sessionId },
       {
         method: 'Page.addScriptToEvaluateOnNewDocument',
         params: { source: 'window.__visualCheck = true' },
@@ -601,7 +634,7 @@ describe('Driver.newPage', () => {
 })
 
 describe('Page', () => {
-  it('turns on no Network, Runtime, Log, lifecycle events or request interception through a whole capture', async () => {
+  it('turns on no Network, Log, lifecycle events or request interception through a whole capture', async () => {
     const { browser, page } = await openPage()
 
     await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1, touch: false })
@@ -627,6 +660,8 @@ describe('Page', () => {
         'Emulation.setLocaleOverride',
         'Emulation.setEmulatedMedia',
         'Emulation.setFocusEmulationEnabled',
+        'Runtime.enable',
+        'Runtime.addBinding',
         'Page.addScriptToEvaluateOnNewDocument',
         'Emulation.setDeviceMetricsOverride',
         'Emulation.setTouchEmulationEnabled',
@@ -2485,5 +2520,137 @@ describe('Page.close', () => {
     await expect(page.clearStorage()).rejects.toThrow('The page was closed.')
     expect(sentOf(browser, 'Runtime.evaluate')).toEqual([])
     expect(sentOf(browser, 'Storage.clearCookies')).toEqual([])
+  })
+})
+
+describe('Page.consoleMessages', () => {
+  it('gives none before the page sent any', async () => {
+    const { page } = await openPage()
+
+    expect(page.consoleMessages()).toEqual([])
+  })
+
+  it("gives the messages the main world of the goto's document sent, in order", async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    sendMessage(browser, logged('first'), 1)
+    sendMessage(browser, JSON.stringify({ kind: 'unhandledrejection', text: 'nope' }), 1)
+    await flush()
+    expect(page.consoleMessages()).toEqual([logMessage('first'), { kind: 'unhandledrejection', text: 'nope' }])
+  })
+
+  it('keeps only the last 50', async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    for (let index = 1; index <= 60; index += 1) {
+      sendMessage(browser, logged(`line ${index}`), 1)
+    }
+
+    await flush()
+
+    const kept = page.consoleMessages()
+
+    expect(kept).toHaveLength(50)
+    expect(kept[0]).toEqual(logMessage('line 11'))
+    expect(kept[49]).toEqual(logMessage('line 60'))
+  })
+
+  it('forgets the messages from before a goto once it starts', async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    sendMessage(browser, logged('the earlier story'), 1)
+    await flush()
+    await page.goto(burgersUrl, 1000)
+    sendMessage(browser, logged('this story'), 2)
+    await flush()
+    expect(page.consoleMessages()).toEqual([logMessage('this story')])
+  })
+
+  it("ignores what the document before a goto sends once it started, though it comes after the goto's document", async () => {
+    const { browser, page } = await openPage({
+      handlers: {
+        'Page.navigate': (command: ReceivedCommand, fake: FakeBrowser) => {
+          if (fake.timesReceived('Page.navigate') === 2) {
+            sendMessage(fake, logged('the earlier story, late'), 1)
+          }
+
+          fake.emit(
+            'Page.frameNavigated',
+            { frame: mainFrame(targetId, String(command.params.url), 'loader-9') },
+            sessionId,
+          )
+          fake.emit('Runtime.executionContextCreated', executionContext(7, targetId), sessionId)
+          sendMessage(fake, logged('the earlier story, later still'), 1)
+          sendMessage(fake, logged('this story'), 7)
+          fake.reply(command, { frameId: targetId, loaderId: 'loader-9' })
+          fake.emit('Page.loadEventFired', { timestamp: 1 }, sessionId)
+        },
+      },
+    })
+
+    await page.goto(storyUrl, 1000)
+    await page.goto(burgersUrl, 1000)
+    sendMessage(browser, logged('the earlier story, last'), 1)
+    await flush()
+    expect(page.consoleMessages()).toEqual([logMessage('this story')])
+  })
+
+  it('keeps the messages of a story that navigated away, and those of the document it went to', async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    sendMessage(browser, logged('before leaving'), 1)
+    browser.emit('Page.frameNavigated', { frame: mainFrame(targetId, burgersUrl, 'loader-9') }, sessionId)
+    browser.emit('Runtime.executionContextCreated', executionContext(9, targetId), sessionId)
+    sendMessage(browser, logged('after leaving'), 9)
+    await flush()
+    await expect(page.evaluate('1', 1000)).rejects.toMatchObject(navigatedAway(burgersUrl))
+    expect(page.consoleMessages()).toEqual([logMessage('before leaving'), logMessage('after leaving')])
+  })
+
+  it("ignores a subframe's context, an isolated world and a context it wasn't told of", async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    browser.emit('Runtime.executionContextCreated', executionContext(5, 'child-frame'), sessionId)
+    browser.emit('Runtime.executionContextCreated', executionContext(6, targetId, false), sessionId)
+    browser.emit('Runtime.executionContextCreated', executionContext(8, targetId), 'session-9')
+    sendMessage(browser, logged('a subframe'), 5)
+    sendMessage(browser, logged('an isolated world'), 6)
+    sendMessage(browser, logged("another session's context"), 8)
+    sendMessage(browser, logged('an unknown context'), 42)
+    sendMessage(browser, logged('kept'), 1)
+    await flush()
+    expect(page.consoleMessages()).toEqual([logMessage('kept')])
+  })
+
+  it("ignores a payload it can't read, another function's calls and another session's", async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    sendMessage(browser, 'not JSON', 1)
+    sendMessage(browser, JSON.stringify({ kind: 'console.table', text: 'a table' }), 1)
+    sendMessage(browser, logged('another function'), 1, { name: 'otherBinding' })
+    sendMessage(browser, logged('another session'), 1, { session: 'session-9' })
+    sendMessage(browser, logged('kept'), 1)
+    await flush()
+    expect(page.consoleMessages()).toEqual([logMessage('kept')])
+  })
+
+  it('gives a copy, which the page never changes', async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    sendMessage(browser, logged('first'), 1)
+    await flush()
+
+    const given = page.consoleMessages()
+
+    sendMessage(browser, logged('second'), 1)
+    await flush()
+    expect(given).toEqual([logMessage('first')])
   })
 })

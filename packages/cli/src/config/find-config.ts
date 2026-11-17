@@ -1,10 +1,10 @@
 import { existsSync, statSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, extname, join, resolve } from 'node:path'
 
 /**
  * The names a config file takes, in the order the search tries them in each folder.
  */
-export const configFileNames = [
+const configFileNames = [
   'visual-check.config.ts',
   'visual-check.config.mts',
   'visual-check.config.js',
@@ -43,4 +43,28 @@ export function findConfig(startDirectory: string): string | undefined {
   }
 
   return findConfig(parent)
+}
+
+/**
+ * Whether a path ends in one of a config file's extensions: `.ts`, `.mts`, `.js` or `.mjs`.
+ */
+export function hasConfigExtension(path: string): boolean {
+  return configFileNames.some((name) => extname(name) === extname(path))
+}
+
+/**
+ * Gives the absolute path of the config a run would load, without loading it: the path `--config` gives, absolute or
+ * relative to `cwd`, when it is a config file, else nothing; and with no path given, the config the search finds from
+ * `cwd`, or nothing. It never throws.
+ *
+ * @public
+ */
+export function locateConfig(cwd: string, given: string | undefined): string | undefined {
+  if (given === undefined) {
+    return findConfig(cwd)
+  }
+
+  const path = resolve(cwd, given)
+
+  return hasConfigExtension(path) && isFile(path) ? path : undefined
 }

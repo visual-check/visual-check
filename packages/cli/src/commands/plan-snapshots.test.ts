@@ -270,6 +270,8 @@ describe('planSnapshots', () => {
     const broken: BrokenStory = {
       reason: 'load-failed',
       message: "Its stories file ./b.stories.tsx didn't load within readyTimeout (5000 ms).",
+      loadError: undefined,
+      readyTimeoutMs: 5000,
     }
     const plan = await planSnapshots(
       [{ storybook: web, stories: [stories[0] as Story], allStories: stories }],
@@ -299,14 +301,20 @@ describe('planSnapshots', () => {
         brokenOf(web, stories[0], {
           reason: 'load-failed',
           message: "Its stories file ./a.stories.tsx failed to load: SyntaxError: Unexpected token '<'.",
+          loadError: "SyntaxError: Unexpected token '<'",
+          readyTimeoutMs: undefined,
         }),
         brokenOf(web, stories[1], {
           reason: 'load-failed',
           message: 'Its stories file ./b.stories.tsx failed to load: TypeError: x is not a function.',
+          loadError: 'TypeError: x is not a function.',
+          readyTimeoutMs: undefined,
         }),
         brokenOf(web, stories[2], {
           reason: 'load-failed',
           message: 'Its stories file ./c.stories.tsx failed to load.',
+          loadError: undefined,
+          readyTimeoutMs: undefined,
         }),
       ],
     })
@@ -320,6 +328,8 @@ describe('planSnapshots', () => {
     const broken: BrokenStory = {
       reason: 'load-failed',
       message: "Its stories file ./button.stories.tsx didn't load within readyTimeout (7500 ms).",
+      loadError: undefined,
+      readyTimeoutMs: 7500,
     }
 
     expect(
@@ -754,6 +764,8 @@ describe('planSnapshots modes', () => {
         brokenOf(web, storyOf('a'), {
           reason: 'load-failed',
           message: "Its stories file ./button.stories.tsx didn't load within readyTimeout (5000 ms).",
+          loadError: undefined,
+          readyTimeoutMs: 5000,
         }),
       ],
     })

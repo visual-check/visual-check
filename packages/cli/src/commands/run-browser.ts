@@ -68,11 +68,12 @@ export interface RunBrowser {
    * launches the browser and checks that it is the browser package's build, and every call shares that one browser. A
    * worker's first call on a browser opens its session there.
    *
-   * When the first browser exits, each capture in flight on it gives a broken story, `browser-exited`, even when it
-   * fails after the relaunch. The browser counts as exited from the first capture that fails with the exit, or from
-   * its `exited`, so an exit seen between captures breaks no story. The next call relaunches the browser and checks it
-   * the same way, and every call after shares the relaunched one. A worker's session in the first browser is closed
-   * when the worker opens one in the relaunched browser. The first browser itself stays open until `close()`.
+   * When the first browser exits, each capture in flight on it gives a broken story, `browser-exited`, without console
+   * messages, even when it fails after the relaunch. The browser counts as exited from the first capture that fails
+   * with the exit, or from its `exited`, so an exit seen between captures breaks no story. The next call relaunches the
+   * browser and checks it the same way, and every call after shares the relaunched one. A worker's session in the first
+   * browser is closed when the worker opens one in the relaunched browser. The first browser itself stays open until
+   * `close()`.
    *
    * An exit of the first browser whose output says its graphics process couldn't start, before any capture gave a
    * snapshot, means this machine can't run the platform: a relaunch would fail the same way, so every capture that

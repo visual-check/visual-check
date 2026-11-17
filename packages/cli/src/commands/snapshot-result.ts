@@ -1,12 +1,15 @@
 import { BaselineError } from '../baselines/baseline-error.js'
 import type { BrokenStory, StoryCapture, StoryHosts, StoryToCapture } from '../capture/capture-session.js'
+import type { ConsoleMessage } from '../capture/driver/driver.js'
 import type { StoryMask } from '../capture/prepare-capture.js'
 import type { StoryOptions } from '../config/story-options.js'
+import type { ReportImages } from '../report/report-document.js'
 import { storyUrlOf } from '../storybook/read-stories.js'
 import {
   ImageDecodeError,
   type ImageRegion,
   type VisualDiff,
+  type VisualDiffFailure,
   type VisualDiffResult,
 } from '../visual-diff/visual-diff.js'
 import type { SnapshotToCapture } from './plan-snapshots.js'
@@ -17,9 +20,20 @@ import type { SnapshotToCapture } from './plan-snapshots.js'
 export type SnapshotStatus = 'passed' | 'differs' | 'missing' | 'broken' | 'written' | 'kept'
 
 /**
- * One snapshot's status, the text its line ends with and, for a captured snapshot, how long Storybook's `completing`
- * render step took and, for `update`, the hosts its story reaches. A snapshot that differs can carry a hint, printed
- * under its line.
+ * What the report keeps of a comparison that differed: why, its message, the pixels that differ and are allowed, and
+ * both sizes.
+ */
+export type ReportedComparison = Pick<
+  VisualDiffFailure,
+  'reason' | 'message' | 'differ' | 'allowed' | 'baselineSize' | 'snapshotSize'
+>
+
+/**
+ * One snapshot's status, the text its line ends with, how many captures it took and, for a captured snapshot, how long
+ * Storybook's `completing` render step took and, for `update`, the hosts its story reaches. A snapshot that differs
+ * can carry a hint, printed under its line. It also carries what the report lists of it: the comparison that
+ * differed, why it broke, the hosts its hint names, the console messages and the images of the listed capture, and why
+ * `update` wrote it.
  */
 export interface SnapshotResult {
   /**
@@ -30,6 +44,12 @@ export interface SnapshotResult {
    * The line's last column, such as `142 ms` or `differs: 84 differ, 80 allowed (20 at scale 2)`.
    */
   detail: string
+  /**
+   * How many captures visual-check asked for: 0 for a missing baseline and a stories file that didn't load, 1 and the
+   * retries made for `test`, and the loads made for `update`. The capture session's own retries of a story that
+   * navigates away aren't counted.
+   */
+  attempts: number
   /**
    * How long Storybook's `completing` render step took for the story, in ms, on its first load for `update`.
    * `undefined` for a story that wasn't captured, or whose page didn't see the step.
@@ -51,6 +71,84 @@ export interface SnapshotResult {
    * lines with no indentation.
    */
   hint?: string[]
+  /**
+   * How the first capture differed from the baseline: for `test`, of a snapshot that differs or passed only on a
+   * retry; for `update`, of a baseline written because it differed.
+   */
+  comparison?: ReportedComparison
+  /**
+   * Why a broken snapshot's story can't be captured.
+   */
+  broken?: BrokenStory
+  /**
+   * The hosts of the remote content a differing snapshot differs only inside, which its hint names.
+   */
+  hintHosts?: string[]
+  /**
+   * The console messages and errors of the capture the report lists: `test`'s first capture, or the load `update`
+   * wrote or broke on. Left out when that capture had no page.
+   */
+  console?: ConsoleMessage[]
+  /**
+   * The images `test` wrote to the report folder, relative to it: the first capture's baseline, snapshot and visual
+   * diff of a snapshot that differs or passed only on a retry, or a broken story's image of its page as the snapshot.
+   */
+  images?: ReportImages
+  /**
+   * Why `update` wrote the baseline: it was missing, or the snapshot differed from it.
+   */
+  writtenFor?: 'missing' | 'differs'
+}
+
+/**
+ * What a broken snapshot's result keeps besides its broken story: how many captures it took and the console messages
+ * of the capture that broke, when it had a page.
+ */
+interface BrokenAttempts {
+  /**
+   * How many captures visual-check asked for, the one that broke included.
+   */
+  attempts: number
+  /**
+   * The console messages and errors of the capture that broke. `undefined` when it had no page or no capture.
+   */
+  console?: ConsoleMessage[] | undefined
+}
+
+/**
+ * The snapshot the browser returned can't be decoded, which its PNG files rule out unless something is wrong with the
+ * browser or the machine.
+ */
+export class SnapshotDecodeError extends Error {
+  /**
+   * The class's name, so a stack trace or a log line reads `SnapshotDecodeError`.
+   */
+  override name = 'SnapshotDecodeError'
+
+  /**
+   * The name of the snapshot's Storybook.
+   */
+  readonly storybook: string
+
+  /**
+   * The snapshot's key: `<story-id>`, or `<story-id>.<mode>` for a mode.
+   */
+  readonly key: string
+
+  /**
+   * The decoder's reason, such as `Input buffer contains unsupported image format`.
+   */
+  readonly reason: string
+
+  /**
+   * Keeps which snapshot couldn't be decoded and the decoder's reason.
+   */
+  constructor(storybook: string, key: string, reason: string) {
+    super(`Couldn't decode the snapshot of ${storybook}  ${key}: ${reason}.`)
+    this.storybook = storybook
+    this.key = key
+    this.reason = reason
+  }
 }
 
 /**
@@ -86,48 +184,107 @@ export function storyToCaptureOf({ storybook, story, options, globals, viewport 
 }
 
 /**
- * Gives the result of a snapshot whose baseline is missing, whose detail says to run `update`.
+ * Gives the result of a snapshot whose baseline is missing, whose detail says to run `update`. It took no capture.
  */
 export function missingResultOf(): SnapshotResult {
-  return { status: 'missing', detail: 'missing: no baseline yet; run visual-check update to write it' }
+  return { status: 'missing', detail: 'missing: no baseline yet; run visual-check update to write it', attempts: 0 }
 }
 
 /**
- * Gives a broken snapshot's result, whose detail is the broken story's message.
+ * Gives a broken snapshot's result, whose detail is the broken story's message, with the broken story, how many
+ * captures it took and, when given, the console messages of the capture that broke.
  */
-export function brokenResultOf(broken: BrokenStory): SnapshotResult {
-  return { status: 'broken', detail: `broken: ${broken.message}` }
+export function brokenResultOf(broken: BrokenStory, { attempts, console }: BrokenAttempts): SnapshotResult {
+  return {
+    status: 'broken',
+    detail: `broken: ${broken.message}`,
+    attempts,
+    broken,
+    ...(console === undefined ? {} : { console }),
+  }
 }
 
 /**
- * Compares a snapshot with an earlier image of it, its baseline or an earlier capture, by the story's tolerance, at its
- * viewport's device scale factor, a size difference counting as a difference. With `regions`, a failure by pixels says
- * whether every differing pixel lies inside one of them.
+ * Gives what the report keeps of a comparison that differed, leaving out the visual diff's bytes and the regions hit.
+ */
+export function reportedComparisonOf({
+  reason,
+  message,
+  differ,
+  allowed,
+  baselineSize,
+  snapshotSize,
+}: VisualDiffFailure): ReportedComparison {
+  return { reason, message, differ, allowed, baselineSize, snapshotSize }
+}
+
+/**
+ * Compares a snapshot with an earlier image of it by the story's tolerance, at its viewport's device scale factor, a
+ * size difference counting as a difference. With `regions`, a failure by pixels says whether every differing pixel
+ * lies inside one of them. `earlierErrorOf` gives what to throw, from the decoder's reason, when the earlier image
+ * can't be decoded.
  *
- * @throws {ImageDecodeError} When the images differ and one of them can't be decoded.
- * @throws {Error} When a visual diff thread stops mid-comparison.
+ * @throws {SnapshotDecodeError} When the images differ and the snapshot can't be decoded.
+ * @throws {VisualDiffError} When sharp can't be loaded, or a visual diff thread stops mid-comparison.
  */
-export async function compareForStory(
+async function compareImagesOf(
   visualDiff: VisualDiff,
   item: SnapshotToCapture,
   earlier: Uint8Array,
   snapshot: Uint8Array,
-  regions?: readonly ImageRegion[],
+  regions: readonly ImageRegion[] | undefined,
+  earlierErrorOf: (error: ImageDecodeError) => Error,
 ): Promise<VisualDiffResult> {
-  return await visualDiff.compare({
-    baseline: earlier,
-    snapshot,
-    tolerance: item.tolerance,
-    scale: item.viewport.deviceScaleFactor,
-    ...(regions === undefined ? {} : { regions }),
-  })
+  try {
+    return await visualDiff.compare({
+      baseline: earlier,
+      snapshot,
+      tolerance: item.tolerance,
+      scale: item.viewport.deviceScaleFactor,
+      ...(regions === undefined ? {} : { regions }),
+    })
+  } catch (error) {
+    if (!(error instanceof ImageDecodeError)) {
+      throw error
+    }
+
+    throw error.image === 'snapshot'
+      ? new SnapshotDecodeError(item.storybook.name, item.key, error.reason)
+      : earlierErrorOf(error)
+  }
 }
 
 /**
- * Compares a snapshot with its baseline at `path` as `compareForStory` does, naming the baseline when it can't be
- * decoded.
+ * Compares a later capture of a snapshot with an earlier one, as `compareWithBaseline` compares it with its baseline.
+ * Both are images the browser returned, so either one that can't be decoded names the snapshot.
+ *
+ * @throws {SnapshotDecodeError} When the captures differ and either one can't be decoded.
+ * @throws {VisualDiffError} When sharp can't be loaded, or a visual diff thread stops mid-comparison.
+ */
+export async function compareCaptures(
+  visualDiff: VisualDiff,
+  item: SnapshotToCapture,
+  earlier: Uint8Array,
+  later: Uint8Array,
+): Promise<VisualDiffResult> {
+  return await compareImagesOf(
+    visualDiff,
+    item,
+    earlier,
+    later,
+    undefined,
+    (error) => new SnapshotDecodeError(item.storybook.name, item.key, error.reason),
+  )
+}
+
+/**
+ * Compares a snapshot with its baseline at `path` by the story's tolerance, at its viewport's device scale factor, a
+ * size difference counting as a difference. With `regions`, a failure by pixels says whether every differing pixel
+ * lies inside one of them.
  *
  * @throws {BaselineError} When the files differ and the baseline can't be decoded, with the decoder's reason.
+ * @throws {SnapshotDecodeError} When the files differ and the snapshot can't be decoded.
+ * @throws {VisualDiffError} When sharp can't be loaded, or a visual diff thread stops mid-comparison.
  */
 export async function compareWithBaseline(
   visualDiff: VisualDiff,
@@ -137,14 +294,13 @@ export async function compareWithBaseline(
   path: string,
   regions?: readonly ImageRegion[],
 ): Promise<VisualDiffResult> {
-  try {
-    return await compareForStory(visualDiff, item, baseline, snapshot, regions)
-  } catch (error) {
-    if (error instanceof ImageDecodeError && error.image === 'baseline') {
-      // The bare decoder reason, since the printed line already names the baseline.
-      throw new BaselineError('decode', path, new Error(error.reason, { cause: error }))
-    }
-
-    throw error
-  }
+  return await compareImagesOf(
+    visualDiff,
+    item,
+    baseline,
+    snapshot,
+    regions,
+    // The bare decoder reason, since the printed line already names the baseline.
+    (error) => new BaselineError('decode', path, new Error(error.reason, { cause: error })),
+  )
 }

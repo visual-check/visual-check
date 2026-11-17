@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import type { BrokenStory, StoryCapture, StoryHosts, StoryToCapture } from '../capture/capture-session.js'
+import type { ConsoleMessage } from '../capture/driver/driver.js'
 import type { Tolerance } from '../config/define-config.js'
 import { greyPng, type PixelChange, whitePixels } from '../visual-diff/images.fixture.js'
 import { createVisualDiff, type VisualDiff } from '../visual-diff/visual-diff.js'
@@ -30,6 +31,11 @@ const grey = new Uint8Array(await greyPng(10, 10, 128))
  * A dark grey PNG file of 10 × 10 pixels, whose 100 pixels all differ from `black`'s, `white`'s and `grey`'s.
  */
 const darkGrey = new Uint8Array(await greyPng(10, 10, 64))
+
+/**
+ * A file the browser could return that isn't a PNG file, so it can't be decoded.
+ */
+const notPng = new TextEncoder().encode('not a PNG')
 
 /**
  * `black` with 3 white pixels: within the default tolerance of `black`, beyond it of `white`.
@@ -74,16 +80,56 @@ const defaultTolerance: Required<Tolerance> = { color: 0.01, pixels: 20 }
 const brokenStory: BrokenStory = { reason: 'error', message: 'Storybook reported the story finished with an error.' }
 
 /**
- * The detail of a story whose page changed in the second after its first capture, by 100 pixels.
+ * The broken story of a story whose page changed in the second after its first capture, by 100 pixels.
  */
-const changedDetail =
-  'broken: The story changed in the second after its capture: 100 differ, 20 allowed. Use its wait hook to wait ' +
-  'until it settles.'
+const changedStory: BrokenStory = {
+  reason: 'changed-after-capture',
+  message:
+    'The story changed in the second after its capture: 100 differ, 20 allowed. Use its wait hook to wait until it ' +
+    'settles.',
+}
 
 /**
- * The detail of a story none of whose 3 loads agreed.
+ * The broken story of a story none of whose 3 loads agreed.
  */
-const unstableDetail = "broken: No two of the story's 3 loads agreed, so its baseline wasn't written."
+const unstableStory: BrokenStory = {
+  reason: 'unstable',
+  message: "No two of the story's 3 loads agreed, so its baseline wasn't written.",
+}
+
+/**
+ * The result of a story whose page changed in the second after its first capture, by 100 pixels.
+ */
+const changedResult = {
+  status: 'broken',
+  detail: `broken: ${changedStory.message}`,
+  attempts: 1,
+  broken: changedStory,
+  console: [],
+}
+
+/**
+ * The result of a story none of whose 3 loads agreed.
+ */
+const unstableResult = {
+  status: 'broken',
+  detail: `broken: ${unstableStory.message}`,
+  attempts: 3,
+  broken: unstableStory,
+  console: [],
+}
+
+/**
+ * What the report keeps of the first load's comparison with a baseline all 100 of whose pixels it differs from.
+ */
+const allDifferComparison = {
+  reason: 'pixels',
+  message: '100 differ, 20 allowed',
+  differ: 100,
+  allowed: 20,
+  baselineSize: { width: 10, height: 10 },
+  snapshotSize: { width: 10, height: 10 },
+}
 
 /**
  * The visual diff every test compares with, closed after the last test.
@@ -132,6 +178,10 @@ type FakeLoad =
        */
       hosts?: StoryHosts
       /**
+       * The console messages of the load's page. None when not given.
+       */
+      console?: ConsoleMessage[]
+      /**
        * The snapshots of the attempts before the last, in order, each of whose second capture navigated away, so the
        * session tried again. None when not given.
        */
@@ -147,6 +197,10 @@ type FakeLoad =
        * Why the load can't be captured.
        */
       broken: BrokenStory
+      /**
+       * The console messages of the load's page. Left out when not given, as for a load with no page.
+       */
+      console?: ConsoleMessage[]
     }
 
 /**
@@ -218,8 +272,8 @@ function fakeCapturesOf(loads: readonly FakeLoad[]): FakeCaptures {
         await ask(earlier)
       }
 
-      const { snapshot, later = snapshot, completingMs, hosts } = load
-      const capture: StoryCapture = { snapshot, completingMs, ...(hosts === undefined ? {} : { hosts }) }
+      const { snapshot, later = snapshot, completingMs, hosts, console = [] } = load
+      const capture: StoryCapture = { snapshot, completingMs, console, ...(hosts === undefined ? {} : { hosts }) }
 
       return (await ask(snapshot)) && load.ignoresAgain !== true ? { ...capture, capturedAgain: later } : capture
     },
@@ -287,6 +341,9 @@ describe('updateSnapshot', () => {
     expect(await updateSnapshot(item, fake.captureStory, tools)).toEqual({
       status: 'written',
       detail: 'written: missing',
+      attempts: 2,
+      writtenFor: 'missing',
+      console: [],
     })
     expect(bytesAt(path)).toEqual(threeWhite)
     expect(fake.stories).toHaveLength(2)
@@ -312,6 +369,7 @@ describe('updateSnapshot', () => {
     expect(await updateSnapshot(item, fake.captureStory, { visualDiff, recaptureDelayMs: 60_000 })).toEqual({
       status: 'kept',
       detail: 'kept',
+      attempts: 1,
     })
     expect(bytesAt(path)).toEqual(black)
     expect(fake.stories).toHaveLength(1)
@@ -322,10 +380,7 @@ describe('updateSnapshot', () => {
     const { item, path } = snapshotOf()
     const fake = fakeCapturesOf([{ snapshot: black, later: white }])
 
-    expect(await updateSnapshot(item, fake.captureStory, tools)).toStrictEqual({
-      status: 'broken',
-      detail: changedDetail,
-    })
+    expect(await updateSnapshot(item, fake.captureStory, tools)).toStrictEqual(changedResult)
     expect(existsSync(path)).toBe(false)
     expect(fake.stories).toHaveLength(1)
   })
@@ -334,10 +389,7 @@ describe('updateSnapshot', () => {
     const { item, path } = snapshotOf(grey)
     const fake = fakeCapturesOf([{ snapshot: black, later: white }])
 
-    expect(await updateSnapshot(item, fake.captureStory, tools)).toStrictEqual({
-      status: 'broken',
-      detail: changedDetail,
-    })
+    expect(await updateSnapshot(item, fake.captureStory, tools)).toStrictEqual(changedResult)
     expect(bytesAt(path)).toEqual(grey)
     expect(fake.stories).toHaveLength(1)
   })
@@ -346,11 +398,14 @@ describe('updateSnapshot', () => {
     const { item, path } = snapshotOf()
     const fake = fakeCapturesOf([{ snapshot: black, later: taller }])
 
+    const message =
+      'The story changed in the second after its capture: size changed: 10×10 → 10×12. Use its wait hook to wait ' +
+      'until it settles.'
+
     expect(await updateSnapshot(item, fake.captureStory, tools)).toStrictEqual({
-      status: 'broken',
-      detail:
-        'broken: The story changed in the second after its capture: size changed: 10×10 → 10×12. Use its wait hook ' +
-        'to wait until it settles.',
+      ...changedResult,
+      detail: `broken: ${message}`,
+      broken: { reason: 'changed-after-capture', message },
     })
     expect(existsSync(path)).toBe(false)
   })
@@ -362,7 +417,10 @@ describe('updateSnapshot', () => {
     expect(await updateSnapshot(item, fake.captureStory, tools)).toEqual({
       status: 'written',
       detail: 'written: missing · flaky',
+      attempts: 3,
+      writtenFor: 'missing',
       flaky: true,
+      console: [],
     })
     expect(bytesAt(path)).toEqual(black)
     expect(fake.stories).toHaveLength(3)
@@ -375,7 +433,10 @@ describe('updateSnapshot', () => {
     expect(await updateSnapshot(item, fake.captureStory, tools)).toEqual({
       status: 'written',
       detail: 'written: missing · flaky',
+      attempts: 3,
+      writtenFor: 'missing',
       flaky: true,
+      console: [],
     })
     expect(bytesAt(path)).toEqual(threeWhite)
   })
@@ -384,10 +445,7 @@ describe('updateSnapshot', () => {
     const { item, path } = snapshotOf()
     const fake = fakeCapturesOf([{ snapshot: black }, { snapshot: white }, { snapshot: grey }])
 
-    expect(await updateSnapshot(item, fake.captureStory, tools)).toStrictEqual({
-      status: 'broken',
-      detail: unstableDetail,
-    })
+    expect(await updateSnapshot(item, fake.captureStory, tools)).toStrictEqual(unstableResult)
     expect(existsSync(path)).toBe(false)
     expect(fake.stories).toHaveLength(3)
   })
@@ -396,10 +454,7 @@ describe('updateSnapshot', () => {
     const { item, path } = snapshotOf(darkGrey)
     const fake = fakeCapturesOf([{ snapshot: black }, { snapshot: white }, { snapshot: grey }])
 
-    expect(await updateSnapshot(item, fake.captureStory, tools)).toStrictEqual({
-      status: 'broken',
-      detail: unstableDetail,
-    })
+    expect(await updateSnapshot(item, fake.captureStory, tools)).toStrictEqual(unstableResult)
     expect(bytesAt(path)).toEqual(darkGrey)
   })
 
@@ -410,6 +465,7 @@ describe('updateSnapshot', () => {
     expect(await updateSnapshot(item, fake.captureStory, tools)).toEqual({
       status: 'kept',
       detail: 'kept · flaky',
+      attempts: 2,
       flaky: true,
     })
     expect(bytesAt(path)).toEqual(black)
@@ -421,7 +477,14 @@ describe('updateSnapshot', () => {
     const fake = fakeCapturesOf([{ snapshot: white }, { snapshot: threeBlack }])
     const result = await updateSnapshot(item, fake.captureStory, tools)
 
-    expect(result).toEqual({ status: 'written', detail: 'written: differs: 100 differ, 20 allowed' })
+    expect(result).toEqual({
+      status: 'written',
+      detail: 'written: differs: 100 differ, 20 allowed',
+      attempts: 2,
+      writtenFor: 'differs',
+      comparison: allDifferComparison,
+      console: [],
+    })
     expect(result.flaky).toBeUndefined()
     expect(bytesAt(path)).toEqual(threeBlack)
     expect(fake.stories).toHaveLength(2)
@@ -434,7 +497,11 @@ describe('updateSnapshot', () => {
     expect(await updateSnapshot(item, fake.captureStory, tools)).toEqual({
       status: 'written',
       detail: 'written: differs: 100 differ, 20 allowed · flaky',
+      attempts: 3,
+      writtenFor: 'differs',
+      comparison: allDifferComparison,
       flaky: true,
+      console: [],
     })
     expect(bytesAt(path)).toEqual(threeBlack)
     expect(fake.stories).toHaveLength(3)
@@ -448,6 +515,7 @@ describe('updateSnapshot', () => {
     expect(await updateSnapshot(item, fake.captureStory, tools)).toEqual({
       status: 'kept',
       detail: 'kept · flaky',
+      attempts: 2,
       flaky: true,
     })
     expect(bytesAt(path)).toEqual(black)
@@ -461,6 +529,9 @@ describe('updateSnapshot', () => {
     expect(await updateSnapshot(lenient.item, lenientFake.captureStory, tools)).toEqual({
       status: 'written',
       detail: 'written: missing',
+      attempts: 2,
+      writtenFor: 'missing',
+      console: [],
     })
     expect(lenientFake.stories).toHaveLength(2)
 
@@ -470,7 +541,10 @@ describe('updateSnapshot', () => {
     expect(await updateSnapshot(strict.item, strictFake.captureStory, tools)).toEqual({
       status: 'written',
       detail: 'written: missing · flaky',
+      attempts: 3,
+      writtenFor: 'missing',
       flaky: true,
+      console: [],
     })
     expect(strictFake.stories).toHaveLength(3)
   })
@@ -482,7 +556,10 @@ describe('updateSnapshot', () => {
     expect(await updateSnapshot(item, fake.captureStory, tools)).toEqual({
       status: 'written',
       detail: 'written: missing · flaky',
+      attempts: 3,
+      writtenFor: 'missing',
       flaky: true,
+      console: [],
     })
     expect(bytesAt(path)).toEqual(taller)
     expect(fake.stories).toHaveLength(3)
@@ -495,6 +572,8 @@ describe('updateSnapshot', () => {
     expect(await updateSnapshot(item, fake.captureStory, tools)).toStrictEqual({
       status: 'broken',
       detail: `broken: ${brokenStory.message}`,
+      attempts: 1,
+      broken: brokenStory,
     })
     expect(fake.stories).toHaveLength(1)
   })
@@ -506,6 +585,8 @@ describe('updateSnapshot', () => {
     expect(await updateSnapshot(item, fake.captureStory, tools)).toStrictEqual({
       status: 'broken',
       detail: `broken: ${brokenStory.message}`,
+      attempts: 2,
+      broken: brokenStory,
     })
     expect(existsSync(path)).toBe(false)
   })
@@ -517,6 +598,8 @@ describe('updateSnapshot', () => {
     expect(await updateSnapshot(item, fake.captureStory, tools)).toStrictEqual({
       status: 'broken',
       detail: `broken: ${brokenStory.message}`,
+      attempts: 3,
+      broken: brokenStory,
     })
     expect(bytesAt(path)).toEqual(grey)
   })
@@ -533,9 +616,12 @@ describe('updateSnapshot', () => {
     expect(await updateSnapshot(written.item, writtenFake.captureStory, tools)).toStrictEqual({
       status: 'written',
       detail: 'written: missing · flaky',
+      attempts: 3,
       completingMs: 3,
       hosts: hostsOf('first.test'),
+      writtenFor: 'missing',
       flaky: true,
+      console: [],
     })
 
     const kept = snapshotOf(black)
@@ -547,6 +633,7 @@ describe('updateSnapshot', () => {
     expect(await updateSnapshot(kept.item, keptFake.captureStory, tools)).toStrictEqual({
       status: 'kept',
       detail: 'kept · flaky',
+      attempts: 2,
       completingMs: 3,
       hosts: hostsOf('first.test'),
       flaky: true,
@@ -557,7 +644,11 @@ describe('updateSnapshot', () => {
     const kept = snapshotOf(black)
     const keptFake = fakeCapturesOf([{ snapshot: threeWhite, retriedFrom: [white] }])
 
-    expect(await updateSnapshot(kept.item, keptFake.captureStory, tools)).toEqual({ status: 'kept', detail: 'kept' })
+    expect(await updateSnapshot(kept.item, keptFake.captureStory, tools)).toEqual({
+      status: 'kept',
+      detail: 'kept',
+      attempts: 1,
+    })
     expect(keptFake.answers).toEqual([true, false])
     expect(keptFake.stories).toHaveLength(1)
 
@@ -567,8 +658,58 @@ describe('updateSnapshot', () => {
     expect(await updateSnapshot(written.item, writtenFake.captureStory, tools)).toEqual({
       status: 'written',
       detail: 'written: differs: 100 differ, 20 allowed',
+      attempts: 2,
+      writtenFor: 'differs',
+      comparison: allDifferComparison,
+      console: [],
     })
     expect(writtenFake.answers).toEqual([true, true])
+  })
+
+  it('gives the console messages of the load it writes or breaks on', async () => {
+    const consoleOf = (text: string): ConsoleMessage[] => [{ kind: 'console.log', text }]
+    const second = snapshotOf()
+    const secondFake = fakeCapturesOf([
+      { snapshot: black, console: consoleOf('first') },
+      { snapshot: black, console: consoleOf('second') },
+    ])
+
+    expect(await updateSnapshot(second.item, secondFake.captureStory, tools)).toMatchObject({
+      status: 'written',
+      console: consoleOf('second'),
+    })
+
+    const third = snapshotOf()
+    const thirdFake = fakeCapturesOf([
+      { snapshot: black, console: consoleOf('first') },
+      { snapshot: white, console: consoleOf('second') },
+      { snapshot: white, console: consoleOf('third') },
+    ])
+
+    expect(await updateSnapshot(third.item, thirdFake.captureStory, tools)).toMatchObject({
+      status: 'written',
+      console: consoleOf('third'),
+    })
+
+    const changed = snapshotOf()
+    const changedFake = fakeCapturesOf([{ snapshot: black, later: white, console: consoleOf('first') }])
+
+    expect(await updateSnapshot(changed.item, changedFake.captureStory, tools)).toMatchObject({
+      status: 'broken',
+      console: consoleOf('first'),
+    })
+
+    const broken = snapshotOf()
+    const brokenFake = fakeCapturesOf([
+      { snapshot: black, console: consoleOf('first') },
+      { broken: brokenStory, console: consoleOf('second') },
+    ])
+
+    expect(await updateSnapshot(broken.item, brokenFake.captureStory, tools)).toMatchObject({
+      status: 'broken',
+      attempts: 2,
+      console: consoleOf('second'),
+    })
   })
 
   it('asks for the second capture no sooner than the delay after its first', async () => {
@@ -643,4 +784,24 @@ describe('updateSnapshot', () => {
       action: 'decode',
     })
   })
+})
+
+describe('updateSnapshot with a capture that cannot be decoded', () => {
+  it.each([
+    ['earlier', [{ snapshot: notPng }, { snapshot: black }]],
+    ['later', [{ snapshot: black }, { snapshot: notPng }]],
+  ] as const)(
+    'rejects with a SnapshotDecodeError naming the snapshot when the %s of two loads is not a PNG',
+    async (_, loads) => {
+      const { item } = snapshotOf()
+      const fake = fakeCapturesOf([...loads])
+
+      await expect(updateSnapshot(item, fake.captureStory, tools)).rejects.toMatchObject({
+        name: 'SnapshotDecodeError',
+        storybook: 'web',
+        key: 'a',
+        reason: 'Input buffer contains unsupported image format',
+      })
+    },
+  )
 })

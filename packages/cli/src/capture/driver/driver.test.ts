@@ -8,6 +8,7 @@ import {
   PageLoadError,
   PageNavigatedAwayError,
   PageTimeoutError,
+  readConsoleMessage,
 } from './driver.js'
 
 describe('describeExit', () => {
@@ -129,5 +130,45 @@ describe('browserThatFailedToStart', () => {
     expect(await browser.fromBrowser.toArray()).toEqual([])
     expect(await browser.output.toArray()).toEqual([])
     expect(() => browser.kill()).not.toThrow()
+  })
+})
+
+describe('readConsoleMessage', () => {
+  it.each([
+    ['console.debug'],
+    ['console.info'],
+    ['console.log'],
+    ['console.warn'],
+    ['console.error'],
+    ['error'],
+    ['unhandledrejection'],
+  ])('reads a %s message', (kind) => {
+    expect(readConsoleMessage(JSON.stringify({ kind, text: 'a line' }))).toEqual({ kind, text: 'a line' })
+  })
+
+  it('keeps only the kind and the text', () => {
+    expect(readConsoleMessage(JSON.stringify({ kind: 'console.log', text: 'a line', extra: 1 }))).toEqual({
+      kind: 'console.log',
+      text: 'a line',
+    })
+  })
+
+  it('cuts the text to 500 characters', () => {
+    expect(readConsoleMessage(JSON.stringify({ kind: 'console.log', text: 'x'.repeat(600) }))).toEqual({
+      kind: 'console.log',
+      text: 'x'.repeat(500),
+    })
+  })
+
+  it.each([
+    ['text that is not JSON', 'console.log'],
+    ['JSON that is not an object', '"console.log"'],
+    ['null', 'null'],
+    ['an unknown kind', JSON.stringify({ kind: 'console.table', text: 'a line' })],
+    ['a missing kind', JSON.stringify({ text: 'a line' })],
+    ['a text that is not a string', JSON.stringify({ kind: 'console.log', text: 42 })],
+    ['a missing text', JSON.stringify({ kind: 'console.log' })],
+  ])('rejects %s', (_case, payload) => {
+    expect(readConsoleMessage(payload)).toBeUndefined()
   })
 })

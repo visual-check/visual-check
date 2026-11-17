@@ -84,9 +84,33 @@ _Avoid_: Failed story, errored story
 A snapshot whose captures didn't agree within one run but settled on another try, so it still passed, was kept or was written.
 _Avoid_: Unstable snapshot, intermittent, passed on recapture
 
+**Console message**:
+What a story's page logged to its console, or an uncaught error or unhandled rejection it raised, kept with the snapshot for review.
+_Avoid_: Page message, log, console output
+
 **Report**:
-What one `test` run leaves for review: every snapshot that didn't plainly pass, with its reason and images. Each shard has its own.
+A run's account of its snapshots: the counts, and every snapshot that needs a look, with its outcome and reason. Every `test` leaves one in the report folder, each shard its own, and `update` prints its own on request. After a run error it holds only the error.
 _Avoid_: Results, output, HTML report
+
+**Report folder**:
+Where every `test` leaves its report, with the images of every snapshot the report lists. Each `test` replaces it whole.
+_Avoid_: Output folder, results folder, artifacts
+
+**Hint**:
+A note on a failure, or on a run, that points to a likely cause and its fix, such as remote content to mask.
+_Avoid_: Tip, suggestion
+
+**Warning**:
+A note about something in the project or the run that may make baselines or the selection wrong but fails nothing, such as real network requests `update` saw.
+_Avoid_: Notice, alert
+
+**Reporter**:
+The form a command's terminal output takes: `live` for a terminal, `log` for CI, or `json`, which prints the report.
+_Avoid_: Output format, formatter, output mode
+
+**Run error**:
+A problem outside any story that stops a run before it has results, such as an invalid config or an unreachable Storybook. It exits 2, unlike a broken story.
+_Avoid_: Fatal error, crash
 
 **Base**:
 The commit changed files are measured from: where the current branch split from the branch it targets.

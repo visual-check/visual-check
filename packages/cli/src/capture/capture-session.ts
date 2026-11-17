@@ -5,6 +5,7 @@ import {
   BrowserExitedError,
   type CaptureArea,
   CaptureTooLargeError,
+  type ConsoleMessage,
   type Driver,
   maxCaptureSide,
   type Page,
@@ -69,7 +70,19 @@ export interface CaptureSettings {
    * It turns on the page's request watching, so only `update` sets it.
    */
   listHosts: boolean
+  /**
+   * How long the capture of a broken story's image may take, in ms: `brokenImageTimeLimitMs` outside tests. A capture
+   * that takes longer gives no image.
+   */
+  brokenImageTimeLimitMs: number
 }
+
+/**
+ * How long the capture of a broken story's image may take, in ms.
+ *
+ * @public
+ */
+export const brokenImageTimeLimitMs = 5_000
 
 /**
  * A snapshot to capture: a story's URL, with a mode's globals in it, the viewport to capture it at, the story's element
@@ -105,6 +118,12 @@ export interface StoryToCapture {
    * to list hosts.
    */
   findRemoteContent?: boolean
+  /**
+   * Whether a story that breaks while its page still shows something comes with an image of that page: for the
+   * reasons `error`, `play-threw`, `timeout`, `fonts-not-loaded`, `wait-threw` and `element-missing`, the full page,
+   * captured at once, before the page is closed. Without it, a broken story comes without one.
+   */
+  imageWhenBroken?: boolean
   /**
    * Decides whether to capture the same page again. It's called with the snapshot as soon as it's captured and what
    * the snapshot comes with is read, with the page left as it is. Each attempt that captured a snapshot calls it once,
@@ -191,8 +210,10 @@ export type BrokenReason =
 /**
  * A story that can't be captured: why, and a one-line message for people saying so. A capture session gives one for a
  * story it can't capture, and the run gives one for a story in flight when its browser exits and for each story of a
- * stories file that didn't load. `update` gives one for a story that doesn't render the same way twice. A story whose
- * fonts didn't load also keeps the faces still loading, and a story that navigated away keeps where it went.
+ * stories file that didn't load. `update` gives one for a story that doesn't render the same way twice. Some reasons
+ * keep details besides: the stories file's load error or the time it had, `play`'s stack, the readyTimeout that ran
+ * out, the font faces still loading, where a story that navigated away went, and the size of a capture too tall to
+ * take.
  *
  * @public
  */
@@ -201,11 +222,67 @@ export type BrokenStory =
       /**
        * Why the story can't be captured.
        */
-      reason: Exclude<BrokenReason, 'fonts-not-loaded' | 'navigated-away'>
+      reason: Exclude<
+        BrokenReason,
+        'load-failed' | 'play-threw' | 'timeout' | 'fonts-not-loaded' | 'navigated-away' | 'too-tall'
+      >
       /**
        * One line for people saying why.
        */
       message: string
+    }
+  | {
+      /**
+       * Why the story can't be captured: its stories file failed to load, or didn't load within readyTimeout.
+       */
+      reason: 'load-failed'
+      /**
+       * One line for people saying why.
+       */
+      message: string
+      /**
+       * The error the stories file failed to load with, as Storybook gave it. `undefined` when it didn't load in time,
+       * or failed with no message.
+       */
+      loadError: string | undefined
+      /**
+       * The config's readyTimeout, in ms, when the stories file didn't load within it. `undefined` when it failed.
+       */
+      readyTimeoutMs: number | undefined
+    }
+  | {
+      /**
+       * Why the story can't be captured: its `play` function threw or left unhandled errors.
+       */
+      reason: 'play-threw'
+      /**
+       * One line for people saying why, with the error's message.
+       */
+      message: string
+      /**
+       * The error as Storybook described it, such as `Error: boom`, or the unhandled errors, `; ` apart. Empty when it
+       * described none.
+       */
+      errorText: string
+      /**
+       * Up to the first 5 frames of the error's stack, the lines that start with `at `, each trimmed, without its
+       * message. None when the error had no stack.
+       */
+      stack: string[]
+    }
+  | {
+      /**
+       * Why the story can't be captured: it wasn't ready within readyTimeout.
+       */
+      reason: 'timeout'
+      /**
+       * One line for people saying why, and what the story was doing.
+       */
+      message: string
+      /**
+       * The config's readyTimeout, in ms, that ran out.
+       */
+      readyTimeoutMs: number
     }
   | {
       /**
@@ -221,6 +298,10 @@ export type BrokenStory =
        * as `Inter normal normal` or `Inter 100 900 normal`.
        */
       faces: string[]
+      /**
+       * The config's readyTimeout, in ms, that ran out.
+       */
+      readyTimeoutMs: number
     }
   | {
       /**
@@ -235,6 +316,29 @@ export type BrokenStory =
        * The full URL the document went to.
        */
       url: string
+    }
+  | {
+      /**
+       * Why the story can't be captured: the capture is over 32,767 device pixels on a side.
+       */
+      reason: 'too-tall'
+      /**
+       * One line for people saying why, with the capture's size.
+       */
+      message: string
+      /**
+       * The capture's size, in device pixels.
+       */
+      size: {
+        /**
+         * The capture's width, in device pixels.
+         */
+        width: number
+        /**
+         * The capture's height, in device pixels.
+         */
+        height: number
+      }
     }
 
 /**
@@ -255,9 +359,10 @@ export interface StoryHosts {
 }
 
 /**
- * What capturing a story gave: its snapshot, with how long Storybook's `completing` render step took, the remote
- * content it shows when the story asked for it, the hosts it reaches when the session lists them and the same page
- * captured again when the story's `captureAgainIf` asked for it, or, for a broken story, why it can't be captured.
+ * What capturing a story gave: its snapshot, with how long Storybook's `completing` render step took, the console
+ * messages and errors its page sent, the remote content it shows when the story asked for it, the hosts it reaches
+ * when the session lists them and the same page captured again when the story's `captureAgainIf` asked for it, or, for
+ * a broken story, why it can't be captured and, when it had a page, what its page sent.
  *
  * @public
  */
@@ -272,6 +377,12 @@ export type StoryCapture =
        * 100 or more off it. `undefined` when the page didn't see both the `completing` and `completed` steps.
        */
       completingMs: number | undefined
+      /**
+       * The last 50 console messages and errors the story's page sent from the load of the story in the attempt that
+       * captured it, as the page gives them right after the first capture, before the story's `captureAgainIf` is
+       * called.
+       */
+      console: ConsoleMessage[]
       /**
        * The remote content the snapshot shows, when the story asked for it with `findRemoteContent` and the search
        * answered in time. Without it, the remote content is unknown.
@@ -293,6 +404,18 @@ export type StoryCapture =
        * Why the story can't be captured.
        */
       broken: BrokenStory
+      /**
+       * The last 50 console messages and errors the story's page sent from the start of the attempt that broke, read
+       * before the page is closed, from the document the story went to too when it navigated away. Left out when the
+       * story had no page: a page that couldn't be opened, or a browser that exited.
+       */
+      console?: ConsoleMessage[]
+      /**
+       * The full page as it was when the story broke, as PNG bytes exactly as the browser made them. Present only when
+       * the story asked for it with `imageWhenBroken`, broke for a reason whose page still shows something, and the
+       * page was captured within the settings' `brokenImageTimeLimitMs`.
+       */
+      image?: Uint8Array
     }
 
 /**
@@ -391,10 +514,14 @@ const endStateTimeouts: Record<Extract<EndState, { outcome: 'timed-out' }>['step
 }
 
 /**
- * Says the story wasn't ready within readyTimeout, and what it was doing.
+ * Gives a story that wasn't ready within readyTimeout, saying what it was doing.
  */
-function notReady(readyTimeoutMs: number, doing: string): string {
-  return `The story wasn't ready within readyTimeout (${readyTimeoutMs} ms): ${doing}.`
+function notReady(readyTimeoutMs: number, doing: string): BrokenStory {
+  return {
+    reason: 'timeout',
+    message: `The story wasn't ready within readyTimeout (${readyTimeoutMs} ms): ${doing}.`,
+    readyTimeoutMs,
+  }
 }
 
 /**
@@ -452,11 +579,11 @@ function stillWaitingFor(wait: Extract<StoryWait, { outcome: 'timed-out' }>): st
 function describeStoryWait(wait: Exclude<StoryWait, { outcome: 'finished' }>, readyTimeoutMs: number): BrokenStory {
   switch (wait.outcome) {
     case 'play-threw':
-      return { reason: 'play-threw', message: wait.message }
+      return { reason: 'play-threw', message: wait.message, errorText: wait.errorText, stack: wait.stack }
     case 'errored':
       return { reason: 'error', message: wait.message }
     case 'timed-out':
-      return { reason: 'timeout', message: notReady(readyTimeoutMs, stillWaitingFor(wait)) }
+      return notReady(readyTimeoutMs, stillWaitingFor(wait))
     case 'script-missing':
       return {
         reason: 'error',
@@ -494,19 +621,20 @@ function describeAssetsWait(
   }
 
   if (assets.step === 'images') {
-    return { reason: 'timeout', message: notReady(readyTimeoutMs, `${imagesStillLoading(assets.pending)}${suffix}`) }
+    return notReady(readyTimeoutMs, `${imagesStillLoading(assets.pending)}${suffix}`)
   }
 
   const faces = assets.pendingFaces
 
   if (faces.length === 0) {
-    return { reason: 'timeout', message: notReady(readyTimeoutMs, `document.fonts.ready hadn't resolved${suffix}`) }
+    return notReady(readyTimeoutMs, `document.fonts.ready hadn't resolved${suffix}`)
   }
 
   return {
     reason: 'fonts-not-loaded',
     message: `The story's fonts hadn't loaded within readyTimeout (${readyTimeoutMs} ms)${suffix}. Still loading: ${faces.join(', ')}.`,
     faces,
+    readyTimeoutMs,
   }
 }
 
@@ -521,7 +649,7 @@ function describeEndState(endState: Exclude<EndState, { outcome: 'settled' }>, r
     }
   }
 
-  return { reason: 'timeout', message: notReady(readyTimeoutMs, endStateTimeouts[endState.step]) }
+  return notReady(readyTimeoutMs, endStateTimeouts[endState.step])
 }
 
 /**
@@ -550,10 +678,7 @@ function describeCapturePrep(
             : `The selector of mask ${JSON.stringify(prep.name)} isn't valid CSS: ${failureReasonOf(prep.message)}`,
       }
     case 'timed-out':
-      return {
-        reason: 'timeout',
-        message: notReady(readyTimeoutMs, 'visual-check was still looking for remote content to mask'),
-      }
+      return notReady(readyTimeoutMs, 'visual-check was still looking for remote content to mask')
     case 'script-missing':
       return {
         reason: 'error',
@@ -580,7 +705,7 @@ function describeWaitHookRun(
     case 'context-failed':
       return { reason: 'error', message: run.message }
     case 'timed-out':
-      return { reason: 'timeout', message: notReady(readyTimeoutMs, "its wait hook hadn't finished") }
+      return notReady(readyTimeoutMs, "its wait hook hadn't finished")
     case 'no-render':
       return {
         reason: 'error',
@@ -622,13 +747,14 @@ function describeFailure(error: unknown, step: Step, story: StoryToCapture, read
     return {
       reason: 'too-tall',
       message: `The capture is ${error.deviceWidth} × ${error.deviceHeight} device pixels, over ${maxCaptureSide.toLocaleString('en-US')} on a side. ${hint}, or use a smaller viewport.`,
+      size: { width: error.deviceWidth, height: error.deviceHeight },
     }
   }
 
   const doing = stepTimeouts[step]
 
   if (error instanceof PageTimeoutError && doing !== undefined) {
-    return { reason: 'timeout', message: notReady(readyTimeoutMs, doing) }
+    return notReady(readyTimeoutMs, doing)
   }
 
   const name = stepNames[step]
@@ -760,16 +886,26 @@ interface CapturedSnapshot {
  * When the settings ask to list hosts, it also gives the hosts the page sent requests to, read once the capture is
  * done, and the hosts of the remote content the story shows, from the same search as the host masks. Gives the area
  * the snapshot was captured from beside it, and leaves the story's `captureAgainIf` to the caller. A story that can't
- * be captured comes back as a broken story. Rejects only with a `BrowserExitedError`.
+ * be captured comes back as a broken story. Either way it comes with the console messages and errors the page sent,
+ * read once the capture is done or the story broke, while the page is still open. Rejects only with a
+ * `BrowserExitedError`.
  */
 async function captureOnPage(
   page: Page,
   story: StoryToCapture,
   settings: CaptureSettings,
-): Promise<CapturedSnapshot | { broken: BrokenStory }> {
+): Promise<CapturedSnapshot | Extract<StoryCapture, { broken: BrokenStory }>> {
   const deadline = performance.now() + settings.readyTimeoutMs
   const timeLeft = (): number => Math.max(0, Math.ceil(deadline - performance.now()))
   let step: Step = 'viewport'
+
+  /**
+   * Gives the broken story with the messages the page sent.
+   */
+  const brokenBy = (broken: BrokenStory): Extract<StoryCapture, { broken: BrokenStory }> => ({
+    broken,
+    console: page.consoleMessages(),
+  })
 
   /**
    * Evaluates a wait in the page, built by `expressionFor` for what's left of readyTimeout, and gives the page's
@@ -864,19 +1000,19 @@ async function captureOnPage(
     const wait = readStoryWait(await waitInPage((limit) => storyWaitExpression(story.id, limit)))
 
     if (wait.outcome !== 'finished') {
-      return { broken: describeStoryWait(wait, settings.readyTimeoutMs) }
+      return brokenBy(describeStoryWait(wait, settings.readyTimeoutMs))
     }
 
     const broken = (await checkAssets('assets')) ?? (await runWaitHook()) ?? (await bringToEndState())
 
     if (broken !== undefined) {
-      return { broken }
+      return brokenBy(broken)
     }
 
     const prepared = await prepareCapture()
 
     if ('broken' in prepared) {
-      return prepared
+      return brokenBy(prepared.broken)
     }
 
     step = 'capture'
@@ -884,7 +1020,12 @@ async function captureOnPage(
     const snapshot = await page.capture(prepared.area)
 
     return {
-      result: { snapshot, completingMs: wait.completingMs, ...capturedExtrasOf(page, story, settings, prepared) },
+      result: {
+        snapshot,
+        completingMs: wait.completingMs,
+        console: page.consoleMessages(),
+        ...capturedExtrasOf(page, story, settings, prepared),
+      },
       area: prepared.area,
     }
   } catch (error) {
@@ -892,8 +1033,64 @@ async function captureOnPage(
       throw error
     }
 
-    return { broken: describeFailure(error, step, story, settings.readyTimeoutMs) }
+    return brokenBy(describeFailure(error, step, story, settings.readyTimeoutMs))
   }
+}
+
+/**
+ * Why a story can be broken while its page still shows something, so an image of the page says what went wrong. A
+ * crash, a capture too tall, a page that went to another document and a story that had no page leave nothing to
+ * capture.
+ */
+const imagedReasons: readonly BrokenReason[] = [
+  'error',
+  'play-threw',
+  'timeout',
+  'fonts-not-loaded',
+  'wait-threw',
+  'element-missing',
+]
+
+/**
+ * Captures the full page of a story that just broke, as it is. Gives nothing when the capture fails or doesn't finish
+ * within `limitMs`. Rejects with a `BrowserExitedError` when the browser exits during the capture.
+ */
+async function brokenImageOf(page: Page, limitMs: number): Promise<Uint8Array | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeUp = new Promise<undefined>((resolve) => {
+    timer = setTimeout(resolve, limitMs, undefined)
+  })
+
+  try {
+    return await Promise.race([page.capture('full-page'), timeUp])
+  } catch (error) {
+    if (error instanceof BrowserExitedError) {
+      throw error
+    }
+
+    return undefined
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * Adds an image of the page to a broken story when the story asked for one with `imageWhenBroken` and broke for a
+ * reason whose page still shows something. Gives the broken story as it is otherwise, or when no image came.
+ */
+async function withBrokenImage(
+  page: Page,
+  story: StoryToCapture,
+  settings: CaptureSettings,
+  capture: Extract<StoryCapture, { broken: BrokenStory }>,
+): Promise<Extract<StoryCapture, { broken: BrokenStory }>> {
+  if (story.imageWhenBroken !== true || !imagedReasons.includes(capture.broken.reason)) {
+    return capture
+  }
+
+  const image = await brokenImageOf(page, settings.brokenImageTimeLimitMs)
+
+  return image === undefined ? capture : { ...capture, image }
 }
 
 /**
@@ -901,9 +1098,9 @@ async function captureOnPage(
  * resolves true, captures the area the snapshot was captured from again at once, doing nothing to the page in between,
  * bound by the driver's own capture limit, and gives the snapshot with the second capture as `capturedAgain`. Gives the
  * snapshot as it is when the story has no `captureAgainIf` or it resolves false. A second capture that fails comes back
- * as a broken story. Rejects with a `BrowserExitedError` when the browser exits during the second capture, and with
- * whatever `captureAgainIf` rejects with: it runs outside the handling that turns the page's failures into a broken
- * story.
+ * as a broken story, with the messages the page sent, read again. Rejects with a `BrowserExitedError` when the browser
+ * exits during the second capture, and with whatever `captureAgainIf` rejects with: it runs outside the handling that
+ * turns the page's failures into a broken story.
  */
 async function captureAgainIfAsked(
   page: Page,
@@ -924,7 +1121,10 @@ async function captureAgainIfAsked(
       throw error
     }
 
-    return { broken: describeFailure(error, 'capture-again', story, settings.readyTimeoutMs) }
+    return {
+      broken: describeFailure(error, 'capture-again', story, settings.readyTimeoutMs),
+      console: page.consoleMessages(),
+    }
   }
 }
 
@@ -973,6 +1173,11 @@ export function pageSetupOf(settings: CaptureSettings): PageSetup {
  * other outcome of a retry, a snapshot or another broken reason, is the story's outcome, and no other reason is
  * retried.
  *
+ * A story that asks for it with `imageWhenBroken` and breaks while its page still shows something, for the reasons
+ * `error`, `play-threw`, `timeout`, `fonts-not-loaded`, `wait-threw` and `element-missing`, comes with an image of the
+ * full page, captured before the page is closed, unless that capture fails or takes longer than the settings'
+ * `brokenImageTimeLimitMs`. A browser exit during it rejects the capture with a `BrowserExitedError`.
+ *
  * When a story has `captureAgainIf`, each attempt that captured a snapshot calls it with the snapshot, the page left as
  * it is, and captures the same area again at once when it resolves true. A second capture that fails makes the story
  * broken, and its page is closed; one that navigates away is retried like any attempt that does. When
@@ -1013,7 +1218,8 @@ export function openCaptureSession(driver: Driver, settings: CaptureSettings): C
   /**
    * Captures the story on the open page, opening one first when none is, and captures it again there when the story's
    * `captureAgainIf` asks for it. A story that can't be captured, or whose page can't be opened, comes back as a broken
-   * story, and a broken story's page is closed. Rejects with a `BrowserExitedError`, and then drops the page without
+   * story, with an image of its page when it asked for one and its page still shows something, and a broken story's
+   * page is closed. Rejects with a `BrowserExitedError`, and then drops the page without
    * closing it. When the story's `captureAgainIf` rejects, closes the page and rejects with the same error.
    */
   const captureOnOpenPage = async (story: StoryToCapture): Promise<StoryCapture> => {
@@ -1034,7 +1240,10 @@ export function openCaptureSession(driver: Driver, settings: CaptureSettings): C
 
     try {
       const captured = await captureOnPage(page, story, settings)
-      const capture = 'broken' in captured ? captured : await captureAgainIfAsked(page, story, settings, captured)
+      const capture =
+        'broken' in captured
+          ? await withBrokenImage(page, story, settings, captured)
+          : await captureAgainIfAsked(page, story, settings, captured)
 
       if ('broken' in capture) {
         await closePage()

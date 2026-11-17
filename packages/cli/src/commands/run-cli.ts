@@ -7,22 +7,29 @@ import { imageMarkerPath } from '../browser/image-marker.js'
 import type { BrowserPackage } from '../browser/read-browser-package.js'
 import { autoWorkerCount, type BrowserHost } from '../capture/worker-pool.js'
 import { ConfigError } from '../config/config-error.js'
+import { locateConfig } from '../config/find-config.js'
 import { isCi } from '../config/is-ci.js'
 import { type LoadConfigOptions, loadConfig } from '../config/load-config.js'
-import type { ResolvedConfig } from '../config/resolve-config.js'
+import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
 import type { ContainerPlatform } from '../container/browser-container.js'
 import { ContainerError } from '../container/container-error.js'
 import { type DockerHost, type ProbeDocker, probeDocker } from '../container/docker-probe.js'
 import { isInsideContainer } from '../container/inside-container.js'
 import { knownContainerIdOf } from '../container/own-container.js'
+import { clearReport, ReportError, reportFolderOf, writeReportJson } from '../report/report-folder.js'
+import type { Story } from '../storybook/read-stories.js'
 import { type BrowserPlace, browserPlaceOf } from './browser-route.js'
 import { checkStorybooks } from './check-storybooks.js'
 import { dockerProblemOf } from './docker-problem.js'
 import { createLaunchBrowser, type LaunchBrowser } from './launch-browser.js'
-import { parseCommandLine, type RunOptions, UsageError } from './parse-command-line.js'
+import { parseCommandLine, type Reporter, type RunOptions, UsageError } from './parse-command-line.js'
 import { readImageFit } from './read-image-fit.js'
+import { type RunOutput, reportLineOf, runOutputOf } from './run-output.js'
+import { type TestReportFacts, testReportFor, updateReportFor } from './run-report.js'
 import { runSnapshots } from './run-snapshots.js'
 import { selectStories } from './select-stories.js'
+import { reportProblemOf } from './stop-message.js'
+import { crashedBy, type RunStop, stoppedBy, stoppedTestOf, stoppedUpdateOf, usageFailureOf } from './stopped-run.js'
 import { defaultRecaptureDelayMs } from './update-snapshot.js'
 
 /**
@@ -44,6 +51,7 @@ Options for test and update:
   --consistency       Only check for missing baselines, orphans and stories files that fail to load (test only)
   --workers <n>       Capture with this many workers
   --shard <k>/<n>     Run one shard's share of the stories files (test only)
+  --reporter <name>   Live or log for people, json for the report's JSON document on stdout
 
 Other options:
   --help     Show this help
@@ -51,23 +59,15 @@ Other options:
 `
 
 /**
- * What a CLI run produced: the exit code and the text for each output stream.
+ * What a CLI run produced: the exit code, the text for each output stream, and the report line to write after both.
  *
  * @public
  */
-export interface CliResult {
+export interface CliResult extends RunOutput {
   /**
    * The process exit code.
    */
   exitCode: number
-  /**
-   * Text for standard output.
-   */
-  stdout: string
-  /**
-   * Text for standard error.
-   */
-  stderr: string
 }
 
 /**
@@ -136,8 +136,12 @@ export interface RunCliOptions {
 
 /**
  * Runs the CLI with the given arguments, environment and folder, and returns what it prints on each stream. Only
- * progress is written as it happens, through `options.progress`; `update` also writes and deletes baselines. Problems
- * with the command line, the config, the run's setup or the browser exit with code 2. Other errors are thrown.
+ * progress is written as it happens, through `options.progress`; `update` also writes and deletes baselines, and
+ * `test` writes the report folder. Problems with the command line, the config, the run's setup or the browser exit
+ * with code 2. A usage error of a `test` command line, even one whose flags fail to parse, writes its error report
+ * beside the config the run would load. Once a `test` or `update` has loaded its config, an error that is a bug exits
+ * 2 too, with its stack trace on stderr, as an error report for `test` and an error document with `--reporter json`.
+ * Other errors are thrown.
  *
  * @public
  */
@@ -163,11 +167,7 @@ export async function runCli(
     }
   } catch (error) {
     if (error instanceof UsageError) {
-      return failure(`${error.message}\nRun visual-check --help to see the commands and options.`)
-    }
-
-    if (error instanceof ConfigError) {
-      return failure(error.message)
+      return await usageFailureOf(error, cwd, readVersion())
     }
 
     throw error
@@ -195,7 +195,18 @@ export async function runCli(
  * requests to and the hosts whose remote content they show, grouped by host with the first story IDs of each. The
  * config's `silenceHosts` leaves hosts out. `test` never watches requests. The warning never changes the exit code.
  *
- * @throws {ConfigError} When the config can't be found, loaded or used.
+ * Right after the config loads, `test` clears the report folder, `.visual-check/report` beside the config file; one it
+ * can't clear exits 2. Every `test` that exits 0 or 1, `test --consistency`, a CI stop and each shard included, then
+ * writes `report.json` there and gives the report's path, relative to the folder the CLI runs in, as the report line
+ * for stdout. A `test` that exits 2 with its config found, or named by the config error, replaces the folder with a
+ * `report.json` holding only the error, naming the Storybooks where nothing answers, and gives the report line for
+ * stderr; with no config found, or when the report folder itself is what failed, nothing is written. With
+ * `--reporter json`, stdout then holds the error document alone. `update` never touches the report folder. With
+ * `--reporter json`, its stdout holds its own document alone, the error document when it exits 2. Whatever the
+ * command and exit code, `--reporter json` moves the human lines to stderr, before what the run prints there. An
+ * error that is a bug, once the config loads, ends the run as a problem would, with its stack trace and its message.
+ *
+ * @throws {Error} Any error besides the problems that stop the run with exit 2, before the config loads.
  */
 async function runTestOrUpdate(
   command: 'test' | 'update',
@@ -205,62 +216,340 @@ async function runTestOrUpdate(
   cliOptions: RunCliOptions,
 ): Promise<CliResult> {
   const ci = isCi(environment)
+  const outcome =
+    command === 'update' && ci
+      ? stoppedBy(
+          'visual-check update only runs locally, and the CI environment variable is set. ' +
+            'Run it on your machine and commit the baselines, or unset CI.\n',
+          { configPath: undefined, storybooks: [] },
+        )
+      : await runOutcomeOf({ command, options, environment, cwd, cliOptions, ci })
 
-  if (command === 'update' && ci) {
-    return failure(
-      'visual-check update only runs locally, and the CI environment variable is set. ' +
-        'Run it on your machine and commit the baselines, or unset CI.',
-    )
+  if ('finished' in outcome) {
+    return outcome.finished
   }
 
-  const browserCheck = checkBrowserPackage(environment)
+  if (command === 'update') {
+    return stoppedUpdateOf(outcome.stopped, { version: readVersion(), options })
+  }
+
+  return await stoppedTestOf(outcome.stopped, { version: readVersion(), cwd, options })
+}
+
+/**
+ * How a `test` or `update` ended: finished with exit 0 or 1, its report written for `test`, or stopped with exit 2.
+ */
+type RunOutcome = { finished: CliResult } | { stopped: RunStop }
+
+/**
+ * What a `test` or `update` run is given: its command, options, environment and folder, what the CLI's caller gives,
+ * and whether it runs in CI.
+ */
+interface RunContext {
+  /**
+   * The command.
+   */
+  command: 'test' | 'update'
+  /**
+   * Its options.
+   */
+  options: RunOptions
+  /**
+   * The environment.
+   */
+  environment: Record<string, string | undefined>
+  /**
+   * The folder the CLI runs in.
+   */
+  cwd: string
+  /**
+   * What the CLI's caller gives the run.
+   */
+  cliOptions: RunCliOptions
+  /**
+   * Whether the `CI` environment variable says the run is in CI.
+   */
+  ci: boolean
+}
+
+/**
+ * Runs `test` or `update` as `runTestOrUpdate` says, and gives how it ended. Once the config loads, an error that is
+ * a bug stops the run too, with its stack trace and its message.
+ *
+ * @throws {Error} Any error besides the problems that stop the run with exit 2, before the config loads.
+ */
+async function runOutcomeOf(context: RunContext): Promise<RunOutcome> {
+  const browserCheck = checkBrowserPackage(context.environment)
 
   if ('problem' in browserCheck) {
-    return { exitCode: 2, stdout: '', stderr: browserCheck.problem }
+    return stoppedBy(browserCheck.problem, {
+      configPath: locateConfig(context.cwd, context.options.config),
+      storybooks: [],
+    })
   }
 
-  const config = await loadConfig(loadConfigOptionsOf(options, ci, cwd))
-  const insideContainer = insideContainerOf(cliOptions, environment)
-  const placement = await placeAndProbe(config, browserCheck.browserPackage, insideContainer, cliOptions)
+  const loaded = await loadedConfigOf(context)
+
+  if ('stopped' in loaded) {
+    return loaded
+  }
+
+  try {
+    return await configuredOutcomeOf(context, loaded.config, browserCheck.browserPackage)
+  } catch (error) {
+    // A bug once the config loaded still leaves test's error report and prints the error document.
+    return crashedBy(error, {
+      stdout: '',
+      stderr: '',
+      configPath: loaded.config.path,
+      storybooks: loaded.config.storybooks,
+    })
+  }
+}
+
+/**
+ * Loads the run's config, or gives the stop a `ConfigError` makes, naming the config when it was found.
+ *
+ * @throws {Error} Any error besides a `ConfigError`.
+ */
+async function loadedConfigOf(context: RunContext): Promise<{ config: ResolvedConfig } | { stopped: RunStop }> {
+  try {
+    return { config: await loadConfig(loadConfigOptionsOf(context.options, context.ci, context.cwd)) }
+  } catch (error) {
+    if (error instanceof ConfigError) {
+      return stoppedBy(`${error.message}\n`, { configPath: error.configPath, storybooks: [] })
+    }
+
+    throw error
+  }
+}
+
+/**
+ * Runs `test` or `update` once its config is loaded: clears the report folder for `test`, places the browser, checks
+ * the Storybooks, then takes the snapshots.
+ *
+ * @throws {Error} Any error besides the problems that stop the run with exit 2.
+ */
+async function configuredOutcomeOf(
+  context: RunContext,
+  config: ResolvedConfig,
+  browserPackage: BrowserPackage,
+): Promise<RunOutcome> {
+  const inRun = { configPath: config.path, storybooks: config.storybooks }
+  const clearProblem = await clearReportProblemOf(context.command, config, context.cwd)
+
+  if (clearProblem !== undefined) {
+    return stoppedBy(clearProblem, { ...inRun, configPath: undefined })
+  }
+
+  const insideContainer = insideContainerOf(context.cliOptions, context.environment)
+  const placement = await placeAndProbe(config, browserPackage, insideContainer, context.cliOptions)
 
   if ('problem' in placement) {
-    return { exitCode: 2, stdout: '', stderr: placement.problem }
+    return stoppedBy(placement.problem, inRun)
   }
 
-  const checks = await checkStorybooks(config.storybooks, cwd)
+  const checks = await checkStorybooks(config.storybooks, context.cwd)
   const warnings = checks.warnings.map((warning) => `${warning}\n`).join('')
 
   if ('problems' in checks) {
+    const problems = checks.problems.map((problem) => `${problem}\n`).join('')
+
     return {
-      exitCode: 2,
-      stdout: '',
-      stderr: `${warnings}${checks.problems.map((problem) => `${problem}\n`).join('')}`,
+      stopped: {
+        ...inRun,
+        stdout: '',
+        stderr: `${warnings}${problems}`,
+        message: problems,
+        unreachable: checks.unreachable,
+      },
     }
   }
 
+  return await snapshotsOutcomeOf(context, config, {
+    browserPackage,
+    insideContainer,
+    placement,
+    storybooks: checks.storybooks,
+    warnings,
+  })
+}
+
+/**
+ * What the checks before the snapshots found: the browser package, where the browser runs, and each Storybook with
+ * its version and stories, with the warnings they printed.
+ */
+interface CheckedRun {
+  /**
+   * The installed browser package.
+   */
+  browserPackage: BrowserPackage
+  /**
+   * Whether visual-check runs inside a container.
+   */
+  insideContainer: boolean
+  /**
+   * Where the browser runs, and the CPUs and memory there.
+   */
+  placement: { place: BrowserPlace; host: BrowserHost }
+  /**
+   * Each Storybook in the run, in config order, with its version and stories.
+   */
+  storybooks: { storybook: ResolvedStorybook; version: string | undefined; stories: Story[] }[]
+  /**
+   * The warnings the checks printed, each on its own line.
+   */
+  warnings: string
+}
+
+/**
+ * Takes the snapshots, then for `test` writes the report of a run that exits 0 or 1, and for `update` prints its
+ * document with `--reporter json`. Gives the stop of a run that stopped with exit 2.
+ *
+ * @throws {Error} Any error besides the problems that stop the run with exit 2.
+ */
+async function snapshotsOutcomeOf(
+  context: RunContext,
+  config: ResolvedConfig,
+  checked: CheckedRun,
+): Promise<RunOutcome> {
+  const { command, options } = context
+  const version = readVersion()
   const result = await runSnapshots({
     command,
-    version: readVersion(),
-    ci,
+    version,
+    ci: context.ci,
     consistencyOnly: options.consistency,
     shard: options.shard,
     config,
-    workers: workersOf(options, config, placement.host),
-    place: placement.place,
-    browserPackage: browserCheck.browserPackage,
-    selections: checks.storybooks.map(({ storybook, version, stories }) => ({
+    workers: workersOf(options, config, checked.placement.host),
+    place: checked.placement.place,
+    browserPackage: checked.browserPackage,
+    selections: checked.storybooks.map(({ storybook, version, stories }) => ({
       storybook,
       version,
       stories: selectStories(stories, options.selection),
       allStories: stories,
     })),
-    cwd,
-    insideContainer,
-    environment,
-    ...runDefaultsOf(cliOptions),
+    cwd: context.cwd,
+    insideContainer: checked.insideContainer,
+    environment: context.environment,
+    ...runDefaultsOf(context.cliOptions),
   })
+  const output = { stdout: result.stdout, stderr: `${checked.warnings}${result.stderr}` }
 
-  return { ...result, stderr: `${warnings}${result.stderr}` }
+  if ('stopMessage' in result) {
+    return {
+      stopped: {
+        ...output,
+        message: result.stopMessage,
+        // The report folder that failed can't take an error report either.
+        configPath: result.reportFailed ? undefined : config.path,
+        storybooks: config.storybooks,
+        unreachable: [],
+      },
+    }
+  }
+
+  const facts = {
+    version,
+    configPath: config.path,
+    selection: options.selection,
+    storybooks: checked.storybooks.map(({ storybook }) => storybook),
+    exitCode: result.exitCode,
+    findings: result.findings,
+  }
+
+  if (command === 'update') {
+    // update writes no report.json, so its document is built only to be printed.
+    if (options.reporter !== 'json') {
+      return { finished: { exitCode: result.exitCode, ...output } }
+    }
+
+    return {
+      finished: { exitCode: result.exitCode, ...runOutputOf(output, updateReportFor(facts), 'json', undefined) },
+    }
+  }
+
+  return await withTestReport(
+    { exitCode: result.exitCode, ...output },
+    context.cwd,
+    { ...facts, consistencyOnly: options.consistency, shard: options.shard },
+    options.reporter,
+  )
+}
+
+/**
+ * Clears the report folder beside the config for `test`, so an old report never lingers. Gives what to print when it
+ * can't. `update` never touches the folder.
+ *
+ * @throws {Error} Any error besides a `ReportError`.
+ */
+async function clearReportProblemOf(
+  command: 'test' | 'update',
+  config: ResolvedConfig,
+  cwd: string,
+): Promise<string | undefined> {
+  if (command === 'update') {
+    return undefined
+  }
+
+  try {
+    await clearReport(reportFolderOf(config.path))
+  } catch (error) {
+    if (error instanceof ReportError) {
+      return reportProblemOf(error, cwd)
+    }
+
+    throw error
+  }
+
+  return undefined
+}
+
+/**
+ * Writes the report of a `test` that exits 0 or 1, then gives the report's path as the report line for stdout. With
+ * `--reporter json` stdout holds the report's JSON document alone, the human lines move to stderr, and the report
+ * line is for stderr. When the report can't be written, the run stops with exit 2 with what went wrong after its
+ * stderr, and no error report is written. An error that is a bug stops it too, after what it printed.
+ */
+async function withTestReport(
+  result: CliResult,
+  cwd: string,
+  facts: TestReportFacts,
+  reporter: Reporter | undefined,
+): Promise<RunOutcome> {
+  const folder = reportFolderOf(facts.configPath)
+
+  try {
+    const report = await testReportFor(facts)
+
+    await writeReportJson(folder, report)
+
+    return {
+      finished: {
+        ...result,
+        ...runOutputOf(result, report, reporter, { stream: 'stdout', text: reportLineOf(cwd, folder) }),
+      },
+    }
+  } catch (error) {
+    if (error instanceof ReportError) {
+      const problem = reportProblemOf(error, cwd)
+
+      return {
+        stopped: {
+          stdout: result.stdout,
+          stderr: `${result.stderr}${problem}`,
+          message: problem,
+          configPath: undefined,
+          storybooks: facts.storybooks,
+          unreachable: [],
+        },
+      }
+    }
+
+    return crashedBy(error, { ...result, configPath: facts.configPath, storybooks: facts.storybooks })
+  }
 }
 
 /**

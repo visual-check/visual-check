@@ -1,6 +1,6 @@
 import { baselinePathOf, baselineStemOf, readBaseline } from '../baselines/baseline-files.js'
 import type { BrokenStory, RemoteContentBox, StoryCapture } from '../capture/capture-session.js'
-import { writeFailureImages } from '../report/report-folder.js'
+import { writeReportImages } from '../report/report-folder.js'
 import type { ImageRegion, VisualDiff, VisualDiffResult } from '../visual-diff/visual-diff.js'
 import type { SnapshotToCapture } from './plan-snapshots.js'
 import { remoteContentHintOf } from './remote-content-hint.js'
@@ -9,6 +9,7 @@ import {
   type CaptureStory,
   compareWithBaseline,
   missingResultOf,
+  reportedComparisonOf,
   type SnapshotResult,
   storyToCaptureOf,
 } from './snapshot-result.js'
@@ -83,6 +84,10 @@ interface AttemptOptions {
    * Whether the capture also brings back the remote content the snapshot shows.
    */
   findRemoteContent: boolean
+  /**
+   * Whether a broken story comes with an image of its page, when its page still shows something.
+   */
+  imageWhenBroken: boolean
 }
 
 /**
@@ -122,18 +127,18 @@ function regionsAround(boxes: readonly RemoteContentBox[], margin: number): Imag
  * capture's alone: it leaves out the browser's launch and the comparison.
  *
  * @throws {BaselineError} When the files differ and the baseline can't be decoded.
- * @throws {ImageDecodeError} When the snapshot can't be decoded, which the browser's PNG files rule out.
- * @throws {Error} When a visual diff thread stops mid-comparison.
+ * @throws {SnapshotDecodeError} When the snapshot can't be decoded, which the browser's PNG files rule out.
+ * @throws {VisualDiffError} When sharp can't be loaded, or a visual diff thread stops mid-comparison.
  */
 async function attemptOf(
   item: SnapshotToCapture,
   captureStory: CaptureStory,
   visualDiff: VisualDiff,
   baseline: Baseline,
-  { findRemoteContent }: AttemptOptions,
+  { findRemoteContent, imageWhenBroken }: AttemptOptions,
 ): Promise<Attempt> {
   let started = performance.now()
-  const capture = await captureStory({ ...storyToCaptureOf(item), findRemoteContent }, () => {
+  const capture = await captureStory({ ...storyToCaptureOf(item), findRemoteContent, imageWhenBroken }, () => {
     started = performance.now()
   })
 
@@ -203,13 +208,17 @@ function remoteHostsOf(retry: Attempt | undefined): string[] | undefined {
  * the snapshot differs with its first capture's message, and the report keeps that capture's images. When both the
  * first capture and the last retry differ by pixels, and every differing pixel of the last retry lies inside its remote
  * content, give or take the device scale factor rounded up, the result carries a hint that names those hosts. A broken
- * first capture isn't retried. It asks for a capture only once it has read the baseline. A pass's time is the passing
- * capture's alone: it leaves out the browser's launch and the comparison.
+ * first capture isn't retried. The first capture asks for an image of the story's page should it break; retries don't,
+ * since a broken retry keeps the first capture's images. A broken first capture that came with an image of its page
+ * leaves it in the report folder as its snapshot. It asks for a capture only once it has read the baseline. A pass's
+ * time is the passing capture's alone: it leaves out the browser's launch and the comparison. The result counts the
+ * captures it asked for and carries what the report lists: the first capture's console messages and, for a snapshot
+ * that differs or passed only on a retry, its comparison and images, and the hosts a hint names.
  *
  * @throws {BaselineError} When the baseline can't be read or decoded.
  * @throws {ReportError} When an image can't be written to the report folder.
- * @throws {ImageDecodeError} When the snapshot can't be decoded, which the browser's PNG files rule out.
- * @throws {Error} When a visual diff thread stops mid-comparison.
+ * @throws {SnapshotDecodeError} When the snapshot can't be decoded, which the browser's PNG files rule out.
+ * @throws {VisualDiffError} When sharp can't be loaded, or a visual diff thread stops mid-comparison.
  */
 export async function testSnapshot(
   item: SnapshotToCapture,
@@ -223,27 +232,47 @@ export async function testSnapshot(
     return missingResultOf()
   }
 
-  const attempt = (options: AttemptOptions): Promise<Attempt> =>
-    attemptOf(item, captureStory, visualDiff, { bytes, path }, options)
-  const first = await attempt({ findRemoteContent: false })
+  let attempts = 0
+  const attempt = (options: AttemptOptions): Promise<Attempt> => {
+    attempts += 1
+
+    return attemptOf(item, captureStory, visualDiff, { bytes, path }, options)
+  }
+  const stem = baselineStemOf(item.key)
+  const first = await attempt({ findRemoteContent: false, imageWhenBroken: true })
 
   if ('broken' in first) {
-    return brokenResultOf(first.broken)
+    const brokenResult = brokenResultOf(first.broken, { attempts, console: first.console })
+
+    if (first.image === undefined) {
+      return brokenResult
+    }
+
+    return {
+      ...brokenResult,
+      images: await writeReportImages(reportFolder, item.storybook.name, stem, { snapshot: first.image }),
+    }
   }
 
   const { capture, elapsedMs, result } = first
 
   if (result.outcome !== 'differs') {
-    return { status: 'passed', detail: `${elapsedMs} ms`, completingMs: capture.completingMs }
+    return {
+      status: 'passed',
+      detail: `${elapsedMs} ms`,
+      attempts,
+      completingMs: capture.completingMs,
+      console: capture.console,
+    }
   }
 
-  await writeFailureImages(reportFolder, item.storybook.name, baselineStemOf(item.key), {
+  const images = await writeReportImages(reportFolder, item.storybook.name, stem, {
     baseline: bytes,
     snapshot: capture.snapshot,
     diff: result.diff,
   })
-
-  const retried = await retryOf(retries, () => attempt({ findRemoteContent: true }))
+  const listed = { comparison: reportedComparisonOf(result), console: capture.console, images }
+  const retried = await retryOf(retries, () => attempt({ findRemoteContent: true, imageWhenBroken: false }))
 
   if ('failed' in retried) {
     const hosts = result.reason === 'pixels' ? remoteHostsOf(retried.failed) : undefined
@@ -251,8 +280,10 @@ export async function testSnapshot(
     return {
       status: 'differs',
       detail: `differs: ${result.message}`,
+      attempts,
       completingMs: capture.completingMs,
-      ...(hosts === undefined ? {} : { hint: remoteContentHintOf(hosts) }),
+      ...listed,
+      ...(hosts === undefined ? {} : { hint: remoteContentHintOf(hosts), hintHosts: hosts }),
     }
   }
 
@@ -261,7 +292,9 @@ export async function testSnapshot(
   return {
     status: 'passed',
     detail: `${passed.elapsedMs} ms · flaky`,
+    attempts,
     completingMs: passed.capture.completingMs,
     flaky: true,
+    ...listed,
   }
 }
