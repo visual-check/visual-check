@@ -36,39 +36,82 @@ export function reportLineOf(cwd: string, folder: string): string {
 }
 
 /**
- * Composes what a `test` that wrote its report prints on each stream. With `--reporter json`, stdout holds the report's
- * JSON document alone, the human lines are dropped, and stderr keeps its text and ends with the report line. With any
- * other reporter, stdout ends with the report line.
+ * The line that ends a run's output, the path of the report it wrote, with the stream it goes on. It is written after
+ * both streams, so it is the run's last line whatever stderr holds.
+ */
+export interface ReportLine {
+  /**
+   * The stream it goes on: stdout, ending the block a human reporter ends a `test` with, else stderr.
+   */
+  stream: 'stdout' | 'stderr'
+  /**
+   * The line, without its newline.
+   */
+  text: string
+}
+
+/**
+ * What a run prints: the text for each stream, then the report line when it wrote a report.
+ */
+export interface RunOutput {
+  /**
+   * Text for standard output.
+   */
+  stdout: string
+  /**
+   * Text for standard error.
+   */
+  stderr: string
+  /**
+   * The line written after both streams: the report's path. Absent when no report was written.
+   */
+  reportLine?: ReportLine
+}
+
+/**
+ * Composes what a `test` that wrote its report prints. With `--reporter json`, stdout holds the report's JSON document
+ * alone, the human lines are dropped, stderr keeps its text, and the report line goes on stderr. With any other
+ * reporter, both streams keep their text and the report line goes on stdout.
  */
 export function cliOutputOf(
   output: { stdout: string; stderr: string },
   report: Report,
   reporter: Reporter | undefined,
   reportLine: string,
-): { stdout: string; stderr: string } {
+): RunOutput {
   if (reporter === 'json') {
-    return { stdout: `${reportJsonOf(report)}\n`, stderr: `${output.stderr}${reportLine}\n` }
+    return {
+      stdout: `${reportJsonOf(report)}\n`,
+      stderr: output.stderr,
+      reportLine: { stream: 'stderr', text: reportLine },
+    }
   }
 
-  return { stdout: `${output.stdout}${reportLine}\n`, stderr: output.stderr }
+  return { stdout: output.stdout, stderr: output.stderr, reportLine: { stream: 'stdout', text: reportLine } }
 }
 
 /**
- * Composes what a run prints on each stream when stdout doesn't end with the report line: a `test` that exits 2, and
- * every `update`. stderr keeps its text and ends with `tail`: for a `test`, the report line when the report was
- * written, else what kept it from being written, or nothing. With `--reporter json`, stdout holds the report's JSON
- * document alone and the human lines are dropped. With any other reporter, stdout keeps them.
+ * Composes what a run prints when stdout doesn't end with the report line: a `test` that exits 2, and every `update`.
+ * stderr keeps its text, and `reportLine`, given when a `test` wrote its error report, goes on stderr. With
+ * `--reporter json`, stdout holds the report's JSON document alone and the human lines are dropped. With any other
+ * reporter, stdout keeps them.
  */
 export function documentOutputOf(
   output: { stdout: string; stderr: string },
   report: Report,
   reporter: Reporter | undefined,
-  tail: string,
-): { stdout: string; stderr: string } {
-  return {
+  reportLine: string | undefined,
+): RunOutput {
+  const streams = {
     stdout: reporter === 'json' ? `${reportJsonOf(report)}\n` : output.stdout,
-    stderr: `${output.stderr}${tail}`,
+    stderr: output.stderr,
   }
+
+  if (reportLine === undefined) {
+    return streams
+  }
+
+  return { ...streams, reportLine: { stream: 'stderr', text: reportLine } }
 }
 
 /**

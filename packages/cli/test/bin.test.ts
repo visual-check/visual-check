@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -127,6 +127,29 @@ function runAsynchronously(options: CaseOptions, ...commandLineArguments: string
     child.on('error', reject)
     child.on('close', (status) => {
       resolve({ status, stdout, stderr })
+    })
+  })
+}
+
+/**
+ * Runs the built binary without blocking, with standard output and standard error both written to one file, as a
+ * terminal shows them. Writes to a file are synchronous, so the file keeps the order the binary wrote in. Resolves with
+ * its exit code and the file's text.
+ */
+function runIntoOneFile(options: CaseOptions, ...commandLineArguments: string[]) {
+  const path = join(createProject({}), 'output.txt')
+  const file = openSync(path, 'w')
+
+  return new Promise<{ status: number | null; output: string }>((resolve, reject) => {
+    const child = spawn(process.execPath, [binaryPath, ...commandLineArguments], {
+      ...spawnOptionsOf(options),
+      stdio: ['ignore', file, file],
+    })
+
+    child.on('error', reject)
+    child.on('close', (status) => {
+      closeSync(file)
+      resolve({ status, output: readFileSync(path, 'utf8') })
     })
   })
 }
@@ -506,6 +529,23 @@ describe('visual-check binary reaching Storybooks', () => {
       `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed\nReport: .visual-check/report/report.json\n`,
     )
     expect(result.stderr).toBe('')
+  })
+
+  it("ends the run's output with the report line, after a warning on standard error", async () => {
+    const url = await startStorybookServer({ c: entryOf('button--primary:test', { subtype: 'test' }) })
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
+      'button.stories.tsx': '',
+      'node_modules/storybook/package.json': JSON.stringify({ version: '12.0.0' }),
+    })
+    const result = await runIntoOneFile({ cwd: project }, 'test')
+
+    expect(result.status).toBe(0)
+    expect(result.output).toBe(
+      `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed\n` +
+        'Warning: Storybook web runs storybook 12.0.0, and visual-check supports 9.1 to 11. The run carries on.\n' +
+        'Report: .visual-check/report/report.json\n',
+    )
   })
 
   it('prints exactly one JSON document on stdout for test --reporter json, the report line on stderr', async () => {

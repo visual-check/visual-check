@@ -46,9 +46,9 @@ function readReport(project: string): TestReport {
 }
 
 /**
- * The line that ends stderr once the report beside the project's config is written.
+ * The report line of the report beside the project's config, which ends stderr once it is written.
  */
-const reportLine = 'Report: .visual-check/report/report.json\n'
+const reportLine = { stream: 'stderr', text: 'Report: .visual-check/report/report.json' } as const
 
 /**
  * The stop of a run whose browser exited twice after one snapshot finished.
@@ -91,7 +91,7 @@ describe('stoppedBy', () => {
 })
 
 describe('stoppedTestOf', () => {
-  it('replaces the report folder with the error report, keeping stdout and ending stderr with the report line', async () => {
+  it('replaces the report folder with the error report, keeping both streams and giving the report line for stderr', async () => {
     const project = createProject()
 
     mkdirSync(join(project, '.visual-check', 'report', 'images'), { recursive: true })
@@ -101,7 +101,8 @@ describe('stoppedTestOf', () => {
     expect(output).toEqual({
       exitCode: 2,
       stdout: '✓ web  a  12 ms\n',
-      stderr: `Warning.\nThe browser exited.\n${reportLine}`,
+      stderr: 'Warning.\nThe browser exited.\n',
+      reportLine,
     })
     expect(readdirSync(join(project, '.visual-check', 'report'))).toEqual(['report.json'])
     expect(readReport(project)).toMatchObject({
@@ -121,7 +122,8 @@ describe('stoppedTestOf', () => {
     expect(output).toEqual({
       exitCode: 2,
       stdout: `${reportJsonOf(readReport(project))}\n`,
-      stderr: `Warning.\nThe browser exited.\n${reportLine}`,
+      stderr: 'Warning.\nThe browser exited.\n',
+      reportLine,
     })
   })
 
@@ -130,6 +132,7 @@ describe('stoppedTestOf', () => {
     const output = await stoppedTestOf({ ...stopIn(project), configPath: undefined }, testIn(project, 'json'))
 
     expect(output.stderr).toBe('Warning.\nThe browser exited.\n')
+    expect(output.reportLine).toBeUndefined()
     expect(JSON.parse(output.stdout)).toMatchObject({ reportDir: null, error: { message: 'The browser exited.' } })
     expect(readdirSync(project).sort()).toEqual(['.git', 'visual-check.config.mjs'])
   })
@@ -146,6 +149,7 @@ describe('stoppedTestOf', () => {
         "visual-check couldn't clear .visual-check/report: ENOTDIR: not a directory. " +
         'Check that visual-check can remove it.\n',
     )
+    expect(output.reportLine).toBeUndefined()
     expect(JSON.parse(output.stdout)).toMatchObject({ reportDir: null })
   })
 })
@@ -233,9 +237,9 @@ describe('usageFailureOf', () => {
     const output = await usageFailureOf(error, project, '1.2.3')
 
     expect(output.stderr).toBe(
-      "--all and --filter can't be used together. Pick one.\n" +
-        `Run visual-check --help to see the commands and options.\n${reportLine}`,
+      "--all and --filter can't be used together. Pick one.\nRun visual-check --help to see the commands and options.\n",
     )
+    expect(output.reportLine).toEqual(reportLine)
     expect(readReport(project).error).toEqual({
       message: "--all and --filter can't be used together. Pick one.",
       storybooks: [],

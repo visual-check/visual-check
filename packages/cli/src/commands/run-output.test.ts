@@ -31,17 +31,22 @@ describe('cliOutputOf', () => {
   const result = { stdout: '✓ web  a  passed\n', stderr: 'warning\n' }
   const line = 'Report: .visual-check/report/report.json'
 
-  it.each([undefined, 'live', 'log'] as const)('ends stdout with the report line for reporter %s', (reporter) => {
-    expect(cliOutputOf(result, report, reporter, line)).toEqual({
-      stdout: `✓ web  a  passed\n${line}\n`,
-      stderr: 'warning\n',
-    })
-  })
+  it.each([undefined, 'live', 'log'] as const)(
+    'keeps both streams and gives the report line for stdout, after stderr, for reporter %s',
+    (reporter) => {
+      expect(cliOutputOf(result, report, reporter, line)).toEqual({
+        stdout: '✓ web  a  passed\n',
+        stderr: 'warning\n',
+        reportLine: { stream: 'stdout', text: line },
+      })
+    },
+  )
 
-  it('puts only the document on stdout for json, and the report line last on stderr', () => {
+  it('puts only the document on stdout for json, and gives the report line for stderr', () => {
     expect(cliOutputOf(result, report, 'json', line)).toEqual({
       stdout: `${reportJsonOf(report)}\n`,
-      stderr: `warning\n${line}\n`,
+      stderr: 'warning\n',
+      reportLine: { stream: 'stderr', text: line },
     })
   })
 })
@@ -60,20 +65,28 @@ describe('documentOutputOf', () => {
     error: { message: 'Boom.', storybooks: [] },
   })
   const result = { stdout: '✓ web  a  passed\n', stderr: 'Boom.\n' }
-  const line = 'Report: .visual-check/report/report.json\n'
+  const line = 'Report: .visual-check/report/report.json'
 
   it.each([undefined, 'live', 'log'] as const)(
-    'keeps stdout and ends stderr with the given tail for reporter %s',
+    'keeps both streams and gives the report line for stderr for reporter %s',
     (reporter) => {
       expect(documentOutputOf(result, report, reporter, line)).toEqual({
         stdout: '✓ web  a  passed\n',
-        stderr: `Boom.\n${line}`,
+        stderr: 'Boom.\n',
+        reportLine: { stream: 'stderr', text: line },
       })
     },
   )
 
+  it('gives no report line when no report was written', () => {
+    expect(documentOutputOf(result, report, 'log', undefined)).toEqual({
+      stdout: '✓ web  a  passed\n',
+      stderr: 'Boom.\n',
+    })
+  })
+
   it('puts only the document on stdout for json, dropping the human lines', () => {
-    expect(documentOutputOf(result, report, 'json', '')).toEqual({
+    expect(documentOutputOf(result, report, 'json', undefined)).toEqual({
       stdout: `${reportJsonOf(report)}\n`,
       stderr: 'Boom.\n',
     })

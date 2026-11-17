@@ -2,7 +2,7 @@ import { locateConfig } from '../config/find-config.js'
 import type { ReportStorybook } from '../report/report-document.js'
 import { ReportError, reportFolderOf, writeErrorReport } from '../report/report-folder.js'
 import type { RunOptions, UsageError } from './parse-command-line.js'
-import { documentOutputOf, reportLineOf } from './run-output.js'
+import { documentOutputOf, type RunOutput, reportLineOf } from './run-output.js'
 import { testErrorReportOf, updateErrorReportOf } from './run-report.js'
 import { reportProblemOf } from './stop-message.js'
 
@@ -81,23 +81,15 @@ export interface StoppedUpdate {
 }
 
 /**
- * What a stopped run prints on each stream, and its exit code, 2.
+ * What a stopped run prints, and its exit code, 2.
  *
  * @public
  */
-export interface StoppedOutput {
+export interface StoppedOutput extends RunOutput {
   /**
    * The exit code: 2.
    */
   exitCode: 2
-  /**
-   * Text for standard output.
-   */
-  stdout: string
-  /**
-   * Text for standard error.
-   */
-  stderr: string
 }
 
 /**
@@ -112,9 +104,9 @@ export function stoppedBy(problem: string, inRun: Pick<RunStop, 'configPath' | '
 
 /**
  * Ends a `test` that exits 2. When the stop names a config, the report folder beside it is replaced with a report
- * holding only the error, wiping any images the run wrote, and the report's path ends stderr; a report folder that
- * can't be written adds its problem instead. With `--reporter json`, stdout holds the error document alone, its
- * `reportDir` `null` when nothing was written.
+ * holding only the error, wiping any images the run wrote, and the report's path is the report line, for stderr; a
+ * report folder that can't be written adds its problem to stderr instead. With `--reporter json`, stdout holds the
+ * error document alone, its `reportDir` `null` when nothing was written.
  *
  * @throws {Error} Any error besides a `ReportError` while writing the report.
  *
@@ -134,7 +126,7 @@ export async function stoppedTestOf(stop: RunStop, test: StoppedTest): Promise<S
   })
 
   if (stop.configPath === undefined) {
-    return { exitCode: 2, ...documentOutputOf(stop, report, options.reporter, '') }
+    return { exitCode: 2, ...documentOutputOf(stop, report, options.reporter, undefined) }
   }
 
   const folder = reportFolderOf(stop.configPath)
@@ -145,14 +137,19 @@ export async function stoppedTestOf(stop: RunStop, test: StoppedTest): Promise<S
     if (error instanceof ReportError) {
       return {
         exitCode: 2,
-        ...documentOutputOf(stop, { ...report, reportDir: null }, options.reporter, reportProblemOf(error, cwd)),
+        ...documentOutputOf(
+          { stdout: stop.stdout, stderr: `${stop.stderr}${reportProblemOf(error, cwd)}` },
+          { ...report, reportDir: null },
+          options.reporter,
+          undefined,
+        ),
       }
     }
 
     throw error
   }
 
-  return { exitCode: 2, ...documentOutputOf(stop, report, options.reporter, `${reportLineOf(cwd, folder)}\n`) }
+  return { exitCode: 2, ...documentOutputOf(stop, report, options.reporter, reportLineOf(cwd, folder)) }
 }
 
 /**
@@ -170,7 +167,7 @@ export function stoppedUpdateOf(stop: RunStop, update: StoppedUpdate): StoppedOu
     unreachable: stop.unreachable,
   })
 
-  return { exitCode: 2, ...documentOutputOf(stop, report, update.options.reporter, '') }
+  return { exitCode: 2, ...documentOutputOf(stop, report, update.options.reporter, undefined) }
 }
 
 /**

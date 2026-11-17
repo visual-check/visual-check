@@ -19,6 +19,7 @@ import { finishedAnswer } from '../storybook/preview-script.fixture.js'
 import { greyPng } from '../visual-diff/images.fixture.js'
 import type { BrowserLaunch, LaunchBrowser } from './launch-browser.js'
 import type { RunCliOptions } from './run-cli.js'
+import type { ReportLine } from './run-output.js'
 
 /**
  * The version in the CLI's `package.json`, which every header a run prints names.
@@ -644,24 +645,20 @@ export function printed(...lines: string[]): string {
 }
 
 /**
- * The line that ends the stdout of a `test` that exits 0 or 1, run in the config's folder.
+ * The report line of a `test` run in the config's folder.
  */
-export const reportLine = 'Report: .visual-check/report/report.json'
+const reportLine = 'Report: .visual-check/report/report.json'
 
 /**
- * Gives what a `test` that exits 2 with its config found prints on stderr: `text`, then the report line.
+ * The report line of a `test` that exits 0 or 1, run in the config's folder, which goes on stdout.
  */
-export function withReportLine(text: string): string {
-  return `${text}${reportLine}\n`
-}
+export const reportOnStdout: ReportLine = { stream: 'stdout', text: reportLine }
 
 /**
- * Builds what a `test` that exits 0 or 1, run in the config's folder, prints on stdout: these lines, then the report
- * line.
+ * The report line of a `test` that exits 2 with its config found, or runs with `--reporter json`, run in the config's
+ * folder, which goes on stderr.
  */
-export function printedTest(...lines: string[]): string {
-  return printed(...lines, reportLine)
-}
+export const reportOnStderr: ReportLine = { stream: 'stderr', text: reportLine }
 
 /**
  * Gives the first line a stream holds.

@@ -24,7 +24,7 @@ import { dockerProblemOf } from './docker-problem.js'
 import { createLaunchBrowser, type LaunchBrowser } from './launch-browser.js'
 import { parseCommandLine, type Reporter, type RunOptions, UsageError } from './parse-command-line.js'
 import { readImageFit } from './read-image-fit.js'
-import { cliOutputOf, documentOutputOf, reportLineOf } from './run-output.js'
+import { cliOutputOf, documentOutputOf, type RunOutput, reportLineOf } from './run-output.js'
 import { type TestReportFacts, testReportFor, updateReportFor } from './run-report.js'
 import { runSnapshots } from './run-snapshots.js'
 import { selectStories } from './select-stories.js'
@@ -59,23 +59,15 @@ Other options:
 `
 
 /**
- * What a CLI run produced: the exit code and the text for each output stream.
+ * What a CLI run produced: the exit code, the text for each output stream, and the report line to write after both.
  *
  * @public
  */
-export interface CliResult {
+export interface CliResult extends RunOutput {
   /**
    * The process exit code.
    */
   exitCode: number
-  /**
-   * Text for standard output.
-   */
-  stdout: string
-  /**
-   * Text for standard error.
-   */
-  stderr: string
 }
 
 /**
@@ -203,12 +195,13 @@ export async function runCli(
  *
  * Right after the config loads, `test` clears the report folder, `.visual-check/report` beside the config file; one it
  * can't clear exits 2. Every `test` that exits 0 or 1, `test --consistency`, a CI stop and each shard included, then
- * writes `report.json` there and ends stdout with the report's path, relative to the folder the CLI runs in. A `test`
- * that exits 2 with its config found, or named by the config error, replaces the folder with a `report.json` holding
- * only the error, naming the Storybooks where nothing answers, and ends stderr with the report's path; with no config
- * found, or when the report folder itself is what failed, nothing is written. With `--reporter json`, stdout then holds
- * the error document alone. `update` never touches the report folder. With `--reporter json`, its stdout holds its own
- * document alone, the error document when it exits 2, and its warnings stay on stderr.
+ * writes `report.json` there and gives the report's path, relative to the folder the CLI runs in, as the report line
+ * for stdout. A `test` that exits 2 with its config found, or named by the config error, replaces the folder with a
+ * `report.json` holding only the error, naming the Storybooks where nothing answers, and gives the report line for
+ * stderr; with no config found, or when the report folder itself is what failed, nothing is written. With
+ * `--reporter json`, stdout then holds the error document alone. `update` never touches the report folder. With
+ * `--reporter json`, its stdout holds its own document alone, the error document when it exits 2, and its warnings
+ * stay on stderr.
  *
  * @throws {Error} Any error besides the problems that stop the run with exit 2.
  */
@@ -459,7 +452,9 @@ async function snapshotsOutcomeOf(
       return { finished: { exitCode: result.exitCode, ...output } }
     }
 
-    return { finished: { exitCode: result.exitCode, ...documentOutputOf(output, updateReportFor(facts), 'json', '') } }
+    return {
+      finished: { exitCode: result.exitCode, ...documentOutputOf(output, updateReportFor(facts), 'json', undefined) },
+    }
   }
 
   return await withTestReport(
@@ -499,9 +494,9 @@ async function clearReportProblemOf(
 }
 
 /**
- * Writes the report of a `test` that exits 0 or 1, then ends its stdout with the report's path. With `--reporter json`
- * stdout holds the report's JSON document alone and the path ends stderr. When the report can't be written, the run
- * stops with exit 2 with what went wrong after its stderr, and no error report is written.
+ * Writes the report of a `test` that exits 0 or 1, then gives the report's path as the report line for stdout. With
+ * `--reporter json` stdout holds the report's JSON document alone and the report line is for stderr. When the report
+ * can't be written, the run stops with exit 2 with what went wrong after its stderr, and no error report is written.
  *
  * @throws {Error} Any error besides a `ReportError`.
  */

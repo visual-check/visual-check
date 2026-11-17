@@ -13,7 +13,8 @@ import {
   otherSnapshot,
   removeMarkerFolder,
   reportFolderIn,
-  reportLine,
+  reportOnStderr,
+  reportOnStdout,
   startStorybook,
   takeUnusedUrl,
   usageHint,
@@ -41,13 +42,6 @@ function readImage(project: string, path: string | null): Uint8Array {
   }
 
   return new Uint8Array(readFileSync(join(reportFolderIn(project), path)))
-}
-
-/**
- * Gives the last line a stream holds.
- */
-function lastLineOf(text: string): string | undefined {
-  return text.trimEnd().split('\n').at(-1)
 }
 
 /**
@@ -79,7 +73,7 @@ describe('runCli test report', () => {
     const result = await runCli(['test'], {}, project, fakeBrowser().options)
 
     expect(result.exitCode).toBe(0)
-    expect(lastLineOf(result.stdout)).toBe(reportLine)
+    expect(result.reportLine).toEqual(reportOnStdout)
     expect(readdirSync(reportFolderIn(project))).toEqual(['report.json'])
     expect(readReport(project)).toEqual({
       version: 1,
@@ -105,7 +99,7 @@ describe('runCli test report', () => {
     const entry = onlyEntryOf(report)
 
     expect(result.exitCode).toBe(1)
-    expect(lastLineOf(result.stdout)).toBe(reportLine)
+    expect(result.reportLine).toEqual(reportOnStdout)
     expect(report.exitCode).toBe(1)
     expect(report.counts).toEqual({ passed: 1, flaky: 0, differs: 1, broken: 0, missing: 0, orphan: 0 })
     expect(entry).toEqual({
@@ -257,7 +251,7 @@ describe('runCli test report', () => {
     const report = readReport(project)
 
     expect(result.exitCode).toBe(1)
-    expect(lastLineOf(result.stdout)).toBe(reportLine)
+    expect(result.reportLine).toEqual(reportOnStdout)
     expect(report.shard).toEqual({ index: 2, total: 3 })
     expect(report.snapshots.map(({ id, status }) => [id, status])).toEqual([['b', 'missing']])
   })
@@ -272,7 +266,7 @@ describe('runCli test report', () => {
     const result = await runCli(['test'], {}, join(project, 'packages', 'web'), fakeBrowser().options)
 
     expect(result.exitCode).toBe(0)
-    expect(lastLineOf(result.stdout)).toBe('Report: ../../.visual-check/report/report.json')
+    expect(result.reportLine).toEqual({ stream: 'stdout', text: 'Report: ../../.visual-check/report/report.json' })
     expect(readReport(project).reportDir).toBe('.visual-check/report')
   })
 
@@ -282,7 +276,7 @@ describe('runCli test report', () => {
     const result = await runCli(['update'], {}, project, fakeBrowser().options)
 
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).not.toContain('Report:')
+    expect(result.reportLine).toBeUndefined()
     expect(readdirSync(reportFolderIn(project))).toEqual(['images'])
     expect(existsSync(image)).toBe(true)
   })
@@ -305,7 +299,7 @@ describe('runCli test report after the consistency check', () => {
     const report = readReport(project)
 
     expect(result.exitCode).toBe(1)
-    expect(lastLineOf(result.stdout)).toBe(reportLine)
+    expect(result.reportLine).toEqual(reportOnStdout)
     expect(report).toMatchObject({ consistencyOnly: true, exitCode: 1 })
     expect(report.counts).toEqual({ passed: 0, flaky: 0, differs: 0, broken: 2, missing: 1, orphan: 1 })
     expect(report.snapshots.map(({ id, status, reason }) => [id, status, reason])).toEqual([
@@ -318,13 +312,14 @@ describe('runCli test report after the consistency check', () => {
     expect(readdirSync(join(reportFolderIn(project), 'images', 'web'))).toEqual(['gone.baseline.png'])
   })
 
-  it('writes the findings of a CI test that stops before capturing, ending stdout with the report line', async () => {
+  it('writes the findings of a CI test that stops before capturing, giving the report line for stdout', async () => {
     const { project } = await createRun(['a1', 'a2', 'b'], { b: defaultRunSnapshot }, '', importPaths)
     const result = await runCli(['test'], { CI: 'true' }, project, fakeBrowser({}, aFileFails).options)
     const report = readReport(project)
 
     expect(result.exitCode).toBe(1)
-    expect(result.stdout.endsWith(`\n${ciStopLine}\n${reportLine}\n`)).toBe(true)
+    expect(result.stdout.endsWith(`\n${ciStopLine}\n`)).toBe(true)
+    expect(result.reportLine).toEqual(reportOnStdout)
     expect(report).toMatchObject({ consistencyOnly: false, exitCode: 1 })
     expect(report.snapshots.map(({ id, status }) => [id, status])).toEqual([
       ['a1', 'broken'],
@@ -343,7 +338,7 @@ describe('runCli test report after the consistency check', () => {
     expect(JSON.parse(result.stdout)).toEqual(readReport(project))
     expect(result.stdout).toBe(readFileSync(join(reportFolderIn(project), 'report.json'), 'utf8'))
     expect(result.stdout).not.toContain('Report:')
-    expect(lastLineOf(result.stderr)).toBe(reportLine)
+    expect(result.reportLine).toEqual(reportOnStderr)
   })
 
   it.each(['live', 'log'])('prints the same with --reporter %s as with no flag', async (reporter) => {
@@ -384,16 +379,16 @@ function errorReportOf(error: TestReport['error'], storybooks: TestReport['story
 const writableFix = 'Check that its folder is writable and the disk has room.'
 
 describe('runCli test report on exit 2', () => {
-  it('replaces a stale report with one holding the config error, ending stderr with the report line', async () => {
+  it('replaces a stale report with one holding the config error, giving the report line for stderr', async () => {
     const { project } = await createRun(['a'], { a: defaultRunSnapshot }, "colour: 'red'")
 
     writeStaleReport(project)
 
     const result = await runCli(['test'], {}, project, fakeBrowser().options)
-    const message = result.stderr.slice(0, -`\n${reportLine}\n`.length)
+    const message = result.stderr.slice(0, -1)
 
     expect(message).toMatch(/^visual-check\.config\.mjs is invalid:\n {2}- colour: unknown key\./)
-    expect(result).toEqual({ exitCode: 2, stdout: '', stderr: `${message}\n${reportLine}\n` })
+    expect(result).toEqual({ exitCode: 2, stdout: '', stderr: `${message}\n`, reportLine: reportOnStderr })
     expect(readdirSync(reportFolderIn(project))).toEqual(['report.json'])
     expect(readReport(project)).toEqual(errorReportOf({ message, storybooks: [] }))
   })
@@ -403,7 +398,7 @@ describe('runCli test report on exit 2', () => {
     const result = await runCli(['test', '--all', '--filter', 'a'], {}, project, fakeBrowser().options)
     const message = "--all and --filter can't be used together. Pick one."
 
-    expect(result).toEqual({ exitCode: 2, stdout: '', stderr: `${message}\n${usageHint}${reportLine}\n` })
+    expect(result).toEqual({ exitCode: 2, stdout: '', stderr: `${message}\n${usageHint}`, reportLine: reportOnStderr })
     expect(readReport(project)).toEqual(errorReportOf({ message, storybooks: [] }))
   })
 
@@ -420,7 +415,7 @@ describe('runCli test report on exit 2', () => {
       fakeBrowser().options,
     )
 
-    expect(lastLineOf(result.stderr)).toBe('Report: ../.visual-check/report/report.json')
+    expect(result.reportLine).toEqual({ stream: 'stderr', text: 'Report: ../.visual-check/report/report.json' })
     expect(readReport(project).error?.message).toMatch(/^--shard takes k\/n/)
   })
 
@@ -433,10 +428,10 @@ describe('runCli test report on exit 2', () => {
     const report = readReport(project)
 
     expect(result.exitCode).toBe(2)
-    expect(lastLineOf(result.stderr)).toBe(reportLine)
+    expect(result.reportLine).toEqual(reportOnStderr)
     expect(report.storybooks).toEqual([{ name: 'web', url }])
     expect(report.error).toEqual({
-      message: result.stderr.slice(0, -`${reportLine}\n`.length).trim(),
+      message: result.stderr.trim(),
       storybooks: [{ name: 'web', url }],
     })
     expect(report.error?.message).toContain(url)
@@ -453,7 +448,7 @@ describe('runCli test report on exit 2', () => {
 
     expect(result.exitCode).toBe(2)
     expect(result.stdout).toContain('! web  a  broken: The browser exited')
-    expect(lastLineOf(result.stderr)).toBe(reportLine)
+    expect(result.reportLine).toEqual(reportOnStderr)
     expect(readdirSync(reportFolderIn(project))).toEqual(['report.json'])
     expect(report).toMatchObject({ exitCode: 2, snapshots: [], counts: { passed: 0, broken: 0, differs: 0 } })
     expect(report.error?.message).toMatch(/^The browser was killed by signal SIGKILL while in use\.\n/)
@@ -481,7 +476,7 @@ describe('runCli test report on exit 2', () => {
     expect(result.exitCode).toBe(2)
     expect(result.stdout).toBe(readFileSync(join(reportFolderIn(project), 'report.json'), 'utf8'))
     expect(result.stdout.trimEnd().split('\n')).toHaveLength(1)
-    expect(lastLineOf(result.stderr)).toBe(reportLine)
+    expect(result.reportLine).toEqual(reportOnStderr)
   })
 
   it('writes nothing when no config is found, and prints the error document with no report folder for json', async () => {
@@ -521,7 +516,7 @@ describe('runCli test report on exit 2', () => {
     const result = await runCli(['update'], {}, project, fakeBrowser().options)
 
     expect(result.exitCode).toBe(2)
-    expect(result.stderr).not.toContain('Report:')
+    expect(result.reportLine).toBeUndefined()
     expect(existsSync(image)).toBe(true)
     expect(readdirSync(reportFolderIn(project))).toEqual(['images'])
   })
@@ -594,7 +589,7 @@ describe('runCli test report on exit 2', () => {
 
         expect(result.exitCode).toBe(2)
         expect(result.stdout).toContain('1 passed')
-        expect(result.stdout).not.toContain('Report:')
+        expect(result.reportLine).toBeUndefined()
         expect(result.stderr).toBe(`${problem}\n`)
         expect(json).toEqual({
           exitCode: 2,

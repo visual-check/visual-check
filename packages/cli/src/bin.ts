@@ -10,6 +10,14 @@ try {
 
   process.stdout.write(result.stdout)
   process.stderr.write(result.stderr)
+
+  // The report line comes last, after both streams, so it is the run's last line.
+  if (result.reportLine !== undefined) {
+    const stream = result.reportLine.stream === 'stdout' ? process.stdout : process.stderr
+
+    stream.write(`${result.reportLine.text}\n`)
+  }
+
   process.exitCode = result.exitCode
 } catch (error) {
   process.stderr.write(`${error instanceof Error ? (error.stack ?? String(error)) : String(error)}\n`)
