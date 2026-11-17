@@ -31,13 +31,17 @@ import {
   cleanUpRuns,
   consistencyHeaderOf,
   containerId,
+  countsOf,
   createProject,
   createRun,
   defaultRunSnapshot,
   desktopProbe,
+  diffLineOf,
   type FakeBrowserOptions,
   type FakeStory,
   failingLaunch,
+  failureOf,
+  failuresHeadingOf,
   fakeBrowser,
   fakeDriverOf,
   firstLineOf,
@@ -49,14 +53,17 @@ import {
   listen,
   loaderLine,
   markerOf,
+  missingFailureOf,
   missingLibraryError,
   missingLineOf,
   newRecord,
   noLaunch,
   noMarker,
+  orphanFailureOf,
   orphanLineOf,
   otherSnapshot,
   printed,
+  recordingWrite,
   removeMarkerFolder,
   reportFolderIn,
   reportOnStderr,
@@ -68,10 +75,16 @@ import {
   usageHint,
   version,
   withoutTimes,
+  withSnapshotLinesSorted,
   writeMarker,
   writeStaleReport,
 } from './run-cli.fixture.js'
 import { type RunCliOptions, runCli } from './run-cli.js'
+
+/**
+ * The config key that captures with one worker, so the snapshots finish, and their lines print, in planned order.
+ */
+const oneWorker = 'workers: 1'
 
 /**
  * The command that adds visual-check's packages to the `init` project, under pnpm.
@@ -183,7 +196,8 @@ Options for test and update:
   --consistency       Only check for missing baselines, orphans and stories files that fail to load (test only)
   --workers <n>       Capture with this many workers
   --shard <k>/<n>     Run one shard's share of the stories files (test only)
-  --reporter <name>   Live or log for people, json for the report's JSON document on stdout
+  --reporter <name>   live (default in a terminal), log (default in CI or without one), or json for the report's JSON
+                      document on stdout
 
 Options for init:
   --yes               Take every default
@@ -326,7 +340,7 @@ Other options:
     const web = await startStorybook(['a', 'b', 'c'])
     const docs = await startStorybook(['d'])
     const project = createProject({
-      'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${web}' }, docs: { dir: 'docs', url: '${docs}' } } }\n`,
+      'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${web}' }, docs: { dir: 'docs', url: '${docs}' } }, ${oneWorker} }\n`,
       'web/button.stories.tsx': '',
       'docs/button.stories.tsx': '',
     })
@@ -335,12 +349,17 @@ Other options:
     expect(await runCli(['test'], {}, project, options)).toEqual({
       exitCode: 1,
       stdout: printed(
-        headerOf('test', 4),
+        headerOf('test', 4, 1),
         missingLineOf('web', 'a'),
         missingLineOf('web', 'b'),
         missingLineOf('web', 'c'),
         missingLineOf('docs', 'd'),
-        '0 passed · 4 missing',
+        failuresHeadingOf(4),
+        ...missingFailureOf('web', 'a'),
+        ...missingFailureOf('web', 'b'),
+        ...missingFailureOf('web', 'c'),
+        ...missingFailureOf('docs', 'd'),
+        countsOf('0 passed · 4 missing'),
       ),
       stderr: '',
       reportLine: reportOnStdout,
@@ -486,7 +505,7 @@ Other options:
 
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBe('')
-    expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 1), '✓ web  a  N ms', '1 passed'))
+    expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 1), '✓ web  a  N ms', countsOf('1 passed')))
     expect(result.reportLine).toEqual(reportOnStdout)
     expect(record.urls).toEqual([previewOf(url), `${url}/iframe.html?id=a&viewMode=story`])
     expect(record.urls.some((loaded) => loaded.includes(':6007') || loaded.includes(':6008'))).toBe(false)
@@ -580,7 +599,13 @@ describe('runCli test', () => {
     expect(result.exitCode).toBe(1)
     expect(result.stderr).toBe('')
     expect(withoutTimes(result.stdout)).toBe(
-      printed(headerOf('test', 1), '✓ web  a  N ms', orphanLineOf('web', 'gone'), '1 passed · 1 orphan'),
+      printed(
+        headerOf('test', 1),
+        '✓ web  a  N ms',
+        failuresHeadingOf(1),
+        ...orphanFailureOf('web', 'gone'),
+        countsOf('1 passed · 1 orphan'),
+      ),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
     expect(storyIdsOf(record.urls)).toEqual(['a'])
@@ -594,7 +619,9 @@ describe('runCli test', () => {
 
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBe('')
-    expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 1), '✓ web  button--primary  N ms', '1 passed'))
+    expect(withoutTimes(result.stdout)).toBe(
+      printed(headerOf('test', 1), '✓ web  button--primary  N ms', countsOf('1 passed')),
+    )
     expect(result.reportLine).toEqual(reportOnStdout)
     expect(record.urls).toEqual([
       `${url}/iframe.html?viewMode=story`,
@@ -605,12 +632,11 @@ describe('runCli test', () => {
   })
 
   it('reports differing, missing and broken stories, carries on, and exits 1 without capturing the missing one', async () => {
-    const { project } = await createRun(['a', 'b', 'c', 'd', 'e'], {
-      a: defaultRunSnapshot,
-      b: otherSnapshot,
-      d: defaultRunSnapshot,
-      e: defaultRunSnapshot,
-    })
+    const { project } = await createRun(
+      ['a', 'b', 'c', 'd', 'e'],
+      { a: defaultRunSnapshot, b: otherSnapshot, d: defaultRunSnapshot, e: defaultRunSnapshot },
+      oneWorker,
+    )
     const { options, record } = fakeBrowser({ d: { broken: true } })
     const result = await runCli(['test'], {}, project, options)
 
@@ -618,13 +644,17 @@ describe('runCli test', () => {
     expect(result.stderr).toBe('')
     expect(withoutTimes(result.stdout)).toBe(
       printed(
-        headerOf('test', 5),
+        headerOf('test', 5, 1),
         '✓ web  a  N ms',
         '✗ web  b  differs: 100 differ, 20 allowed',
         missingLineOf('web', 'c'),
         `! web  d  ${brokenDetail}`,
         '✓ web  e  N ms',
-        '2 passed · 1 differs · 1 broken · 1 missing',
+        failuresHeadingOf(3),
+        ...failureOf('web  b', 'differs: 100 differ, 20 allowed', diffLineOf('web', 'b')),
+        ...missingFailureOf('web', 'c'),
+        ...failureOf('web  d', brokenDetail),
+        countsOf('2 passed · 1 differs · 1 broken · 1 missing'),
       ),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
@@ -683,17 +713,20 @@ describe('runCli test', () => {
   })
 
   it('captures nothing when every selected baseline is missing, after reading the options', async () => {
-    const { project, url } = await createRun(['a', 'b'])
+    const { project, url } = await createRun(['a', 'b'], {}, oneWorker)
     const { options, record } = fakeBrowser()
     const result = await runCli(['test'], {}, project, options)
 
     expect(result).toEqual({
       exitCode: 1,
       stdout: printed(
-        headerOf('test', 2),
+        headerOf('test', 2, 1),
         missingLineOf('web', 'a'),
         missingLineOf('web', 'b'),
-        '0 passed · 2 missing',
+        failuresHeadingOf(2),
+        ...missingFailureOf('web', 'a'),
+        ...missingFailureOf('web', 'b'),
+        countsOf('0 passed · 2 missing'),
       ),
       stderr: '',
       reportLine: reportOnStdout,
@@ -708,7 +741,7 @@ describe('runCli test', () => {
 
     expect(await runCli(['test', '--filter', 'nothing'], {}, project, fakeBrowser().options)).toEqual({
       exitCode: 0,
-      stdout: printed(headerOf('test', 0), '0 passed'),
+      stdout: printed(headerOf('test', 0), countsOf('0 passed')),
       stderr: '',
       reportLine: reportOnStdout,
     })
@@ -735,7 +768,13 @@ describe('runCli visual diff', () => {
         headerOf('test', 2),
         '✓ web  a  N ms',
         '✗ web  b  differs: 100 differ, 20 allowed',
-        '1 passed · 1 differs',
+        failuresHeadingOf(1),
+        ...failureOf(
+          'web  b',
+          'differs: 100 differ, 20 allowed',
+          'diff: ../.visual-check/report/images/web/b.diff.png',
+        ),
+        countsOf('1 passed · 1 differs'),
       ),
     )
     expect(result.reportLine).toEqual({ stream: 'stdout', text: 'Report: ../.visual-check/report/report.json' })
@@ -784,7 +823,7 @@ describe('runCli visual diff', () => {
   })
 
   it("compares by the story's tolerance over the config's", async () => {
-    const { project } = await createRun(['a', 'b'], { a: defaultRunSnapshot, b: defaultRunSnapshot })
+    const { project } = await createRun(['a', 'b'], { a: defaultRunSnapshot, b: defaultRunSnapshot }, oneWorker)
     const threeWhite = new Uint8Array(await greyPng(10, 10, 0, whitePixels(3, 10)))
     const { options } = fakeBrowser(
       { a: { snapshot: threeWhite }, b: { snapshot: threeWhite } },
@@ -793,7 +832,14 @@ describe('runCli visual diff', () => {
     const result = await runCli(['test'], {}, project, options)
 
     expect(withoutTimes(result.stdout)).toBe(
-      printed(headerOf('test', 2), '✓ web  a  N ms', '✗ web  b  differs: 3 differ, 0 allowed', '1 passed · 1 differs'),
+      printed(
+        headerOf('test', 2, 1),
+        '✓ web  a  N ms',
+        '✗ web  b  differs: 3 differ, 0 allowed',
+        failuresHeadingOf(1),
+        ...failureOf('web  b', 'differs: 3 differ, 0 allowed', diffLineOf('web', 'b')),
+        countsOf('1 passed · 1 differs'),
+      ),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
   })
@@ -887,17 +933,20 @@ const ciEnvironment = { CI: 'true' }
 
 describe('runCli consistency check', () => {
   it("reports a missing baseline outside --filter after another story's visual diff, without capturing it, and exits 1", async () => {
-    const { project } = await createRun(['a', 'b'], { a: defaultRunSnapshot })
+    const { project } = await createRun(['a', 'b'], { a: defaultRunSnapshot }, oneWorker)
     const { options, record } = fakeBrowser({ a: { snapshot: otherSnapshot } })
     const result = await runCli(['test', '--filter', '^a$'], {}, project, options)
 
     expect(result).toEqual({
       exitCode: 1,
       stdout: printed(
-        headerOf('test', 2),
+        headerOf('test', 2, 1),
         '✗ web  a  differs: 100 differ, 20 allowed',
         missingLineOf('web', 'b'),
-        '0 passed · 1 differs · 1 missing',
+        failuresHeadingOf(2),
+        ...failureOf('web  a', 'differs: 100 differ, 20 allowed', diffLineOf('web', 'a')),
+        ...missingFailureOf('web', 'b'),
+        countsOf('0 passed · 1 differs · 1 missing'),
       ),
       stderr: '',
       reportLine: reportOnStdout,
@@ -910,11 +959,11 @@ describe('runCli consistency check', () => {
     ])
   })
 
-  it('lists the orphans of every Storybook in config order, then file name order, before the flaky snapshots', async () => {
+  it('lists the orphans of every Storybook in config order, then file name order, after the snapshots, then the flaky ones', async () => {
     const web = await startStorybook(['a'])
     const docs = await startStorybook(['d'])
     const project = createProject({
-      'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${web}' }, docs: { dir: 'docs', url: '${docs}' } } }\n`,
+      'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${web}' }, docs: { dir: 'docs', url: '${docs}' } }, ${oneWorker} }\n`,
       'web/button.stories.tsx': '',
       'docs/button.stories.tsx': '',
       'web/.visual-check/baselines/a.png': defaultRunSnapshot,
@@ -929,15 +978,16 @@ describe('runCli consistency check', () => {
     expect(result.exitCode).toBe(1)
     expect(withoutTimes(result.stdout)).toBe(
       printed(
-        headerOf('test', 2),
+        headerOf('test', 2, 1),
         '✓ web  a  N ms · flaky',
         '✓ docs  d  N ms',
-        orphanLineOf('web', 'y.dark', 'web/.visual-check/baselines'),
-        orphanLineOf('web', 'z', 'web/.visual-check/baselines'),
-        orphanLineOf('docs', 'x', 'docs/.visual-check/baselines'),
+        failuresHeadingOf(3),
+        ...orphanFailureOf('web', 'y.dark', 'web/.visual-check/baselines'),
+        ...orphanFailureOf('web', 'z', 'web/.visual-check/baselines'),
+        ...orphanFailureOf('docs', 'x', 'docs/.visual-check/baselines'),
         flakyHeading,
         '  web  a',
-        '2 passed (1 flaky) · 3 orphans',
+        countsOf('2 passed (1 flaky) · 3 orphans'),
       ),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
@@ -951,14 +1001,20 @@ describe('runCli consistency check', () => {
     expect(result.exitCode).toBe(1)
     expect(result.stderr).toBe('')
     expect(withoutTimes(result.stdout)).toBe(
-      printed(headerOf('test', 1), '✓ web  a  N ms', orphanLineOf('web', 'b'), '1 passed · 1 orphan'),
+      printed(
+        headerOf('test', 1),
+        '✓ web  a  N ms',
+        failuresHeadingOf(1),
+        ...orphanFailureOf('web', 'b'),
+        countsOf('1 passed · 1 orphan'),
+      ),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
     expect(storyIdsOf(record.urls)).toEqual(['a'])
   })
 
   it('breaks every story of a stories file that failed to load, whatever --filter selects, and exits 1', async () => {
-    const { project, url } = await createRun(['a', 'b', 'c'], { b: defaultRunSnapshot }, '', {
+    const { project, url } = await createRun(['a', 'b', 'c'], { b: defaultRunSnapshot }, oneWorker, {
       a: './a.stories.tsx',
       b: './b.stories.tsx',
       c: './a.stories.tsx',
@@ -969,11 +1025,14 @@ describe('runCli consistency check', () => {
     expect(result.exitCode).toBe(1)
     expect(withoutTimes(result.stdout)).toBe(
       printed(
-        headerOf('test', 3),
+        headerOf('test', 3, 1),
         `! web  a  ${loadFailedDetail}`,
         '✓ web  b  N ms',
         `! web  c  ${loadFailedDetail}`,
-        '1 passed · 2 broken',
+        failuresHeadingOf(2),
+        ...failureOf('web  a', loadFailedDetail),
+        ...failureOf('web  c', loadFailedDetail),
+        countsOf('1 passed · 2 broken'),
       ),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
@@ -1084,7 +1143,9 @@ describe('runCli consistency check', () => {
         headerOf('test', 2),
         '✓ web  a  N ms',
         '✗ web  b  differs: 100 differ, 20 allowed',
-        '1 passed · 1 differs',
+        failuresHeadingOf(1),
+        ...failureOf('web  b', 'differs: 100 differ, 20 allowed', diffLineOf('web', 'b')),
+        countsOf('1 passed · 1 differs'),
       ),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
@@ -1314,7 +1375,7 @@ describe('runCli test --consistency with --storybook', () => {
     const result = await runCli(['test', '--storybook', 'web'], {}, project, fakeBrowser().options)
 
     expect(result.exitCode).toBe(0)
-    expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 1), '✓ web  a  N ms', '1 passed'))
+    expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 1), '✓ web  a  N ms', countsOf('1 passed')))
     expect(result.reportLine).toEqual(reportOnStdout)
   })
 })
@@ -1458,10 +1519,26 @@ describe('runCli test --shard', () => {
 
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBe('')
-    expect(withoutTimes(result.stdout)).toBe(
-      printed(shardHeaderOf('3/4', 1, 2), shardNote, '✓ web  d1  N ms', '✓ web  d2  N ms', '2 passed'),
+    expect(withSnapshotLinesSorted(withoutTimes(result.stdout))).toBe(
+      printed(shardHeaderOf('3/4', 1, 2), shardNote, '✓ web  d1  N ms', '✓ web  d2  N ms', countsOf('2 passed')),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
+  })
+
+  it("writes the shard's note right after its header, before any snapshot line", async () => {
+    const { project } = await createShardedRun()
+    const { write, writes } = recordingWrite()
+    const result = await runCli(['test', '--shard', '3/4'], {}, project, { ...fakeBrowser().options, write })
+
+    expect(result.exitCode).toBe(0)
+    expect(writes.slice(0, 2)).toEqual([
+      ['stdout', `${shardHeaderOf('3/4', 1, 2)}\n`],
+      ['stdout', `${shardNote}\n`],
+    ])
+    expect(writes.slice(2).sort()).toEqual([
+      ['stdout', '✓ web  d1  N ms\n'],
+      ['stdout', '✓ web  d2  N ms\n'],
+    ])
   })
 
   it('runs no consistency check: an orphan fails no shard, locally or in CI', async () => {
@@ -1473,7 +1550,7 @@ describe('runCli test --shard', () => {
 
       expect(result.exitCode).toBe(0)
       expect(withoutTimes(result.stdout)).toBe(
-        printed(shardHeaderOf('4/4', 1, 1), shardNote, '✓ web  c1  N ms', '1 passed'),
+        printed(shardHeaderOf('4/4', 1, 1), shardNote, '✓ web  c1  N ms', countsOf('1 passed')),
       )
       expect(result.reportLine).toEqual(reportOnStdout)
       expect(capturedIdsOf(record)).toEqual(['c1'])
@@ -1497,7 +1574,14 @@ describe('runCli test --shard', () => {
 
     expect(result).toEqual({
       exitCode: 1,
-      stdout: printed(shardHeaderOf('1/2', 1, 1), shardNote, missingLineOf('web', 'a'), '0 passed · 1 missing'),
+      stdout: printed(
+        shardHeaderOf('1/2', 1, 1),
+        shardNote,
+        missingLineOf('web', 'a'),
+        failuresHeadingOf(1),
+        ...missingFailureOf('web', 'a'),
+        countsOf('0 passed · 1 missing'),
+      ),
       stderr: '',
       reportLine: reportOnStdout,
     })
@@ -1512,7 +1596,7 @@ describe('runCli test --shard', () => {
 
     expect(await runCli(['test', '--shard', '4/4'], {}, project, noLaunch)).toEqual({
       exitCode: 0,
-      stdout: printed(shardHeaderOf('4/4', 0, 0), shardNote, 'Shard 4/4 has nothing to capture.', '0 passed'),
+      stdout: printed(shardHeaderOf('4/4', 0, 0), shardNote, 'Shard 4/4 has nothing to capture.', countsOf('0 passed')),
       stderr: '',
       reportLine: reportOnStdout,
     })
@@ -1528,7 +1612,7 @@ describe('runCli test --shard', () => {
 
     expect(result).toEqual({
       exitCode: 0,
-      stdout: printed(shardHeaderOf('2/2', 1, 0), shardNote, 'Shard 2/2 has nothing to capture.', '0 passed'),
+      stdout: printed(shardHeaderOf('2/2', 1, 0), shardNote, 'Shard 2/2 has nothing to capture.', countsOf('0 passed')),
       stderr: '',
       reportLine: reportOnStdout,
     })
@@ -1609,11 +1693,11 @@ describe('runCli test --shard', () => {
 
 describe('runCli update', () => {
   it('writes missing baselines and ones beyond tolerance exactly as captured, and keeps the rest untouched', async () => {
-    const { project, folder } = await createRun(['a', 'b', 'c', 'd'], {
-      a: defaultRunSnapshot,
-      b: defaultRunSnapshot,
-      c: defaultRunSnapshot,
-    })
+    const { project, folder } = await createRun(
+      ['a', 'b', 'c', 'd'],
+      { a: defaultRunSnapshot, b: defaultRunSnapshot, c: defaultRunSnapshot },
+      oneWorker,
+    )
     const past = new Date('2001-01-01T00:00:00Z')
 
     utimesSync(join(folder, 'a.png'), past, past)
@@ -1631,7 +1715,7 @@ describe('runCli update', () => {
     expect(result).toEqual({
       exitCode: 0,
       stdout: printed(
-        headerOf('update', 4),
+        headerOf('update', 4, 1),
         '✓ web  a  kept',
         '✓ web  b  kept',
         '✓ web  c  written: differs: 100 differ, 20 allowed',
@@ -1651,7 +1735,7 @@ describe('runCli update', () => {
   })
 
   it("compares by the story's tolerance, at the viewport's device scale factor", async () => {
-    const { project, folder } = await createRun(['a', 'b'], { a: defaultRunSnapshot, b: defaultRunSnapshot })
+    const { project, folder } = await createRun(['a', 'b'], { a: defaultRunSnapshot, b: defaultRunSnapshot }, oneWorker)
     const { options } = fakeBrowser(
       { a: { snapshot: otherSnapshot }, b: { snapshot: otherSnapshot } },
       {
@@ -1664,7 +1748,7 @@ describe('runCli update', () => {
 
     expect(result.stdout).toBe(
       printed(
-        headerOf('update', 2),
+        headerOf('update', 2, 1),
         '✓ web  a  kept',
         '✓ web  b  written: differs: 100 differ, 80 allowed (20 at scale 2)',
         '1 written · 1 kept',
@@ -1703,14 +1787,14 @@ describe('runCli update', () => {
   })
 
   it('writes nothing for a broken story, keeps its old baseline, and exits 1', async () => {
-    const { project, folder } = await createRun(['a', 'b', 'c'], { a: otherSnapshot })
+    const { project, folder } = await createRun(['a', 'b', 'c'], { a: otherSnapshot }, oneWorker)
     const { options } = fakeBrowser({ a: { broken: true }, b: { broken: true } })
     const result = await runCli(['update'], {}, project, options)
 
     expect(result).toEqual({
       exitCode: 1,
       stdout: printed(
-        headerOf('update', 3),
+        headerOf('update', 3, 1),
         `! web  a  ${brokenDetail}`,
         `! web  b  ${brokenDetail}`,
         '✓ web  c  written: missing',
@@ -1736,21 +1820,25 @@ describe('runCli update', () => {
   })
 
   it('writes every missing baseline, deletes every orphan, rewrites failing ones only inside --filter', async () => {
-    const { project, folder } = await createRun(['a', 'b', 'c', 'd', 'e', 'f'], {
-      a: defaultRunSnapshot,
-      'a.dark': defaultRunSnapshot,
-      c: defaultRunSnapshot,
-      d: defaultRunSnapshot,
-      f: defaultRunSnapshot,
-      gone: defaultRunSnapshot,
-    })
+    const { project, folder } = await createRun(
+      ['a', 'b', 'c', 'd', 'e', 'f'],
+      {
+        a: defaultRunSnapshot,
+        'a.dark': defaultRunSnapshot,
+        c: defaultRunSnapshot,
+        d: defaultRunSnapshot,
+        f: defaultRunSnapshot,
+        gone: defaultRunSnapshot,
+      },
+      oneWorker,
+    )
     const { options, record } = fakeBrowser({ a: { snapshot: otherSnapshot }, c: { snapshot: otherSnapshot } })
     const result = await runCli(['update', '--filter', '^[abf]$'], {}, project, options)
 
     expect(result).toEqual({
       exitCode: 0,
       stdout: printed(
-        headerOf('update', 4),
+        headerOf('update', 4, 1),
         '✓ web  a  written: differs: 100 differ, 20 allowed',
         '✓ web  b  written: missing',
         '✓ web  e  written: missing',
@@ -1856,7 +1944,7 @@ describe('runCli update', () => {
     const { project, folder } = await createRun(
       ['a', 'b'],
       { a: defaultRunSnapshot, 'b.dark': defaultRunSnapshot },
-      '',
+      oneWorker,
       {
         a: './a.stories.tsx',
         b: './b.stories.tsx',
@@ -1868,7 +1956,7 @@ describe('runCli update', () => {
     expect(result).toEqual({
       exitCode: 1,
       stdout: printed(
-        headerOf('update', 2),
+        headerOf('update', 2, 1),
         '✓ web  a  kept',
         '! web  b  broken: Its stories file ./b.stories.tsx failed to load: SyntaxError.',
         '0 written · 1 kept · 1 broken',
@@ -2006,7 +2094,7 @@ describe('runCli update', () => {
   })
 
   it('takes only the missing mode of a story outside the filter whose default baseline is there', async () => {
-    const { project, folder } = await createRun(['a', 'b'], { a: defaultRunSnapshot, b: defaultRunSnapshot })
+    const { project, folder } = await createRun(['a', 'b'], { a: defaultRunSnapshot, b: defaultRunSnapshot }, oneWorker)
     const { options, record } = fakeBrowser(
       { b: darkStory },
       { read: { options: { b: { modes: { dark: twoModes.modes.dark } } } } },
@@ -2015,7 +2103,7 @@ describe('runCli update', () => {
 
     expect(result.stdout).toBe(
       printed(
-        headerOf('update', 2),
+        headerOf('update', 2, 1),
         '✓ web  a  kept',
         '✓ web  b  dark  written: missing',
         '1 written · 1 kept',
@@ -2102,12 +2190,12 @@ describe('runCli warning about baseline paths over 260 characters', () => {
 
   /**
    * Starts a Storybook with the stories and makes a project whose baselines folder is `deepFolder`, with `baselines`
-   * written in it.
+   * written in it. It captures with one worker, so its lines print in planned order.
    */
   async function createDeepRun(storyIds: string[], baselines: Record<string, Uint8Array> = {}): Promise<string> {
     const url = await startStorybook(storyIds)
     const project = createProject({
-      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}', baselines: '${deepFolder}' } } }\n`,
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}', baselines: '${deepFolder}' } }, ${oneWorker} }\n`,
       './button.stories.tsx': '',
     })
 
@@ -2128,7 +2216,7 @@ describe('runCli warning about baseline paths over 260 characters', () => {
     expect(result).toEqual({
       exitCode: 0,
       stdout: printed(
-        headerOf('update', 2),
+        headerOf('update', 2, 1),
         '✓ web  a  written: missing',
         '✓ web  b  written: missing',
         '2 written',
@@ -2313,7 +2401,7 @@ describe('runCli per-story options', () => {
     })
     const docs = await startStorybook(['d'])
     const project = createProject({
-      'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${web}' }, docs: { dir: 'docs', url: '${docs}' } } }\n`,
+      'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${web}' }, docs: { dir: 'docs', url: '${docs}' } }, ${oneWorker} }\n`,
       'web/a.stories.tsx': '',
       'web/b.stories.tsx': '',
       'docs/button.stories.tsx': '',
@@ -2327,7 +2415,7 @@ describe('runCli per-story options', () => {
 
     expect(result.exitCode).toBe(0)
     expect(withoutTimes(result.stdout)).toBe(
-      printed(headerOf('test', 2), '✓ web  a  N ms', '✓ docs  d  N ms', '2 passed'),
+      printed(headerOf('test', 2, 1), '✓ web  a  N ms', '✓ docs  d  N ms', countsOf('2 passed')),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
     expect(record.reads).toEqual([
@@ -2464,7 +2552,7 @@ describe('runCli per-story options', () => {
 
     expect(result.exitCode).toBe(0)
     expect(withoutTimes(result.stdout)).toBe(
-      printed(headerOf('test', 2, 1), '✓ web  a  N ms', '✓ web  b  N ms', '2 passed'),
+      printed(headerOf('test', 2, 1), '✓ web  a  N ms', '✓ web  b  N ms', countsOf('2 passed')),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
     expect(result.stderr).toBe(relaunchNotice)
@@ -2537,7 +2625,7 @@ describe('runCli per-story options', () => {
 
     expect(result).toEqual({
       exitCode: 0,
-      stdout: printed(headerOf('test', 0), '0 passed'),
+      stdout: printed(headerOf('test', 0), countsOf('0 passed')),
       reportLine: reportOnStdout,
       stderr: '',
     })
@@ -2547,13 +2635,13 @@ describe('runCli per-story options', () => {
   })
 
   it("leaves out a disabled story, and keeps one whose merged options say it isn't", async () => {
-    const { project } = await createRun(['a', 'b', 'c'], { a: defaultRunSnapshot, c: defaultRunSnapshot })
+    const { project } = await createRun(['a', 'b', 'c'], { a: defaultRunSnapshot, c: defaultRunSnapshot }, oneWorker)
     const { options, record } = fakeBrowser({}, { read: { options: { b: { disable: true }, c: { disable: false } } } })
     const result = await runCli(['test'], {}, project, options)
 
     expect(result.exitCode).toBe(0)
     expect(withoutTimes(result.stdout)).toBe(
-      printed(headerOf('test', 2), '✓ web  a  N ms', '✓ web  c  N ms', '2 passed'),
+      printed(headerOf('test', 2, 1), '✓ web  a  N ms', '✓ web  c  N ms', countsOf('2 passed')),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
     expect(storyIdsOf(record.urls).sort()).toEqual(['a', 'c'])
@@ -2581,7 +2669,7 @@ describe('runCli per-story options', () => {
     const { project, url } = await createRun(
       ['a', 'b', 'c'],
       { a: defaultRunSnapshot, b: defaultRunSnapshot, c: defaultRunSnapshot },
-      '',
+      oneWorker,
       { a: './a.stories.tsx', b: './b.stories.tsx', c: './a.stories.tsx' },
     )
     const { options, record } = fakeBrowser(
@@ -2595,11 +2683,14 @@ describe('runCli per-story options', () => {
     expect(result.stderr).toBe('')
     expect(withoutTimes(result.stdout)).toBe(
       printed(
-        headerOf('test', 3),
+        headerOf('test', 3, 1),
         `! web  a  ${broken}`,
         '✓ web  b  N ms',
         `! web  c  ${broken}`,
-        '1 passed · 2 broken',
+        failuresHeadingOf(2),
+        ...failureOf('web  a', broken),
+        ...failureOf('web  c', broken),
+        countsOf('1 passed · 2 broken'),
       ),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
@@ -2615,7 +2706,9 @@ describe('runCli per-story options', () => {
       printed(
         headerOf('test', 1),
         '! web  a  broken: Its stories file ./button.stories.tsx failed to load.',
-        '0 passed · 1 broken',
+        failuresHeadingOf(1),
+        ...failureOf('web  a', 'broken: Its stories file ./button.stories.tsx failed to load.'),
+        countsOf('0 passed · 1 broken'),
       ),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
@@ -2631,7 +2724,12 @@ describe('runCli per-story options', () => {
       stdout: printed(
         headerOf('test', 1),
         "! web  a  broken: Its stories file ./button.stories.tsx didn't load within readyTimeout (4000 ms).",
-        '0 passed · 1 broken',
+        failuresHeadingOf(1),
+        ...failureOf(
+          'web  a',
+          "broken: Its stories file ./button.stories.tsx didn't load within readyTimeout (4000 ms).",
+        ),
+        countsOf('0 passed · 1 broken'),
       ),
       stderr: '',
       reportLine: reportOnStdout,
@@ -2648,7 +2746,9 @@ describe('runCli per-story options', () => {
       stdout: printed(
         headerOf('test', 1),
         '! web  a  broken: Its stories file ./button.stories.tsx failed to load: Error: boom.',
-        '0 passed · 1 broken',
+        failuresHeadingOf(1),
+        ...failureOf('web  a', 'broken: Its stories file ./button.stories.tsx failed to load: Error: boom.'),
+        countsOf('0 passed · 1 broken'),
       ),
       stderr: '',
       reportLine: reportOnStdout,
@@ -2657,14 +2757,14 @@ describe('runCli per-story options', () => {
   })
 
   it('writes nothing in update for a story whose file failed to load, and keeps its old baseline', async () => {
-    const { project, folder } = await createRun(['a', 'b'], { a: otherSnapshot })
+    const { project, folder } = await createRun(['a', 'b'], { a: otherSnapshot }, oneWorker)
     const { options, record } = fakeBrowser({}, { read: { failed: { './button.stories.tsx': 'Error: boom' } } })
     const result = await runCli(['update'], {}, project, options)
     const broken = 'broken: Its stories file ./button.stories.tsx failed to load: Error: boom.'
 
     expect(result).toEqual({
       exitCode: 1,
-      stdout: printed(headerOf('update', 2), `! web  a  ${broken}`, `! web  b  ${broken}`, '0 written · 2 broken'),
+      stdout: printed(headerOf('update', 2, 1), `! web  a  ${broken}`, `! web  b  ${broken}`, '0 written · 2 broken'),
       stderr: '',
     })
     expect(new Uint8Array(readFileSync(join(folder, 'a.png')))).toEqual(otherSnapshot)
@@ -2691,7 +2791,7 @@ describe('runCli per-story options', () => {
 
     expect(await runCli(['test'], {}, project, noLaunch)).toEqual({
       exitCode: 0,
-      stdout: printed(headerOf('test', 0), '0 passed'),
+      stdout: printed(headerOf('test', 0), countsOf('0 passed')),
       stderr: '',
       reportLine: reportOnStdout,
     })
@@ -2722,7 +2822,11 @@ const darkStory: FakeStory = { byGlobals: { 'theme:dark': { snapshot: darkSnapsh
 
 describe('runCli modes', () => {
   it('tests each mode as its own snapshot against its own baseline, the mode in its own column', async () => {
-    const { project } = await createRun(['a', 'b'], { a: defaultRunSnapshot, 'a.dark': darkSnapshot, b: otherSnapshot })
+    const { project } = await createRun(
+      ['a', 'b'],
+      { a: defaultRunSnapshot, 'a.dark': darkSnapshot, b: otherSnapshot },
+      oneWorker,
+    )
     const { options, record } = fakeBrowser({ a: darkStory }, { read: { options: { a: twoModes } } })
     const result = await runCli(['test'], {}, project, options)
 
@@ -2730,12 +2834,15 @@ describe('runCli modes', () => {
     expect(result.stderr).toBe('')
     expect(withoutTimes(result.stdout)).toBe(
       printed(
-        headerOf('test', 4),
+        headerOf('test', 4, 1),
         '✓ web  a  N ms',
         '✓ web  a  dark  N ms',
         '✗ web  a  mobile  missing: no baseline yet; run visual-check update to write it',
         '✗ web  b  differs: 100 differ, 20 allowed',
-        '2 passed · 1 differs · 1 missing',
+        failuresHeadingOf(2),
+        ...missingFailureOf('web', 'a  mobile'),
+        ...failureOf('web  b', 'differs: 100 differ, 20 allowed', diffLineOf('web', 'b')),
+        countsOf('2 passed · 1 differs · 1 missing'),
       ),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
@@ -2744,7 +2851,7 @@ describe('runCli modes', () => {
   })
 
   it("reports a mode's snapshot that breaks as broken, on its own line, and takes the others", async () => {
-    const { project } = await createRun(['a'], { a: defaultRunSnapshot, 'a.dark': defaultRunSnapshot })
+    const { project } = await createRun(['a'], { a: defaultRunSnapshot, 'a.dark': defaultRunSnapshot }, oneWorker)
     const { options } = fakeBrowser(
       { a: { byGlobals: { 'theme:dark': { broken: true } } } },
       { read: { options: { a: { modes: { dark: twoModes.modes.dark } } } } },
@@ -2753,7 +2860,14 @@ describe('runCli modes', () => {
 
     expect(result.exitCode).toBe(1)
     expect(withoutTimes(result.stdout)).toBe(
-      printed(headerOf('test', 2), '✓ web  a  N ms', `! web  a  dark  ${brokenDetail}`, '1 passed · 1 broken'),
+      printed(
+        headerOf('test', 2, 1),
+        '✓ web  a  N ms',
+        `! web  a  dark  ${brokenDetail}`,
+        failuresHeadingOf(1),
+        ...failureOf('web  a  dark', brokenDetail),
+        countsOf('1 passed · 1 broken'),
+      ),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
   })
@@ -2785,14 +2899,14 @@ describe('runCli modes', () => {
   })
 
   it("writes each mode's baseline as <story-id>.<mode>.png in update, with the mode's own capture", async () => {
-    const { project, folder } = await createRun(['a'])
+    const { project, folder } = await createRun(['a'], {}, oneWorker)
     const { options } = fakeBrowser({ a: darkStory }, { read: { options: { a: twoModes } } })
     const result = await runCli(['update'], {}, project, options)
 
     expect(result).toEqual({
       exitCode: 0,
       stdout: printed(
-        headerOf('update', 3),
+        headerOf('update', 3, 1),
         '✓ web  a  written: missing',
         '✓ web  a  dark  written: missing',
         '✓ web  a  mobile  written: missing',
@@ -2809,20 +2923,24 @@ describe('runCli modes', () => {
   })
 
   it('takes every snapshot of a story --filter selects', async () => {
-    const { project } = await createRun(['a', 'b'], {
-      a: otherSnapshot,
-      'a.dark': otherSnapshot,
-      'a.mobile': otherSnapshot,
-      b: otherSnapshot,
-      'b.dark': otherSnapshot,
-      'b.mobile': otherSnapshot,
-    })
+    const { project } = await createRun(
+      ['a', 'b'],
+      {
+        a: otherSnapshot,
+        'a.dark': otherSnapshot,
+        'a.mobile': otherSnapshot,
+        b: otherSnapshot,
+        'b.dark': otherSnapshot,
+        'b.mobile': otherSnapshot,
+      },
+      oneWorker,
+    )
     const { options } = fakeBrowser({}, { read: { options: { a: twoModes, b: twoModes } } })
     const result = await runCli(['update', '--filter', '^a$'], {}, project, options)
 
     expect(result.stdout).toBe(
       printed(
-        headerOf('update', 3),
+        headerOf('update', 3, 1),
         '✓ web  a  written: differs: 100 differ, 20 allowed',
         '✓ web  a  dark  written: differs: 100 differ, 20 allowed',
         '✓ web  a  mobile  written: differs: 100 differ, 80 allowed (20 at scale 2)',
@@ -2855,7 +2973,7 @@ describe('runCli retries and flaky snapshots', () => {
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBe('')
     expect(withoutTimes(result.stdout)).toBe(
-      printed(headerOf('test', 1), '✓ web  a  N ms · flaky', flakyHeading, '  web  a', '1 passed (1 flaky)'),
+      printed(headerOf('test', 1), '✓ web  a  N ms · flaky', flakyHeading, '  web  a', countsOf('1 passed (1 flaky)')),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
     expect(storyIdsOf(record.urls)).toEqual(['a', 'a'])
@@ -2872,7 +2990,13 @@ describe('runCli retries and flaky snapshots', () => {
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toBe(
-      printed(headerOf('test', 1), '✗ web  a  differs: 100 differ, 20 allowed', '0 passed · 1 differs'),
+      printed(
+        headerOf('test', 1),
+        '✗ web  a  differs: 100 differ, 20 allowed',
+        failuresHeadingOf(1),
+        ...failureOf('web  a', 'differs: 100 differ, 20 allowed', diffLineOf('web', 'a')),
+        countsOf('0 passed · 1 differs'),
+      ),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
     expect(storyIdsOf(record.urls)).toEqual(['a'])
@@ -2887,7 +3011,7 @@ describe('runCli retries and flaky snapshots', () => {
 
     expect(result.exitCode).toBe(0)
     expect(withoutTimes(result.stdout)).toBe(
-      printed(headerOf('test', 1), '✓ web  a  N ms · flaky', flakyHeading, '  web  a', '1 passed (1 flaky)'),
+      printed(headerOf('test', 1), '✓ web  a  N ms · flaky', flakyHeading, '  web  a', countsOf('1 passed (1 flaky)')),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
     expect(storyIdsOf(record.urls)).toEqual(['a', 'a', 'a'])
@@ -2903,7 +3027,13 @@ describe('runCli retries and flaky snapshots', () => {
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toBe(
-      printed(headerOf('test', 1), '✗ web  a  differs: 100 differ, 20 allowed', '0 passed · 1 differs'),
+      printed(
+        headerOf('test', 1),
+        '✗ web  a  differs: 100 differ, 20 allowed',
+        failuresHeadingOf(1),
+        ...failureOf('web  a', 'differs: 100 differ, 20 allowed', diffLineOf('web', 'a')),
+        countsOf('0 passed · 1 differs'),
+      ),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
     expect(storyIdsOf(record.urls)).toEqual(['a', 'a', 'a'])
@@ -2955,7 +3085,15 @@ describe('runCli retries and flaky snapshots', () => {
     const result = await runCli(['test'], {}, project, options)
 
     expect(result.exitCode).toBe(1)
-    expect(result.stdout).toBe(printed(headerOf('test', 1), `! web  a  ${brokenDetail}`, '0 passed · 1 broken'))
+    expect(result.stdout).toBe(
+      printed(
+        headerOf('test', 1),
+        `! web  a  ${brokenDetail}`,
+        failuresHeadingOf(1),
+        ...failureOf('web  a', brokenDetail),
+        countsOf('0 passed · 1 broken'),
+      ),
+    )
     expect(result.reportLine).toEqual(reportOnStdout)
     expect(storyIdsOf(record.urls)).toEqual(['a'])
     expect(record.captures.map(({ id, onLoad }) => [id, onLoad])).toEqual([['a', 1]])
@@ -2968,7 +3106,13 @@ describe('runCli retries and flaky snapshots', () => {
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toBe(
-      printed(headerOf('test', 1), '✗ web  a  differs: 100 differ, 20 allowed', '0 passed · 1 differs'),
+      printed(
+        headerOf('test', 1),
+        '✗ web  a  differs: 100 differ, 20 allowed',
+        failuresHeadingOf(1),
+        ...failureOf('web  a', 'differs: 100 differ, 20 allowed', diffLineOf('web', 'a')),
+        countsOf('0 passed · 1 differs'),
+      ),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
     expect(storyIdsOf(record.urls)).toEqual(['a', 'a'])
@@ -2981,7 +3125,15 @@ describe('runCli retries and flaky snapshots', () => {
     const { options, record } = fakeBrowser({ a: { captures: [{ snapshot: otherSnapshot }, {}] } })
     const result = await runCli(['test'], {}, project, options)
 
-    expect(result.stdout).toBe(printed(headerOf('test', 1), missingLineOf('web', 'a'), '0 passed · 1 missing'))
+    expect(result.stdout).toBe(
+      printed(
+        headerOf('test', 1),
+        missingLineOf('web', 'a'),
+        failuresHeadingOf(1),
+        ...missingFailureOf('web', 'a'),
+        countsOf('0 passed · 1 missing'),
+      ),
+    )
     expect(result.reportLine).toEqual(reportOnStdout)
     expect(storyIdsOf(record.urls)).toEqual([])
   })
@@ -3000,12 +3152,11 @@ describe('runCli retries and flaky snapshots', () => {
   })
 
   it('lists every flaky snapshot by name in snapshot order, with its mode, and counts them among the passes', async () => {
-    const { project } = await createRun(['a', 'b', 'c'], {
-      a: defaultRunSnapshot,
-      'a.dark': darkSnapshot,
-      b: defaultRunSnapshot,
-      c: defaultRunSnapshot,
-    })
+    const { project } = await createRun(
+      ['a', 'b', 'c'],
+      { a: defaultRunSnapshot, 'a.dark': darkSnapshot, b: defaultRunSnapshot, c: defaultRunSnapshot },
+      oneWorker,
+    )
     const { options } = fakeBrowser(
       {
         a: { byGlobals: { 'theme:dark': { captures: [{ snapshot: otherSnapshot }, { snapshot: darkSnapshot }] } } },
@@ -3019,18 +3170,92 @@ describe('runCli retries and flaky snapshots', () => {
     expect(result.exitCode).toBe(1)
     expect(withoutTimes(result.stdout)).toBe(
       printed(
-        headerOf('test', 4),
+        headerOf('test', 4, 1),
         '✓ web  a  N ms',
         '✓ web  a  dark  N ms · flaky',
         '✓ web  b  N ms · flaky',
         '✗ web  c  differs: 100 differ, 20 allowed',
+        failuresHeadingOf(1),
+        ...failureOf('web  c', 'differs: 100 differ, 20 allowed', diffLineOf('web', 'c')),
         flakyHeading,
         '  web  a  dark',
         '  web  b',
-        '3 passed (2 flaky) · 1 differs',
+        countsOf('3 passed (2 flaky) · 1 differs'),
       ),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
+  })
+})
+
+describe('runCli test end block', () => {
+  it("lists a broken story's last 5 console errors and warnings under its failure, each by its first line", async () => {
+    const { project } = await createRun(['a'], { a: defaultRunSnapshot })
+    const consoleMessages = [
+      { kind: 'console.error' as const, text: 'First error' },
+      { kind: 'console.log' as const, text: 'Rendering' },
+      { kind: 'console.warn' as const, text: 'First warning' },
+      { kind: 'console.error' as const, text: 'Second error' },
+      { kind: 'console.info' as const, text: 'Loaded' },
+      { kind: 'unhandledrejection' as const, text: 'Request failed' },
+      { kind: 'console.warn' as const, text: 'Deprecated prop size' },
+      { kind: 'error' as const, text: 'TypeError: x is undefined\n    at Button (button.tsx:4:2)' },
+    ]
+    const result = await runCli(['test'], {}, project, fakeBrowser({ a: { broken: true, consoleMessages } }).options)
+
+    expect(result.stdout).toBe(
+      printed(
+        headerOf('test', 1),
+        `! web  a  ${brokenDetail}`,
+        failuresHeadingOf(1),
+        ...failureOf(
+          'web  a',
+          brokenDetail,
+          'console warn: First warning',
+          'console error: Second error',
+          'console error: Unhandled rejection: Request failed',
+          'console warn: Deprecated prop size',
+          'console error: Uncaught TypeError: x is undefined',
+        ),
+        countsOf('0 passed · 1 broken'),
+      ),
+    )
+  })
+
+  it('ends the counts with how long the run took, from its start by the clock given', async () => {
+    const { project } = await createRun(['a'], { a: defaultRunSnapshot })
+    const times = [0, 192_000]
+    const now = (): number => times.shift() ?? 192_000
+    const result = await runCli(['test'], {}, project, { ...fakeBrowser().options, now })
+
+    expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 1), '✓ web  a  N ms', '1 passed · 3m 12s'))
+  })
+
+  it('prints the end block on stderr with --reporter json, after the lines, with the report line last', async () => {
+    const { project } = await createRun(['a', 'b'], { b: defaultRunSnapshot }, oneWorker)
+    const result = await runCli(['test', '--reporter', 'json'], {}, project, fakeBrowser().options)
+
+    expect(JSON.parse(result.stdout)).toMatchObject({ command: 'test', exitCode: 1 })
+    expect(result.stdout.endsWith('}\n')).toBe(true)
+    expect(result.stdout.split('\n')).toHaveLength(2)
+    expect(withoutTimes(result.stderr)).toBe(
+      printed(
+        headerOf('test', 2, 1),
+        missingLineOf('web', 'a'),
+        '✓ web  b  N ms',
+        failuresHeadingOf(1),
+        ...missingFailureOf('web', 'a'),
+        countsOf('1 passed · 1 missing'),
+      ),
+    )
+    expect(result.reportLine).toEqual(reportOnStderr)
+  })
+
+  it('prints no end block after the consistency output of test --consistency', async () => {
+    const { project } = await createRun(['a'])
+    const result = await runCli(['test', '--consistency'], {}, project, fakeBrowser().options)
+
+    expect(result.stdout).not.toContain('──')
+    expect(result.stdout).not.toContain(' · 0 ms')
   })
 })
 
@@ -3059,7 +3284,11 @@ const unstableDetail = "broken: No two of the story's 3 loads agreed, so its bas
 
 describe('runCli update stability checks', () => {
   it('lists the flaky snapshots after the written and deleted paths, and exits 0', async () => {
-    const { project, folder } = await createRun(['a', 'b', 'c'], { a: defaultRunSnapshot, gone: defaultRunSnapshot })
+    const { project, folder } = await createRun(
+      ['a', 'b', 'c'],
+      { a: defaultRunSnapshot, gone: defaultRunSnapshot },
+      oneWorker,
+    )
     const { options, record } = fakeBrowser({
       a: { captures: [{ snapshot: otherSnapshot }, {}] },
       b: { captures: [{}, { snapshot: otherSnapshot }, { snapshot: otherSnapshot }] },
@@ -3069,7 +3298,7 @@ describe('runCli update stability checks', () => {
     expect(result).toEqual({
       exitCode: 0,
       stdout: printed(
-        headerOf('update', 3),
+        headerOf('update', 3, 1),
         '✓ web  a  kept · flaky',
         '✓ web  b  written: missing · flaky',
         '✓ web  c  written: missing',
@@ -3089,7 +3318,7 @@ describe('runCli update stability checks', () => {
   })
 
   it('breaks a story that changed after its capture and ones whose loads never agree, writes nothing, and exits 1', async () => {
-    const { project, folder } = await createRun(['a', 'b', 'c'], { a: otherSnapshot, c: otherSnapshot })
+    const { project, folder } = await createRun(['a', 'b', 'c'], { a: otherSnapshot, c: otherSnapshot }, oneWorker)
     const { options, record } = fakeBrowser({
       a: { snapshotLater: greySnapshot },
       b: { captures: [{}, { snapshot: otherSnapshot }, { snapshot: greySnapshot }] },
@@ -3100,7 +3329,7 @@ describe('runCli update stability checks', () => {
     expect(result).toEqual({
       exitCode: 1,
       stdout: printed(
-        headerOf('update', 3),
+        headerOf('update', 3, 1),
         `! web  a  ${changedDetail}`,
         `! web  b  ${unstableDetail}`,
         `! web  c  ${unstableDetail}`,
@@ -3160,7 +3389,7 @@ describe('runCli update stability checks', () => {
         '✓ web  b  N ms · flaky',
         flakyHeading,
         '  web  b',
-        '2 passed (1 flaky)',
+        countsOf('2 passed (1 flaky)'),
       ),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
@@ -3205,14 +3434,25 @@ const squareRemote = [{ host: 'images.unsplash.com', x: 2, y: 2, width: 5, heigh
 const cornerRemote = [{ host: 'images.unsplash.com', x: 9, y: 9, width: 1, height: 1 }]
 
 /**
- * The hint under a snapshot's line when it differs only inside remote content from `images.unsplash.com`.
+ * The hint line in the end block of a snapshot that differs only inside remote content from `images.unsplash.com`.
  */
-const unsplashHint = [
-  '  hint: Differs only inside remote content from images.unsplash.com. A CDN can serve different bytes to different ' +
-    'machines. Mask it by host:',
-  "    { host: 'images.unsplash.com' }",
-  '  See https://visual-check.vercel.app/docs/remote-content',
-]
+const unsplashHint =
+  'hint: Differs only inside remote content from images.unsplash.com. A CDN can serve different bytes to different ' +
+  "machines. Mask it by host: { host: 'images.unsplash.com' }. See https://visual-check.vercel.app/docs/remote-content"
+
+/**
+ * Builds what a `test` of story `a` alone prints when its snapshot is `squareSnapshot`: its line, then its failure with
+ * the hint lines given, then the counts.
+ */
+function squareOutputOf(...hints: string[]): string {
+  return printed(
+    headerOf('test', 1),
+    squareLine,
+    failuresHeadingOf(1),
+    ...failureOf('web  a', 'differs: 25 differ, 20 allowed', diffLineOf('web', 'a'), ...hints),
+    countsOf('0 passed · 1 differs'),
+  )
+}
 
 describe('runCli remote content hint', () => {
   it('hints at a host mask when a retry differs only inside remote content, and still fails the snapshot', async () => {
@@ -3224,7 +3464,7 @@ describe('runCli remote content hint', () => {
 
     expect(result).toEqual({
       exitCode: 1,
-      stdout: printed(headerOf('test', 1), squareLine, ...unsplashHint, '0 passed · 1 differs'),
+      stdout: squareOutputOf(unsplashHint),
       stderr: '',
       reportLine: reportOnStdout,
     })
@@ -3254,7 +3494,7 @@ describe('runCli remote content hint', () => {
     })
     const result = await runCli(['test'], {}, project, options)
 
-    expect(result.stdout).toBe(printed(headerOf('test', 1), squareLine, '0 passed · 1 differs'))
+    expect(result.stdout).toBe(squareOutputOf())
     expect(result.reportLine).toEqual(reportOnStdout)
   })
 
@@ -3266,7 +3506,7 @@ describe('runCli remote content hint', () => {
     })
     const result = await runCli(['test'], {}, project, options)
 
-    expect(result.stdout).toBe(printed(headerOf('test', 1), squareLine, ...unsplashHint, '0 passed · 1 differs'))
+    expect(result.stdout).toBe(squareOutputOf(unsplashHint))
     expect(result.reportLine).toEqual(reportOnStdout)
   })
 
@@ -3278,7 +3518,7 @@ describe('runCli remote content hint', () => {
     })
     const result = await runCli(['test'], {}, project, options)
 
-    expect(result.stdout).toBe(printed(headerOf('test', 1), squareLine, ...unsplashHint, '0 passed · 1 differs'))
+    expect(result.stdout).toBe(squareOutputOf(unsplashHint))
     expect(result.reportLine).toEqual(reportOnStdout)
   })
 
@@ -3307,7 +3547,7 @@ describe('runCli remote content hint', () => {
     const { options } = fakeBrowser({ a: { snapshot: squareSnapshot, remote: squareRemote } })
     const result = await runCli(['test'], {}, project, options)
 
-    expect(result.stdout).toBe(printed(headerOf('test', 1), squareLine, '0 passed · 1 differs'))
+    expect(result.stdout).toBe(squareOutputOf())
     expect(result.reportLine).toEqual(reportOnStdout)
   })
 
@@ -3329,7 +3569,7 @@ describe('runCli remote content hint', () => {
     })
     const result = await runCli(['test'], {}, project, options)
 
-    expect(result.stdout).toBe(printed(headerOf('test', 1), squareLine, '0 passed · 1 differs'))
+    expect(result.stdout).toBe(squareOutputOf())
     expect(result.reportLine).toEqual(reportOnStdout)
   })
 
@@ -3347,15 +3587,10 @@ describe('runCli remote content hint', () => {
     const result = await runCli(['test'], {}, project, options)
 
     expect(result.stdout).toBe(
-      printed(
-        headerOf('test', 1),
-        squareLine,
-        '  hint: Differs only inside remote content from b.com and c.com. A CDN can serve different bytes to different ' +
-          'machines. Mask it by host:',
-        "    { host: 'b.com' }",
-        "    { host: 'c.com' }",
-        '  See https://visual-check.vercel.app/docs/remote-content',
-        '0 passed · 1 differs',
+      squareOutputOf(
+        'hint: Differs only inside remote content from b.com and c.com. A CDN can serve different bytes to different ' +
+          "machines. Mask it by host: { host: 'b.com' }, { host: 'c.com' }. " +
+          'See https://visual-check.vercel.app/docs/remote-content',
       ),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
@@ -3386,7 +3621,7 @@ describe('runCli remote content hint', () => {
     ).toBe(true)
   })
 
-  it('prints the hint of a finished snapshot when the run stops with exit 2', async () => {
+  it("prints no hint under a finished snapshot's line when the run stops with exit 2, which has no end block", async () => {
     const { project } = await createRun(
       ['a', 'b', 'c'],
       { a: defaultRunSnapshot, b: defaultRunSnapshot, c: defaultRunSnapshot },
@@ -3401,7 +3636,7 @@ describe('runCli remote content hint', () => {
 
     expect(result).toEqual({
       exitCode: 2,
-      stdout: printed(headerOf('test', 3, 1), squareLine, ...unsplashHint, `! web  b  ${browserExitedDetail}`),
+      stdout: printed(headerOf('test', 3, 1), squareLine, `! web  b  ${browserExitedDetail}`),
       stderr: `${relaunchNotice}${secondExitMessage}`,
       reportLine: reportOnStderr,
     })
@@ -3541,7 +3776,13 @@ describe('runCli baseline file names', () => {
 
     expect(result).toEqual({
       exitCode: 1,
-      stdout: printed(headerOf('test', 1), `✗ web  ${longId}  differs: 100 differ, 20 allowed`, '0 passed · 1 differs'),
+      stdout: printed(
+        headerOf('test', 1),
+        `✗ web  ${longId}  differs: 100 differ, 20 allowed`,
+        failuresHeadingOf(1),
+        ...failureOf(`web  ${longId}`, 'differs: 100 differ, 20 allowed', diffLineOf('web', stem)),
+        countsOf('0 passed · 1 differs'),
+      ),
       stderr: '',
       reportLine: reportOnStdout,
     })
@@ -3636,11 +3877,11 @@ describe('runCli capture area and masks', () => {
 
 describe('runCli warning when a Storybook ignores the test path', () => {
   it('warns once at the end, naming the Storybook and its version, when the median is 50 ms or more', async () => {
-    const { project } = await createRun(['a', 'b', 'c'], {
-      a: defaultRunSnapshot,
-      b: defaultRunSnapshot,
-      c: defaultRunSnapshot,
-    })
+    const { project } = await createRun(
+      ['a', 'b', 'c'],
+      { a: defaultRunSnapshot, b: defaultRunSnapshot, c: defaultRunSnapshot },
+      oneWorker,
+    )
 
     installStorybook(project, '9.1.2')
 
@@ -3649,7 +3890,7 @@ describe('runCli warning when a Storybook ignores the test path', () => {
 
     expect(result.exitCode).toBe(0)
     expect(withoutTimes(result.stdout)).toBe(
-      printed(headerOf('test', 3), '✓ web  a  N ms', '✓ web  b  N ms', '✓ web  c  N ms', '3 passed'),
+      printed(headerOf('test', 3, 1), '✓ web  a  N ms', '✓ web  b  N ms', '✓ web  c  N ms', countsOf('3 passed')),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
     expect(result.stderr).toBe(testPathWarningOf('web', 'storybook 9.1.2', 101))
@@ -3700,7 +3941,7 @@ describe('runCli warning when a Storybook ignores the test path', () => {
     const result = await runCli(['test'], {}, project, options)
 
     expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain('0 passed · 4 differs')
+    expect(result.stdout).toContain(countsOf('0 passed · 4 differs'))
     expect(result.stderr).toBe(
       testPathWarningOf('web', 'storybook 10.0.1', 120) +
         testPathWarningOf('docs', 'its storybook version is unknown', 104),
@@ -4056,7 +4297,9 @@ describe('runCli launching the browser', () => {
         '✓ web  a  N ms',
         `! web  b  ${browserExitedDetail}`,
         '✓ web  c  N ms',
-        '2 passed · 1 broken',
+        failuresHeadingOf(1),
+        ...failureOf('web  b', browserExitedDetail),
+        countsOf('2 passed · 1 broken'),
       ),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
@@ -4086,14 +4329,17 @@ describe('runCli launching the browser', () => {
     const result = await runCli(['test'], {}, project, options)
 
     expect(result.exitCode).toBe(1)
-    expect(withoutTimes(result.stdout)).toBe(
+    expect(withSnapshotLinesSorted(withoutTimes(result.stdout))).toBe(
       printed(
         headerOf('test', 4, 2),
         `! web  a  ${browserExitedDetail}`,
         `! web  b  ${browserExitedDetail}`,
         '✓ web  c  N ms',
         '✓ web  d  N ms',
-        '2 passed · 2 broken',
+        failuresHeadingOf(2),
+        ...failureOf('web  a', browserExitedDetail),
+        ...failureOf('web  b', browserExitedDetail),
+        countsOf('2 passed · 2 broken'),
       ),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
@@ -4119,7 +4365,7 @@ describe('runCli launching the browser', () => {
     const result = await runCli(['update'], {}, project, options)
 
     expect(result.exitCode).toBe(1)
-    expect(result.stdout).toBe(
+    expect(withSnapshotLinesSorted(result.stdout)).toBe(
       printed(
         headerOf('update', 6, 3),
         `! web  a  ${browserExitedDetail}`,
@@ -4149,7 +4395,7 @@ describe('runCli launching the browser', () => {
 
     expect(result.exitCode).toBe(0)
     expect(withoutTimes(result.stdout)).toBe(
-      printed(headerOf('test', 3, 1), '✓ web  a  N ms', '✓ web  b  N ms', '✓ web  c  N ms', '3 passed'),
+      printed(headerOf('test', 3, 1), '✓ web  a  N ms', '✓ web  b  N ms', '✓ web  c  N ms', countsOf('3 passed')),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
     expect(result.stderr).toBe(relaunchNotice)
@@ -4210,6 +4456,36 @@ describe('runCli launching the browser', () => {
     expect(record.driverCloses).toBe(2)
   })
 
+  it('has written the lines that finished when the relaunched browser exits too, and gives only the stop', async () => {
+    const { project } = await createRun(
+      ['a', 'b', 'c', 'd', 'e'],
+      {
+        a: defaultRunSnapshot,
+        b: defaultRunSnapshot,
+        c: defaultRunSnapshot,
+        d: defaultRunSnapshot,
+        e: defaultRunSnapshot,
+      },
+      oneWorker,
+    )
+    const { options } = fakeBrowser({ b: { browserExits: true }, d: { browserExits: true } })
+    const { write, writes } = recordingWrite()
+    const result = await runCli(['test'], {}, project, { ...options, write })
+
+    expect(writes).toEqual([
+      ['stdout', `${headerOf('test', 5, 1)}\n`],
+      ['stdout', '✓ web  a  N ms\n'],
+      ['stdout', `! web  b  ${browserExitedDetail}\n`],
+      ['stdout', '✓ web  c  N ms\n'],
+    ])
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr: `${relaunchNotice}${secondExitMessage}`,
+      reportLine: reportOnStderr,
+    })
+  })
+
   it('exits 2 when the relaunched browser exits with several workers capturing, keeping the lines that finished', async () => {
     const { project } = await createRun(
       ['a', 'b', 'c', 'd', 'e'],
@@ -4231,7 +4507,7 @@ describe('runCli launching the browser', () => {
     const result = await runCli(['test'], {}, project, options)
 
     expect(result.exitCode).toBe(2)
-    expect(withoutTimes(result.stdout)).toBe(
+    expect(withSnapshotLinesSorted(withoutTimes(result.stdout))).toBe(
       printed(
         headerOf('test', 5, 2),
         `! web  a  ${browserExitedDetail}`,
@@ -4299,7 +4575,7 @@ describe('runCli launching the browser', () => {
     })
 
     expect(result.exitCode).toBe(2)
-    expect(result.stdout).toBe(
+    expect(withSnapshotLinesSorted(result.stdout)).toBe(
       printed(headerOf('test', 4, 2), `! web  a  ${browserExitedDetail}`, `! web  b  ${browserExitedDetail}`),
     )
     expect(result.stderr).toBe(
@@ -4385,7 +4661,9 @@ describe('runCli launching the browser', () => {
           '✓ web  a  N ms',
           `! web  b  ${browserExitedDetail}`,
           '✓ web  c  N ms',
-          '2 passed · 1 broken',
+          failuresHeadingOf(1),
+          ...failureOf('web  b', browserExitedDetail),
+          countsOf('2 passed · 1 broken'),
         ),
       )
       expect(result.reportLine).toEqual(reportOnStdout)
@@ -4484,7 +4762,7 @@ describe('runCli launching the browser', () => {
     })
   })
 
-  it('captures with one browser and a page for each worker, printing the lines in selection order', async () => {
+  it('captures with one browser and a page for each worker', async () => {
     const { project } = await createRun(
       ['a', 'b', 'c'],
       { a: defaultRunSnapshot, b: defaultRunSnapshot, c: defaultRunSnapshot },
@@ -4494,8 +4772,8 @@ describe('runCli launching the browser', () => {
     const result = await runCli(['test'], {}, project, options)
 
     expect(result.exitCode).toBe(0)
-    expect(withoutTimes(result.stdout)).toBe(
-      printed(headerOf('test', 3, 2), '✓ web  a  N ms', '✓ web  b  N ms', '✓ web  c  N ms', '3 passed'),
+    expect(withSnapshotLinesSorted(withoutTimes(result.stdout))).toBe(
+      printed(headerOf('test', 3, 2), '✓ web  a  N ms', '✓ web  b  N ms', '✓ web  c  N ms', countsOf('3 passed')),
     )
     expect(result.reportLine).toEqual(reportOnStdout)
     expect(result.stderr).toBe('')

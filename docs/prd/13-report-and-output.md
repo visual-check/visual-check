@@ -138,6 +138,10 @@ Both `log` and `live` end with the same block:
 3. The counts, for example `248 passed (2 flaky) · 1 differs · 1 broken · 3m 12s`.
 4. `Report: .visual-check/report/report.json`.
 
+- A failure is its name line, `web  button--primary  dark`, then lines indented two spaces: `differs: <message>`, `broken: <message>`, `missing: no baseline yet; …` or `orphan: no story calls for <path>; …`, then `diff: <path>`, one `hint: <message>` per hint, and a broken story's last 5 `console error:` and `console warn:` messages, each by its first line. Failures follow the report's order. Paths are relative to the folder the CLI runs in.
+- Durations read `142 ms` under a second, `12.3s` under a minute, then `3m 12s`.
+- `test --consistency` and a CI `test` stopped by its consistency check print the consistency output instead, with no block. A run that exits 2 gets none either.
+
 `update` ends with its own block, which has no report line ([Baselines and update](10-baselines-and-update.md)).
 
 ## Hints and warnings
@@ -153,7 +157,9 @@ Both `log` and `live` end with the same block:
 
 - The CLI writes it whenever `GITHUB_STEP_SUMMARY` is set, under any reporter. It works from a plain `run:` step, the Action and the reusable workflow alike.
 - It holds the shard, the counts, the flaky snapshots and a table of failures: Storybook, story, mode, status and message. The table is cut to stay under GitHub's 1 MiB per step.
-- On exit 2 it holds the error.
+- Layout: a heading with the version, command and shard, the counts, up to 100 flaky snapshots, then the table. A cut table keeps its first rows and ends with a note counting the rest. 1 KiB stays free for the Action's artifact link.
+- A summary that can't be written adds a warning on stderr and never changes the exit code.
+- On a `test` or `update` run's exit 2, once the command line names one, it holds the error.
 - It has no images, because a summary only shows images from public URLs.
 - v1 writes no `::error` annotations.
 

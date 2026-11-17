@@ -45,8 +45,8 @@ interface CaseOptions {
    */
   cwd?: string
   /**
-   * What the case adds to the environment. `CI` is stripped from the inherited environment unless it is given here, so
-   * a case never inherits `CI=true` from a CI runner.
+   * What the case adds to the environment. `CI` and `GITHUB_STEP_SUMMARY` are stripped from the inherited environment
+   * unless they are given here, so a case never inherits `CI=true` from a CI runner nor writes its step summary.
    */
   env?: Record<string, string>
   /**
@@ -75,8 +75,8 @@ writeFileSync(
 )
 
 /**
- * Builds the spawn options for a case: the inherited environment without `CI`, plus what the case adds, and the
- * timeout.
+ * Builds the spawn options for a case: the inherited environment without `CI` and `GITHUB_STEP_SUMMARY`, plus what the
+ * case adds, and the timeout.
  */
 function spawnOptionsOf(options: CaseOptions) {
   const environment = { ...process.env, ...options.env }
@@ -85,6 +85,10 @@ function spawnOptionsOf(options: CaseOptions) {
 
   if (options.env?.CI === undefined) {
     delete environment.CI
+  }
+
+  if (options.env?.GITHUB_STEP_SUMMARY === undefined) {
+    delete environment.GITHUB_STEP_SUMMARY
   }
 
   return { env: environment, timeout, ...(options.cwd === undefined ? {} : { cwd: options.cwd }) }
@@ -185,6 +189,13 @@ function runThroughOnePipe(options: CaseOptions, ...commandLineArguments: string
       resolve({ status, output })
     })
   })
+}
+
+/**
+ * Replaces the elapsed time a `test`'s counts line ends with by ` · N`, since it varies from run to run.
+ */
+function withoutElapsed(text: string): string {
+  return text.replace(/ · (\d+ ms|\d+\.\d+s|\d+m \d+s)$/gm, ' · N')
 }
 
 /**
@@ -609,10 +620,41 @@ describe('visual-check binary reaching Storybooks', () => {
     const result = await runAsynchronously({ cwd: project }, 'test')
 
     expect(result.status).toBe(0)
-    expect(result.stdout).toBe(
-      `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed\nReport: .visual-check/report/report.json\n`,
+    expect(withoutElapsed(result.stdout)).toBe(
+      `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed · N\nReport: .visual-check/report/report.json\n`,
     )
     expect(result.stderr).toBe('')
+  })
+
+  it('writes the step summary of a test, in log without a TTY, its header on stdout with no colour', async () => {
+    const url = await startStorybookServer({ c: entryOf('button--primary:test', { subtype: 'test' }) })
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
+      'button.stories.tsx': '',
+    })
+    const summary = join(project, 'summary.md')
+    const result = await runAsynchronously({ cwd: project, env: { GITHUB_STEP_SUMMARY: summary } }, 'test')
+
+    expect(result.status).toBe(0)
+    expect(readFileSync(summary, 'utf8')).toBe(`### visual-check ${version} · test\n\n0 passed\n`)
+    expect(result.stdout.startsWith(`visual-check ${version} · test · 0 snapshots · 4 workers\n`)).toBe(true)
+    // The escape every ANSI sequence starts with.
+    expect(result.stdout + result.stderr).not.toContain('\u001b[')
+  })
+
+  it('writes the error to the step summary of a test whose Storybook is down', async () => {
+    const down = await takeUnusedUrl()
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${down}' } } }\n`,
+    })
+    const summary = join(project, 'summary.md')
+    const result = await runAsynchronously({ cwd: project, env: { GITHUB_STEP_SUMMARY: summary } }, 'test')
+
+    expect(result.status).toBe(2)
+    expect(readFileSync(summary, 'utf8')).toMatch(
+      new RegExp(`^### visual-check ${version} · test\\n\\nThe run stopped with exit code 2:\\n\\n {4}`),
+    )
+    expect(readFileSync(summary, 'utf8')).toContain(`Storybook web doesn't answer at ${down}/index.json (ECONNREFUSED)`)
   })
 
   it("ends the run's output with the report line, after a warning on standard error", async () => {
@@ -625,8 +667,8 @@ describe('visual-check binary reaching Storybooks', () => {
     const result = await runIntoOneFile({ cwd: project }, 'test')
 
     expect(result.status).toBe(0)
-    expect(result.output).toBe(
-      `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed\n` +
+    expect(withoutElapsed(result.output)).toBe(
+      `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed · N\n` +
         'Warning: Storybook web runs storybook 12.0.0, and visual-check supports 9.1 to 11. The run carries on.\n' +
         'Report: .visual-check/report/report.json\n',
     )
@@ -644,8 +686,8 @@ describe('visual-check binary reaching Storybooks', () => {
       const result = await runThroughOnePipe({ cwd: project }, 'test')
 
       expect(result.status).toBe(0)
-      expect(result.output).toBe(
-        `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed\n` +
+      expect(withoutElapsed(result.output)).toBe(
+        `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed · N\n` +
           'Warning: Storybook web runs storybook 12.0.0, and visual-check supports 9.1 to 11. The run carries on.\n' +
           'Report: .visual-check/report/report.json\n',
       )
@@ -677,9 +719,24 @@ describe('visual-check binary reaching Storybooks', () => {
       warnings: [],
       error: null,
     } satisfies TestReport)
-    expect(result.stderr).toBe(
-      `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed\nReport: .visual-check/report/report.json\n`,
+    expect(withoutElapsed(result.stderr)).toBe(
+      `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed · N\nReport: .visual-check/report/report.json\n`,
     )
+  })
+
+  it('writes the header to stderr as it happens with --reporter json, before the document', async () => {
+    const url = await startStorybookServer({ c: entryOf('button--primary:test', { subtype: 'test' }) })
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
+      'button.stories.tsx': '',
+    })
+    const result = await runIntoOneFile({ cwd: project }, 'test', '--reporter', 'json')
+    const [header, document = '', ...rest] = withoutElapsed(result.output).split('\n')
+
+    expect(result.status).toBe(0)
+    expect(header).toBe(`visual-check ${version} · test · 0 snapshots · 4 workers`)
+    expect(JSON.parse(document)).toMatchObject({ command: 'test', exitCode: 0 })
+    expect(rest).toEqual(['0 passed · N', 'Report: .visual-check/report/report.json', ''])
   })
 
   it('reaches the browser to read the per-story options of every story, even when --filter selects none', async () => {

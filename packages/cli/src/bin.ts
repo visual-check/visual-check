@@ -19,15 +19,33 @@ function flushed(stream: NodeJS.WriteStream, text: string): Promise<void> {
   })
 }
 
+/**
+ * The writes made so far, the progress and the run's lines, each waiting until the one before is flushed, so their
+ * order holds across the two streams.
+ */
+let written: Promise<void> = Promise.resolve()
+
+/**
+ * Writes `text` to the stream once every earlier write is flushed.
+ */
+function writeInOrder(stream: NodeJS.WriteStream, text: string): void {
+  written = written.then(() => flushed(stream, text))
+  // A failed write rejects the chain's tail, which the exit awaits; this keeps it from being an unhandled rejection.
+  written.catch(() => undefined)
+}
+
 try {
   const result = await runCli(process.argv.slice(2), process.env, process.cwd(), {
     progress: (text) => {
-      process.stderr.write(text)
+      writeInOrder(process.stderr, text)
+    },
+    write: (stream, text) => {
+      writeInOrder(process[stream], text)
     },
   })
 
-  // The progress written so far goes out first.
-  await flushed(process.stderr, '')
+  // The progress and lines written so far go out first.
+  await written
   await flushed(process.stdout, result.stdout)
   await flushed(process.stderr, result.stderr)
 
@@ -40,6 +58,8 @@ try {
 
   process.exitCode = result.exitCode
 } catch (error) {
+  // The lines queued so far go out before the error.
+  await written.catch(() => undefined)
   process.stderr.write(`${error instanceof Error ? (error.stack ?? String(error)) : String(error)}\n`)
   process.exitCode = 2
 }

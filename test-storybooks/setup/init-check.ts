@@ -114,7 +114,7 @@ interface CommandOptions {
    */
   cwd: string
   /**
-   * Its environment. The check's own when not given.
+   * Its environment. The check's own, without `GITHUB_STEP_SUMMARY`, when not given.
    */
   env?: NodeJS.ProcessEnv
   /**
@@ -403,10 +403,22 @@ function findSetupProblems(initOnly: boolean): string[] {
 }
 
 /**
- * The environment without `CI`, as on a developer's machine: `update` refuses to run under it.
+ * The check's own environment without `GITHUB_STEP_SUMMARY`, so no run of the CLI writes the step summary of the CI job
+ * running the check.
+ */
+function checkEnvironment(): NodeJS.ProcessEnv {
+  const environment = { ...process.env }
+
+  delete environment.GITHUB_STEP_SUMMARY
+
+  return environment
+}
+
+/**
+ * The check's environment without `CI` either, as on a developer's machine: `update` refuses to run under it.
  */
 function localEnvironment(): NodeJS.ProcessEnv {
-  const environment = { ...process.env }
+  const environment = checkEnvironment()
 
   delete environment.CI
 
@@ -443,7 +455,7 @@ function startCommand(
   }
   const child = spawn(command, args, {
     cwd: options.cwd,
-    env: options.env ?? process.env,
+    env: options.env ?? checkEnvironment(),
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true,
   })

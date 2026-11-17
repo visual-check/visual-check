@@ -126,8 +126,10 @@ Each message names what failed and the fix.
 
 - `--reporter json` prints one document on stdout, so everything else goes to stderr:
   - image pull and `host` download progress;
+  - the human lines: the header, notes and each snapshot's line as it finishes, then the end block;
   - `update`'s end-of-run warnings;
   - the paths of a refreshed agent skill.
+- The step summary goes to the file `GITHUB_STEP_SUMMARY` names, never to a stream.
 - Terminal paths are relative to the current folder.
 
 ## Skill refresh on local runs

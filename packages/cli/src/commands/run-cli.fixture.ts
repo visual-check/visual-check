@@ -75,16 +75,19 @@ export const noMarker: RunCliOptions = { imageMarkerPath: absentMarkerPath }
 /**
  * The options every run gets: a Docker probe and a machine that both have 4 CPUs and 16 GiB, an engine that isn't
  * Docker Desktop's, Linux on x64, and no container around the run, so no test runs the real `docker` or reads the
- * machine it runs on. `update` captures a page again at once, so no test waits a second for it.
+ * machine it runs on. `update` captures a page again at once, so no test waits a second for it. The clock stands
+ * still, so every `test`'s counts end with ` · 0 ms`.
  */
 export const hostOptions = {
   probeDocker: async () => ({ cpus: 4, memoryBytes: 16 * 2 ** 30, desktop: false }),
   machine: { cpus: 4, memoryBytes: 16 * 2 ** 30 },
   insideContainer: false,
+  tty: false,
   os: 'linux',
   arch: 'x64',
   findKnownContainer: async () => undefined,
   recaptureDelayMs: 0,
+  now: () => 0,
 } satisfies RunCliOptions
 
 /**
@@ -579,12 +582,13 @@ type InitOnlyOption =
 
 /**
  * Builds options whose every launch writes pull progress and gives a fresh fake driver of the given version, answering
- * each story as `stories` says and the options read as `read` says. Returns them with what the fake browsers saw.
+ * each story as `stories` says and the options read as `read` says. Returns them with what the fake browsers saw. They
+ * give no `write`, so the result's streams start with what the run's reporter wrote.
  */
 export function fakeBrowser(
   stories: Record<string, FakeStory> = {},
   { version: driverVersion = browserPackage.chromium, read = {} }: FakeBrowserOptions = {},
-): { options: Required<Omit<RunCliOptions, InitOnlyOption>>; record: FakeBrowserRecord; progress: string[] } {
+): { options: Required<Omit<RunCliOptions, InitOnlyOption | 'write'>>; record: FakeBrowserRecord; progress: string[] } {
   const record = newRecord()
   const progress: string[] = []
   const gates: StoryGates = new Map()
@@ -646,6 +650,55 @@ export function orphanLineOf(storybook: string, stem: string, folder = '.visual-
   const detail = `orphan: no story calls for ${folder}/${stem}.png; run visual-check update to delete it`
 
   return `✗ ${storybook}  ${stem}  ${detail}`
+}
+
+/**
+ * Builds the heading of `test`'s failures block, which counts them.
+ */
+export function failuresHeadingOf(count: number): string {
+  return `── ${count} ${count === 1 ? 'failure' : 'failures'} ──`
+}
+
+/**
+ * Builds the lines of a failure in `test`'s failures block: its name, such as `web  a  dark`, then each detail line,
+ * such as `differs: …` or `diff: …`, indented by two spaces.
+ */
+export function failureOf(name: string, ...details: string[]): string[] {
+  return [name, ...details.map((detail) => `  ${detail}`)]
+}
+
+/**
+ * Builds the lines of an orphan in `test`'s failures block, by its Storybook, its file name without `.png` and its
+ * folder, relative to the project, `.visual-check/baselines` when not given.
+ */
+export function orphanFailureOf(storybook: string, stem: string, folder = '.visual-check/baselines'): string[] {
+  return failureOf(
+    `${storybook}  ${stem}`,
+    `orphan: no story calls for ${folder}/${stem}.png; run visual-check update to delete it`,
+  )
+}
+
+/**
+ * Builds the lines of a missing baseline in `test`'s failures block.
+ */
+export function missingFailureOf(storybook: string, id: string): string[] {
+  return failureOf(`${storybook}  ${id}`, 'missing: no baseline yet; run visual-check update to write it')
+}
+
+/**
+ * Builds the line of a differing snapshot's visual diff in `test`'s failures block, by its Storybook and its
+ * baseline's stem, in the report folder beside a config in the folder the CLI runs in.
+ */
+export function diffLineOf(storybook: string, stem: string): string {
+  return `diff: .visual-check/report/images/${storybook}/${stem}.diff.png`
+}
+
+/**
+ * Builds `test`'s counts line, which ends with how long the run took: always `0 ms` with the standing clock of
+ * {@link hostOptions}.
+ */
+export function countsOf(text: string): string {
+  return `${text} · 0 ms`
 }
 
 /**
@@ -831,6 +884,36 @@ export async function createRun(
  */
 export function withoutTimes(text: string): string {
   return text.replace(/ {2}\d+ ms( · flaky)?$/gm, '  N ms$1')
+}
+
+/**
+ * Gives a `write` that records each write as its stream and its text, with the times of pass lines replaced, and the
+ * writes it recorded.
+ */
+export function recordingWrite(): { write: NonNullable<RunCliOptions['write']>; writes: [string, string][] } {
+  const writes: [string, string][] = []
+
+  return {
+    write: (stream, text) => {
+      writes.push([stream, withoutTimes(text)])
+    },
+    writes,
+  }
+}
+
+/**
+ * Sorts each run of snapshot lines in `text` by what follows the mark, the snapshot's name then its detail, for a run
+ * whose concurrent captures finish in no fixed order. The other lines keep their places.
+ */
+export function withSnapshotLinesSorted(text: string): string {
+  return text.replace(/(^[✓✗!] .*\n)+/gm, (block) =>
+    block
+      .split('\n')
+      .slice(0, -1)
+      .sort((first, second) => (first.slice(2) < second.slice(2) ? -1 : 1))
+      .map((line) => `${line}\n`)
+      .join(''),
+  )
 }
 
 /**

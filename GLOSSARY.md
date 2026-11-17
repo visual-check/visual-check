@@ -108,6 +108,10 @@ _Avoid_: Notice, alert
 The form a command's terminal output takes: `live` for a terminal, `log` for CI, or `json`, which prints the report.
 _Avoid_: Output format, formatter, output mode
 
+**Step summary**:
+The Markdown page GitHub Actions shows for a job step, where every `test` and `update` writes its shard, counts, flaky snapshots and failures, or its run error.
+_Avoid_: Job summary, check summary, annotations
+
 **Run error**:
 A problem outside any story that stops a run before it has results, such as an invalid config or an unreachable Storybook. It exits 2, unlike a broken story.
 _Avoid_: Fatal error, crash

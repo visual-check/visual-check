@@ -368,11 +368,23 @@ describe('runCli test report after the consistency check', () => {
     expect(result.reportLine).toEqual(reportOnStderr)
   })
 
-  it.each(['live', 'log'])('prints the same with --reporter %s as with no flag', async (reporter) => {
+  it('prints the JSON document alone on stdout with --reporter json even in a TTY', async () => {
+    const { project } = await createRun(['a'], { a: defaultRunSnapshot })
+    const result = await runCli(['test', '--reporter', 'json'], {}, project, {
+      ...fakeBrowser().options,
+      tty: true,
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(JSON.parse(result.stdout)).toEqual(readReport(project))
+    expect(result.reportLine).toEqual(reportOnStderr)
+  })
+
+  it('prints the same with --reporter log as with no flag and no terminal', async () => {
     const plain = await createRun(['a'], { a: defaultRunSnapshot })
     const flagged = await createRun(['a'], { a: defaultRunSnapshot })
     const expected = await runCli(['test'], {}, plain.project, fakeBrowser().options)
-    const result = await runCli(['test', '--reporter', reporter], {}, flagged.project, fakeBrowser().options)
+    const result = await runCli(['test', '--reporter', 'log'], {}, flagged.project, fakeBrowser().options)
 
     expect(result).toEqual(expected)
   })
@@ -773,7 +785,8 @@ describe('runCli test report on exit 2', () => {
         const json = await runCli(['test', '--reporter', 'json'], {}, project, fakeBrowser().options)
 
         expect(result.exitCode).toBe(2)
-        expect(result.stdout).toContain('1 passed')
+        // No end block, since the run stops with exit 2 and the report it would be built from isn't written.
+        expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 1), '✓ web  a  N ms'))
         expect(result.reportLine).toBeUndefined()
         expect(result.stderr).toBe(`${problem}\n`)
         expect(json).toEqual({

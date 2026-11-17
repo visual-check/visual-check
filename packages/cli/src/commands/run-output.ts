@@ -1,31 +1,26 @@
-import { join, relative, sep } from 'node:path'
+import { join } from 'node:path'
+import { displayPathOf } from '../report/display-path.js'
 import { type Report, reportJsonOf } from '../report/report-document.js'
-import type { Reporter } from './parse-command-line.js'
+import type { Reporter } from '../reporter/reporter-choice.js'
+import type { SnapshotMark } from '../reporter/run-event.js'
 import type { PlannedSnapshot } from './plan-snapshots.js'
 import type { SnapshotResult, SnapshotStatus } from './snapshot-result.js'
 
 /**
  * The mark of a line that fails the run: a snapshot that differs or is missing, and an orphan.
  */
-export const failMark = '✗'
+export const failMark: SnapshotMark = '✗'
 
 /**
  * The mark each status's line starts with.
  */
-const marks: Record<SnapshotStatus, string> = {
+const marks: Record<SnapshotStatus, SnapshotMark> = {
   passed: '✓',
   written: '✓',
   kept: '✓',
   differs: failMark,
   missing: failMark,
   broken: '!',
-}
-
-/**
- * Writes a path relative to `folder`, such as the folder the CLI runs in or the config's, with `/` on every OS.
- */
-export function displayPathOf(folder: string, path: string): string {
-  return relative(folder, path).split(sep).join('/')
 }
 
 /**
@@ -66,13 +61,19 @@ export interface RunOutput {
    * The line written after both streams: the report's path. Absent when no report was written.
    */
   reportLine?: ReportLine
+  /**
+   * The report, or `update`'s document, the run built, which the step summary is written from. Absent for help,
+   * version, init and a usage error that names no run.
+   */
+  report?: Report
 }
 
 /**
  * Composes what a run prints from what it printed on each stream, its report or document, and its report line when it
  * wrote a report, given with the stream a human reporter puts it on: stdout for a `test` that exits 0 or 1, else
  * stderr. With `--reporter json`, stdout holds the JSON document alone, so the human lines move to stderr, before its
- * own text, and the report line goes on stderr. With any other reporter, both streams keep their text.
+ * own text, and the report line goes on stderr. With any other reporter, both streams keep their text. The report
+ * comes along, for the step summary.
  */
 export function runOutputOf(
   output: { stdout: string; stderr: string },
@@ -86,18 +87,14 @@ export function runOutputOf(
       : { stdout: output.stdout, stderr: output.stderr }
 
   if (reportLine === undefined) {
-    return streams
+    return { ...streams, report }
   }
 
-  return { ...streams, reportLine: reporter === 'json' ? { stream: 'stderr', text: reportLine.text } : reportLine }
-}
-
-/**
- * Builds a counts line, such as `2 written · 1 kept`: each label with its count, in the order given, leaving out zero
- * counts except the first.
- */
-export function countsLineOf(counts: readonly (readonly [label: string, count: number])[]): string {
-  return counts.flatMap(([label, count], index) => (index === 0 || count > 0 ? [`${count} ${label}`] : [])).join(' · ')
+  return {
+    ...streams,
+    reportLine: reporter === 'json' ? { stream: 'stderr', text: reportLine.text } : reportLine,
+    report,
+  }
 }
 
 /**
@@ -121,5 +118,12 @@ export function snapshotNameOf({ storybook, story, mode }: PlannedSnapshot): str
  * out the result's hint.
  */
 export function snapshotLineOf(item: PlannedSnapshot, result: SnapshotResult): string {
-  return `${marks[result.status]} ${snapshotNameOf(item)}  ${result.detail}`
+  return `${markOf(result)} ${snapshotNameOf(item)}  ${result.detail}`
+}
+
+/**
+ * Gives the mark a finished snapshot's line starts with: `✓` for a pass, `✗` for a failure, `!` for a broken story.
+ */
+export function markOf(result: SnapshotResult): SnapshotMark {
+  return marks[result.status]
 }

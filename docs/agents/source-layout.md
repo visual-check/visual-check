@@ -63,7 +63,7 @@ packages/cli/src/
   index.ts              entry: the public config API
   commands/             init, test, update
   init/                 what init detects, asks, writes and installs; adapter: git ls-files and Fallow's check
-  terminal-ui/          adapter: Ink and React: init's questions, steps and summary
+  terminal-ui/          adapter: Ink and React: init's questions, steps and summary, and the live reporter
   docs-site/            the docs site's address, which every docs link starts with
   config/
   storybook/            adapter: index.json, story URLs, the preview script and the test path
@@ -77,4 +77,6 @@ packages/cli/src/
   affected-stories/     adapter: git and Fallow's graph
   sharding/
   report/
+  reporter/             the reporters' choice, progress stream, log lines and test's end block
+  step-summary/         adapter: GitHub's step summary file
 ```

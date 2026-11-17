@@ -115,6 +115,7 @@ describe('stoppedTestOf', () => {
       stdout: '✓ web  a  12 ms\n',
       stderr: 'Warning.\nThe browser exited.\n',
       reportLine,
+      report: readReport(project),
     })
     expect(readdirSync(join(project, '.visual-check', 'report'))).toEqual(['report.json'])
     expect(readReport(project)).toMatchObject({
@@ -136,6 +137,7 @@ describe('stoppedTestOf', () => {
       stdout: `${reportJsonOf(readReport(project))}\n`,
       stderr: '✓ web  a  12 ms\nWarning.\nThe browser exited.\n',
       reportLine,
+      report: readReport(project),
     })
   })
 
@@ -174,7 +176,12 @@ describe('stoppedUpdateOf', () => {
       options: { selection: { kind: 'default' }, reporter: undefined },
     })
 
-    expect(output).toEqual({ exitCode: 2, stdout: '✓ web  a  12 ms\n', stderr: 'Warning.\nThe browser exited.\n' })
+    expect(output).toEqual({
+      exitCode: 2,
+      stdout: '✓ web  a  12 ms\n',
+      stderr: 'Warning.\nThe browser exited.\n',
+      report: expect.objectContaining({ command: 'update', error: { message: 'The browser exited.', storybooks: [] } }),
+    })
     expect(readdirSync(project).sort()).toEqual(['.git', 'visual-check.config.mjs'])
   })
 
@@ -202,6 +209,17 @@ describe('stoppedUpdateOf', () => {
 })
 
 describe('usageFailureOf', () => {
+  it('prints the message and the hint, with no report, for an error that names no run', async () => {
+    const project = createProject()
+
+    expect(await usageFailureOf(new UsageError('Unknown command: deploy.'), project, '1.2.3')).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr: 'Unknown command: deploy.\nRun visual-check --help to see the commands and options.\n',
+    })
+    expect(readdirSync(project).sort()).toEqual(['.git', 'visual-check.config.mjs'])
+  })
+
   it('prints the message and the hint, writing no report, for update', async () => {
     const project = createProject()
     const error = new UsageError('--shard applies only to test.', {
@@ -214,6 +232,10 @@ describe('usageFailureOf', () => {
       exitCode: 2,
       stdout: '',
       stderr: '--shard applies only to test.\nRun visual-check --help to see the commands and options.\n',
+      report: expect.objectContaining({
+        command: 'update',
+        error: { message: '--shard applies only to test.', storybooks: [] },
+      }),
     })
     expect(readdirSync(project).sort()).toEqual(['.git', 'visual-check.config.mjs'])
   })

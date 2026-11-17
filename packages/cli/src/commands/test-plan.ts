@@ -94,9 +94,8 @@ function testSnapshotsOf(planned: readonly PlannedSnapshot[], check: Consistency
  * story whose stories file didn't load, and any the file system takes for an expected baseline.
  *
  * Locally, `test` also takes every snapshot outside the selection that is a finding, so its missing or broken line is
- * printed and counted, the header included; a missing one is still never captured. After the snapshot lines, it prints
- * a line for each orphan, in config order then file name order, and its counts end with the orphans', which make it
- * exit 1.
+ * printed and counted, the header included; a missing one is still never captured. Its orphans, in config order then
+ * file name order, go to the report and its end block, and make it exit 1.
  *
  * In CI, a `test` whose check finds anything captures nothing: it stops with exit 1 and prints the consistency output,
  * a header that counts every planned snapshot, then the missing and broken lines in planned order, the orphan lines and

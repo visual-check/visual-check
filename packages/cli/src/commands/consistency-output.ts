@@ -1,8 +1,10 @@
 import { basename } from 'node:path'
 import { stemOfFileName } from '../baselines/baseline-files.js'
+import { displayPathOf } from '../report/display-path.js'
+import { countsLineOf, orphanLabelOf } from '../reporter/counts-line.js'
 import { type ConsistencyCheck, isConsistent, type StorybookBaselines } from './consistency-check.js'
 import type { PlannedSnapshot } from './plan-snapshots.js'
-import { countsLineOf, displayPathOf, failMark, snapshotCountOf, snapshotLineOf } from './run-output.js'
+import { failMark, snapshotCountOf, snapshotLineOf } from './run-output.js'
 import { brokenResultOf, missingResultOf, type SnapshotResult, type SnapshotStatus } from './snapshot-result.js'
 
 /**
@@ -54,13 +56,6 @@ interface ConsistencyOutput {
  * The line that ends the consistency output when the check found nothing.
  */
 const consistentLine = 'Consistent: every baseline the stories call for is there, and none is an orphan.'
-
-/**
- * Labels a count of orphans: `orphan` for 1, `orphans` otherwise.
- */
-export function orphanLabelOf(count: number): string {
-  return count === 1 ? 'orphan' : 'orphans'
-}
 
 /**
  * Builds a line for each orphan, Storybooks in the order given, then file name order: the fail mark, the Storybook, the
