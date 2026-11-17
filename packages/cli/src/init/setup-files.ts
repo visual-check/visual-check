@@ -8,10 +8,14 @@ import { isJsonObject } from './package-manager.js'
 export const visualCheckGitignore = '/*\n!/baselines/\n!/.gitignore\n'
 
 /**
- * The content of `<configDir>/visual-check.ts`: no modes, and a commented example of one.
+ * The content of `<configDir>/visual-check.ts`: no modes, a commented example of one, and a comment that shows how to
+ * spread `visualCheck` into the parameters in `preview.ts`, which sets options for every story.
  */
 export const modesFileSource = `import { defineVisualCheck } from '@visual-check/storybook'
 
+// To set options for every story, spread visualCheck into the parameters in preview.ts:
+//   import { visualCheck } from './visual-check'
+//   parameters: { ...visualCheck({}) },
 export const visualCheck = defineVisualCheck({
   modes: {
     // Each mode a story lists adds one snapshot besides its default capture. For example:

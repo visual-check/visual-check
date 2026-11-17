@@ -140,8 +140,8 @@ Rules:
   - the running step turns the spinner and counts its time up each second, with its command and the last three lines of its output under it, dim;
   - a step that ended shows `✓`, `▲` or `✕` in the accent, caution or danger colour, and how long it took. A failed step keeps the last 15 lines of its output, and the steps after it end dim after `−`, marked skipped.
 - It ends with the steps as they ended, printed once, then a summary:
-  - **Set up:** `✓ visual-check is set up`, each file written and each script change, the warnings, then the four next steps, numbered, with commands, paths and URLs in the accent colour. Then each preview file's snippet in a box, and the line pointing to the CI docs. The steps', previews' and CI line's words match the plain closing message; the headings differ.
-  - **The install failed:** the files written, then the problem after `✕`.
+  - **Set up:** `✓ visual-check is set up`, a dim line naming any scripts it replaced, the warnings, then the numbered next steps, each a command and what it does, the commands in a column of their own in the accent colour. Then, dim, where to set options for every story and the line pointing to the CI docs, with paths and URLs in the accent colour. The words match the plain closing message; the headings differ. It lists no files written.
+  - **The install failed:** the line naming any scripts it replaced, then the problem after `✕`.
   - **Stopped before writing:** the warnings and hints, then why it stopped after `✕`.
 - Elsewhere it prints plain text.
 - The package manager question is a list.
@@ -151,12 +151,12 @@ Rules:
 
 - **The config** at the workspace root, holding only what differs from the defaults.
 - **For each Storybook:**
-  - `<configDir>/visual-check.ts`, which exports `visualCheck = defineVisualCheck({ modes: {} })` and carries a commented example of a `mobile` mode at 375×667, scale 2, with touch;
+  - `<configDir>/visual-check.ts`, which exports `visualCheck = defineVisualCheck({ modes: {} })` and carries a commented example of a `mobile` mode at 375×667, scale 2, with touch, and a comment that shows how to spread `visualCheck` into the parameters in `preview`, which sets options for every story;
   - `<dir>/.visual-check/.gitignore`.
 - **The root `.visual-check/.gitignore`.**
 - **Dependencies,** as [Packages](01-packages.md) lists them. Under Rush it prints the install steps instead.
 - **The addon:** for each ticked Storybook it runs `storybook add @visual-check/storybook-addon@<cli version>` in that Storybook's package. If that fails, it warns, prints the command and carries on.
-- **The two npm scripts.** One that replaces a script is listed with what that script ran.
+- **The two npm scripts.** The summary names the scripts it replaced, not what they ran.
 - **The agent skill** ([Agent skill](16-agent-skill.md)).
 
 What it never does:
@@ -194,12 +194,14 @@ It warns and still writes when:
 
 ## `init`: closing message
 
-1. Start each Storybook with its command.
-2. Run `visual:update` to write baselines. The first run downloads the browser image.
-3. Run `visual:check`. It should pass. If a story fails, ask your agent to run visual-check, or see the docs.
-4. Commit the config, `.visual-check/baselines/`, `.agents/skills/visual-check/` and the `.claude/skills/visual-check` link.
+Each step is a command and what it does, the commands in a column of their own:
 
-Then it prints the line to add to `preview` and a docs link for CI. It says nothing about remote content.
+1. Start each Storybook with its command, and keep it running.
+2. `visual:update` writes the first baselines. Left out when every Storybook already has baselines.
+3. `visual:check` checks the stories against them.
+4. Commit the changes, baselines included.
+
+Then a line pointing to each `visual-check.ts` for options for every story (its comment shows how to spread it into `preview`), and a docs link for CI. Before the closing message, a line names any scripts `init` replaced. It lists no files written and says nothing about remote content.
 
 ## Sources
 

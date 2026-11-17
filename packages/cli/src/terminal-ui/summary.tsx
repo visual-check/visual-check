@@ -1,10 +1,22 @@
 import { Box, Text } from 'ink'
 import { Fragment, type ReactNode } from 'react'
-import { ciLineOf, type NextSteps, previewIntroOf, type Segment, type WrittenList } from '../init/closing-message.js'
+import {
+  ciLineOf,
+  commandColumnWidthOf,
+  modesLineOf,
+  type NextStepRow,
+  type NextSteps,
+  type Segment,
+} from '../init/closing-message.js'
 import type { InitResult } from '../init/run-init.js'
 import { ColouredText } from './coloured-text.js'
 import { MessageLine } from './message-line.js'
 import { glyphs } from './theme.js'
+
+/**
+ * How many columns a step's number takes, with the spaces around it.
+ */
+const numberColumnWidth = 5
 
 /**
  * What `Summary` takes.
@@ -27,13 +39,13 @@ interface MessageLinesProps {
 }
 
 /**
- * What `WrittenLines` takes.
+ * What `ReplacedLine` takes.
  */
-interface WrittenLinesProps {
+interface ReplacedLineProps {
   /**
-   * What `init` wrote, worded for the person.
+   * The line that names the scripts `init` replaced, when it replaced any.
    */
-  written: WrittenList
+  text: string | undefined
 }
 
 /**
@@ -44,6 +56,24 @@ interface NextStepsViewProps {
    * What to do next.
    */
   nextSteps: NextSteps
+}
+
+/**
+ * What `StepRow` takes.
+ */
+interface StepRowProps {
+  /**
+   * The row to draw.
+   */
+  row: NextStepRow
+  /**
+   * What the number column shows: the step's number on the step's first row, nothing on the others.
+   */
+  numberLabel: string
+  /**
+   * How many columns the commands take, the gap after the longest included.
+   */
+  commandWidth: number
 }
 
 /**
@@ -82,52 +112,73 @@ function MessageLines({ messages }: MessageLinesProps): ReactNode {
 }
 
 /**
- * Draws what `init` wrote, a check each, indented: the path of each file, then each change to the scripts.
+ * Draws the line that names the scripts `init` replaced, dim and indented, or nothing when it replaced none.
  */
-function WrittenLines({ written }: WrittenLinesProps): ReactNode {
-  return [...written.files, ...written.scripts].map((line) => (
-    <Box key={line} marginLeft={2}>
-      <Box flexShrink={0} marginRight={1}>
-        <ColouredText colour="accent">{glyphs.passed}</ColouredText>
-      </Box>
-      <Text>{line}</Text>
+function ReplacedLine({ text }: ReplacedLineProps): ReactNode {
+  if (text === undefined) {
+    return null
+  }
+
+  return (
+    <Box marginLeft={2}>
+      <Text dimColor>{text}</Text>
     </Box>
-  ))
+  )
 }
 
 /**
- * Draws what to do next: the numbered steps, the snippet for each preview file in a dim box, then the docs page for CI.
- * Commands, paths and URLs take the accent colour.
+ * Draws a row of a step: the step's number on its first row, the command in the accent colour, padded so every text
+ * starts in the same column, then the text, which wraps under itself. A row without a command starts its text where
+ * the commands start.
+ */
+function StepRow({ row, numberLabel, commandWidth }: StepRowProps): ReactNode {
+  return (
+    <Box>
+      <Box flexShrink={0} width={numberColumnWidth}>
+        <Text>{numberLabel}</Text>
+      </Box>
+      {row.command === undefined ? null : (
+        <Box flexShrink={0} width={commandWidth}>
+          <ColouredText colour="accent">{row.command}</ColouredText>
+        </Box>
+      )}
+      <Text>
+        <SegmentsText segments={row.text} />
+      </Text>
+    </Box>
+  )
+}
+
+/**
+ * Draws what to do next: the numbered steps, each command in a column of its own, then, dim, where options for every
+ * story go and the docs page for CI. Commands, paths and URLs take the accent colour.
  */
 function NextStepsView({ nextSteps }: NextStepsViewProps): ReactNode {
+  const commandWidth = commandColumnWidthOf(nextSteps.steps)
+
   return (
     <>
       <Box marginTop={1}>
         <Text bold>Next</Text>
       </Box>
-      {/* The steps never change, so where each one is tells it apart, and gives its number. */}
-      {Array.from(nextSteps.steps.entries(), ([position, step]) => (
-        <Box key={position}>
-          <Box flexShrink={0}>
-            <Text>{`  ${position + 1}  `}</Text>
-          </Box>
-          <Text>
-            <SegmentsText segments={step} />
+      {/* The steps and their rows never change, so where each one is tells it apart, and gives the step its number. */}
+      {Array.from(nextSteps.steps.entries()).flatMap(([position, rows]) =>
+        Array.from(rows.entries(), ([rowPosition, row]) => (
+          <StepRow
+            commandWidth={commandWidth}
+            key={`${position}-${rowPosition}`}
+            numberLabel={rowPosition === 0 ? `  ${position + 1}` : ''}
+            row={row}
+          />
+        )),
+      )}
+      <Box flexDirection="column" marginTop={1}>
+        {nextSteps.modesFiles.length === 0 ? null : (
+          <Text dimColor>
+            <SegmentsText segments={modesLineOf(nextSteps.modesFiles)} />
           </Text>
-        </Box>
-      ))}
-      {nextSteps.previews.map(({ file, lines }) => (
-        <Box flexDirection="column" key={file} marginTop={1}>
-          <Text>
-            <SegmentsText segments={previewIntroOf(file)} />
-          </Text>
-          <Box borderDimColor alignSelf="flex-start" borderStyle="round" paddingX={1}>
-            <Text>{lines.join('\n')}</Text>
-          </Box>
-        </Box>
-      ))}
-      <Box marginTop={1}>
-        <Text>
+        )}
+        <Text dimColor>
           <SegmentsText segments={ciLineOf(nextSteps.ciUrl)} />
         </Text>
       </Box>
@@ -136,9 +187,9 @@ function NextStepsView({ nextSteps }: NextStepsViewProps): ReactNode {
 }
 
 /**
- * The end of a run. One that got to the end says visual-check is set up, lists what it wrote and the warnings, then
- * what to do next. One whose install failed lists what it wrote, then why it stopped. One that stopped before it wrote
- * shows its warnings and hints as notes, and why it stopped after `✕`.
+ * The end of a run. One that got to the end says visual-check is set up, names the scripts it replaced, shows the
+ * warnings, then what to do next. One whose install failed names the scripts it replaced, then why it stopped. One
+ * that stopped before it wrote shows its warnings and hints as notes, and why it stopped after `✕`.
  */
 export function Summary({ result }: SummaryProps): ReactNode {
   const { summary } = result
@@ -156,7 +207,7 @@ export function Summary({ result }: SummaryProps): ReactNode {
       {summary.nextSteps === undefined ? null : (
         <ColouredText bold colour="accent">{`${glyphs.passed} visual-check is set up`}</ColouredText>
       )}
-      <WrittenLines written={summary.written} />
+      <ReplacedLine text={summary.replacedLine} />
       <MessageLines messages={result.messages} />
       {summary.nextSteps === undefined ? null : <NextStepsView nextSteps={summary.nextSteps} />}
     </Box>

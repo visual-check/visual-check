@@ -1,14 +1,13 @@
 import { dirname, join } from 'node:path'
+import { BaselineError } from '../baselines/baseline-error.js'
+import { listBaselines } from '../baselines/baseline-files.js'
 import type { ProbeDocker } from '../container/docker-probe.js'
 import {
   closingMessageTextOf,
   type NextSteps,
   nextStepsOf,
+  replacedScriptsLineOf,
   type SetUpStorybook,
-  type Written,
-  type WrittenList,
-  writtenLinesOf,
-  writtenListOf,
 } from './closing-message.js'
 import { type DetectedProject, detectProject } from './detect-project.js'
 import { type ExistingConfig, existingConfigOf, existingStorybooksOf } from './existing-config.js'
@@ -18,7 +17,14 @@ import { addAddons, addonTitleOf, dependenciesToAddOf, installDependencies, inst
 import { InputEndedError, type Prompter } from './prompter.js'
 import { type Answers, askQuestions } from './questions.js'
 import type { RunCommand } from './run-command.js'
-import { configSourceOf, modesFileSource, setScripts, visualCheckGitignore, writeIfMissing } from './setup-files.js'
+import {
+  configSourceOf,
+  modesFileSource,
+  type ScriptChanges,
+  setScripts,
+  visualCheckGitignore,
+  writeIfMissing,
+} from './setup-files.js'
 import { runStep, type SetupProgress } from './setup-progress.js'
 import {
   type FindUnlistedDependencies,
@@ -98,7 +104,8 @@ export interface InitResult {
    */
   exitCode: number
   /**
-   * Text for standard output: the files written, then the closing message.
+   * Text for standard output: the line that names the scripts replaced in `package.json`, when there are any, then the
+   * closing message, which a failed install leaves out.
    */
   stdout: string
   /**
@@ -111,8 +118,8 @@ export interface InitResult {
    */
   messages: readonly string[]
   /**
-   * What the terminal UI sums the run up with, once `init` has written: what it wrote, and the next steps when it got
-   * to the end. A run that stopped before it wrote has none.
+   * What the terminal UI sums the run up with, once `init` has written: the scripts it replaced, and the next steps
+   * when it got to the end. A run that stopped before it wrote has none.
    */
   summary?: InitSummary
 }
@@ -122,9 +129,9 @@ export interface InitResult {
  */
 interface InitSummary {
   /**
-   * What `init` wrote, worded for the person, with the paths relative to the folder it runs in.
+   * The line that names the scripts `init` replaced in `package.json`, when it replaced any.
    */
-  written: WrittenList
+  replacedLine?: string
   /**
    * What to do next, when `init` got to the end. A failed install leaves it out.
    */
@@ -273,9 +280,10 @@ function setupOf(
 }
 
 /**
- * Writes the files and the scripts, adds the dependencies and the addon, and checks for unlisted dependencies. A failed
- * install exits 2 after listing the files written so far, with no closing message. The result carries a summary for the
- * terminal UI: what was written, and the next steps unless the install failed.
+ * Writes the files and the scripts, adds the dependencies and the addon, and checks for unlisted dependencies. Standard
+ * output names the scripts it replaced, then gives the closing message. A failed install exits 2 with no closing
+ * message. The result carries a summary for the terminal UI: the scripts replaced, and the next steps unless the
+ * install failed.
  */
 async function applySetup(cwd: string, project: DetectedProject, setup: Setup, tools: InitTools): Promise<InitResult> {
   const { packageManager, scripts, addons } = setup.answers
@@ -295,18 +303,21 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
     ...addons.map(({ name }) => addonTitleOf(name)),
     checkUnlistedTitle,
   ])
-  const written = await runStep(
+  const scriptChanges = await runStep(
     progress,
     { title: writeFilesTitle },
     () => writeSetupFiles(project, setup),
     () => 'done',
   )
-  const writtenList = writtenListOf(written, cwd)
-  const writtenLines = writtenLinesOf(writtenList)
+  const replacedLine = replacedScriptsLineOf(scriptChanges.replaced.map(({ name }) => name))
+  const replaced = replacedLine === undefined ? {} : { replacedLine }
   const problem = await installDependencies({ installs, packageManager, runCommand, progress })
 
   if (problem !== undefined) {
-    return { ...resultOf(2, linesOf(writtenLines), [...setup.notes, problem]), summary: { written: writtenList } }
+    return {
+      ...resultOf(2, replacedLine === undefined ? '' : `${replacedLine}\n`, [...setup.notes, problem]),
+      summary: replaced,
+    }
   }
 
   const addonWarnings = await addAddons({
@@ -331,13 +342,46 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
     configPath: setup.configPath,
     storybooks: setup.storybooks,
     scripts,
+    needsBaselines: await needsBaselinesOf(setup.storybooks),
   })
   const closingMessage = closingMessageTextOf(nextSteps)
-  const stdout = writtenLines.length === 0 ? closingMessage : `${linesOf(writtenLines)}\n${closingMessage}`
+  const stdout = replacedLine === undefined ? closingMessage : `${replacedLine}\n\n${closingMessage}`
 
   return {
     ...resultOf(0, stdout, [...setup.notes, ...addonWarnings, ...fallowWarnings]),
-    summary: { written: writtenList, nextSteps },
+    summary: { ...replaced, nextSteps },
+  }
+}
+
+/**
+ * Whether the first baselines are still to be written: unless every Storybook set up has at least one in its
+ * `.visual-check/baselines` folder. With none set up, a Storybook is still to be added, so they are. A config's own
+ * `baselines` folder isn't read.
+ *
+ * @throws Any error besides a `BaselineError`, which counts as no baselines.
+ */
+async function needsBaselinesOf(storybooks: readonly SetUpStorybook[]): Promise<boolean> {
+  const hasBaselines = await Promise.all(
+    storybooks.map(({ dir }) => holdsBaselines(join(dir, '.visual-check', 'baselines'))),
+  )
+
+  return hasBaselines.length === 0 || hasBaselines.includes(false)
+}
+
+/**
+ * Whether a baselines folder holds at least one baseline. A folder that can't be listed holds none.
+ *
+ * @throws Any error besides a `BaselineError`.
+ */
+async function holdsBaselines(folder: string): Promise<boolean> {
+  try {
+    return (await listBaselines(folder)).length > 0
+  } catch (error) {
+    if (error instanceof BaselineError) {
+      return false
+    }
+
+    throw error
   }
 }
 
@@ -359,9 +403,9 @@ async function dockerNotesOf(probeDocker: ProbeDocker, os: NodeJS.Platform): Pro
 /**
  * Writes each file that's missing: the config when there was none, each Storybook's `visual-check.ts` and
  * `.visual-check/.gitignore`, and the config folder's `.visual-check/.gitignore`. Then sets the scripts. Gives what it
- * wrote. An existing file is never touched.
+ * changed in the scripts. An existing file is never touched.
  */
-function writeSetupFiles(project: DetectedProject, setup: Setup): Written {
+function writeSetupFiles(project: DetectedProject, setup: Setup): ScriptChanges {
   const { answers, configPath, configSource, storybooks } = setup
   const contents: (readonly [string, string])[] = [
     ...(configSource === undefined ? [] : [[configPath, configSource] as const]),
@@ -371,15 +415,11 @@ function writeSetupFiles(project: DetectedProject, setup: Setup): Written {
     ]),
     [join(dirname(configPath), '.visual-check', '.gitignore'), visualCheckGitignore],
   ]
-  const files: string[] = []
-
   for (const [path, content] of contents) {
-    if (writeIfMissing(path, content)) {
-      files.push(path)
-    }
+    writeIfMissing(path, content)
   }
 
-  return { files, scripts: setScripts(project.manifestPath, scriptsToSetOf(answers.scripts)) }
+  return setScripts(project.manifestPath, scriptsToSetOf(answers.scripts))
 }
 
 /**

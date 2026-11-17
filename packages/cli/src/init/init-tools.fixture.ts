@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { NextSteps, WrittenList } from './closing-message.js'
+import type { NextSteps } from './closing-message.js'
 import { listProjectFiles } from './find-storybooks.js'
 import { defaultsPrompter } from './prompter.js'
 import type { RunCommand } from './run-command.js'
@@ -55,6 +55,9 @@ export const pnpmAddon = {
  */
 export const modesFile = `import { defineVisualCheck } from '@visual-check/storybook'
 
+// To set options for every story, spread visualCheck into the parameters in preview.ts:
+//   import { visualCheck } from './visual-check'
+//   parameters: { ...visualCheck({}) },
 export const visualCheck = defineVisualCheck({
   modes: {
     // Each mode a story lists adds one snapshot besides its default capture. For example:
@@ -69,81 +72,36 @@ export const visualCheck = defineVisualCheck({
 export const gitignore = '/*\n!/baselines/\n!/.gitignore\n'
 
 /**
- * The closing message for the one Storybook of the pnpm project.
+ * The closing message for the one Storybook of the pnpm project, which has no baselines yet.
  *
  * @public
  */
-export const pnpmClosingMessage = [
-  'visual-check is set up. Next:',
-  '  1. Start Storybook with pnpm run storybook.',
-  '  2. Run pnpm run visual:update to write baselines. The first run downloads the browser image.',
-  '  3. Run pnpm run visual:check. It should pass. ' +
-    'If a story fails, see https://visual-check.vercel.app/docs/broken-stories.',
-  '  4. Commit visual-check.config.ts, .storybook/visual-check.ts and .visual-check/.',
-  '',
-  'To set options for every story, spread visualCheck into the parameters in .storybook/preview.ts:',
-  "  import { visualCheck } from './visual-check'",
-  '  parameters: { ...visualCheck({}) },',
-  '',
-  'To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.',
-  '',
-].join('\n')
+export const pnpmClosingMessage = `visual-check is set up. Next:
+  1. pnpm run storybook       Start Storybook, and keep it running
+  2. pnpm run visual:update   Write the first baselines
+  3. pnpm run visual:check    Check the stories against the baselines
+  4. Commit the changes, baselines included
+
+To set options for every story, see .storybook/visual-check.ts.
+To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
+`
 
 /**
- * What the one Storybook of the pnpm project is told to do next: the closing message as data.
+ * What the one Storybook of the pnpm project, which has no baselines yet, is told to do next: the closing message as
+ * data.
  *
  * @public
  */
 export const pnpmNextSteps: NextSteps = {
   steps: [
-    ['Start Storybook with ', { code: 'pnpm run storybook' }, '.'],
-    ['Run ', { code: 'pnpm run visual:update' }, ' to write baselines. The first run downloads the browser image.'],
-    [
-      'Run ',
-      { code: 'pnpm run visual:check' },
-      '. It should pass. If a story fails, see ',
-      { code: 'https://visual-check.vercel.app/docs/broken-stories' },
-      '.',
-    ],
-    [
-      'Commit ',
-      { code: 'visual-check.config.ts' },
-      ', ',
-      { code: '.storybook/visual-check.ts' },
-      ' and ',
-      { code: '.visual-check/' },
-      '.',
-    ],
+    [{ command: 'pnpm run storybook', text: ['Start Storybook, and keep it running'] }],
+    [{ command: 'pnpm run visual:update', text: ['Write the first baselines'] }],
+    [{ command: 'pnpm run visual:check', text: ['Check the stories against the baselines'] }],
+    [{ text: ['Commit the changes, baselines included'] }],
   ],
-  previews: [
-    {
-      file: '.storybook/preview.ts',
-      lines: ["import { visualCheck } from './visual-check'", 'parameters: { ...visualCheck({}) },'],
-    },
-  ],
+  modesFiles: ['.storybook/visual-check.ts'],
   ciUrl: 'https://visual-check.vercel.app/docs/ci',
 }
-
-/**
- * What `init` writes in the pnpm project when it holds none of it yet, worded for the person.
- *
- * @public
- */
-export const pnpmWrittenList: WrittenList = {
-  files: ['visual-check.config.ts', '.storybook/visual-check.ts', '.visual-check/.gitignore'],
-  scripts: ['Added the scripts visual:check and visual:update to package.json.'],
-}
-
-/**
- * What `init` prints on stdout for the files it writes in the pnpm project.
- *
- * @public
- */
-export const pnpmWrittenLines = `Wrote visual-check.config.ts
-Wrote .storybook/visual-check.ts
-Wrote .visual-check/.gitignore
-Added the scripts visual:check and visual:update to package.json.
-`
 
 /**
  * A command a fake `RunCommand` was asked to run.

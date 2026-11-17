@@ -86,7 +86,10 @@
       },
       { "from": "cli/config", "allow": [] },
       { "from": "cli/docs-site", "allow": [] },
-      { "from": "cli/init", "allow": ["cli/config", "cli/container", "cli/docs-site", "cli/storybook"] },
+      {
+        "from": "cli/init",
+        "allow": ["cli/baselines", "cli/config", "cli/container", "cli/docs-site", "cli/storybook"]
+      },
       { "from": "cli/report", "allow": ["cli/system-error"] },
       { "from": "cli/sharding", "allow": ["cli/baselines", "cli/storybook"] },
       { "from": "cli/storybook", "allow": [] },

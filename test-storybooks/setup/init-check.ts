@@ -301,6 +301,9 @@ export default defineConfig({
  */
 const expectedModesFile = `import { defineVisualCheck } from '@visual-check/storybook'
 
+// To set options for every story, spread visualCheck into the parameters in preview.ts:
+//   import { visualCheck } from './visual-check'
+//   parameters: { ...visualCheck({}) },
 export const visualCheck = defineVisualCheck({
   modes: {
     // Each mode a story lists adds one snapshot besides its default capture. For example:
@@ -1069,8 +1072,8 @@ function snapshotProblems(before: ReadonlyMap<string, string>, after: ReadonlyMa
 }
 
 /**
- * Runs `init --yes` again with the installed CLI, without `CI`, and checks it exits 0 without a warning, prints no
- * `Wrote` line, and changes no file git lists.
+ * Runs `init --yes` again with the installed CLI, without `CI`, and checks it exits 0 without a warning and changes no
+ * file git lists.
  */
 async function checkInitAgain(check: Check): Promise<string[]> {
   const before = await snapshotProject(check, 'list files before init again')
@@ -1086,14 +1089,7 @@ async function checkInitAgain(check: Check): Promise<string[]> {
 
   const after = await snapshotProject(check, 'list files after init again')
 
-  return [
-    ...warningProblems('init again', run.stderr),
-    ...run.stdout
-      .split('\n')
-      .filter((line) => line.startsWith('Wrote '))
-      .map((line) => `init again wrote a file: ${line}`),
-    ...snapshotProblems(before, after),
-  ]
+  return [...warningProblems('init again', run.stderr), ...snapshotProblems(before, after)]
 }
 
 /**

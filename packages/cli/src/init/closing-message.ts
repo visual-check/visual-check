@@ -1,11 +1,9 @@
-import { dirname, join } from 'node:path'
-import { isFile } from '../config/find-config.js'
+import { join } from 'node:path'
 import { docsUrlOf } from '../docs-site/docs-url.js'
 import { relativePathOf } from './find-storybooks.js'
 import { listOf } from './list-of.js'
 import { type PackageManager, runScriptCommandOf } from './package-manager.js'
 import type { Answers } from './questions.js'
-import type { ScriptChanges } from './setup-files.js'
 
 /**
  * A Storybook `init` set up, with what the closing message says about it.
@@ -20,44 +18,13 @@ export interface SetUpStorybook {
    */
   dir: string
   /**
-   * The absolute path of Storybook's config folder, which holds `visual-check.ts` and the preview file.
+   * The absolute path of Storybook's config folder, which holds `visual-check.ts`.
    */
   configDir: string
   /**
    * The command that starts the Storybook.
    */
   startCommand: string
-}
-
-/**
- * What `init` wrote.
- */
-export interface Written {
-  /**
-   * The absolute paths of the files it wrote, in the order it wrote them.
-   */
-  files: string[]
-  /**
-   * The scripts it added to `package.json` and the ones it replaced there.
-   */
-  scripts: ScriptChanges
-}
-
-/**
- * What `init` wrote, worded for the person.
- *
- * @public
- */
-export interface WrittenList {
-  /**
-   * The paths of the files it wrote, relative to the folder `init` runs in, in the order it wrote them.
-   */
-  files: string[]
-  /**
-   * A line naming the scripts it added to `package.json`, when it added any, then a line per script it replaced there,
-   * with what that script ran before.
-   */
-  scripts: string[]
 }
 
 /**
@@ -75,17 +42,19 @@ export type Segment =
     }
 
 /**
- * How to spread `visualCheck` into the parameters of one config folder's preview file.
+ * A row of a next step: the command to run, when there's one, and what it does, or what to do when there's none.
+ *
+ * @public
  */
-interface PreviewSnippet {
+export interface NextStepRow {
   /**
-   * The preview file, relative to the folder `init` runs in.
+   * What the command does, or what to do when the row has no command.
    */
-  file: string
+  text: Segment[]
   /**
-   * The two lines to put in it, without indentation.
+   * The command to run.
    */
-  lines: string[]
+  command?: string
 }
 
 /**
@@ -95,13 +64,14 @@ interface PreviewSnippet {
  */
 export interface NextSteps {
   /**
-   * The four steps to a first passing run, in order, each a line of segments.
+   * The steps to a first passing run, in order, each one row or more: a row per Storybook to start.
    */
-  steps: Segment[][]
+  steps: NextStepRow[][]
   /**
-   * How to set options for every story, one per config folder, in the order of the Storybooks.
+   * Each set-up Storybook's `visual-check.ts`, where options for every story go, relative to the folder `init` runs
+   * in, once each, in the order of the Storybooks.
    */
-  previews: PreviewSnippet[]
+  modesFiles: string[]
   /**
    * The docs page that tells how to run visual-check in CI.
    */
@@ -132,39 +102,30 @@ interface ClosingMessageInput {
    * The scripts that run `visual-check test` and `visual-check update`.
    */
   scripts: Answers['scripts']
+  /**
+   * Whether a Storybook has no baselines yet, so the steps include writing the first ones.
+   */
+  needsBaselines: boolean
 }
 
 /**
- * The extensions a Storybook preview file takes, in the order `init` looks for them.
+ * How many spaces come between the longest command and the text after it.
  */
-const previewExtensions = ['ts', 'tsx', 'js', 'jsx', 'mjs', 'mts', 'cjs', 'cts']
+const commandGap = 3
 
 /**
- * Words what `init` wrote: the path of each file, relative to `cwd`, then a line naming the scripts it added, when it
- * added any, and a line per script it replaced, with what that script ran before.
+ * Returns the line that names the scripts `init` replaced in `package.json`, or `undefined` when it replaced none.
  */
-export function writtenListOf(written: Written, cwd: string): WrittenList {
-  const { added, replaced } = written.scripts
-  const scripts: string[] = []
-
-  if (added.length === 1) {
-    scripts.push(`Added the script ${added[0]} to package.json.`)
-  } else if (added.length > 1) {
-    scripts.push(`Added the scripts ${listOf(added)} to package.json.`)
+export function replacedScriptsLineOf(names: readonly string[]): string | undefined {
+  if (names.length === 0) {
+    return undefined
   }
 
-  for (const { name, previous } of replaced) {
-    scripts.push(`Replaced the script ${name} in package.json. It ran: ${previous}`)
+  if (names.length === 1) {
+    return `Replaced the script ${names[0]} in package.json.`
   }
 
-  return { files: written.files.map((file) => relativePathOf(cwd, file)), scripts }
-}
-
-/**
- * Lists what `init` wrote, as its plain text says it: a `Wrote <path>` line per file, then the lines about the scripts.
- */
-export function writtenLinesOf({ files, scripts }: WrittenList): string[] {
-  return [...files.map((file) => `Wrote ${file}`), ...scripts]
+  return `Replaced the scripts ${listOf(names)} in package.json.`
 }
 
 /**
@@ -188,64 +149,53 @@ function textOf(segments: readonly Segment[]): string {
 }
 
 /**
- * Returns the first step: start the Storybook, or each Storybook with its own command. With none set up, when the
- * config holds none `init` could set up, it's to add one, as the hints say.
- */
-function startStepOf({ cwd, configPath, storybooks }: ClosingMessageInput): Segment[] {
-  const [first, ...others] = storybooks
-
-  if (first === undefined) {
-    return ['Add your Storybook to ', { code: relativePathOf(cwd, configPath) }, ', as the hints say, then start it.']
-  }
-
-  if (others.length === 0) {
-    return ['Start Storybook with ', { code: first.startCommand }, '.']
-  }
-
-  return [
-    'Start each Storybook: ',
-    ...storybooks.flatMap(({ name, startCommand }, index): Segment[] => [
-      { code: startCommand },
-      ` for ${name}${index === storybooks.length - 1 ? '.' : ', '}`,
-    ]),
-  ]
-}
-
-/**
- * Returns the last step: commit the config, each Storybook's `visual-check.ts`, and each `.visual-check/` folder, the
- * config folder's last. Each path shows once.
- */
-function commitStepOf({ cwd, configPath, storybooks }: ClosingMessageInput): Segment[] {
-  const paths = [
-    relativePathOf(cwd, configPath),
-    ...storybooks.map(({ configDir }) => relativePathOf(cwd, join(configDir, 'visual-check.ts'))),
-    ...[...storybooks.map(({ dir }) => dir), dirname(configPath)].map(
-      (folder) => `${relativePathOf(cwd, join(folder, '.visual-check'))}/`,
-    ),
-  ]
-
-  return ['Commit ', ...codeListOf([...new Set(paths)]), '.']
-}
-
-/**
- * Returns the preview file of a config folder: the first `preview.<extension>` there, else `preview.ts`.
- */
-function previewFileIn(configDir: string): string {
-  const existing = previewExtensions
-    .map((extension) => join(configDir, `preview.${extension}`))
-    .find((path) => isFile(path))
-
-  return existing ?? join(configDir, 'preview.ts')
-}
-
-/**
- * Returns the line that leads into the snippet for a preview file: to set options for every story, spread
- * `visualCheck` into the parameters there.
+ * Returns how many columns the commands of the steps take: the longest command, then a gap. A row without a command
+ * starts its text where the commands start, so with no command at all, it's 0.
  *
  * @public
  */
-export function previewIntroOf(file: string): Segment[] {
-  return ['To set options for every story, spread visualCheck into the parameters in ', { code: file }, ':']
+export function commandColumnWidthOf(steps: readonly (readonly NextStepRow[])[]): number {
+  const longest = Math.max(0, ...steps.flat().map(({ command }) => command?.length ?? 0))
+
+  return longest === 0 ? 0 : longest + commandGap
+}
+
+/**
+ * Returns the first step: start the Storybook, or a row per Storybook, each with its own command. With none set up,
+ * when the config holds none `init` could set up, it's to add one, as the hints say.
+ */
+function startStepOf({ cwd, configPath, storybooks }: ClosingMessageInput): NextStepRow[] {
+  const [first, ...others] = storybooks
+
+  if (first === undefined) {
+    return [
+      {
+        text: [
+          'Add your Storybook to ',
+          { code: relativePathOf(cwd, configPath) },
+          ', as the hints say, then start it',
+        ],
+      },
+    ]
+  }
+
+  if (others.length === 0) {
+    return [{ command: first.startCommand, text: ['Start Storybook, and keep it running'] }]
+  }
+
+  return storybooks.map(({ name, startCommand }) => ({
+    command: startCommand,
+    text: [`Start ${name}, and keep it running`],
+  }))
+}
+
+/**
+ * Returns the line that points to where options for every story go: each Storybook's `visual-check.ts`.
+ *
+ * @public
+ */
+export function modesLineOf(files: readonly string[]): Segment[] {
+  return ['To set options for every story, see ', ...codeListOf(files), '.']
 }
 
 /**
@@ -258,49 +208,62 @@ export function ciLineOf(url: string): Segment[] {
 }
 
 /**
- * Returns what the closing message tells: the four steps to a first passing run, how to set options for every story in
- * each config folder's preview file, and the docs page that tells how to run visual-check in CI. Commands, paths and
- * URLs are code segments. It says nothing about remote content.
+ * Returns what the closing message tells: the steps to a first passing run, each `visual-check.ts` where options for
+ * every story go, and the docs page that tells how to run visual-check in CI. The step that writes the first baselines
+ * is left out when no Storybook needs them. Paths and URLs in the text are code segments. It says nothing about remote
+ * content.
  */
 export function nextStepsOf(input: ClosingMessageInput): NextSteps {
-  const { cwd, packageManager, storybooks, scripts } = input
-  const configDirs = [...new Set(storybooks.map(({ configDir }) => configDir))]
+  const { cwd, packageManager, storybooks, scripts, needsBaselines } = input
+  const modesFiles = storybooks.map(({ configDir }) => relativePathOf(cwd, join(configDir, 'visual-check.ts')))
 
   return {
     steps: [
       startStepOf(input),
+      ...(needsBaselines
+        ? [[{ command: runScriptCommandOf(packageManager, scripts.update.name), text: ['Write the first baselines'] }]]
+        : []),
       [
-        'Run ',
-        { code: runScriptCommandOf(packageManager, scripts.update.name) },
-        ' to write baselines. The first run downloads the browser image.',
+        {
+          command: runScriptCommandOf(packageManager, scripts.test.name),
+          text: ['Check the stories against the baselines'],
+        },
       ],
-      [
-        'Run ',
-        { code: runScriptCommandOf(packageManager, scripts.test.name) },
-        '. It should pass. If a story fails, see ',
-        { code: docsUrlOf('broken-stories') },
-        '.',
-      ],
-      commitStepOf(input),
+      [{ text: ['Commit the changes, baselines included'] }],
     ],
-    previews: configDirs.map((configDir) => ({
-      file: relativePathOf(cwd, previewFileIn(configDir)),
-      lines: ["import { visualCheck } from './visual-check'", 'parameters: { ...visualCheck({}) },'],
-    })),
+    modesFiles: [...new Set(modesFiles)],
     ciUrl: docsUrlOf('ci'),
   }
 }
 
 /**
- * Returns the message `init` ends with, as plain text: the next steps numbered, the preview snippets indented, and the
- * docs link for CI.
+ * Returns the lines of one step as plain text: its number, then each row's command padded to `commandWidth` and its
+ * text. A row without a command starts its text where the commands start. The rows after the first are indented as far
+ * as the first, without a number.
  */
-export function closingMessageTextOf({ steps, previews, ciUrl }: NextSteps): string {
+function stepLinesOf(rows: readonly NextStepRow[], number: number, commandWidth: number): string[] {
+  const numberColumn = `  ${number}. `
+
+  return rows.map(({ command, text }, index) => {
+    const lead = index === 0 ? numberColumn : ' '.repeat(numberColumn.length)
+    const commandColumn = command === undefined ? '' : command.padEnd(commandWidth)
+
+    return `${lead}${commandColumn}${textOf(text)}`
+  })
+}
+
+/**
+ * Returns the message `init` ends with, as plain text: the next steps numbered, each command in a column of its own,
+ * then where options for every story go, when a Storybook was set up, and the docs link for CI.
+ */
+export function closingMessageTextOf({ steps, modesFiles, ciUrl }: NextSteps): string {
+  const commandWidth = commandColumnWidthOf(steps)
+
   return [
     'visual-check is set up. Next:',
-    ...steps.map((step, index) => `  ${index + 1}. ${textOf(step)}`),
-    ...previews.flatMap(({ file, lines }) => ['', textOf(previewIntroOf(file)), ...lines.map((line) => `  ${line}`)]),
+    ...steps.flatMap((rows, index) => stepLinesOf(rows, index + 1, commandWidth)),
     '',
+    ...(modesFiles.length === 0 ? [] : [textOf(modesLineOf(modesFiles))]),
     textOf(ciLineOf(ciUrl)),
     '',
   ].join('\n')

@@ -15,7 +15,7 @@ The check runs these steps, a line each, and stops at the first that fails:
 7. `pnpm run storybook` answers for `index.json` within 120 s.
 8. `pnpm run visual:update`, without `CI`, exits 0 and writes one baseline.
 9. `pnpm run visual:check`, in the check's own environment, exits 0.
-10. `pnpm exec visual-check init --yes` exits 0 without a warning, prints no `Wrote` line, and changes no file git lists.
+10. `pnpm exec visual-check init --yes` exits 0 without a warning, and changes no file git lists.
 
 Then it stops Storybook's processes and removes the temporary folder. On a failure, it first copies the project, without `node_modules`, and every command's output to `init-check-output/`; `registry.log` lists the requests the registry didn't answer with 200. A SIGINT or SIGTERM stops every command the check started and skips the steps left; the check cleans up as on a failure and exits 130 or 143.
 

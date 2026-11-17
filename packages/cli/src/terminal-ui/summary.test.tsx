@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { NextSteps, WrittenList } from '../init/closing-message.js'
+import type { NextSteps } from '../init/closing-message.js'
 import type { InitResult } from '../init/run-init.js'
 import { Summary } from './summary.js'
 import { cleanupSettled, plainFrameOf, renderSettled, renderSettledAt } from './terminal.fixture.js'
@@ -12,44 +12,30 @@ vi.hoisted(() => {
 afterEach(cleanupSettled)
 
 /**
- * What `init` writes in a pnpm project that holds none of it yet, and a script it replaces, worded.
+ * The line that names the two scripts `init` replaced.
  */
-const written: WrittenList = {
-  files: ['visual-check.config.ts', '.storybook/visual-check.ts', '.visual-check/.gitignore'],
-  scripts: [
-    'Added the scripts visual:check and visual:update to package.json.',
-    'Replaced the script vc in package.json. It ran: vitest',
-  ],
-}
+const replacedLine = 'Replaced the scripts visual:check and visual:update in package.json.'
 
 /**
- * What the pnpm project is told to do next.
+ * What the pnpm project, which has no baselines yet, is told to do next.
  */
 const nextSteps: NextSteps = {
   steps: [
-    ['Start Storybook with ', { code: 'pnpm run storybook' }, '.'],
-    ['Run ', { code: 'pnpm run visual:update' }, ' to write baselines. The first run downloads the browser image.'],
-    [
-      'Run ',
-      { code: 'pnpm run visual:check' },
-      '. It should pass. If a story fails, see ',
-      { code: 'https://visual-check.vercel.app/docs/broken-stories' },
-      '.',
-    ],
-    ['Commit ', { code: 'visual-check.config.ts' }, ' and ', { code: '.visual-check/' }, '.'],
+    [{ command: 'pnpm storybook', text: ['Start Storybook, and keep it running'] }],
+    [{ command: 'pnpm visual:update', text: ['Write the first baselines'] }],
+    [{ command: 'pnpm visual:check', text: ['Check the stories against the baselines'] }],
+    [{ text: ['Commit the changes, baselines included'] }],
   ],
-  previews: [
-    {
-      file: '.storybook/preview.ts',
-      lines: ["import { visualCheck } from './visual-check'", 'parameters: { ...visualCheck({}) },'],
-    },
-    {
-      file: 'docs/.storybook/preview.tsx',
-      lines: ["import { visualCheck } from './visual-check'", 'parameters: { ...visualCheck({}) },'],
-    },
-  ],
+  modesFiles: ['.storybook/visual-check.ts'],
   ciUrl: 'https://visual-check.vercel.app/docs/ci',
 }
+
+/**
+ * The warning Fallow's check gives for a package the project imports and doesn't list.
+ */
+const fallowWarning =
+  "Warning: package.json doesn't list tailwindcss, imported in src/app/(landings)/bingo/landing-page.globals.css. " +
+  "visual-check can't tell which stories it affects."
 
 /**
  * A result that exits with `exitCode` and has `messages`, which its stderr holds.
@@ -64,99 +50,133 @@ function resultWith(exitCode: number, messages: readonly string[]): InitResult {
 const installProblem = 'pnpm add x failed with exit code 1. Run it yourself, then run visual-check init again.'
 
 describe('Summary', () => {
-  it('sums up a run that got to the end: what it wrote, the warnings, the next steps, the snippets and CI', async () => {
+  it('sums up a run that got to the end: the scripts it replaced, the warnings, the next steps, then where to go on', async () => {
     const { lastFrame } = await renderSettledAt(
       <Summary
-        result={{
-          ...resultWith(0, ["Warning: Docker isn't running.", 'hint: Add -p 6006.']),
-          stdout: 'ignored\n',
-          summary: { written, nextSteps },
-        }}
+        result={{ ...resultWith(0, [fallowWarning]), stdout: 'ignored\n', summary: { replacedLine, nextSteps } }}
       />,
       160,
     )
 
     expect(plainFrameOf(lastFrame())).toBe(`
 ✓ visual-check is set up
-  ✓ visual-check.config.ts
-  ✓ .storybook/visual-check.ts
-  ✓ .visual-check/.gitignore
-  ✓ Added the scripts visual:check and visual:update to package.json.
-  ✓ Replaced the script vc in package.json. It ran: vitest
-▲ Docker isn't running.
-· Add -p 6006.
+  Replaced the scripts visual:check and visual:update in package.json.
+▲ package.json doesn't list tailwindcss, imported in src/app/(landings)/bingo/landing-page.globals.css. visual-check can't tell which stories it affects.
 
 Next
-  1  Start Storybook with pnpm run storybook.
-  2  Run pnpm run visual:update to write baselines. The first run downloads the browser image.
-  3  Run pnpm run visual:check. It should pass. If a story fails, see https://visual-check.vercel.app/docs/broken-stories.
-  4  Commit visual-check.config.ts and .visual-check/.
+  1  pnpm storybook       Start Storybook, and keep it running
+  2  pnpm visual:update   Write the first baselines
+  3  pnpm visual:check    Check the stories against the baselines
+  4  Commit the changes, baselines included
 
-To set options for every story, spread visualCheck into the parameters in .storybook/preview.ts:
-╭──────────────────────────────────────────────╮
-│ import { visualCheck } from './visual-check' │
-│ parameters: { ...visualCheck({}) },          │
-╰──────────────────────────────────────────────╯
-
-To set options for every story, spread visualCheck into the parameters in docs/.storybook/preview.tsx:
-╭──────────────────────────────────────────────╮
-│ import { visualCheck } from './visual-check' │
-│ parameters: { ...visualCheck({}) },          │
-╰──────────────────────────────────────────────╯
-
+To set options for every story, see .storybook/visual-check.ts.
 To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
   })
 
-  it('keeps its layout at 80 columns: a long step wraps under its own text', async () => {
-    const { lastFrame } = await renderSettledAt(
-      <Summary
-        result={{
-          ...resultWith(0, ["Warning: Docker isn't running."]),
-          summary: { written, nextSteps: { ...nextSteps, previews: nextSteps.previews.slice(0, 1) } },
-        }}
-      />,
-      80,
-    )
-
-    expect(plainFrameOf(lastFrame())).toBe(`
-✓ visual-check is set up
-  ✓ visual-check.config.ts
-  ✓ .storybook/visual-check.ts
-  ✓ .visual-check/.gitignore
-  ✓ Added the scripts visual:check and visual:update to package.json.
-  ✓ Replaced the script vc in package.json. It ran: vitest
-▲ Docker isn't running.
-
-Next
-  1  Start Storybook with pnpm run storybook.
-  2  Run pnpm run visual:update to write baselines. The first run downloads the
-     browser image.
-  3  Run pnpm run visual:check. It should pass. If a story fails, see
-     https://visual-check.vercel.app/docs/broken-stories.
-  4  Commit visual-check.config.ts and .visual-check/.
-
-To set options for every story, spread visualCheck into the parameters in
-.storybook/preview.ts:
-╭──────────────────────────────────────────────╮
-│ import { visualCheck } from './visual-check' │
-│ parameters: { ...visualCheck({}) },          │
-╰──────────────────────────────────────────────╯
-
-To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
-  })
-
-  it('draws the heading in bold accent, the checks, commands, paths and URLs in accent, and the boxes dim', async () => {
+  it('puts each Storybook on a row of its own, its command in the same column, and wraps text under itself', async () => {
     const { lastFrame } = await renderSettledAt(
       <Summary
         result={{
           ...resultWith(0, []),
           summary: {
-            written: { files: ['visual-check.config.ts'], scripts: [] },
             nextSteps: {
-              steps: [nextSteps.steps[0] ?? []],
-              previews: nextSteps.previews.slice(0, 1),
+              ...nextSteps,
+              steps: [
+                [
+                  { command: 'pnpm storybook', text: ['Start web-app, and keep it running'] },
+                  { command: 'pnpm exec storybook dev -p 6007', text: ['Start docs, and keep it running'] },
+                ],
+                ...nextSteps.steps.slice(1),
+              ],
+              modesFiles: ['.storybook/visual-check.ts', 'docs/.storybook/visual-check.ts'],
+            },
+          },
+        }}
+      />,
+      60,
+    )
+
+    // A dim line keeps the space it breaks at, since the style ends after it, which the terminal shows as nothing.
+    expect(plainFrameOf(lastFrame())).toBe(
+      [
+        '',
+        '✓ visual-check is set up',
+        '',
+        'Next',
+        '  1  pnpm storybook                    Start web-app, and',
+        '                                       keep it running',
+        '     pnpm exec storybook dev -p 6007   Start docs, and keep',
+        '                                       it running',
+        '  2  pnpm visual:update                Write the first',
+        '                                       baselines',
+        '  3  pnpm visual:check                 Check the stories',
+        '                                       against the baselines',
+        '  4  Commit the changes, baselines included',
+        '',
+        'To set options for every story, see ',
+        '.storybook/visual-check.ts and ',
+        'docs/.storybook/visual-check.ts.',
+        'To run visual-check in CI, see ',
+        'https://visual-check.vercel.app/docs/ci.',
+      ].join('\n'),
+    )
+  })
+
+  it('starts the text of a row without a command where the commands start', async () => {
+    const { lastFrame } = await renderSettledAt(
+      <Summary
+        result={{
+          ...resultWith(0, []),
+          summary: {
+            nextSteps: {
+              steps: [
+                [
+                  {
+                    text: [
+                      'Add your Storybook to ',
+                      { code: 'visual-check.config.ts' },
+                      ', as the hints say, then start it',
+                    ],
+                  },
+                ],
+                ...nextSteps.steps.slice(1),
+              ],
+              modesFiles: [],
               ciUrl: nextSteps.ciUrl,
             },
+          },
+        }}
+      />,
+      52,
+    )
+
+    expect(plainFrameOf(lastFrame())).toBe(
+      [
+        '',
+        '✓ visual-check is set up',
+        '',
+        'Next',
+        '  1  Add your Storybook to visual-check.config.ts,',
+        '     as the hints say, then start it',
+        '  2  pnpm visual:update   Write the first baselines',
+        '  3  pnpm visual:check    Check the stories against',
+        '                          the baselines',
+        '  4  Commit the changes, baselines included',
+        '',
+        'To run visual-check in CI, see ',
+        'https://visual-check.vercel.app/docs/ci.',
+      ].join('\n'),
+    )
+  })
+
+  it('draws the heading in bold accent, the replaced line dim, the commands in accent, and the last lines dim', async () => {
+    const { lastFrame } = await renderSettledAt(
+      <Summary
+        result={{
+          ...resultWith(0, []),
+          summary: {
+            replacedLine: 'Replaced the script vc in package.json.',
+            nextSteps: { ...nextSteps, steps: nextSteps.steps.slice(0, 1) },
           },
         }}
       />,
@@ -165,42 +185,12 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
 
     expect(lastFrame()).toBe(
       '\n\u001b[1m\u001b[36m✓ visual-check is set up\u001b[39m\u001b[22m\n' +
-        '  \u001b[36m✓\u001b[39m visual-check.config.ts\n' +
+        '  \u001b[2mReplaced the script vc in package.json.\u001b[22m\n' +
         '\n\u001b[1mNext\u001b[22m\n' +
-        '  1  Start Storybook with \u001b[36mpnpm run storybook\u001b[39m.\n' +
-        '\nTo set options for every story, spread visualCheck into the parameters in \u001b[36m.storybook/preview.ts\u001b[39m:\n' +
-        '\u001b[2m╭──────────────────────────────────────────────╮\u001b[22m\n' +
-        "\u001b[2m│\u001b[22m import { visualCheck } from './visual-check' \u001b[2m│\u001b[22m\n" +
-        '\u001b[2m│\u001b[22m parameters: { ...visualCheck({}) },          \u001b[2m│\u001b[22m\n' +
-        '\u001b[2m╰──────────────────────────────────────────────╯\u001b[22m\n' +
-        '\nTo run visual-check in CI, see \u001b[36mhttps://visual-check.vercel.app/docs/ci\u001b[39m.',
+        '  1  \u001b[36mpnpm storybook\u001b[39m   Start Storybook, and keep it running\n' +
+        '\n\u001b[2mTo set options for every story, see \u001b[36m.storybook/visual-check.ts\u001b[39m.\u001b[22m\n' +
+        '\u001b[2mTo run visual-check in CI, see \u001b[36mhttps://visual-check.vercel.app/docs/ci\u001b[39m.\u001b[22m',
     )
-  })
-
-  it('wraps a long step under its own text, not under its number', async () => {
-    const { lastFrame } = await renderSettledAt(
-      <Summary
-        result={{
-          ...resultWith(0, []),
-          summary: {
-            written: { files: [], scripts: [] },
-            nextSteps: { steps: [nextSteps.steps[1] ?? []], previews: [], ciUrl: nextSteps.ciUrl },
-          },
-        }}
-      />,
-      50,
-    )
-
-    expect(plainFrameOf(lastFrame())).toBe(`
-✓ visual-check is set up
-
-Next
-  1  Run pnpm run visual:update to write
-     baselines. The first run downloads the
-     browser image.
-
-To run visual-check in CI, see
-https://visual-check.vercel.app/docs/ci.`)
   })
 
   it('shows a warning that spans lines under its triangle, its later lines included', async () => {
@@ -210,10 +200,7 @@ https://visual-check.vercel.app/docs/ci.`)
           ...resultWith(0, [
             "Warning: Fallow couldn't check this project's imports: Fallow broke.\nIt could not read tsconfig.json.",
           ]),
-          summary: {
-            written: { files: [], scripts: [] },
-            nextSteps: { steps: [], previews: [], ciUrl: nextSteps.ciUrl },
-          },
+          summary: { nextSteps: { steps: [], modesFiles: [], ciUrl: nextSteps.ciUrl } },
         }}
       />,
     )
@@ -228,21 +215,26 @@ Next
 To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
   })
 
-  it('sums up a run whose install failed: what it wrote, then the warnings and the problem', async () => {
+  it('sums up a run whose install failed: the scripts it replaced, then the warnings and the problem', async () => {
     const { lastFrame } = await renderSettled(
       <Summary
         result={{
           ...resultWith(2, ['Warning: Port 7000 is not 6006.', installProblem]),
-          summary: { written: { files: ['../visual-check.config.ts'], scripts: [] } },
+          summary: { replacedLine },
         }}
       />,
     )
 
-    expect(lastFrame()).toBe(
-      '\n  \u001b[36m✓\u001b[39m ../visual-check.config.ts\n' +
-        '\u001b[33m▲\u001b[39m \u001b[33mPort 7000 is not 6006.\u001b[39m\n' +
-        `\u001b[31m✕\u001b[39m \u001b[31m${installProblem}\u001b[39m`,
-    )
+    expect(plainFrameOf(lastFrame())).toBe(`
+  Replaced the scripts visual:check and visual:update in package.json.
+▲ Port 7000 is not 6006.
+✕ ${installProblem}`)
+  })
+
+  it('sums up a run whose install failed and that replaced no script: the problem alone', async () => {
+    const { lastFrame } = await renderSettled(<Summary result={{ ...resultWith(2, [installProblem]), summary: {} }} />)
+
+    expect(lastFrame()).toBe(`\n\u001b[31m✕\u001b[39m \u001b[31m${installProblem}\u001b[39m`)
   })
 
   it('shows a run that stopped before it wrote: its warnings and hints as notes, and why it stopped', async () => {

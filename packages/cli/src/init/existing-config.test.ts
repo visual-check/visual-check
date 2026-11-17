@@ -133,19 +133,10 @@ describe('init run again with a config there', () => {
 
     expect(result).toEqual({
       exitCode: 0,
-      stdout:
-        'Wrote .storybook/visual-check.ts\n' +
-        'Added the scripts visual:check and visual:update to package.json.\n' +
-        `\n${pnpmClosingMessage}`,
+      stdout: pnpmClosingMessage,
       stderr: '',
       messages: [],
-      summary: {
-        written: {
-          files: ['.storybook/visual-check.ts'],
-          scripts: ['Added the scripts visual:check and visual:update to package.json.'],
-        },
-        nextSteps: pnpmNextSteps,
-      },
+      summary: { nextSteps: pnpmNextSteps },
     })
     expect(readText(root, 'visual-check.config.ts')).toBe(config)
     expect(readText(root, '.storybook/visual-check.ts')).toBe(modesFile)
@@ -168,8 +159,9 @@ describe('init run again with a config there', () => {
     expect(result.stderr).toBe(
       "hint: visual-check.config.ts lists no Storybook in .storybook. To add it, put this under storybooks: 'web-app': { url: 'http://127.0.0.1:6007' },\n",
     )
-    expect(result.stdout).toContain('Wrote docs/.storybook/visual-check.ts\n')
-    expect(result.stdout).toContain('  1. Start Storybook with pnpm run storybook:docs.\n')
+    expect(readText(root, 'docs/.storybook/visual-check.ts')).toBe(modesFile)
+    expect(result.stdout).toContain('  1. pnpm run storybook:docs   Start Storybook, and keep it running\n')
+    expect(result.stdout).toContain('To set options for every story, see docs/.storybook/visual-check.ts.\n')
     expect(existsSync(join(root, '.storybook/visual-check.ts'))).toBe(false)
     expect(readText(root, 'visual-check.config.ts')).toBe(config)
     expect(record.commands).toEqual(
@@ -188,7 +180,7 @@ describe('init run again with a config there', () => {
     const result = await runInit(root, tools)
 
     expect(result.stderr).toBe('')
-    expect(result.stdout).toContain('Wrote .storybook/visual-check.ts\n')
+    expect(readText(root, '.storybook/visual-check.ts')).toBe(modesFile)
     expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddon))
   })
 
@@ -203,20 +195,10 @@ describe('init run again with a config there', () => {
 
     expect(result).toEqual({
       exitCode: 0,
-      stdout:
-        'Wrote .storybook/visual-check.ts\n' +
-        'Wrote .visual-check/.gitignore\n' +
-        'Added the scripts visual:check and visual:update to package.json.\n' +
-        `\n${pnpmClosingMessage}`,
+      stdout: pnpmClosingMessage,
       stderr: `${warning}\n`,
       messages: [warning],
-      summary: {
-        written: {
-          files: ['.storybook/visual-check.ts', '.visual-check/.gitignore'],
-          scripts: ['Added the scripts visual:check and visual:update to package.json.'],
-        },
-        nextSteps: pnpmNextSteps,
-      },
+      summary: { nextSteps: pnpmNextSteps },
     })
     expect(readText(root, 'visual-check.config.ts')).toBe(config)
     expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddon))
@@ -233,7 +215,7 @@ describe('init run again with a config there', () => {
     const result = await runInit(root, toolsOf().tools)
 
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain(`  1. Start Storybook with ${command}.\n`)
+    expect(result.stdout).toContain(`  1. ${command}   Start Storybook, and keep it running\n`)
   })
 
   it('gives a left-out Storybook a name no Storybook in the config has', async () => {
@@ -268,12 +250,7 @@ describe('init run again with a config there', () => {
       'hint: visual-check.config.ts lists the Storybook old in old/.storybook, which has no main file, so init left it alone.\n' +
         `hint: visual-check.config.ts lists the Storybook shared in ${outside}, outside this project, so init left it alone.\n`,
     )
-    expect(result.stdout).toBe(
-      'Wrote .storybook/visual-check.ts\n' +
-        'Wrote .visual-check/.gitignore\n' +
-        'Added the scripts visual:check and visual:update to package.json.\n' +
-        `\n${pnpmClosingMessage}`,
-    )
+    expect(result.stdout).toBe(pnpmClosingMessage)
     expect(existsSync(join(root, 'old'))).toBe(false)
     expect(existsSync(join(root, outside))).toBe(false)
     expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddon))
@@ -295,7 +272,7 @@ describe('init run again with a config there', () => {
     expect(result.stderr).toBe(
       `hint: visual-check.config.ts lists the Storybook docs in ../${outside}/.storybook, outside this project, so init left it alone.\n`,
     )
-    expect(result.stdout).toContain('Wrote .storybook/visual-check.ts\n')
+    expect(readText(root, '.storybook/visual-check.ts')).toBe(modesFile)
     expect(existsSync(join(root, 'docs'))).toBe(false)
     expect(existsSync(join(root, '..', outside))).toBe(false)
   })
@@ -318,42 +295,33 @@ describe('init run again with a config there', () => {
 
     expect(await runInit(root, tools)).toEqual({
       exitCode: 0,
-      stdout: `Wrote .visual-check/.gitignore
-Added the scripts visual:check and visual:update to package.json.
-
-visual-check is set up. Next:
-  1. Add your Storybook to visual-check.config.ts, as the hints say, then start it.
-  2. Run pnpm run visual:update to write baselines. The first run downloads the browser image.
-  3. Run pnpm run visual:check. It should pass. If a story fails, see https://visual-check.vercel.app/docs/broken-stories.
-  4. Commit visual-check.config.ts and .visual-check/.
+      stdout: `visual-check is set up. Next:
+  1. Add your Storybook to visual-check.config.ts, as the hints say, then start it
+  2. pnpm run visual:update   Write the first baselines
+  3. pnpm run visual:check    Check the stories against the baselines
+  4. Commit the changes, baselines included
 
 To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
 `,
       stderr: hints.map((hint) => `${hint}\n`).join(''),
       messages: hints,
       summary: {
-        written: {
-          files: ['.visual-check/.gitignore'],
-          scripts: ['Added the scripts visual:check and visual:update to package.json.'],
-        },
         nextSteps: {
           steps: [
-            ['Add your Storybook to ', { code: 'visual-check.config.ts' }, ', as the hints say, then start it.'],
             [
-              'Run ',
-              { code: 'pnpm run visual:update' },
-              ' to write baselines. The first run downloads the browser image.',
+              {
+                text: [
+                  'Add your Storybook to ',
+                  { code: 'visual-check.config.ts' },
+                  ', as the hints say, then start it',
+                ],
+              },
             ],
-            [
-              'Run ',
-              { code: 'pnpm run visual:check' },
-              '. It should pass. If a story fails, see ',
-              { code: 'https://visual-check.vercel.app/docs/broken-stories' },
-              '.',
-            ],
-            ['Commit ', { code: 'visual-check.config.ts' }, ' and ', { code: '.visual-check/' }, '.'],
+            [{ command: 'pnpm run visual:update', text: ['Write the first baselines'] }],
+            [{ command: 'pnpm run visual:check', text: ['Check the stories against the baselines'] }],
+            [{ text: ['Commit the changes, baselines included'] }],
           ],
-          previews: [],
+          modesFiles: [],
           ciUrl: 'https://visual-check.vercel.app/docs/ci',
         },
       },

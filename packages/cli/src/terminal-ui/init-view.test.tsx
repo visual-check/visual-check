@@ -381,15 +381,15 @@ describe('startInitView', () => {
     })
     await finish(view, {
       exitCode: 2,
-      stdout: 'Wrote visual-check.config.ts\n',
+      stdout: 'Replaced the script visual:check in package.json.\n',
       stderr: 'pnpm add x failed with exit code 1.\n',
       messages: ['pnpm add x failed with exit code 1.'],
-      summary: { written: { files: ['visual-check.config.ts'], scripts: [] } },
+      summary: { replacedLine: 'Replaced the script visual:check in package.json.' },
     })
 
     expect(plainFrameOf(stdout.lastFrame())).toBe(
       `${header}\n━━━━━━━━━━━━━─────── 2/3 · 0.0s\n✓ Write the files 0.0s\n✕ Install 0.0s\n  │ ERR_PNPM_FETCH_404\n` +
-        '− Check skipped\n\n  ✓ visual-check.config.ts\n✕ pnpm add x failed with exit code 1.\n',
+        '− Check skipped\n\n  Replaced the script visual:check in package.json.\n✕ pnpm add x failed with exit code 1.\n',
     )
   })
 
@@ -551,23 +551,14 @@ describe('startInitView', () => {
     expect(frame()).toBe(`${header}${answers}${steps}
 
 ✓ visual-check is set up
-  ✓ visual-check.config.ts
-  ✓ .storybook/visual-check.ts
-  ✓ .visual-check/.gitignore
-  ✓ Added the scripts visual:check and visual:update to package.json.
 
 Next
-  1  Start Storybook with pnpm run storybook.
-  2  Run pnpm run visual:update to write baselines. The first run downloads the browser image.
-  3  Run pnpm run visual:check. It should pass. If a story fails, see https://visual-check.vercel.app/docs/broken-stories.
-  4  Commit visual-check.config.ts, .storybook/visual-check.ts and .visual-check/.
+  1  pnpm run storybook       Start Storybook, and keep it running
+  2  pnpm run visual:update   Write the first baselines
+  3  pnpm run visual:check    Check the stories against the baselines
+  4  Commit the changes, baselines included
 
-To set options for every story, spread visualCheck into the parameters in .storybook/preview.ts:
-╭──────────────────────────────────────────────╮
-│ import { visualCheck } from './visual-check' │
-│ parameters: { ...visualCheck({}) },          │
-╰──────────────────────────────────────────────╯
-
+To set options for every story, see .storybook/visual-check.ts.
 To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
 `)
   })

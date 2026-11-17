@@ -29,7 +29,7 @@ import {
 } from '../capture/driver/driver.js'
 import { answerEvaluate } from '../capture/fake-driver.fixture.js'
 import { ContainerError } from '../container/container-error.js'
-import { pnpmClosingMessage, pnpmNextSteps, pnpmWrittenLines, pnpmWrittenList } from '../init/init-tools.fixture.js'
+import { pnpmClosingMessage, pnpmNextSteps } from '../init/init-tools.fixture.js'
 import { scriptedPrompter } from '../init/prompter.fixture.js'
 import type { InitResult } from '../init/run-init.js'
 import { answerOptionsReadExpression, optionsReadAnswer } from '../storybook/options-read.fixture.js'
@@ -1027,7 +1027,7 @@ Other options:
     })
     const addonLine = `pnpm exec storybook add @visual-check/storybook-addon@${version} --yes`
 
-    expect(result).toEqual({ exitCode: 0, stdout: `${pnpmWrittenLines}\n${pnpmClosingMessage}`, stderr: '' })
+    expect(result).toEqual({ exitCode: 0, stdout: pnpmClosingMessage, stderr: '' })
     expect(written).toEqual([`Running ${pnpmAddLine}\n`, `Running ${addonLine}\n`])
     expect(commands).toEqual([pnpmAddLine, addonLine])
     expect(initViewModule.startInitView).not.toHaveBeenCalled()
@@ -1068,13 +1068,10 @@ Other options:
     expect(view.progress.start).toHaveBeenCalledWith("Install visual-check's packages", pnpmAddLine)
     expect(view.finish).toHaveBeenCalledExactlyOnceWith({
       exitCode: 0,
-      stdout: `${pnpmWrittenLines}\n${pnpmClosingMessage}`,
+      stdout: pnpmClosingMessage,
       stderr: '',
       messages: [],
-      summary: {
-        written: pnpmWrittenList,
-        nextSteps: pnpmNextSteps,
-      },
+      summary: { nextSteps: pnpmNextSteps },
     })
   })
 

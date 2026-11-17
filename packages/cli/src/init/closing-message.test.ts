@@ -1,58 +1,13 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
   ciLineOf,
   closingMessageTextOf,
+  commandColumnWidthOf,
+  modesLineOf,
   nextStepsOf,
-  previewIntroOf,
+  replacedScriptsLineOf,
   type SetUpStorybook,
-  type Written,
-  writtenLinesOf,
-  writtenListOf,
 } from './closing-message.js'
-
-/**
- * The plain closing message for `input`, as `init` prints it.
- */
-function closingMessageOf(input: Parameters<typeof nextStepsOf>[0]): string {
-  return closingMessageTextOf(nextStepsOf(input))
-}
-
-/**
- * The plain lines for what `init` wrote, with the paths relative to `cwd`, as `init` prints them.
- */
-function writtenLinesIn(written: Written, cwd: string): string[] {
-  return writtenLinesOf(writtenListOf(written, cwd))
-}
-
-/**
- * The temporary folders the tests made, removed after each test.
- */
-const temporaryFolders: string[] = []
-
-/**
- * Makes a temporary folder holding `files`, each a path relative to the folder mapped to its content, and returns its
- * real path.
- */
-function createFolder(files: Record<string, string>): string {
-  const folder = realpathSync(mkdtempSync(join(tmpdir(), 'visual-check-closing-')))
-
-  temporaryFolders.push(folder)
-  for (const [path, content] of Object.entries(files)) {
-    mkdirSync(join(folder, path, '..'), { recursive: true })
-    writeFileSync(join(folder, path), content)
-  }
-
-  return folder
-}
-
-afterEach(() => {
-  for (const folder of temporaryFolders.splice(0)) {
-    rmSync(folder, { recursive: true, force: true })
-  }
-})
 
 /**
  * The one Storybook of a project at `/project`, started by its `storybook` script under pnpm.
@@ -65,285 +20,187 @@ const webApp: SetUpStorybook = {
 }
 
 /**
+ * A second Storybook of the project at `/project`, in `docs/`.
+ */
+const docs: SetUpStorybook = {
+  name: 'docs',
+  dir: '/project/docs',
+  configDir: '/project/docs/.storybook',
+  startCommand: 'pnpm exec storybook dev -p 6007',
+}
+
+/**
  * The scripts `init` adds by default.
  */
 const defaultScripts = { test: { name: 'visual:check', add: true }, update: { name: 'visual:update', add: true } }
 
-describe('closingMessageTextOf', () => {
-  it('tells the four steps, the preview line and the CI docs for one Storybook under pnpm', () => {
-    expect(
-      closingMessageOf({
-        cwd: '/project',
-        packageManager: 'pnpm',
-        configPath: '/project/visual-check.config.ts',
-        storybooks: [webApp],
-        scripts: defaultScripts,
-      }),
-    ).toBe(`visual-check is set up. Next:
-  1. Start Storybook with pnpm run storybook.
-  2. Run pnpm run visual:update to write baselines. The first run downloads the browser image.
-  3. Run pnpm run visual:check. It should pass. If a story fails, see https://visual-check.vercel.app/docs/broken-stories.
-  4. Commit visual-check.config.ts, .storybook/visual-check.ts and .visual-check/.
+/**
+ * What the closing message tells the project at `/project` with its one Storybook under pnpm, which has no baselines,
+ * with `overrides` in place.
+ */
+function inputOf(overrides: Partial<Parameters<typeof nextStepsOf>[0]> = {}): Parameters<typeof nextStepsOf>[0] {
+  return {
+    cwd: '/project',
+    packageManager: 'pnpm',
+    configPath: '/project/visual-check.config.ts',
+    storybooks: [webApp],
+    scripts: defaultScripts,
+    needsBaselines: true,
+    ...overrides,
+  }
+}
 
-To set options for every story, spread visualCheck into the parameters in .storybook/preview.ts:
-  import { visualCheck } from './visual-check'
-  parameters: { ...visualCheck({}) },
+/**
+ * The plain closing message for `input`, as `init` prints it.
+ */
+function closingMessageOf(input: Parameters<typeof nextStepsOf>[0]): string {
+  return closingMessageTextOf(nextStepsOf(input))
+}
 
-To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
-`)
+describe('replacedScriptsLineOf', () => {
+  it('gives no line when no script was replaced', () => {
+    expect(replacedScriptsLineOf([])).toBe(undefined)
   })
 
-  it('runs the scripts with npm', () => {
-    const message = closingMessageOf({
-      cwd: '/project',
-      packageManager: 'npm',
-      configPath: '/project/visual-check.config.ts',
-      storybooks: [{ ...webApp, startCommand: 'npm run storybook' }],
-      scripts: defaultScripts,
-    })
+  it('names one script in the singular', () => {
+    expect(replacedScriptsLineOf(['visual:check'])).toBe('Replaced the script visual:check in package.json.')
+  })
 
-    expect(message.split('\n').slice(1, 4)).toEqual([
-      '  1. Start Storybook with npm run storybook.',
-      '  2. Run npm run visual:update to write baselines. The first run downloads the browser image.',
-      '  3. Run npm run visual:check. It should pass. If a story fails, see https://visual-check.vercel.app/docs/broken-stories.',
+  it('names several scripts in one line', () => {
+    expect(replacedScriptsLineOf(['visual:check', 'visual:update'])).toBe(
+      'Replaced the scripts visual:check and visual:update in package.json.',
+    )
+    expect(replacedScriptsLineOf(['a', 'b', 'c'])).toBe('Replaced the scripts a, b and c in package.json.')
+  })
+})
+
+describe('nextStepsOf', () => {
+  it('gives the four steps, the modes file and the CI docs for one Storybook', () => {
+    expect(nextStepsOf(inputOf())).toEqual({
+      steps: [
+        [{ command: 'pnpm run storybook', text: ['Start Storybook, and keep it running'] }],
+        [{ command: 'pnpm run visual:update', text: ['Write the first baselines'] }],
+        [{ command: 'pnpm run visual:check', text: ['Check the stories against the baselines'] }],
+        [{ text: ['Commit the changes, baselines included'] }],
+      ],
+      modesFiles: ['.storybook/visual-check.ts'],
+      ciUrl: 'https://visual-check.vercel.app/docs/ci',
+    })
+  })
+
+  it('leaves out writing the first baselines when every Storybook has them', () => {
+    expect(nextStepsOf(inputOf({ needsBaselines: false })).steps).toEqual([
+      [{ command: 'pnpm run storybook', text: ['Start Storybook, and keep it running'] }],
+      [{ command: 'pnpm run visual:check', text: ['Check the stories against the baselines'] }],
+      [{ text: ['Commit the changes, baselines included'] }],
     ])
   })
 
-  it('names each Storybook with its command, and gives each config folder its preview lines', () => {
-    const docs: SetUpStorybook = {
-      name: 'docs',
-      dir: '/project',
-      configDir: '/project/docs/.storybook',
-      startCommand: 'pnpm exec storybook dev -p 6007 -c docs/.storybook',
-    }
+  it('starts each Storybook on a row of its own, named, and lists each modes file', () => {
+    const nextSteps = nextStepsOf(inputOf({ storybooks: [webApp, docs] }))
 
-    expect(
-      closingMessageOf({
-        cwd: '/project',
-        packageManager: 'pnpm',
-        configPath: '/project/visual-check.config.ts',
-        storybooks: [webApp, docs],
-        scripts: defaultScripts,
-      }),
-    ).toBe(`visual-check is set up. Next:
-  1. Start each Storybook: pnpm run storybook for web-app, pnpm exec storybook dev -p 6007 -c docs/.storybook for docs.
-  2. Run pnpm run visual:update to write baselines. The first run downloads the browser image.
-  3. Run pnpm run visual:check. It should pass. If a story fails, see https://visual-check.vercel.app/docs/broken-stories.
-  4. Commit visual-check.config.ts, .storybook/visual-check.ts, docs/.storybook/visual-check.ts and .visual-check/.
-
-To set options for every story, spread visualCheck into the parameters in .storybook/preview.ts:
-  import { visualCheck } from './visual-check'
-  parameters: { ...visualCheck({}) },
-
-To set options for every story, spread visualCheck into the parameters in docs/.storybook/preview.ts:
-  import { visualCheck } from './visual-check'
-  parameters: { ...visualCheck({}) },
-
-To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
-`)
+    expect(nextSteps.steps[0]).toEqual([
+      { command: 'pnpm run storybook', text: ['Start web-app, and keep it running'] },
+      { command: 'pnpm exec storybook dev -p 6007', text: ['Start docs, and keep it running'] },
+    ])
+    expect(nextSteps.modesFiles).toEqual(['.storybook/visual-check.ts', 'docs/.storybook/visual-check.ts'])
   })
 
-  it('lists each distinct .visual-check folder, the config folder last', () => {
-    const message = closingMessageOf({
-      cwd: '/project',
-      packageManager: 'pnpm',
-      configPath: '/project/visual-check.config.ts',
-      storybooks: [{ ...webApp, dir: '/project/web', configDir: '/project/web/.storybook' }],
-      scripts: defaultScripts,
-    })
+  it('names a modes file two Storybooks share once', () => {
+    const shared = { ...docs, dir: '/project', configDir: '/project/.storybook' }
 
-    expect(message.split('\n')[4]).toBe(
-      '  4. Commit visual-check.config.ts, web/.storybook/visual-check.ts, web/.visual-check/ and .visual-check/.',
-    )
+    expect(nextStepsOf(inputOf({ storybooks: [webApp, shared] })).modesFiles).toEqual(['.storybook/visual-check.ts'])
   })
 
-  it('tells to start the Storybook with the command the person gave', () => {
-    const message = closingMessageOf({
-      cwd: '/project',
-      packageManager: 'pnpm',
-      configPath: '/project/visual-check.config.ts',
-      storybooks: [{ ...webApp, startCommand: 'make storybook' }],
-      scripts: defaultScripts,
-    })
+  it('tells to add the Storybook to the config, and names no modes file, when none was set up', () => {
+    const nextSteps = nextStepsOf(inputOf({ storybooks: [] }))
 
-    expect(message.split('\n')[1]).toBe('  1. Start Storybook with make storybook.')
-  })
-
-  it('names the preview file that exists in the config folder', () => {
-    const project = createFolder({
-      '.storybook/main.ts': '',
-      '.storybook/preview.tsx': '',
-      '.storybook/preview.js': '',
-    })
-    const message = closingMessageOf({
-      cwd: project,
-      packageManager: 'pnpm',
-      configPath: join(project, 'visual-check.config.ts'),
-      storybooks: [{ ...webApp, dir: project, configDir: join(project, '.storybook') }],
-      scripts: defaultScripts,
-    })
-
-    expect(message).toContain(
-      'To set options for every story, spread visualCheck into the parameters in .storybook/preview.tsx:\n',
-    )
-  })
-
-  it('names preview.ts when the config folder has no preview file', () => {
-    const project = createFolder({ '.storybook/main.ts': '', '.storybook/preview-head.html': '' })
-    const message = closingMessageOf({
-      cwd: project,
-      packageManager: 'pnpm',
-      configPath: join(project, 'visual-check.config.ts'),
-      storybooks: [{ ...webApp, dir: project, configDir: join(project, '.storybook') }],
-      scripts: defaultScripts,
-    })
-
-    expect(message).toContain(
-      'To set options for every story, spread visualCheck into the parameters in .storybook/preview.ts:\n',
-    )
-  })
-
-  it('runs an existing script that init did not add', () => {
-    const message = closingMessageOf({
-      cwd: '/project',
-      packageManager: 'pnpm',
-      configPath: '/project/visual-check.config.ts',
-      storybooks: [webApp],
-      scripts: { test: { name: 'vc', add: false }, update: { name: 'visual:update', add: true } },
-    })
-
-    expect(message.split('\n')[3]).toBe(
-      '  3. Run pnpm run vc. It should pass. If a story fails, see https://visual-check.vercel.app/docs/broken-stories.',
-    )
+    expect(nextSteps.steps[0]).toEqual([
+      {
+        text: ['Add your Storybook to ', { code: 'visual-check.config.ts' }, ', as the hints say, then start it'],
+      },
+    ])
+    expect(nextSteps.modesFiles).toEqual([])
   })
 
   it('shows the paths relative to a subfolder init runs in', () => {
-    const message = closingMessageOf({
-      cwd: '/project/src',
-      packageManager: 'pnpm',
-      configPath: '/project/visual-check.config.ts',
-      storybooks: [webApp],
-      scripts: defaultScripts,
-    })
+    const nextSteps = nextStepsOf(inputOf({ cwd: '/project/src' }))
 
-    expect(message.split('\n')[4]).toBe(
-      '  4. Commit ../visual-check.config.ts, ../.storybook/visual-check.ts and ../.visual-check/.',
+    expect(nextSteps.modesFiles).toEqual(['../.storybook/visual-check.ts'])
+    expect(nextStepsOf(inputOf({ cwd: '/project/src', storybooks: [] })).steps[0]?.[0]?.text).toEqual([
+      'Add your Storybook to ',
+      { code: '../visual-check.config.ts' },
+      ', as the hints say, then start it',
+    ])
+  })
+
+  it.each([
+    ['npm', 'npm run visual:update', 'npm run visual:check'],
+    ['pnpm', 'pnpm run visual:update', 'pnpm run visual:check'],
+    ['yarn', 'yarn run visual:update', 'yarn run visual:check'],
+  ] as const)('runs the scripts with %s', (packageManager, update, test) => {
+    const { steps } = nextStepsOf(inputOf({ packageManager }))
+
+    expect(steps.slice(1, 3).map((rows) => rows.map(({ command }) => command))).toEqual([[update], [test]])
+  })
+
+  it('runs the scripts by the names the answers give, an existing one included', () => {
+    const { steps } = nextStepsOf(
+      inputOf({ scripts: { test: { name: 'vc', add: false }, update: { name: 'vc:update', add: true } } }),
     )
-    expect(message).toContain('spread visualCheck into the parameters in ../.storybook/preview.ts:\n')
-  })
 
-  it('tells to add the Storybook to the config when the config holds none init could set up', () => {
-    const message = closingMessageOf({
-      cwd: '/project',
-      packageManager: 'pnpm',
-      configPath: '/project/visual-check.config.ts',
-      storybooks: [],
-      scripts: defaultScripts,
-    })
-
-    expect(message.split('\n').slice(0, 6)).toEqual([
-      'visual-check is set up. Next:',
-      '  1. Add your Storybook to visual-check.config.ts, as the hints say, then start it.',
-      '  2. Run pnpm run visual:update to write baselines. The first run downloads the browser image.',
-      '  3. Run pnpm run visual:check. It should pass. If a story fails, see https://visual-check.vercel.app/docs/broken-stories.',
-      '  4. Commit visual-check.config.ts and .visual-check/.',
-      '',
+    expect(steps.slice(1, 3).map((rows) => rows.map(({ command }) => command))).toEqual([
+      ['pnpm run vc:update'],
+      ['pnpm run vc'],
     ])
   })
 
-  it('says nothing about remote content or the agent skill', () => {
-    const message = closingMessageOf({
-      cwd: '/project',
-      packageManager: 'pnpm',
-      configPath: '/project/visual-check.config.ts',
-      storybooks: [webApp],
-      scripts: defaultScripts,
-    })
+  it('starts the Storybook with the command the person gave', () => {
+    const { steps } = nextStepsOf(inputOf({ storybooks: [{ ...webApp, startCommand: 'make storybook' }] }))
 
-    expect(message).not.toMatch(/remote|skill/i)
+    expect(steps[0]).toEqual([{ command: 'make storybook', text: ['Start Storybook, and keep it running'] }])
   })
 })
 
-describe('writtenLinesOf', () => {
-  /**
-   * No script added or replaced.
-   */
-  const noScripts = { added: [], replaced: [] }
-
-  it('lists each file written relative to the folder init runs in, then the two scripts added', () => {
+describe('commandColumnWidthOf', () => {
+  it('gives the longest command of every step and row, then three spaces', () => {
     expect(
-      writtenLinesIn(
-        {
-          files: [
-            '/project/visual-check.config.ts',
-            '/project/.storybook/visual-check.ts',
-            '/project/.visual-check/.gitignore',
-          ],
-          scripts: { added: ['visual:check', 'visual:update'], replaced: [] },
-        },
-        '/project',
-      ),
-    ).toEqual([
-      'Wrote visual-check.config.ts',
-      'Wrote .storybook/visual-check.ts',
-      'Wrote .visual-check/.gitignore',
-      'Added the scripts visual:check and visual:update to package.json.',
-    ])
+      commandColumnWidthOf([
+        [{ command: 'pnpm run storybook', text: [] }],
+        [
+          { command: 'abc', text: [] },
+          { command: 'pnpm run visual:update', text: [] },
+        ],
+        [{ text: ['Commit'] }],
+      ]),
+    ).toBe(25)
   })
 
-  it('names one script added in the singular', () => {
-    expect(writtenLinesIn({ files: [], scripts: { added: ['visual:update'], replaced: [] } }, '/project')).toEqual([
-      'Added the script visual:update to package.json.',
-    ])
-  })
-
-  it('gives a line per script replaced, with what it ran', () => {
-    const replaced = [
-      { name: 'visual:check', previous: 'vitest --project visual' },
-      { name: 'visual:update', previous: 'vitest -u' },
-    ]
-
-    expect(writtenLinesIn({ files: [], scripts: { added: [], replaced } }, '/project')).toEqual([
-      'Replaced the script visual:check in package.json. It ran: vitest --project visual',
-      'Replaced the script visual:update in package.json. It ran: vitest -u',
-    ])
-  })
-
-  it('has no scripts line when it added none', () => {
-    expect(
-      writtenLinesIn({ files: ['/project/.storybook/visual-check.ts'], scripts: noScripts }, '/project/src'),
-    ).toEqual(['Wrote ../.storybook/visual-check.ts'])
-  })
-
-  it('gives no line when it wrote nothing', () => {
-    expect(writtenLinesIn({ files: [], scripts: noScripts }, '/project')).toEqual([])
+  it('gives 0 when no row has a command', () => {
+    expect(commandColumnWidthOf([[{ text: ['Commit'] }]])).toBe(0)
+    expect(commandColumnWidthOf([])).toBe(0)
   })
 })
 
-describe('writtenListOf', () => {
-  it('gives the paths of the files written relative to the folder init runs in, and a line per script change', () => {
-    expect(
-      writtenListOf(
-        {
-          files: ['/project/visual-check.config.ts', '/project/.storybook/visual-check.ts'],
-          scripts: { added: ['visual:update'], replaced: [{ name: 'visual:check', previous: 'vitest' }] },
-        },
-        '/project/src',
-      ),
-    ).toEqual({
-      files: ['../visual-check.config.ts', '../.storybook/visual-check.ts'],
-      scripts: [
-        'Added the script visual:update to package.json.',
-        'Replaced the script visual:check in package.json. It ran: vitest',
-      ],
-    })
+describe('modesLineOf', () => {
+  it('points to one modes file, with its path as code', () => {
+    expect(modesLineOf(['.storybook/visual-check.ts'])).toEqual([
+      'To set options for every story, see ',
+      { code: '.storybook/visual-check.ts' },
+      '.',
+    ])
   })
 
-  it('gives nothing when it wrote nothing', () => {
-    expect(writtenListOf({ files: [], scripts: { added: [], replaced: [] } }, '/project')).toEqual({
-      files: [],
-      scripts: [],
-    })
+  it('names several modes files, each as code', () => {
+    expect(modesLineOf(['a.ts', 'b.ts', 'c.ts'])).toEqual([
+      'To set options for every story, see ',
+      { code: 'a.ts' },
+      ', ',
+      { code: 'b.ts' },
+      ' and ',
+      { code: 'c.ts' },
+      '.',
+    ])
   })
 })
 
@@ -357,131 +214,55 @@ describe('ciLineOf', () => {
   })
 })
 
-describe('previewIntroOf', () => {
-  it('leads into the snippet, with the preview file as code', () => {
-    expect(previewIntroOf('.storybook/preview.ts')).toEqual([
-      'To set options for every story, spread visualCheck into the parameters in ',
-      { code: '.storybook/preview.ts' },
-      ':',
-    ])
-  })
-})
+describe('closingMessageTextOf', () => {
+  it('numbers the steps, puts the commands in a column padded to the longest, then the modes and CI lines', () => {
+    expect(closingMessageOf(inputOf())).toBe(`visual-check is set up. Next:
+  1. pnpm run storybook       Start Storybook, and keep it running
+  2. pnpm run visual:update   Write the first baselines
+  3. pnpm run visual:check    Check the stories against the baselines
+  4. Commit the changes, baselines included
 
-describe('nextStepsOf', () => {
-  /**
-   * The third step under pnpm with the default scripts.
-   */
-  const testStep = [
-    'Run ',
-    { code: 'pnpm run visual:check' },
-    '. It should pass. If a story fails, see ',
-    { code: 'https://visual-check.vercel.app/docs/broken-stories' },
-    '.',
-  ]
-
-  it('gives the four steps, the preview snippet and the CI docs for one Storybook, with the commands and paths as code', () => {
-    expect(
-      nextStepsOf({
-        cwd: '/project',
-        packageManager: 'pnpm',
-        configPath: '/project/visual-check.config.ts',
-        storybooks: [webApp],
-        scripts: defaultScripts,
-      }),
-    ).toEqual({
-      steps: [
-        ['Start Storybook with ', { code: 'pnpm run storybook' }, '.'],
-        ['Run ', { code: 'pnpm run visual:update' }, ' to write baselines. The first run downloads the browser image.'],
-        testStep,
-        [
-          'Commit ',
-          { code: 'visual-check.config.ts' },
-          ', ',
-          { code: '.storybook/visual-check.ts' },
-          ' and ',
-          { code: '.visual-check/' },
-          '.',
-        ],
-      ],
-      previews: [
-        {
-          file: '.storybook/preview.ts',
-          lines: ["import { visualCheck } from './visual-check'", 'parameters: { ...visualCheck({}) },'],
-        },
-      ],
-      ciUrl: 'https://visual-check.vercel.app/docs/ci',
-    })
+To set options for every story, see .storybook/visual-check.ts.
+To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
+`)
   })
 
-  it('names each Storybook with its command, and gives each config folder its preview snippet', () => {
-    const docs: SetUpStorybook = {
-      name: 'docs',
-      dir: '/project/docs',
-      configDir: '/project/docs/.storybook',
-      startCommand: 'pnpm exec storybook dev -p 6007',
-    }
-    const nextSteps = nextStepsOf({
-      cwd: '/project',
-      packageManager: 'npm',
-      configPath: '/project/visual-check.config.ts',
-      storybooks: [webApp, docs],
-      scripts: { test: { name: 'vc', add: false }, update: { name: 'vc:update', add: true } },
-    })
+  it('leaves out writing the first baselines when every Storybook has them', () => {
+    expect(closingMessageOf(inputOf({ needsBaselines: false }))).toBe(`visual-check is set up. Next:
+  1. pnpm run storybook      Start Storybook, and keep it running
+  2. pnpm run visual:check   Check the stories against the baselines
+  3. Commit the changes, baselines included
 
-    expect(nextSteps.steps).toEqual([
-      [
-        'Start each Storybook: ',
-        { code: 'pnpm run storybook' },
-        ' for web-app, ',
-        { code: 'pnpm exec storybook dev -p 6007' },
-        ' for docs.',
-      ],
-      ['Run ', { code: 'npm run vc:update' }, ' to write baselines. The first run downloads the browser image.'],
-      [
-        'Run ',
-        { code: 'npm run vc' },
-        '. It should pass. If a story fails, see ',
-        { code: 'https://visual-check.vercel.app/docs/broken-stories' },
-        '.',
-      ],
-      [
-        'Commit ',
-        { code: 'visual-check.config.ts' },
-        ', ',
-        { code: '.storybook/visual-check.ts' },
-        ', ',
-        { code: 'docs/.storybook/visual-check.ts' },
-        ', ',
-        { code: '.visual-check/' },
-        ' and ',
-        { code: 'docs/.visual-check/' },
-        '.',
-      ],
-    ])
-    expect(nextSteps.previews.map(({ file }) => file)).toEqual(['.storybook/preview.ts', 'docs/.storybook/preview.ts'])
+To set options for every story, see .storybook/visual-check.ts.
+To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
+`)
   })
 
-  it('tells to add the Storybook to the config, and gives no preview snippet, when none was set up', () => {
-    const nextSteps = nextStepsOf({
-      cwd: '/project',
-      packageManager: 'pnpm',
-      configPath: '/project/visual-check.config.ts',
-      storybooks: [],
-      scripts: defaultScripts,
-    })
+  it('puts each Storybook on a row of its own, indented to the commands, and names each modes file', () => {
+    expect(closingMessageOf(inputOf({ storybooks: [webApp, docs] }))).toBe(`visual-check is set up. Next:
+  1. pnpm run storybook                Start web-app, and keep it running
+     pnpm exec storybook dev -p 6007   Start docs, and keep it running
+  2. pnpm run visual:update            Write the first baselines
+  3. pnpm run visual:check             Check the stories against the baselines
+  4. Commit the changes, baselines included
 
-    expect(nextSteps.steps[0]).toEqual([
-      'Add your Storybook to ',
-      { code: 'visual-check.config.ts' },
-      ', as the hints say, then start it.',
-    ])
-    expect(nextSteps.steps[3]).toEqual([
-      'Commit ',
-      { code: 'visual-check.config.ts' },
-      ' and ',
-      { code: '.visual-check/' },
-      '.',
-    ])
-    expect(nextSteps.previews).toEqual([])
+To set options for every story, see .storybook/visual-check.ts and docs/.storybook/visual-check.ts.
+To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
+`)
+  })
+
+  it('tells to add the Storybook, and has no modes line, when none was set up', () => {
+    expect(closingMessageOf(inputOf({ storybooks: [] }))).toBe(`visual-check is set up. Next:
+  1. Add your Storybook to visual-check.config.ts, as the hints say, then start it
+  2. pnpm run visual:update   Write the first baselines
+  3. pnpm run visual:check    Check the stories against the baselines
+  4. Commit the changes, baselines included
+
+To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
+`)
+  })
+
+  it('says nothing about remote content or the agent skill', () => {
+    expect(closingMessageOf(inputOf())).not.toMatch(/remote|skill/i)
   })
 })

@@ -1,4 +1,4 @@
-import { existsSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ContainerError, DockerMissingError } from '../container/container-error.js'
@@ -13,8 +13,6 @@ import {
   pnpmAddon,
   pnpmClosingMessage,
   pnpmNextSteps,
-  pnpmWrittenLines,
-  pnpmWrittenList,
   toolsOf,
 } from './init-tools.fixture.js'
 import { makeProject, pnpmProject, readText, removeProjects, snapshotFiles } from './project.fixture.js'
@@ -87,7 +85,7 @@ function fullProgressOf(addon: 'done' | 'warned', check: 'done' | 'warned'): Pro
 /**
  * The summary of a run that sets up the pnpm project from scratch.
  */
-const pnpmSummary: InitResult['summary'] = { written: pnpmWrittenList, nextSteps: pnpmNextSteps }
+const pnpmSummary: InitResult['summary'] = { nextSteps: pnpmNextSteps }
 
 /**
  * The stderr that holds `messages`: each, then a line break.
@@ -108,7 +106,7 @@ describe('runInit', () => {
 
     expect(result).toEqual({
       exitCode: 0,
-      stdout: `${pnpmWrittenLines}\n${pnpmClosingMessage}`,
+      stdout: pnpmClosingMessage,
       stderr: '',
       messages: [],
       summary: pnpmSummary,
@@ -131,12 +129,7 @@ describe('runInit', () => {
     const root = pnpmProject({ files: { 'src/a.ts': '' } })
     const result = await runInit(join(root, 'src'), toolsOf().tools)
 
-    expect(result.stdout.startsWith('Wrote ../visual-check.config.ts\nWrote ../.storybook/visual-check.ts\n')).toBe(
-      true,
-    )
-    expect(result.stdout).toContain(
-      '  4. Commit ../visual-check.config.ts, ../.storybook/visual-check.ts and ../.visual-check/.\n',
-    )
+    expect(result.stdout).toContain('To set options for every story, see ../.storybook/visual-check.ts.\n')
   })
 
   describe('each check that stops it writes nothing and runs nothing', () => {
@@ -299,7 +292,7 @@ describe('runInit', () => {
 
       expect(result).toEqual({
         exitCode: 0,
-        stdout: `${pnpmWrittenLines}\n${pnpmClosingMessage}`,
+        stdout: pnpmClosingMessage,
         stderr: `${warning}\n`,
         messages: [warning],
         summary: pnpmSummary,
@@ -448,7 +441,7 @@ describe('runInit', () => {
       stdout: pnpmClosingMessage,
       stderr: '',
       messages: [],
-      summary: { written: { files: [], scripts: [] }, nextSteps: pnpmNextSteps },
+      summary: { nextSteps: pnpmNextSteps },
     })
     expect(snapshotFiles(root)).toEqual(before)
     expect(record.commands).toEqual([])
@@ -466,7 +459,7 @@ describe('runInit', () => {
 
     expect(await runInit(root, tools)).toEqual({
       exitCode: 0,
-      stdout: `${pnpmWrittenLines}\n${pnpmClosingMessage}`,
+      stdout: pnpmClosingMessage,
       stderr: '',
       messages: [],
       summary: pnpmSummary,
@@ -487,7 +480,7 @@ describe('runInit', () => {
 
     expect(yesResult).toEqual({
       exitCode: 0,
-      stdout: `${pnpmWrittenLines}\n${pnpmClosingMessage}`,
+      stdout: pnpmClosingMessage,
       stderr: `${hint}\n`,
       messages: [hint],
       summary: pnpmSummary,
@@ -507,22 +500,114 @@ describe('runInit', () => {
     expect(prompter.unused()).toEqual([])
   })
 
-  it('replaces a script that has the name with --yes, and says what it ran', async () => {
+  it('replaces a script that has the name with --yes, and names it before the closing message', async () => {
     const root = pnpmProject({
       manifest: { scripts: { storybook: 'storybook dev -p 6006', 'visual:check': 'vitest --project visual' } },
     })
     const result = await runInit(root, toolsOf().tools)
+    const replacedLine = 'Replaced the script visual:check in package.json.'
 
-    expect(result.exitCode).toBe(0)
-    expect(result.stderr).toBe('')
-    expect(result.stdout).toContain(
-      'Added the script visual:update to package.json.\n' +
-        'Replaced the script visual:check in package.json. It ran: vitest --project visual\n',
-    )
-    expect(result.stdout).toContain(
-      '  3. Run pnpm run visual:check. It should pass. If a story fails, see https://visual-check.vercel.app/docs/broken-stories.\n',
-    )
+    expect(result).toEqual({
+      exitCode: 0,
+      stdout: `${replacedLine}\n\n${pnpmClosingMessage}`,
+      stderr: '',
+      messages: [],
+      summary: { replacedLine, nextSteps: pnpmNextSteps },
+    })
     expect(JSON.parse(readText(root, 'package.json')).scripts['visual:check']).toBe('visual-check test')
+  })
+
+  it('names both scripts it replaced in one line', async () => {
+    const root = pnpmProject({
+      manifest: {
+        scripts: { storybook: 'storybook dev -p 6006', 'visual:check': 'vitest', 'visual:update': 'vitest -u' },
+      },
+    })
+    const result = await runInit(root, toolsOf().tools)
+
+    expect(result.stdout).toBe(
+      `Replaced the scripts visual:check and visual:update in package.json.\n\n${pnpmClosingMessage}`,
+    )
+  })
+
+  describe('the step that writes the first baselines', () => {
+    /**
+     * Puts a file named `name` in the baselines folder of the Storybook in `folder` of the project at `root`.
+     */
+    function putInBaselines(root: string, folder: string, name: string): void {
+      const baselines = join(root, folder, '.visual-check', 'baselines')
+
+      mkdirSync(baselines, { recursive: true })
+      writeFileSync(join(baselines, name), 'png')
+    }
+
+    it('is there when the baselines folder is there and empty', async () => {
+      const root = pnpmProject()
+
+      mkdirSync(join(root, '.visual-check', 'baselines'), { recursive: true })
+
+      expect((await runInit(root, toolsOf().tools)).stdout).toBe(pnpmClosingMessage)
+    })
+
+    it('is there when the baselines folder holds no baseline', async () => {
+      const root = pnpmProject()
+
+      putInBaselines(root, '.', 'notes.txt')
+
+      expect((await runInit(root, toolsOf().tools)).stdout).toBe(pnpmClosingMessage)
+    })
+
+    it('is left out when the Storybook has a baseline', async () => {
+      const root = pnpmProject()
+
+      putInBaselines(root, '.', 'button--primary.png')
+
+      const result = await runInit(root, toolsOf().tools)
+
+      expect(result.stdout).toBe(`visual-check is set up. Next:
+  1. pnpm run storybook      Start Storybook, and keep it running
+  2. pnpm run visual:check   Check the stories against the baselines
+  3. Commit the changes, baselines included
+
+To set options for every story, see .storybook/visual-check.ts.
+To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
+`)
+      expect(result.summary?.nextSteps?.steps).toEqual([
+        [{ command: 'pnpm run storybook', text: ['Start Storybook, and keep it running'] }],
+        [{ command: 'pnpm run visual:check', text: ['Check the stories against the baselines'] }],
+        [{ text: ['Commit the changes, baselines included'] }],
+      ])
+    })
+
+    it('counts a baselines folder it cannot list as holding no baseline', async () => {
+      const root = pnpmProject()
+
+      mkdirSync(join(root, '.visual-check'), { recursive: true })
+      writeFileSync(join(root, '.visual-check', 'baselines'), 'not a folder')
+
+      expect((await runInit(root, toolsOf().tools)).stdout).toBe(pnpmClosingMessage)
+    })
+
+    it('is there when one of two Storybooks has no baseline, and left out once both have one', async () => {
+      const config =
+        'export default { storybooks: { ' +
+        "web: { url: 'http://127.0.0.1:6006' }, " +
+        "docs: { dir: 'docs', url: 'http://127.0.0.1:6007' } } }\n"
+      const root = pnpmProject({
+        files: { 'docs/.storybook/main.ts': '', 'visual-check.config.ts': config },
+      })
+      const updateCommand = 'pnpm run visual:update'
+
+      putInBaselines(root, '.', 'button--primary.png')
+
+      const first = await runInit(root, toolsOf().tools)
+
+      expect(first.stdout).toContain(updateCommand)
+
+      putInBaselines(root, 'docs', 'page--home.png')
+
+      expect((await runInit(root, toolsOf().tools)).stdout).not.toContain(updateCommand)
+    })
   })
 
   it('exits 2 when a question is given up on, after the warnings so far, and writes nothing nor sums up', async () => {
@@ -577,7 +662,7 @@ describe('runInit', () => {
           { command: 'npx', args: pnpmAddon.args.slice(1) },
         ),
       )
-      expect(result.stdout).toContain('  1. Start Storybook with npm run storybook.\n')
+      expect(result.stdout).toContain('  1. npm run storybook       Start Storybook, and keep it running\n')
     })
 
     it('asks for one when nothing shows one', async () => {
@@ -604,7 +689,7 @@ describe('runInit', () => {
     })
   })
 
-  it('exits 2 when the install fails, keeps the files and adds no addon, with a summary of what it wrote', async () => {
+  it('exits 2 when the install fails, keeps the files and adds no addon, with no closing message', async () => {
     const root = pnpmProject()
     const { tools, record } = toolsOf({}, { exitCodes: [1] })
 
@@ -612,10 +697,10 @@ describe('runInit', () => {
 
     expect(await runInit(root, tools)).toEqual({
       exitCode: 2,
-      stdout: pnpmWrittenLines,
+      stdout: '',
       stderr: `${problem}\n`,
       messages: [problem],
-      summary: { written: pnpmWrittenList },
+      summary: {},
     })
     expect(record.commands).toEqual(commandsIn(root, pnpmAdd))
     expect(record.fallowRoots).toEqual([])
@@ -623,6 +708,18 @@ describe('runInit', () => {
     expect(readText(root, 'visual-check.config.ts')).toBe(webAppConfig)
     expect(readText(root, '.storybook/visual-check.ts')).toBe(modesFile)
     expect(readText(root, '.visual-check/.gitignore')).toBe(gitignore)
+  })
+
+  it('names the scripts it replaced when the install fails, with no closing message', async () => {
+    const root = pnpmProject({
+      manifest: { scripts: { storybook: 'storybook dev -p 6006', 'visual:update': 'vitest -u' } },
+    })
+    const result = await runInit(root, toolsOf({}, { exitCodes: [1] }).tools)
+    const replacedLine = 'Replaced the script visual:update in package.json.'
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stdout).toBe(`${replacedLine}\n`)
+    expect(result.summary).toEqual({ replacedLine })
   })
 
   it('writes no file besides the config, the modes file, the .gitignore and package.json', async () => {
