@@ -24,7 +24,7 @@ import { dockerProblemOf } from './docker-problem.js'
 import { createLaunchBrowser, type LaunchBrowser } from './launch-browser.js'
 import { parseCommandLine, type Reporter, type RunOptions, UsageError } from './parse-command-line.js'
 import { readImageFit } from './read-image-fit.js'
-import { cliOutputOf, documentOutputOf, type RunOutput, reportLineOf } from './run-output.js'
+import { type RunOutput, reportLineOf, runOutputOf } from './run-output.js'
 import { type TestReportFacts, testReportFor, updateReportFor } from './run-report.js'
 import { runSnapshots } from './run-snapshots.js'
 import { selectStories } from './select-stories.js'
@@ -462,7 +462,7 @@ async function snapshotsOutcomeOf(
     }
 
     return {
-      finished: { exitCode: result.exitCode, ...documentOutputOf(output, updateReportFor(facts), 'json', undefined) },
+      finished: { exitCode: result.exitCode, ...runOutputOf(output, updateReportFor(facts), 'json', undefined) },
     }
   }
 
@@ -523,7 +523,12 @@ async function withTestReport(
 
     await writeReportJson(folder, report)
 
-    return { finished: { ...result, ...cliOutputOf(result, report, reporter, reportLineOf(cwd, folder)) } }
+    return {
+      finished: {
+        ...result,
+        ...runOutputOf(result, report, reporter, { stream: 'stdout', text: reportLineOf(cwd, folder) }),
+      },
+    }
   } catch (error) {
     if (error instanceof ReportError) {
       const problem = reportProblemOf(error, cwd)

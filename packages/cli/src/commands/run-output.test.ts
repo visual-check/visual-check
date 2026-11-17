@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { emptyTestCounts, reportJsonOf, testReportOf } from '../report/report-document.js'
-import { cliOutputOf, documentOutputOf, reportLineOf } from './run-output.js'
+import { reportLineOf, runOutputOf } from './run-output.js'
 
 describe('reportLineOf', () => {
   it("gives report.json's path relative to the cwd, with /", () => {
@@ -15,7 +15,7 @@ describe('reportLineOf', () => {
   })
 })
 
-describe('cliOutputOf', () => {
+describe('runOutputOf', () => {
   const report = testReportOf({
     visualCheck: '0.1.0',
     consistencyOnly: false,
@@ -28,67 +28,42 @@ describe('cliOutputOf', () => {
     snapshots: [],
     error: null,
   })
-  const result = { stdout: '✓ web  a  passed\n', stderr: 'warning\n' }
-  const line = 'Report: .visual-check/report/report.json'
+  const output = { stdout: '✓ web  a  passed\n', stderr: 'warning\n' }
+  const text = 'Report: .visual-check/report/report.json'
 
   it.each([undefined, 'live', 'log'] as const)(
-    'keeps both streams and gives the report line for stdout, after stderr, for reporter %s',
+    'keeps both streams and the report line on the stream given for reporter %s',
     (reporter) => {
-      expect(cliOutputOf(result, report, reporter, line)).toEqual({
-        stdout: '✓ web  a  passed\n',
-        stderr: 'warning\n',
-        reportLine: { stream: 'stdout', text: line },
+      expect(runOutputOf(output, report, reporter, { stream: 'stdout', text })).toEqual({
+        ...output,
+        reportLine: { stream: 'stdout', text },
+      })
+      expect(runOutputOf(output, report, reporter, { stream: 'stderr', text })).toEqual({
+        ...output,
+        reportLine: { stream: 'stderr', text },
       })
     },
   )
 
-  it('puts only the document on stdout for json, the human lines then the rest on stderr, and the report line for stderr', () => {
-    expect(cliOutputOf(result, report, 'json', line)).toEqual({
-      stdout: `${reportJsonOf(report)}\n`,
-      stderr: '✓ web  a  passed\nwarning\n',
-      reportLine: { stream: 'stderr', text: line },
-    })
-  })
-})
-
-describe('documentOutputOf', () => {
-  const report = testReportOf({
-    visualCheck: '0.1.0',
-    consistencyOnly: false,
-    exitCode: 2,
-    shard: null,
-    selection: { by: 'all', base: null, changedFiles: null, fallback: null },
-    reportDir: '.visual-check/report',
-    storybooks: [],
-    counts: emptyTestCounts(),
-    snapshots: [],
-    error: { message: 'Boom.', storybooks: [] },
-  })
-  const result = { stdout: '✓ web  a  passed\n', stderr: 'Boom.\n' }
-  const line = 'Report: .visual-check/report/report.json'
-
-  it.each([undefined, 'live', 'log'] as const)(
-    'keeps both streams and gives the report line for stderr for reporter %s',
-    (reporter) => {
-      expect(documentOutputOf(result, report, reporter, line)).toEqual({
-        stdout: '✓ web  a  passed\n',
-        stderr: 'Boom.\n',
-        reportLine: { stream: 'stderr', text: line },
+  it.each(['stdout', 'stderr'] as const)(
+    'puts the document alone on stdout for json, the human lines then the rest on stderr, and the report line given for %s on stderr',
+    (stream) => {
+      expect(runOutputOf(output, report, 'json', { stream, text })).toEqual({
+        stdout: `${reportJsonOf(report)}\n`,
+        stderr: '✓ web  a  passed\nwarning\n',
+        reportLine: { stream: 'stderr', text },
       })
     },
   )
 
-  it('gives no report line when no report was written', () => {
-    expect(documentOutputOf(result, report, 'log', undefined)).toEqual({
-      stdout: '✓ web  a  passed\n',
-      stderr: 'Boom.\n',
-    })
-  })
+  it.each([undefined, 'json'] as const)(
+    'gives no report line when no report was written, for reporter %s',
+    (reporter) => {
+      expect(runOutputOf(output, report, reporter, undefined).reportLine).toBeUndefined()
+    },
+  )
 
-  it('puts only the document on stdout for json, and the human lines on stderr before the rest', () => {
-    expect(documentOutputOf(result, report, 'json', undefined)).toEqual({
-      stdout: `${reportJsonOf(report)}\n`,
-      stderr: '✓ web  a  passed\nBoom.\n',
-    })
+  it('gives only the streams, whatever else the output it is given holds', () => {
+    expect(runOutputOf({ ...output, message: 'Boom.' } as typeof output, report, 'log', undefined)).toEqual(output)
   })
 })

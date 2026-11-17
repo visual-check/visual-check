@@ -2,7 +2,7 @@ import { locateConfig } from '../config/find-config.js'
 import type { ReportStorybook } from '../report/report-document.js'
 import { ReportError, reportFolderOf, writeErrorReport } from '../report/report-folder.js'
 import type { RunOptions, UsageError } from './parse-command-line.js'
-import { documentOutputOf, type RunOutput, reportLineOf } from './run-output.js'
+import { type RunOutput, reportLineOf, runOutputOf } from './run-output.js'
 import { testErrorReportOf, updateErrorReportOf } from './run-report.js'
 import { reportProblemOf } from './stop-message.js'
 
@@ -139,7 +139,7 @@ export async function stoppedTestOf(stop: RunStop, test: StoppedTest): Promise<S
   })
 
   if (stop.configPath === undefined) {
-    return { exitCode: 2, ...documentOutputOf(stop, report, options.reporter, undefined) }
+    return { exitCode: 2, ...runOutputOf(stop, report, options.reporter, undefined) }
   }
 
   const folder = reportFolderOf(stop.configPath)
@@ -150,7 +150,7 @@ export async function stoppedTestOf(stop: RunStop, test: StoppedTest): Promise<S
     if (error instanceof ReportError) {
       return {
         exitCode: 2,
-        ...documentOutputOf(
+        ...runOutputOf(
           { stdout: stop.stdout, stderr: `${stop.stderr}${reportProblemOf(error, cwd)}` },
           { ...report, reportDir: null },
           options.reporter,
@@ -162,7 +162,10 @@ export async function stoppedTestOf(stop: RunStop, test: StoppedTest): Promise<S
     throw error
   }
 
-  return { exitCode: 2, ...documentOutputOf(stop, report, options.reporter, reportLineOf(cwd, folder)) }
+  return {
+    exitCode: 2,
+    ...runOutputOf(stop, report, options.reporter, { stream: 'stderr', text: reportLineOf(cwd, folder) }),
+  }
 }
 
 /**
@@ -180,7 +183,7 @@ export function stoppedUpdateOf(stop: RunStop, update: StoppedUpdate): StoppedOu
     unreachable: stop.unreachable,
   })
 
-  return { exitCode: 2, ...documentOutputOf(stop, report, update.options.reporter, undefined) }
+  return { exitCode: 2, ...runOutputOf(stop, report, update.options.reporter, undefined) }
 }
 
 /**
