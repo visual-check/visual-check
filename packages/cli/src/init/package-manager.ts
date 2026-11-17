@@ -230,14 +230,6 @@ export function storybookCommandOf(packageManager: PackageManager, args: readonl
 }
 
 /**
- * The command line that runs the project's `visual-check` binary for `kind`, such as `pnpm exec visual-check test`:
- * what to run when no script does.
- */
-export function visualCheckCommandOf(packageManager: PackageManager, kind: 'test' | 'update'): string {
-  return commandLineOf(binCommandOf(packageManager, 'visual-check', [kind]))
-}
-
-/**
  * Returns the command line as shown to the user: the program and its arguments joined with single spaces.
  */
 export function commandLineOf({ command, args }: CommandLine): string {

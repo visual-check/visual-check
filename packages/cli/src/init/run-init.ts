@@ -9,7 +9,7 @@ import { addAddons, dependenciesToAddOf, installDependencies } from './install.j
 import { InputEndedError, type Prompter } from './prompter.js'
 import { type Answers, askQuestions } from './questions.js'
 import type { RunCommand } from './run-command.js'
-import { addScripts, configSourceOf, modesFileSource, visualCheckGitignore, writeIfMissing } from './setup-files.js'
+import { configSourceOf, modesFileSource, setScripts, visualCheckGitignore, writeIfMissing } from './setup-files.js'
 import {
   type FindUnlistedDependencies,
   fallowFailureWarningOf,
@@ -159,12 +159,12 @@ export async function runInit(cwd: string, tools: InitTools): Promise<InitResult
  * instead when the input ends before every answer is in: the notes collected so far, then why it stopped.
  */
 async function settleSetup(cwd: string, project: DetectedProject, tools: InitTools): Promise<Setup | InitResult> {
-  const { prompter, yes } = tools
+  const { prompter } = tools
   const existing = await noteBeforeQuestions(cwd, project, tools)
   let asked: Awaited<ReturnType<typeof askQuestions>>
 
   try {
-    asked = await askQuestions({ project, prompter, yes, existingConfig: existing })
+    asked = await askQuestions({ project, prompter, existingConfig: existing })
   } catch (error) {
     if (error instanceof InputEndedError) {
       return failureOf([...(prompter.notes ?? []), error.message])
@@ -298,7 +298,7 @@ async function dockerNotesOf(probeDocker: ProbeDocker, os: NodeJS.Platform): Pro
 
 /**
  * Writes each file that's missing: the config when there was none, each Storybook's `visual-check.ts` and
- * `.visual-check/.gitignore`, and the config folder's `.visual-check/.gitignore`. Then adds the scripts. Gives what it
+ * `.visual-check/.gitignore`, and the config folder's `.visual-check/.gitignore`. Then sets the scripts. Gives what it
  * wrote. An existing file is never touched.
  */
 function writeSetupFiles(project: DetectedProject, setup: Setup): Written {
@@ -319,24 +319,24 @@ function writeSetupFiles(project: DetectedProject, setup: Setup): Written {
     }
   }
 
-  return { files, scripts: addScripts(project.manifestPath, scriptsToAddOf(answers.scripts)) }
+  return { files, scripts: setScripts(project.manifestPath, scriptsToSetOf(answers.scripts)) }
 }
 
 /**
- * Returns the scripts to add to `package.json`, by name: the ones the answers say to add.
+ * Returns the scripts to set in `package.json`, by name: the ones the answers say to add.
  */
-function scriptsToAddOf(scripts: Answers['scripts']): Record<string, string> {
-  const toAdd: Record<string, string> = {}
+function scriptsToSetOf(scripts: Answers['scripts']): Record<string, string> {
+  const toSet: Record<string, string> = {}
 
   for (const kind of ['test', 'update'] as const) {
     const script = scripts[kind]
 
-    if (script?.add === true) {
-      toAdd[script.name] = `visual-check ${kind}`
+    if (script.add) {
+      toSet[script.name] = `visual-check ${kind}`
     }
   }
 
-  return toAdd
+  return toSet
 }
 
 /**

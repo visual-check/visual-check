@@ -180,26 +180,6 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
     )
   })
 
-  it.each([
-    ['pnpm', 'pnpm exec visual-check update', 'pnpm exec visual-check test'],
-    ['npm', 'npx visual-check update', 'npx visual-check test'],
-    ['yarn', 'yarn visual-check update', 'yarn visual-check test'],
-    ['bun', 'bunx visual-check update', 'bunx visual-check test'],
-  ] as const)('runs the binary under %s when init added no script for it', (packageManager, update, test) => {
-    const message = closingMessageOf({
-      cwd: '/project',
-      packageManager,
-      configPath: '/project/visual-check.config.ts',
-      storybooks: [webApp],
-      scripts: { test: undefined, update: undefined },
-    })
-
-    expect(message.split('\n').slice(2, 4)).toEqual([
-      `  2. Run ${update} to write baselines. The first run downloads the browser image.`,
-      `  3. Run ${test}. It should pass. If a story fails, see https://visual-check.vercel.app/docs/broken-stories.`,
-    ])
-  })
-
   it('runs an existing script that init did not add', () => {
     const message = closingMessageOf({
       cwd: '/project',
@@ -262,6 +242,11 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
 })
 
 describe('writtenLinesOf', () => {
+  /**
+   * No script added or replaced.
+   */
+  const noScripts = { added: [], replaced: [] }
+
   it('lists each file written relative to the folder init runs in, then the two scripts added', () => {
     expect(
       writtenLinesOf(
@@ -271,7 +256,7 @@ describe('writtenLinesOf', () => {
             '/project/.storybook/visual-check.ts',
             '/project/.visual-check/.gitignore',
           ],
-          scripts: ['visual:test', 'visual:update'],
+          scripts: { added: ['visual:test', 'visual:update'], replaced: [] },
         },
         '/project',
       ),
@@ -284,18 +269,30 @@ describe('writtenLinesOf', () => {
   })
 
   it('names one script added in the singular', () => {
-    expect(writtenLinesOf({ files: [], scripts: ['visual:update'] }, '/project')).toEqual([
+    expect(writtenLinesOf({ files: [], scripts: { added: ['visual:update'], replaced: [] } }, '/project')).toEqual([
       'Added the script visual:update to package.json.',
     ])
   })
 
-  it('has no scripts line when it added none', () => {
-    expect(writtenLinesOf({ files: ['/project/.storybook/visual-check.ts'], scripts: [] }, '/project/src')).toEqual([
-      'Wrote ../.storybook/visual-check.ts',
+  it('gives a line per script replaced, with what it ran', () => {
+    const replaced = [
+      { name: 'visual:test', previous: 'vitest --project visual' },
+      { name: 'visual:update', previous: 'vitest -u' },
+    ]
+
+    expect(writtenLinesOf({ files: [], scripts: { added: [], replaced } }, '/project')).toEqual([
+      'Replaced the script visual:test in package.json. It ran: vitest --project visual',
+      'Replaced the script visual:update in package.json. It ran: vitest -u',
     ])
   })
 
+  it('has no scripts line when it added none', () => {
+    expect(
+      writtenLinesOf({ files: ['/project/.storybook/visual-check.ts'], scripts: noScripts }, '/project/src'),
+    ).toEqual(['Wrote ../.storybook/visual-check.ts'])
+  })
+
   it('gives no line when it wrote nothing', () => {
-    expect(writtenLinesOf({ files: [], scripts: [] }, '/project')).toEqual([])
+    expect(writtenLinesOf({ files: [], scripts: noScripts }, '/project')).toEqual([])
   })
 })

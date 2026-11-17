@@ -12,7 +12,6 @@ async function ask(
   options: {
     project?: Parameters<typeof projectOf>[0]
     existingConfig?: { names: Record<string, string> }
-    yes?: boolean
   } = {},
 ) {
   const prompter = scriptedPrompter(scripted)
@@ -20,7 +19,6 @@ async function ask(
     project: projectOf(options.project),
     prompter,
     existingConfig: options.existingConfig,
-    yes: options.yes ?? false,
   })
 
   expect(prompter.unused()).toEqual([])
@@ -253,24 +251,26 @@ describe('askQuestions', () => {
     expect(answers.scripts.test).toEqual({ name: 'visual:test', add: true })
   })
 
-  it('adds no script with --yes when the default name is taken', async () => {
-    const manifest = { scripts: { 'visual:test': 'vitest' } }
-    const { answers, warnings } = await ask(['', '', '', '', false], { project: { manifest }, yes: true })
+  it('takes a name another script has, so that script is replaced', async () => {
+    const manifest = { scripts: { 'visual:test': 'vitest', 'visual:update': 'vitest -u' } }
+    const { answers, records, warnings } = await ask(['', '', '', '', '', false], { project: { manifest } })
 
-    expect(answers.scripts).toEqual({ test: undefined, update: { name: 'visual:update', add: true } })
-    expect(warnings).toEqual([
-      'Warning: package.json already has a visual:test script, so init added none for visual-check test.',
-    ])
+    expect(answers.scripts).toEqual({
+      test: { name: 'visual:test', add: true },
+      update: { name: 'visual:update', add: true },
+    })
+    expect(messagesOf(records, 'invalid')).toEqual([])
+    expect(warnings).toEqual([])
   })
 
-  it('asks again after a script name that is taken, empty, or has a space', async () => {
-    const manifest = { scripts: { 'visual:test': 'vitest' } }
-    const { answers, records } = await ask(['', '', '', 'visual:test', 'a b', 'vt', '', false], {
-      project: { manifest },
+  it('asks again after a script name that starts Storybook or has a space', async () => {
+    const startScript = { script: 'storybook', subcommand: 'dev' as const, configDir: undefined, port: 6006 }
+    const { answers, records } = await ask(['', '', 'storybook', 'a b', 'vt', '', false], {
+      project: { storybooks: [storybookOf({ startScript })] },
     })
 
     expect(messagesOf(records, 'invalid')).toEqual([
-      'package.json already has a visual:test script. Pick another name.',
+      'The storybook script starts Storybook. Pick another name.',
       "A script name can't hold spaces.",
     ])
     expect(answers.scripts.test).toEqual({ name: 'vt', add: true })
@@ -378,7 +378,6 @@ describe('askQuestions', () => {
     const { answers, warnings } = await askQuestions({
       project: projectOf({ storybooks: [storybookOf({ startScript })] }),
       prompter,
-      yes: true,
     })
 
     expect(answers).toEqual({

@@ -2,8 +2,9 @@ import { dirname, join } from 'node:path'
 import { isFile } from '../config/find-config.js'
 import { docsUrlOf } from '../docs-site/docs-url.js'
 import { relativePathOf } from './find-storybooks.js'
-import { type PackageManager, runScriptCommandOf, visualCheckCommandOf } from './package-manager.js'
-import type { Answers, ScriptAnswer } from './questions.js'
+import { type PackageManager, runScriptCommandOf } from './package-manager.js'
+import type { Answers } from './questions.js'
+import type { ScriptChanges } from './setup-files.js'
 
 /**
  * A Storybook `init` set up, with what the closing message says about it.
@@ -36,9 +37,9 @@ export interface Written {
    */
   files: string[]
   /**
-   * The names of the scripts it added to `package.json`.
+   * The scripts it added to `package.json` and the ones it replaced there.
    */
-  scripts: string[]
+  scripts: ScriptChanges
 }
 
 /**
@@ -84,28 +85,24 @@ function listOf(items: readonly string[]): string {
 }
 
 /**
- * Lists what `init` wrote: a `Wrote <path>` line per file, then a line naming the scripts it added, when it added any.
+ * Lists what `init` wrote: a `Wrote <path>` line per file, a line naming the scripts it added, when it added any, and a
+ * line per script it replaced, with what that script ran before.
  */
 export function writtenLinesOf(written: Written, cwd: string): string[] {
   const lines = written.files.map((file) => `Wrote ${relativePathOf(cwd, file)}`)
+  const { added, replaced } = written.scripts
 
-  if (written.scripts.length === 1) {
-    lines.push(`Added the script ${written.scripts[0]} to package.json.`)
-  } else if (written.scripts.length > 1) {
-    lines.push(`Added the scripts ${listOf(written.scripts)} to package.json.`)
+  if (added.length === 1) {
+    lines.push(`Added the script ${added[0]} to package.json.`)
+  } else if (added.length > 1) {
+    lines.push(`Added the scripts ${listOf(added)} to package.json.`)
+  }
+
+  for (const { name, previous } of replaced) {
+    lines.push(`Replaced the script ${name} in package.json. It ran: ${previous}`)
   }
 
   return lines
-}
-
-/**
- * Returns the command that runs one kind of visual-check command: its script, or the binary itself when `init` added
- * no script for it.
- */
-function commandOf(packageManager: PackageManager, kind: 'test' | 'update', script: ScriptAnswer | undefined): string {
-  return script === undefined
-    ? visualCheckCommandOf(packageManager, kind)
-    : runScriptCommandOf(packageManager, script.name)
 }
 
 /**
@@ -180,9 +177,9 @@ export function closingMessageOf(input: ClosingMessageInput): string {
   return [
     'visual-check is set up. Next:',
     `  1. ${startStepOf(input)}`,
-    `  2. Run ${commandOf(packageManager, 'update', scripts.update)} to write baselines. ` +
+    `  2. Run ${runScriptCommandOf(packageManager, scripts.update.name)} to write baselines. ` +
       'The first run downloads the browser image.',
-    `  3. Run ${commandOf(packageManager, 'test', scripts.test)}. It should pass. ` +
+    `  3. Run ${runScriptCommandOf(packageManager, scripts.test.name)}. It should pass. ` +
       `If a story fails, see ${docsUrlOf('broken-stories')}.`,
     `  4. ${commitStepOf(input)}`,
     ...configDirs.flatMap((configDir) => ['', ...previewLinesOf(configDir, cwd)]),

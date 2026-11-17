@@ -61,18 +61,17 @@ export interface Answers {
    */
   storybooks: StorybookAnswers[]
   /**
-   * The scripts that run `visual-check test` and `visual-check update`. A kind is `undefined` when `--yes` found the
-   * default name taken by another script, so `init` adds none.
+   * The scripts that run `visual-check test` and `visual-check update`.
    */
   scripts: {
     /**
      * The script that runs `visual-check test`.
      */
-    test: ScriptAnswer | undefined
+    test: ScriptAnswer
     /**
      * The script that runs `visual-check update`.
      */
-    update: ScriptAnswer | undefined
+    update: ScriptAnswer
   }
   /**
    * The Storybooks that get the visual-check addon: the config folder and the name of each.
@@ -106,10 +105,6 @@ interface QuestionInput {
    * Where the questions go. With `--yes`, a prompter that takes every default.
    */
   prompter: Prompter
-  /**
-   * Whether `--yes` was passed.
-   */
-  yes: boolean
   /**
    * The visual-check config that already exists, or `undefined` for none. Its Storybooks aren't asked about again, and
    * only they get the addon question.
@@ -152,13 +147,12 @@ export async function askQuestions({
   project,
   prompter,
   existingConfig,
-  yes,
 }: QuestionInput): Promise<{ answers: Answers; warnings: string[] }> {
   const warnings: string[] = []
   const packageManager = await askPackageManager(project, prompter)
   const storybooks =
     existingConfig === undefined ? await askStorybooks(project, packageManager, prompter, warnings) : []
-  const scripts = await askScripts(project, prompter, yes, warnings)
+  const scripts = await askScripts(project, prompter)
   const addons = await askAddons(project, namedStorybooksOf(project, storybooks, existingConfig), prompter)
 
   return { answers: { packageManager, storybooks, scripts, addons }, warnings }
@@ -326,31 +320,28 @@ async function askStartCommand(
 /**
  * Asks for the names of the scripts that run `visual-check test` and `visual-check update`.
  */
-async function askScripts(
-  project: DetectedProject,
-  prompter: Prompter,
-  yes: boolean,
-  warnings: string[],
-): Promise<Answers['scripts']> {
+async function askScripts(project: DetectedProject, prompter: Prompter): Promise<Answers['scripts']> {
   const scripts = scriptsOf(project.manifest)
-  const test = await askScript('test', scripts, undefined, prompter, yes, warnings)
-  const update = await askScript('update', scripts, test?.name, prompter, yes, warnings)
+  const startScripts = project.storybooks.flatMap(({ startScript }) =>
+    startScript === undefined ? [] : [startScript.script],
+  )
+  const test = await askScript('test', scripts, startScripts, undefined, prompter)
+  const update = await askScript('update', scripts, startScripts, test.name, prompter)
 
   return { test, update }
 }
 
 /**
- * Settles the script that runs one kind of visual-check command: an existing script that already runs it, none when
- * `--yes` finds the default name taken, or a name the person gives.
+ * Settles the script that runs one kind of visual-check command: an existing script that already runs it, or a name
+ * the person gives. A script that already has that name is replaced, unless it starts a Storybook.
  */
 async function askScript(
   kind: 'test' | 'update',
   scripts: Record<string, string>,
+  startScripts: readonly string[],
   testName: string | undefined,
   prompter: Prompter,
-  yes: boolean,
-  warnings: string[],
-): Promise<ScriptAnswer | undefined> {
+): Promise<ScriptAnswer> {
   const runs = new RegExp(`(?:^|[\\s/;&|])visual-check\\s+${kind}(?=\\s|$)`)
   const existing = Object.entries(scripts).find(([, value]) => runs.test(value))
 
@@ -358,25 +349,15 @@ async function askScript(
     return { name: existing[0], add: false }
   }
 
-  const defaultName = `visual:${kind}`
-
-  if (yes && Object.hasOwn(scripts, defaultName)) {
-    warnings.push(
-      `Warning: package.json already has a ${defaultName} script, so init added none for visual-check ${kind}.`,
-    )
-
-    return undefined
-  }
-
   const name = await prompter.text(`Name of the script that runs visual-check ${kind}`, {
-    defaultValue: defaultName,
+    defaultValue: `visual:${kind}`,
     validate(value) {
       if (/\s/.test(value)) {
         return "A script name can't hold spaces."
       }
 
-      if (Object.hasOwn(scripts, value)) {
-        return `package.json already has a ${value} script. Pick another name.`
+      if (startScripts.includes(value)) {
+        return `The ${value} script starts Storybook. Pick another name.`
       }
 
       return value === testName ? 'The test and update scripts need different names.' : undefined

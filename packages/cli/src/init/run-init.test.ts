@@ -313,7 +313,7 @@ describe('runInit', () => {
     })
   })
 
-  it('never touches preview, main, turbo.json, nx.json, .gitignore or the existing scripts', async () => {
+  it('never touches preview, main, turbo.json, nx.json, .gitignore or the other scripts', async () => {
     const files = {
       '.storybook/main.ts': "export default { stories: ['../src/**/*.stories.ts'] }\n",
       '.storybook/preview.ts': 'export default { parameters: {} }\n',
@@ -412,21 +412,22 @@ describe('runInit', () => {
     expect(prompter.unused()).toEqual([])
   })
 
-  it('adds no visual:test script with --yes when another script has the name, and runs the binary instead', async () => {
+  it('replaces a script that has the name with --yes, and says what it ran', async () => {
     const root = pnpmProject({
       manifest: { scripts: { storybook: 'storybook dev -p 6006', 'visual:test': 'vitest --project visual' } },
     })
     const result = await runInit(root, toolsOf().tools)
 
     expect(result.exitCode).toBe(0)
-    expect(result.stderr).toBe(
-      'Warning: package.json already has a visual:test script, so init added none for visual-check test.\n',
-    )
-    expect(result.stdout).toContain('Added the script visual:update to package.json.\n')
+    expect(result.stderr).toBe('')
     expect(result.stdout).toContain(
-      '  3. Run pnpm exec visual-check test. It should pass. If a story fails, see https://visual-check.vercel.app/docs/broken-stories.\n',
+      'Added the script visual:update to package.json.\n' +
+        'Replaced the script visual:test in package.json. It ran: vitest --project visual\n',
     )
-    expect(JSON.parse(readText(root, 'package.json')).scripts['visual:test']).toBe('vitest --project visual')
+    expect(result.stdout).toContain(
+      '  3. Run pnpm run visual:test. It should pass. If a story fails, see https://visual-check.vercel.app/docs/broken-stories.\n',
+    )
+    expect(JSON.parse(readText(root, 'package.json')).scripts['visual:test']).toBe('visual-check test')
   })
 
   it('exits 2 when the input ends before every answer is in, after the warnings so far, and writes nothing', async () => {

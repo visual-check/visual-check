@@ -3,10 +3,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  addScripts,
   configEntryOf,
   configSourceOf,
   modesFileSource,
+  setScripts,
   visualCheckGitignore,
   writeIfMissing,
 } from './setup-files.js'
@@ -202,7 +202,7 @@ describe('writeIfMissing', () => {
   })
 })
 
-describe('addScripts', () => {
+describe('setScripts', () => {
   /**
    * Writes `text` to a `package.json` in a new folder and returns its path.
    */
@@ -222,7 +222,7 @@ describe('addScripts', () => {
   it('keeps tab indentation', () => {
     const path = manifestWith('{\n\t"name": "x",\n\t"scripts": {\n\t\t"build": "tsc"\n\t}\n}\n')
 
-    expect(addScripts(path, scripts)).toEqual(['visual:test', 'visual:update'])
+    expect(setScripts(path, scripts)).toEqual({ added: ['visual:test', 'visual:update'], replaced: [] })
     expect(readFileSync(path, 'utf8')).toBe(
       [
         '{',
@@ -241,7 +241,7 @@ describe('addScripts', () => {
   it('keeps four-space indentation', () => {
     const path = manifestWith('{\n    "name": "x"\n}\n')
 
-    addScripts(path, { a: 'b' })
+    setScripts(path, { a: 'b' })
 
     expect(readFileSync(path, 'utf8')).toBe('{\n    "name": "x",\n    "scripts": {\n        "a": "b"\n    }\n}\n')
   })
@@ -249,7 +249,7 @@ describe('addScripts', () => {
   it('uses two spaces when nothing is indented', () => {
     const path = manifestWith('{}')
 
-    addScripts(path, { a: 'b' })
+    setScripts(path, { a: 'b' })
 
     expect(readFileSync(path, 'utf8')).toBe('{\n  "scripts": {\n    "a": "b"\n  }\n}')
   })
@@ -257,7 +257,7 @@ describe('addScripts', () => {
   it('keeps CRLF line endings', () => {
     const path = manifestWith('{\r\n  "name": "x"\r\n}\r\n')
 
-    addScripts(path, { a: 'b' })
+    setScripts(path, { a: 'b' })
 
     expect(readFileSync(path, 'utf8')).toBe('{\r\n  "name": "x",\r\n  "scripts": {\r\n    "a": "b"\r\n  }\r\n}\r\n')
   })
@@ -265,7 +265,7 @@ describe('addScripts', () => {
   it('keeps a missing trailing newline missing', () => {
     const path = manifestWith('{\n  "name": "x"\n}')
 
-    addScripts(path, { a: 'b' })
+    setScripts(path, { a: 'b' })
 
     expect(readFileSync(path, 'utf8')).toBe('{\n  "name": "x",\n  "scripts": {\n    "a": "b"\n  }\n}')
   })
@@ -273,7 +273,7 @@ describe('addScripts', () => {
   it('creates scripts as the last key and keeps the others in order', () => {
     const path = manifestWith('{\n  "version": "1.0.0",\n  "name": "x",\n  "dependencies": {\n    "a": "1"\n  }\n}\n')
 
-    addScripts(path, { a: 'b' })
+    setScripts(path, { a: 'b' })
 
     const manifest = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
 
@@ -281,24 +281,41 @@ describe('addScripts', () => {
     expect(manifest.dependencies).toEqual({ a: '1' })
   })
 
-  it('leaves an existing script alone and does not return it', () => {
-    const path = manifestWith('{\n  "scripts": {\n    "visual:test": "mine"\n  }\n}\n')
+  it('replaces a script that runs something else in its place, and gives what it ran', () => {
+    const path = manifestWith('{\n  "scripts": {\n    "visual:test": "mine",\n    "build": "tsc"\n  }\n}\n')
 
-    expect(addScripts(path, scripts)).toEqual(['visual:update'])
-    expect(JSON.parse(readFileSync(path, 'utf8')).scripts).toEqual({
-      'visual:test': 'mine',
-      'visual:update': 'visual-check update',
+    expect(setScripts(path, scripts)).toEqual({
+      added: ['visual:update'],
+      replaced: [{ name: 'visual:test', previous: 'mine' }],
     })
+    expect(readFileSync(path, 'utf8')).toBe(
+      [
+        '{',
+        '  "scripts": {',
+        '    "visual:test": "visual-check test",',
+        '    "build": "tsc",',
+        '    "visual:update": "visual-check update"',
+        '  }',
+        '}',
+        '',
+      ].join('\n'),
+    )
   })
 
-  it('leaves the file untouched when nothing is added', () => {
-    const text = '{"scripts":{"visual:test":"a","visual:update":"b"}}'
+  it('gives a replaced script that is not a text as JSON', () => {
+    const path = manifestWith('{"scripts":{"a":["x"]}}')
+
+    expect(setScripts(path, { a: 'b' })).toEqual({ added: [], replaced: [{ name: 'a', previous: '["x"]' }] })
+  })
+
+  it('leaves the file untouched when every script is already set', () => {
+    const text = '{"scripts":{"visual:test":"visual-check test","visual:update":"visual-check update"}}'
     const path = manifestWith(text)
     const past = new Date(1_000_000_000_000)
 
     utimesSync(path, past, past)
 
-    expect(addScripts(path, scripts)).toEqual([])
+    expect(setScripts(path, scripts)).toEqual({ added: [], replaced: [] })
     expect(readFileSync(path, 'utf8')).toBe(text)
     expect(statSync(path).mtimeMs).toBe(past.getTime())
   })
@@ -306,7 +323,7 @@ describe('addScripts', () => {
   it('throws when scripts is not an object', () => {
     const path = manifestWith('{"scripts":"nope"}')
 
-    expect(() => addScripts(path, scripts)).toThrow(
+    expect(() => setScripts(path, scripts)).toThrow(
       new Error(`The "scripts" field of ${path} is not an object, so init can't add scripts to it.`),
     )
   })
@@ -314,7 +331,7 @@ describe('addScripts', () => {
   it('throws when scripts is an array', () => {
     const path = manifestWith('{"scripts":[]}')
 
-    expect(() => addScripts(path, scripts)).toThrow(
+    expect(() => setScripts(path, scripts)).toThrow(
       new Error(`The "scripts" field of ${path} is not an object, so init can't add scripts to it.`),
     )
   })
@@ -322,7 +339,7 @@ describe('addScripts', () => {
   it.each(['[]', 'null', '"text"'])('throws when the file is %s instead of an object', (text) => {
     const path = manifestWith(text)
 
-    expect(() => addScripts(path, scripts)).toThrow(
+    expect(() => setScripts(path, scripts)).toThrow(
       new Error(`${path} is not a JSON object, so init can't add scripts to it.`),
     )
     expect(readFileSync(path, 'utf8')).toBe(text)

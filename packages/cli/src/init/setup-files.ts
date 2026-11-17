@@ -163,12 +163,40 @@ function ownScriptsOf(manifest: Record<string, unknown>, manifestPath: string): 
 }
 
 /**
- * Adds the scripts a `package.json` lacks and returns the names it added, in the given order. An existing script is
- * never changed. The file keeps its indentation, its line endings (LF or CRLF), its key order and its trailing
- * newline (or lack of one). When nothing is added, the file isn't written. Throws when the file isn't a JSON object or
+ * A script `init` replaced in `package.json`.
+ */
+export interface ReplacedScript {
+  /**
+   * The script's name.
+   */
+  name: string
+  /**
+   * What the script ran before.
+   */
+  previous: string
+}
+
+/**
+ * The scripts `init` changed in `package.json`.
+ */
+export interface ScriptChanges {
+  /**
+   * The names of the scripts it added, in the given order.
+   */
+  added: string[]
+  /**
+   * The scripts it replaced, in the given order.
+   */
+  replaced: ReplacedScript[]
+}
+
+/**
+ * Sets the scripts of a `package.json`: adds the missing ones and replaces the ones that run something else. Gives
+ * what it changed. The file keeps its indentation, its line endings (LF or CRLF), its key order and its trailing
+ * newline (or lack of one). When nothing changes, the file isn't written. Throws when the file isn't a JSON object or
  * its `scripts` isn't one.
  */
-export function addScripts(manifestPath: string, scripts: Record<string, string>): string[] {
+export function setScripts(manifestPath: string, scripts: Record<string, string>): ScriptChanges {
   const text = readFileSync(manifestPath, 'utf8')
   const manifest: unknown = JSON.parse(text)
 
@@ -177,22 +205,26 @@ export function addScripts(manifestPath: string, scripts: Record<string, string>
   }
 
   const existing = ownScriptsOf(manifest, manifestPath) ?? {}
-  const added = Object.keys(scripts).filter((name) => !Object.hasOwn(existing, name))
+  const changes: ScriptChanges = { added: [], replaced: [] }
 
-  if (added.length === 0) {
-    return []
+  for (const [name, command] of Object.entries(scripts)) {
+    const previous = existing[name]
+
+    if (!Object.hasOwn(existing, name)) {
+      changes.added.push(name)
+    } else if (previous !== command) {
+      changes.replaced.push({ name, previous: typeof previous === 'string' ? previous : JSON.stringify(previous) })
+    }
   }
 
-  const merged: Record<string, unknown> = { ...existing }
-
-  for (const name of added) {
-    merged[name] = scripts[name]
+  if (changes.added.length === 0 && changes.replaced.length === 0) {
+    return changes
   }
 
-  manifest.scripts = merged
+  manifest.scripts = { ...existing, ...scripts }
   const json = JSON.stringify(manifest, null, indentationOf(text)) + (text.endsWith('\n') ? '\n' : '')
 
   writeFileSync(manifestPath, text.includes('\r\n') ? json.replaceAll('\n', '\r\n') : json)
 
-  return added
+  return changes
 }

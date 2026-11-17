@@ -122,7 +122,7 @@ Rules for the keys:
 
 1. **Which Storybooks to include.** A checklist with all ticked, shown only when there's more than one.
 2. **For each Storybook:** its name (the package name without its scope, or the folder name), its URL, and its start command when none was found.
-3. **Script names,** `visual:test` and `visual:update` by default.
+3. **Script names,** `visual:test` and `visual:update` by default. A name another script has replaces that script, unless it starts a Storybook.
 4. **"Install the agent skill?"**, yes by default.
 5. **"Add the Storybook addon?"** A checklist of the chosen Storybooks on 10, all ticked, or one item when there's only one. It's shown only when at least one is on 10. Storybook 9 and 11 entries are skipped with a note.
 
@@ -141,13 +141,13 @@ Rules:
 - **The root `.visual-check/.gitignore`.**
 - **Dependencies,** as [Packages](01-packages.md) lists them. Under Rush it prints the install steps instead.
 - **The addon:** for each ticked Storybook it runs `storybook add @visual-check/storybook-addon@<cli version>` in that Storybook's package. If that fails, it warns, prints the command and carries on.
-- **The two npm scripts.**
+- **The two npm scripts.** One that replaces a script is listed with what that script ran.
 - **The agent skill** ([Agent skill](16-agent-skill.md)).
 
 What it never does:
 
 - edit `preview.*`, and it edits `main.*` only through `storybook add`;
-- edit existing scripts, `turbo.json`, `nx.json` or the root `.gitignore`;
+- edit other scripts, `turbo.json`, `nx.json` or the root `.gitignore`;
 - pull the image, need a running Storybook or capture anything.
 
 Run again, `init`:
