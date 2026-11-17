@@ -115,14 +115,14 @@ describe('stoppedTestOf', () => {
     })
   })
 
-  it('prints the error document alone on stdout with --reporter json', async () => {
+  it('prints the error document alone on stdout with --reporter json, the human lines on stderr', async () => {
     const project = createProject()
     const output = await stoppedTestOf(stopIn(project), testIn(project, 'json'))
 
     expect(output).toEqual({
       exitCode: 2,
       stdout: `${reportJsonOf(readReport(project))}\n`,
-      stderr: 'Warning.\nThe browser exited.\n',
+      stderr: '✓ web  a  12 ms\nWarning.\nThe browser exited.\n',
       reportLine,
     })
   })
@@ -131,7 +131,7 @@ describe('stoppedTestOf', () => {
     const project = createProject()
     const output = await stoppedTestOf({ ...stopIn(project), configPath: undefined }, testIn(project, 'json'))
 
-    expect(output.stderr).toBe('Warning.\nThe browser exited.\n')
+    expect(output.stderr).toBe('✓ web  a  12 ms\nWarning.\nThe browser exited.\n')
     expect(output.reportLine).toBeUndefined()
     expect(JSON.parse(output.stdout)).toMatchObject({ reportDir: null, error: { message: 'The browser exited.' } })
     expect(readdirSync(project).sort()).toEqual(['.git', 'visual-check.config.mjs'])
@@ -145,7 +145,7 @@ describe('stoppedTestOf', () => {
     const output = await stoppedTestOf(stopIn(project), testIn(project, 'json'))
 
     expect(output.stderr).toBe(
-      'Warning.\nThe browser exited.\n' +
+      '✓ web  a  12 ms\nWarning.\nThe browser exited.\n' +
         "visual-check couldn't clear .visual-check/report: ENOTDIR: not a directory. " +
         'Check that visual-check can remove it.\n',
     )
@@ -166,7 +166,7 @@ describe('stoppedUpdateOf', () => {
     expect(readdirSync(project).sort()).toEqual(['.git', 'visual-check.config.mjs'])
   })
 
-  it("prints update's error document alone on stdout with --reporter json, with no report folder", () => {
+  it("prints update's error document alone on stdout with --reporter json, the human lines on stderr", () => {
     const project = createProject()
     const output = stoppedUpdateOf(stopIn(project), {
       version: '1.2.3',
@@ -174,7 +174,7 @@ describe('stoppedUpdateOf', () => {
     })
     const report = JSON.parse(output.stdout) as UpdateReport
 
-    expect(output.stderr).toBe('Warning.\nThe browser exited.\n')
+    expect(output.stderr).toBe('✓ web  a  12 ms\nWarning.\nThe browser exited.\n')
     expect(output.stdout.trimEnd().split('\n')).toHaveLength(1)
     expect(report).toMatchObject({
       command: 'update',

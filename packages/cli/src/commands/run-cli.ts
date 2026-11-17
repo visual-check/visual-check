@@ -200,8 +200,8 @@ export async function runCli(
  * `report.json` holding only the error, naming the Storybooks where nothing answers, and gives the report line for
  * stderr; with no config found, or when the report folder itself is what failed, nothing is written. With
  * `--reporter json`, stdout then holds the error document alone. `update` never touches the report folder. With
- * `--reporter json`, its stdout holds its own document alone, the error document when it exits 2, and its warnings
- * stay on stderr.
+ * `--reporter json`, its stdout holds its own document alone, the error document when it exits 2. Whatever the
+ * command and exit code, `--reporter json` moves the human lines to stderr, before what the run prints there.
  *
  * @throws {Error} Any error besides the problems that stop the run with exit 2.
  */
@@ -495,8 +495,9 @@ async function clearReportProblemOf(
 
 /**
  * Writes the report of a `test` that exits 0 or 1, then gives the report's path as the report line for stdout. With
- * `--reporter json` stdout holds the report's JSON document alone and the report line is for stderr. When the report
- * can't be written, the run stops with exit 2 with what went wrong after its stderr, and no error report is written.
+ * `--reporter json` stdout holds the report's JSON document alone, the human lines move to stderr, and the report
+ * line is for stderr. When the report can't be written, the run stops with exit 2 with what went wrong after its
+ * stderr, and no error report is written.
  *
  * @throws {Error} Any error besides a `ReportError`.
  */

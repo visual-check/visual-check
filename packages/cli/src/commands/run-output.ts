@@ -70,7 +70,7 @@ export interface RunOutput {
 
 /**
  * Composes what a `test` that wrote its report prints. With `--reporter json`, stdout holds the report's JSON document
- * alone, the human lines are dropped, stderr keeps its text, and the report line goes on stderr. With any other
+ * alone, the human lines move to stderr, before its own text, and the report line goes on stderr. With any other
  * reporter, both streams keep their text and the report line goes on stdout.
  */
 export function cliOutputOf(
@@ -80,11 +80,7 @@ export function cliOutputOf(
   reportLine: string,
 ): RunOutput {
   if (reporter === 'json') {
-    return {
-      stdout: `${reportJsonOf(report)}\n`,
-      stderr: output.stderr,
-      reportLine: { stream: 'stderr', text: reportLine },
-    }
+    return { ...jsonOutputOf(output, report), reportLine: { stream: 'stderr', text: reportLine } }
   }
 
   return { stdout: output.stdout, stderr: output.stderr, reportLine: { stream: 'stdout', text: reportLine } }
@@ -92,9 +88,9 @@ export function cliOutputOf(
 
 /**
  * Composes what a run prints when stdout doesn't end with the report line: a `test` that exits 2, and every `update`.
- * stderr keeps its text, and `reportLine`, given when a `test` wrote its error report, goes on stderr. With
- * `--reporter json`, stdout holds the report's JSON document alone and the human lines are dropped. With any other
- * reporter, stdout keeps them.
+ * `reportLine`, given when a `test` wrote its error report, goes on stderr. With `--reporter json`, stdout holds the
+ * report's JSON document alone and the human lines move to stderr, before its own text. With any other reporter, both
+ * streams keep their text.
  */
 export function documentOutputOf(
   output: { stdout: string; stderr: string },
@@ -102,16 +98,21 @@ export function documentOutputOf(
   reporter: Reporter | undefined,
   reportLine: string | undefined,
 ): RunOutput {
-  const streams = {
-    stdout: reporter === 'json' ? `${reportJsonOf(report)}\n` : output.stdout,
-    stderr: output.stderr,
-  }
+  const streams = reporter === 'json' ? jsonOutputOf(output, report) : { stdout: output.stdout, stderr: output.stderr }
 
   if (reportLine === undefined) {
     return streams
   }
 
   return { ...streams, reportLine: { stream: 'stderr', text: reportLine } }
+}
+
+/**
+ * Gives what a run prints with `--reporter json`: the report's JSON document alone on stdout, which is why the human
+ * lines move to stderr, before its own text.
+ */
+function jsonOutputOf(output: { stdout: string; stderr: string }, report: Report): { stdout: string; stderr: string } {
+  return { stdout: `${reportJsonOf(report)}\n`, stderr: `${output.stdout}${output.stderr}` }
 }
 
 /**

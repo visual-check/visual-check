@@ -3018,8 +3018,9 @@ async function checkReportJsonAndErrors(): Promise<string[]> {
 /**
  * Copies the committed baselines into the folder's `baselines/`, adds a stray copy of the card story's baseline that no
  * story calls for, and runs `test --reporter json` on the card story alone. It exits 1 for the orphan, its stdout is
- * `report.json` exactly, one document on one line, and its stderr's last line is the report line. The report counts
- * the card story passed and the orphan, and lists the orphan with no story and its baseline copied into the report.
+ * `report.json` exactly, one document on one line, its stderr holds the human lines from the header on, and its
+ * stderr's last line is the report line. The report counts the card story passed and the orphan, and lists the orphan
+ * with no story and its baseline copied into the report.
  */
 async function jsonReporterProblems(folder: string): Promise<string[]> {
   const { storyId, filter, orphan } = reportJson
@@ -3041,6 +3042,7 @@ async function jsonReporterProblems(folder: string): Promise<string[]> {
       ...(isReportJson && run.stdout.split('\n').length === 2
         ? []
         : [`stdout isn't report.json's one document${outputOf(run.stdout)}`]),
+      ...problemUnless(headerCountPattern.test(run.stderr), `stderr doesn't hold test's header${outputOf(run.stderr)}`),
       ...reportLineProblems(run, folder, 'stderr'),
       ...reportProblems(folder, (report) => [
         ...reportOutcomeProblems(report, { [storyId]: 'passed' }, folder, 1),

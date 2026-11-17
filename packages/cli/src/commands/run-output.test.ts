@@ -42,10 +42,10 @@ describe('cliOutputOf', () => {
     },
   )
 
-  it('puts only the document on stdout for json, and gives the report line for stderr', () => {
+  it('puts only the document on stdout for json, the human lines then the rest on stderr, and the report line for stderr', () => {
     expect(cliOutputOf(result, report, 'json', line)).toEqual({
       stdout: `${reportJsonOf(report)}\n`,
-      stderr: 'warning\n',
+      stderr: '✓ web  a  passed\nwarning\n',
       reportLine: { stream: 'stderr', text: line },
     })
   })
@@ -85,10 +85,10 @@ describe('documentOutputOf', () => {
     })
   })
 
-  it('puts only the document on stdout for json, dropping the human lines', () => {
+  it('puts only the document on stdout for json, and the human lines on stderr before the rest', () => {
     expect(documentOutputOf(result, report, 'json', undefined)).toEqual({
       stdout: `${reportJsonOf(report)}\n`,
-      stderr: 'Boom.\n',
+      stderr: '✓ web  a  passed\nBoom.\n',
     })
   })
 })

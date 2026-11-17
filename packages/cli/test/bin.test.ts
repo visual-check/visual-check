@@ -548,7 +548,7 @@ describe('visual-check binary reaching Storybooks', () => {
     )
   })
 
-  it('prints exactly one JSON document on stdout for test --reporter json, the report line on stderr', async () => {
+  it('prints exactly one JSON document on stdout for test --reporter json, the rest on stderr', async () => {
     const url = await startStorybookServer({ c: entryOf('button--primary:test', { subtype: 'test' }) })
     const project = createProject({
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
@@ -573,7 +573,9 @@ describe('visual-check binary reaching Storybooks', () => {
       warnings: [],
       error: null,
     } satisfies TestReport)
-    expect(result.stderr).toBe('Report: .visual-check/report/report.json\n')
+    expect(result.stderr).toBe(
+      `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed\nReport: .visual-check/report/report.json\n`,
+    )
   })
 
   it('reaches the browser to read the per-story options of every story, even when --filter selects none', async () => {
