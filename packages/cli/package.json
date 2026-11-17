@@ -10,7 +10,8 @@
     "node": ">=22"
   },
   "files": [
-    "dist"
+    "dist",
+    "fallow-graph.json"
   ],
   "exports": {
     ".": {
