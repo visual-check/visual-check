@@ -76,13 +76,14 @@ function setUp(
 /**
  * Runs the copied binary in the temporary folder, with `test` unless the case gives arguments. The user agent is unset
  * unless the case gives one, because Vitest runs under pnpm. NODE_PATH is unset too, because pnpm points it at the
- * workspace's node_modules.
+ * workspace's node_modules, and so is `GITHUB_STEP_SUMMARY`, so no run writes the step summary of a CI job.
  */
 function run(folder: string, options: { arguments?: string[]; userAgent?: string; ci?: boolean } = {}) {
   const environment = { ...process.env }
 
   delete environment.npm_config_user_agent
   delete environment.NODE_PATH
+  delete environment.GITHUB_STEP_SUMMARY
 
   if (options.userAgent !== undefined) {
     environment.npm_config_user_agent = options.userAgent

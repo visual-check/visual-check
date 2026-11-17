@@ -78,4 +78,5 @@ packages/cli/src/
   sharding/
   report/
   reporter/             the reporters' choice, progress stream, log lines and test's end block
+  step-summary/         adapter: GitHub's step summary file
 ```

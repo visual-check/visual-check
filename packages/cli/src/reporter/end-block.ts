@@ -1,6 +1,12 @@
 import { join } from 'node:path'
 import { displayPathOf } from '../report/display-path.js'
-import { type ReportConsoleLevel, reportDir, type TestReport, type TestReportEntry } from '../report/report-document.js'
+import {
+  type ReportConsoleLevel,
+  reportDir,
+  type TestReport,
+  type TestReportCounts,
+  type TestReportEntry,
+} from '../report/report-document.js'
 import { countsLineOf, orphanLabelOf } from './counts-line.js'
 import { durationOf } from './duration.js'
 
@@ -23,9 +29,11 @@ interface EndBlockContext {
 }
 
 /**
- * The statuses of the entries the end block lists as failures.
+ * The statuses of the `test` entries that count as failures: the end block and the step summary list them.
+ *
+ * @public
  */
-const failureStatuses: readonly TestReportEntry['status'][] = ['differs', 'broken', 'missing', 'orphan']
+export const failureStatuses: readonly TestReportEntry['status'][] = ['differs', 'broken', 'missing', 'orphan']
 
 /**
  * The console levels a broken story's failure lists.
@@ -127,10 +135,12 @@ function flakyBlockOf(report: TestReport): string[] {
 }
 
 /**
- * Builds the counts line of a `test`: passed, saying how many are flaky when any is, then the snapshots that differ,
- * the broken and missing ones and the orphans, leaving out zero counts except the passed.
+ * Builds the counts line of a `test`, without how long it took: passed, saying how many are flaky when any is, then the
+ * snapshots that differ, the broken and missing ones and the orphans, leaving out zero counts except the passed.
+ *
+ * @public
  */
-function testCountsLineOf({ counts }: TestReport): string {
+export function testCountsLineOf(counts: TestReportCounts): string {
   return countsLineOf([
     [counts.flaky > 0 ? `passed (${counts.flaky} flaky)` : 'passed', counts.passed],
     ['differs', counts.differs],
@@ -152,6 +162,6 @@ export function testEndLinesOf(report: TestReport, context: EndBlockContext): st
   return [
     ...failuresBlockOf(report, context),
     ...flakyBlockOf(report),
-    `${testCountsLineOf(report)} · ${durationOf(context.elapsedMs)}`,
+    `${testCountsLineOf(report.counts)} · ${durationOf(context.elapsedMs)}`,
   ]
 }

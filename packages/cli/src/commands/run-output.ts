@@ -61,13 +61,19 @@ export interface RunOutput {
    * The line written after both streams: the report's path. Absent when no report was written.
    */
   reportLine?: ReportLine
+  /**
+   * The report, or `update`'s document, the run built, which the step summary is written from. Absent for help,
+   * version, init and a usage error that names no run.
+   */
+  report?: Report
 }
 
 /**
  * Composes what a run prints from what it printed on each stream, its report or document, and its report line when it
  * wrote a report, given with the stream a human reporter puts it on: stdout for a `test` that exits 0 or 1, else
  * stderr. With `--reporter json`, stdout holds the JSON document alone, so the human lines move to stderr, before its
- * own text, and the report line goes on stderr. With any other reporter, both streams keep their text.
+ * own text, and the report line goes on stderr. With any other reporter, both streams keep their text. The report
+ * comes along, for the step summary.
  */
 export function runOutputOf(
   output: { stdout: string; stderr: string },
@@ -81,10 +87,14 @@ export function runOutputOf(
       : { stdout: output.stdout, stderr: output.stderr }
 
   if (reportLine === undefined) {
-    return streams
+    return { ...streams, report }
   }
 
-  return { ...streams, reportLine: reporter === 'json' ? { stream: 'stderr', text: reportLine.text } : reportLine }
+  return {
+    ...streams,
+    reportLine: reporter === 'json' ? { stream: 'stderr', text: reportLine.text } : reportLine,
+    report,
+  }
 }
 
 /**

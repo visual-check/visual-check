@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { availableParallelism, totalmem } from 'node:os'
-import { dirname } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { checkBrowserPackage } from '../browser/browser-package.js'
 import { runImageOf } from '../browser/browser-version.js'
 import { chromeForTestingPlatformOf } from '../browser/chrome-for-testing-platform.js'
@@ -23,11 +23,13 @@ import { createRunCommand, type RunCommand } from '../init/run-command.js'
 import { type InitResult, type InitTools, runInit } from '../init/run-init.js'
 import { plainSetupProgress, type SetupProgress } from '../init/setup-progress.js'
 import { type FindUnlistedDependencies, findUnlistedDependencies } from '../init/unlisted-dependencies.js'
+import type { Report } from '../report/report-document.js'
 import { clearReport, ReportError, reportFolderOf, writeReportJson } from '../report/report-folder.js'
 import { testEndLinesOf } from '../reporter/end-block.js'
 import { logReporterOf } from '../reporter/log-reporter.js'
 import { reporterOf } from '../reporter/reporter-choice.js'
 import type { RunReporter } from '../reporter/run-event.js'
+import { appendStepSummary, StepSummaryError } from '../step-summary/step-summary.js'
 import type { Story } from '../storybook/read-stories.js'
 import { type BrowserPlace, browserPlaceOf } from './browser-route.js'
 import { checkStorybooks } from './check-storybooks.js'
@@ -78,11 +80,22 @@ Other options:
  *
  * @public
  */
-export interface CliResult extends RunOutput {
+export interface CliResult extends Omit<RunOutput, 'report'> {
   /**
    * The process exit code.
    */
   exitCode: number
+}
+
+/**
+ * What a `test` or `update` run produced: the CLI's result, with the report or document it built.
+ */
+interface RunResult extends CliResult {
+  /**
+   * The report, or `update`'s document, which the step summary is written from. Absent for a usage error that names
+   * no run.
+   */
+  report?: Report
 }
 
 /**
@@ -206,7 +219,8 @@ export interface RunCliOptions {
  * code 2. A usage error of a `test` command line, even one whose flags fail to parse, writes its error report beside
  * the config the run would load. Once a `test` or `update` has loaded its config, an error that is a bug exits 2 too,
  * with its stack trace on stderr, as an error report for `test` and an error document with `--reporter json`. Other
- * errors are thrown.
+ * errors are thrown. Whenever `GITHUB_STEP_SUMMARY` is set, every `test` and `update` run, a usage error that names one
+ * included, appends its step summary to the file it names, whatever the reporter.
  *
  * @public
  */
@@ -228,11 +242,15 @@ export async function runCli(
         return await runInitCommand(commandLine.options.yes, environment, cwd, options)
       case 'test':
       case 'update':
-        return await runTestOrUpdate(commandLine.command, commandLine.options, environment, cwd, options)
+        return await withStepSummary(
+          await runTestOrUpdate(commandLine.command, commandLine.options, environment, cwd, options),
+          environment,
+          cwd,
+        )
     }
   } catch (error) {
     if (error instanceof UsageError) {
-      return await usageFailureOf(error, cwd, readCliManifest().version)
+      return await withStepSummary(await usageFailureOf(error, cwd, readCliManifest().version), environment, cwd)
     }
 
     throw error
@@ -281,7 +299,7 @@ async function runTestOrUpdate(
   environment: Record<string, string | undefined>,
   cwd: string,
   cliOptions: RunCliOptions,
-): Promise<CliResult> {
+): Promise<RunResult> {
   const now = cliOptions.now ?? (() => performance.now())
   const startedAt = now()
   const elapsedMs = (): number => now() - startedAt
@@ -320,14 +338,51 @@ async function runTestOrUpdate(
  * Starts each stream of the result with the text the run's reporter wrote to it as it happened and that was kept,
  * since the CLI's caller gave no `write`.
  */
-function withKept(kept: { stdout: string; stderr: string }, result: CliResult): CliResult {
+function withKept(kept: { stdout: string; stderr: string }, result: RunResult): RunResult {
   return { ...result, stdout: `${kept.stdout}${result.stdout}`, stderr: `${kept.stderr}${result.stderr}` }
+}
+
+/**
+ * Appends the step summary of the report or document the run built to the file `GITHUB_STEP_SUMMARY` names, relative
+ * to `cwd`, when it is set, and gives the CLI's result. A summary that can't be written adds a warning to stderr and
+ * leaves the exit code as it is.
+ *
+ * @throws {Error} Any error besides a `StepSummaryError`.
+ */
+async function withStepSummary(
+  result: RunResult,
+  environment: Record<string, string | undefined>,
+  cwd: string,
+): Promise<CliResult> {
+  const { report, ...cliResult } = result
+  const path = environment.GITHUB_STEP_SUMMARY
+
+  if (report === undefined || path === undefined || path === '') {
+    return cliResult
+  }
+
+  try {
+    await appendStepSummary(resolve(cwd, path), report)
+  } catch (error) {
+    if (error instanceof StepSummaryError) {
+      // The path as the environment gives it, which the person set, rather than the resolved one.
+      const warning =
+        `Warning: visual-check couldn't write the GitHub step summary to ${path}: ${error.reason}. ` +
+        "The run's result is unchanged.\n"
+
+      return { ...cliResult, stderr: `${cliResult.stderr}${warning}` }
+    }
+
+    throw error
+  }
+
+  return cliResult
 }
 
 /**
  * How a `test` or `update` ended: finished with exit 0 or 1, its report written for `test`, or stopped with exit 2.
  */
-type RunOutcome = { finished: CliResult } | { stopped: RunStop }
+type RunOutcome = { finished: RunResult } | { stopped: RunStop }
 
 /**
  * What a `test` or `update` run is given: its command, options, environment and folder, what the CLI's caller gives,
@@ -573,13 +628,12 @@ async function snapshotsOutcomeOf(
   }
 
   if (command === 'update') {
-    // update writes no report.json, so its document is built only to be printed.
-    if (options.reporter !== 'json') {
-      return { finished: { exitCode: result.exitCode, ...output } }
-    }
-
+    // update writes no report.json: its document is for --reporter json and the step summary.
     return {
-      finished: { exitCode: result.exitCode, ...runOutputOf(output, updateReportFor(facts), 'json', undefined) },
+      finished: {
+        exitCode: result.exitCode,
+        ...runOutputOf(output, updateReportFor(facts), options.reporter, undefined),
+      },
     }
   }
 
@@ -646,7 +700,7 @@ async function clearReportProblemOf(
  * report is written. An error that is a bug stops it too, after what it printed.
  */
 async function withTestReport(
-  result: CliResult,
+  result: RunResult,
   context: RunContext,
   facts: TestReportFacts,
   checkedOnly: boolean,

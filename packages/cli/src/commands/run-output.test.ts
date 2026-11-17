@@ -32,15 +32,17 @@ describe('runOutputOf', () => {
   const text = 'Report: .visual-check/report/report.json'
 
   it.each([undefined, 'live', 'log'] as const)(
-    'keeps both streams and the report line on the stream given for reporter %s',
+    'keeps both streams, the report line on the stream given and the report for reporter %s',
     (reporter) => {
       expect(runOutputOf(output, report, reporter, { stream: 'stdout', text })).toEqual({
         ...output,
         reportLine: { stream: 'stdout', text },
+        report,
       })
       expect(runOutputOf(output, report, reporter, { stream: 'stderr', text })).toEqual({
         ...output,
         reportLine: { stream: 'stderr', text },
+        report,
       })
     },
   )
@@ -52,6 +54,7 @@ describe('runOutputOf', () => {
         stdout: `${reportJsonOf(report)}\n`,
         stderr: '✓ web  a  passed\nwarning\n',
         reportLine: { stream: 'stderr', text },
+        report,
       })
     },
   )
@@ -63,7 +66,10 @@ describe('runOutputOf', () => {
     },
   )
 
-  it('gives only the streams, whatever else the output it is given holds', () => {
-    expect(runOutputOf({ ...output, message: 'Boom.' } as typeof output, report, 'log', undefined)).toEqual(output)
+  it('gives only the streams and the report, whatever else the output it is given holds', () => {
+    expect(runOutputOf({ ...output, message: 'Boom.' } as typeof output, report, 'log', undefined)).toEqual({
+      ...output,
+      report,
+    })
   })
 })

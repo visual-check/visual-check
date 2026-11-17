@@ -1712,12 +1712,14 @@ function baselineProblems(written: string, keys: string[]): string[] {
 
 /**
  * The environment without `CI`, which `update` refuses to run under, and under which `test` stops before it captures
- * when its consistency check finds anything. It's what every run of the CLI gets unless a case gives its own.
+ * when its consistency check finds anything, and without `GITHUB_STEP_SUMMARY`, so no run writes the step summary of
+ * the CI job running these tests. It's what every run of the CLI gets unless a case gives its own.
  */
 function localEnvironment(): NodeJS.ProcessEnv {
   const environment = { ...process.env }
 
   delete environment.CI
+  delete environment.GITHUB_STEP_SUMMARY
 
   return environment
 }

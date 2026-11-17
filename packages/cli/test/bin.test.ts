@@ -45,8 +45,8 @@ interface CaseOptions {
    */
   cwd?: string
   /**
-   * What the case adds to the environment. `CI` is stripped from the inherited environment unless it is given here, so
-   * a case never inherits `CI=true` from a CI runner.
+   * What the case adds to the environment. `CI` and `GITHUB_STEP_SUMMARY` are stripped from the inherited environment
+   * unless they are given here, so a case never inherits `CI=true` from a CI runner nor writes its step summary.
    */
   env?: Record<string, string>
   /**
@@ -75,8 +75,8 @@ writeFileSync(
 )
 
 /**
- * Builds the spawn options for a case: the inherited environment without `CI`, plus what the case adds, and the
- * timeout.
+ * Builds the spawn options for a case: the inherited environment without `CI` and `GITHUB_STEP_SUMMARY`, plus what the
+ * case adds, and the timeout.
  */
 function spawnOptionsOf(options: CaseOptions) {
   const environment = { ...process.env, ...options.env }
@@ -85,6 +85,10 @@ function spawnOptionsOf(options: CaseOptions) {
 
   if (options.env?.CI === undefined) {
     delete environment.CI
+  }
+
+  if (options.env?.GITHUB_STEP_SUMMARY === undefined) {
+    delete environment.GITHUB_STEP_SUMMARY
   }
 
   return { env: environment, timeout, ...(options.cwd === undefined ? {} : { cwd: options.cwd }) }
@@ -620,6 +624,37 @@ describe('visual-check binary reaching Storybooks', () => {
       `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed · N\nReport: .visual-check/report/report.json\n`,
     )
     expect(result.stderr).toBe('')
+  })
+
+  it('writes the step summary of a test, in log without a TTY, its header on stdout with no colour', async () => {
+    const url = await startStorybookServer({ c: entryOf('button--primary:test', { subtype: 'test' }) })
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
+      'button.stories.tsx': '',
+    })
+    const summary = join(project, 'summary.md')
+    const result = await runAsynchronously({ cwd: project, env: { GITHUB_STEP_SUMMARY: summary } }, 'test')
+
+    expect(result.status).toBe(0)
+    expect(readFileSync(summary, 'utf8')).toBe(`### visual-check ${version} · test\n\n0 passed\n`)
+    expect(result.stdout.startsWith(`visual-check ${version} · test · 0 snapshots · 4 workers\n`)).toBe(true)
+    // The escape every ANSI sequence starts with.
+    expect(result.stdout + result.stderr).not.toContain('\u001b[')
+  })
+
+  it('writes the error to the step summary of a test whose Storybook is down', async () => {
+    const down = await takeUnusedUrl()
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${down}' } } }\n`,
+    })
+    const summary = join(project, 'summary.md')
+    const result = await runAsynchronously({ cwd: project, env: { GITHUB_STEP_SUMMARY: summary } }, 'test')
+
+    expect(result.status).toBe(2)
+    expect(readFileSync(summary, 'utf8')).toMatch(
+      new RegExp(`^### visual-check ${version} · test\\n\\nThe run stopped with exit code 2:\\n\\n {4}`),
+    )
+    expect(readFileSync(summary, 'utf8')).toContain(`Storybook web doesn't answer at ${down}/index.json (ECONNREFUSED)`)
   })
 
   it("ends the run's output with the report line, after a warning on standard error", async () => {
