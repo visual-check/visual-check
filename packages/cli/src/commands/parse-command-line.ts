@@ -1,5 +1,6 @@
 import { parseArgs } from 'node:util'
 import { findStorybookUrlProblem, mayHoldLogin, serveStorybookFix } from '../config/find-storybook-url-problem.js'
+import type { Reporter } from '../reporter/reporter-choice.js'
 import type { Shard } from '../sharding/shard.js'
 
 /**
@@ -50,11 +51,6 @@ export interface UsageErrorRun {
  * Which stories a run covers. `default` is no selection flag: every story until affected stories exist.
  */
 export type Selection = { kind: 'default' } | { kind: 'all' } | { kind: 'filter'; pattern: RegExp }
-
-/**
- * How a run reports: `live` and `log` print the human output, `json` prints the report's JSON document on stdout.
- */
-export type Reporter = 'live' | 'log' | 'json'
 
 /**
  * The options `test` and `update` share.

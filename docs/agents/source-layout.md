@@ -77,4 +77,5 @@ packages/cli/src/
   affected-stories/     adapter: git and Fallow's graph
   sharding/
   report/
+  reporter/             the reporters' choice, progress stream, log lines and test's end block
 ```

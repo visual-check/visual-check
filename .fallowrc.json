@@ -42,6 +42,7 @@
       { "name": "cli/docs-site", "patterns": ["packages/cli/src/docs-site/**"] },
       { "name": "cli/init", "patterns": ["packages/cli/src/init/**"] },
       { "name": "cli/report", "patterns": ["packages/cli/src/report/**"] },
+      { "name": "cli/reporter", "patterns": ["packages/cli/src/reporter/**"] },
       { "name": "cli/sharding", "patterns": ["packages/cli/src/sharding/**"] },
       { "name": "cli/storybook", "patterns": ["packages/cli/src/storybook/**"] },
       { "name": "cli/system-error", "patterns": ["packages/cli/src/system-error/**"] },
@@ -78,6 +79,7 @@
           "cli/docs-site",
           "cli/init",
           "cli/report",
+          "cli/reporter",
           "cli/sharding",
           "cli/storybook",
           "cli/terminal-ui",
@@ -91,6 +93,7 @@
         "allow": ["cli/baselines", "cli/config", "cli/container", "cli/docs-site", "cli/storybook"]
       },
       { "from": "cli/report", "allow": ["cli/system-error"] },
+      { "from": "cli/reporter", "allow": [] },
       { "from": "cli/sharding", "allow": ["cli/baselines", "cli/storybook"] },
       { "from": "cli/storybook", "allow": [] },
       { "from": "cli/system-error", "allow": [] },

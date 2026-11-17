@@ -23,12 +23,13 @@ import { type InitResult, type InitTools, runInit } from '../init/run-init.js'
 import { plainSetupProgress, type SetupProgress } from '../init/setup-progress.js'
 import { type FindUnlistedDependencies, findUnlistedDependencies } from '../init/unlisted-dependencies.js'
 import { clearReport, ReportError, reportFolderOf, writeReportJson } from '../report/report-folder.js'
+import { type Reporter, reporterOf } from '../reporter/reporter-choice.js'
 import type { Story } from '../storybook/read-stories.js'
 import { type BrowserPlace, browserPlaceOf } from './browser-route.js'
 import { checkStorybooks } from './check-storybooks.js'
 import { dockerProblemOf } from './docker-problem.js'
 import { createLaunchBrowser, type LaunchBrowser } from './launch-browser.js'
-import { parseCommandLine, type Reporter, type RunOptions, UsageError } from './parse-command-line.js'
+import { parseCommandLine, type RunOptions, UsageError } from './parse-command-line.js'
 import { readImageFit } from './read-image-fit.js'
 import { type RunOutput, reportLineOf, runOutputOf } from './run-output.js'
 import { type TestReportFacts, testReportFor, updateReportFor } from './run-report.js'
@@ -112,6 +113,11 @@ export interface RunCliOptions {
    * container's root, and for `KUBERNETES_SERVICE_HOST`, which Kubernetes sets in every pod. A test gives its answer.
    */
   insideContainer?: boolean
+  /**
+   * Whether standard output is a TTY, which with `CI` unset makes `live` the default reporter. `process.stdout.isTTY`
+   * by default. A test gives its answer.
+   */
+  tty?: boolean
   /**
    * How long after a snapshot's first capture `update` captures the same page again, to check it isn't still changing,
    * in ms. 1,000 by default. A test gives a shorter one.
@@ -251,12 +257,16 @@ export async function runCli(
  */
 async function runTestOrUpdate(
   command: 'test' | 'update',
-  options: RunOptions,
+  parsed: RunOptions,
   environment: Record<string, string | undefined>,
   cwd: string,
   cliOptions: RunCliOptions,
 ): Promise<CliResult> {
   const ci = isCi(environment)
+  const options: RunOptions = {
+    ...parsed,
+    reporter: reporterOf(parsed.reporter, { ci, tty: cliOptions.tty ?? process.stdout.isTTY === true }),
+  }
   const outcome =
     command === 'update' && ci
       ? stoppedBy(

@@ -1,6 +1,6 @@
 import { join, relative, sep } from 'node:path'
 import { type Report, reportJsonOf } from '../report/report-document.js'
-import type { Reporter } from './parse-command-line.js'
+import type { Reporter } from '../reporter/reporter-choice.js'
 import type { PlannedSnapshot } from './plan-snapshots.js'
 import type { SnapshotResult, SnapshotStatus } from './snapshot-result.js'
 

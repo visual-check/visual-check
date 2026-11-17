@@ -368,6 +368,18 @@ describe('runCli test report after the consistency check', () => {
     expect(result.reportLine).toEqual(reportOnStderr)
   })
 
+  it('prints the JSON document alone on stdout with --reporter json even in a TTY', async () => {
+    const { project } = await createRun(['a'], { a: defaultRunSnapshot })
+    const result = await runCli(['test', '--reporter', 'json'], {}, project, {
+      ...fakeBrowser().options,
+      tty: true,
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(JSON.parse(result.stdout)).toEqual(readReport(project))
+    expect(result.reportLine).toEqual(reportOnStderr)
+  })
+
   it.each(['live', 'log'])('prints the same with --reporter %s as with no flag', async (reporter) => {
     const plain = await createRun(['a'], { a: defaultRunSnapshot })
     const flagged = await createRun(['a'], { a: defaultRunSnapshot })

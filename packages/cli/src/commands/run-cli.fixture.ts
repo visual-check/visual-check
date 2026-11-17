@@ -81,6 +81,7 @@ export const hostOptions = {
   probeDocker: async () => ({ cpus: 4, memoryBytes: 16 * 2 ** 30, desktop: false }),
   machine: { cpus: 4, memoryBytes: 16 * 2 ** 30 },
   insideContainer: false,
+  tty: false,
   os: 'linux',
   arch: 'x64',
   findKnownContainer: async () => undefined,
