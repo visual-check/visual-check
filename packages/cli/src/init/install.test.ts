@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { addAddons, dependenciesToAddOf, installDependencies } from './install.js'
+import { recordingProgress } from './init-tools.fixture.js'
+import {
+  addAddons,
+  addonTitleOf,
+  dependenciesToAddOf,
+  installDependencies,
+  installTitleOf,
+  packageNameOf,
+} from './install.js'
 import type { RunCommand } from './run-command.js'
+import { plainSetupProgress } from './setup-progress.js'
 
 /**
  * A command the fake `RunCommand` was asked to run.
@@ -98,6 +107,43 @@ describe('dependenciesToAddOf', () => {
   })
 })
 
+/**
+ * A `SetupProgress` that writes nothing, for a test that reads no progress.
+ */
+const silentProgress = plainSetupProgress(() => undefined)
+
+describe('packageNameOf', () => {
+  it('drops the version of a scoped name and keeps its leading @', () => {
+    expect(packageNameOf('@visual-check/cli@0.0.0')).toBe('@visual-check/cli')
+    expect(packageNameOf('@visual-check/chromium@^157.0.0')).toBe('@visual-check/chromium')
+  })
+
+  it('drops the version of an unscoped name', () => {
+    expect(packageNameOf('left-pad@1.3.0')).toBe('left-pad')
+  })
+
+  it('keeps a name that has no version', () => {
+    expect(packageNameOf('@visual-check/cli')).toBe('@visual-check/cli')
+    expect(packageNameOf('left-pad')).toBe('left-pad')
+  })
+})
+
+describe('installTitleOf', () => {
+  it('names the packages without their versions', () => {
+    expect(installTitleOf(['@visual-check/storybook@0.0.0'])).toBe('Install @visual-check/storybook')
+    expect(installTitleOf(['@visual-check/cli@0.0.0', '@visual-check/chromium@^157.0.0'])).toBe(
+      'Install @visual-check/cli and @visual-check/chromium',
+    )
+    expect(installTitleOf(['a@1', 'b@2', 'c@3'])).toBe('Install a, b and c')
+  })
+})
+
+describe('addonTitleOf', () => {
+  it('names the Storybook', () => {
+    expect(addonTitleOf('docs')).toBe('Add the Storybook addon to docs')
+  })
+})
+
 describe('installDependencies', () => {
   const installs = [
     { dir: '/p', specs: ['@visual-check/cli@0.0.0', '@visual-check/chromium@^157.0.0'] },
@@ -106,18 +152,19 @@ describe('installDependencies', () => {
 
   it('reports progress, runs each command in its folder and returns nothing', async () => {
     const { runCommand, calls } = fakeRunCommand()
-    const lines: string[] = []
-    const problem = await installDependencies({
-      installs,
-      packageManager: 'pnpm',
-      runCommand,
-      progress: (text) => lines.push(text),
-    })
+    const { progress, calls: progressCalls } = recordingProgress()
+    const problem = await installDependencies({ installs, packageManager: 'pnpm', runCommand, progress })
 
     expect(problem).toBeUndefined()
-    expect(lines).toEqual([
-      'Running pnpm add --save-dev @visual-check/cli@0.0.0 @visual-check/chromium@^157.0.0\n',
-      'Running pnpm add --save-dev @visual-check/storybook@0.0.0\n',
+    expect(progressCalls).toEqual([
+      [
+        'start',
+        'Install @visual-check/cli and @visual-check/chromium',
+        'pnpm add --save-dev @visual-check/cli@0.0.0 @visual-check/chromium@^157.0.0',
+      ],
+      ['end', 'done'],
+      ['start', 'Install @visual-check/storybook', 'pnpm add --save-dev @visual-check/storybook@0.0.0'],
+      ['end', 'done'],
     ])
     expect(calls).toEqual([
       {
@@ -131,12 +178,21 @@ describe('installDependencies', () => {
 
   it('returns the problem and stops at a failure', async () => {
     const { runCommand, calls } = fakeRunCommand([2])
-    const problem = await installDependencies({ installs, packageManager: 'npm', runCommand, progress: () => {} })
+    const { progress, calls: progressCalls } = recordingProgress()
+    const problem = await installDependencies({ installs, packageManager: 'npm', runCommand, progress })
 
     expect(problem).toBe(
       'npm install --save-dev @visual-check/cli@0.0.0 @visual-check/chromium@^157.0.0 failed with exit code 2. Run it yourself, then run visual-check init again.',
     )
     expect(calls).toHaveLength(1)
+    expect(progressCalls).toEqual([
+      [
+        'start',
+        'Install @visual-check/cli and @visual-check/chromium',
+        'npm install --save-dev @visual-check/cli@0.0.0 @visual-check/chromium@^157.0.0',
+      ],
+      ['end', 'failed'],
+    ])
   })
 
   it('uses the yarn and bun forms', async () => {
@@ -148,13 +204,13 @@ describe('installDependencies', () => {
       installs: [storybookInstall],
       packageManager: 'yarn',
       runCommand: yarn.runCommand,
-      progress: () => {},
+      progress: silentProgress,
     })
     await installDependencies({
       installs: [storybookInstall],
       packageManager: 'bun',
       runCommand: bun.runCommand,
-      progress: () => {},
+      progress: silentProgress,
     })
 
     expect(yarn.calls[0]).toMatchObject({ command: 'yarn', args: ['add', '--dev', '@visual-check/storybook@0.0.0'] })
@@ -167,12 +223,12 @@ describe('addAddons', () => {
 
   it('runs storybook add in the root', async () => {
     const { runCommand, calls } = fakeRunCommand()
-    const lines: string[] = []
+    const { progress, calls: progressCalls } = recordingProgress()
     const warnings = await addAddons({
       ...base,
       addons: [{ configDir: '.storybook', name: 'app' }],
       runCommand,
-      progress: (text) => lines.push(text),
+      progress,
     })
 
     expect(warnings).toEqual([])
@@ -183,7 +239,10 @@ describe('addAddons', () => {
         cwd: '/p',
       },
     ])
-    expect(lines).toEqual(['Running pnpm exec storybook add @visual-check/storybook-addon@0.0.0 --yes\n'])
+    expect(progressCalls).toEqual([
+      ['start', 'Add the Storybook addon to app', 'pnpm exec storybook add @visual-check/storybook-addon@0.0.0 --yes'],
+      ['end', 'done'],
+    ])
   })
 
   it('passes a config folder with -c', async () => {
@@ -196,7 +255,7 @@ describe('addAddons', () => {
         { configDir: '.', name: 'root' },
       ],
       runCommand,
-      progress: () => {},
+      progress: silentProgress,
     })
 
     expect(calls.map(({ args }) => args.slice(3))).toEqual([
@@ -207,6 +266,7 @@ describe('addAddons', () => {
 
   it('warns about a failure and still runs the next addon', async () => {
     const { runCommand, calls } = fakeRunCommand([1])
+    const { progress, calls: progressCalls } = recordingProgress()
     const warnings = await addAddons({
       ...base,
       addons: [
@@ -214,27 +274,42 @@ describe('addAddons', () => {
         { configDir: '.storybook', name: 'app' },
       ],
       runCommand,
-      progress: () => {},
+      progress,
     })
 
     expect(warnings).toEqual([
       'Warning: pnpm exec storybook add @visual-check/storybook-addon@0.0.0 --yes -c docs/.storybook failed, so docs has no addon. Run it yourself to add it.',
     ])
     expect(calls).toHaveLength(2)
+    expect(progressCalls).toEqual([
+      [
+        'start',
+        'Add the Storybook addon to docs',
+        'pnpm exec storybook add @visual-check/storybook-addon@0.0.0 --yes -c docs/.storybook',
+      ],
+      ['end', 'warned'],
+      ['start', 'Add the Storybook addon to app', 'pnpm exec storybook add @visual-check/storybook-addon@0.0.0 --yes'],
+      ['end', 'done'],
+    ])
   })
 
   it('warns when the command throws', async () => {
     const { runCommand } = fakeRunCommand(['throw'])
+    const { progress, calls: progressCalls } = recordingProgress()
     const warnings = await addAddons({
       ...base,
       packageManager: 'npm',
       addons: [{ configDir: '.storybook', name: 'app' }],
       runCommand,
-      progress: () => {},
+      progress,
     })
 
     expect(warnings).toEqual([
       'Warning: npx storybook add @visual-check/storybook-addon@0.0.0 --yes failed, so app has no addon. Run it yourself to add it.',
+    ])
+    expect(progressCalls).toEqual([
+      ['start', 'Add the Storybook addon to app', 'npx storybook add @visual-check/storybook-addon@0.0.0 --yes'],
+      ['end', 'warned'],
     ])
   })
 })

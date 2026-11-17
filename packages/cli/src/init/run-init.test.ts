@@ -8,6 +8,7 @@ import {
   commandsIn,
   gitignore,
   modesFile,
+  type ProgressCall,
   pnpmAdd,
   pnpmAddon,
   pnpmClosingMessage,
@@ -36,6 +37,51 @@ export default defineConfig({
  */
 const dockerFix = "Start or install Docker before you run visual-check update, or set platform: 'host' in the config."
 
+/**
+ * The title of the install step of the pnpm project.
+ */
+const installTitle = 'Install @visual-check/cli, @visual-check/chromium and @visual-check/storybook'
+
+/**
+ * The plan call of the pnpm project.
+ */
+const pnpmPlan: ProgressCall = [
+  'plan',
+  [
+    'Write the files and scripts',
+    installTitle,
+    'Add the Storybook addon to web-app',
+    'Check for unlisted dependencies',
+  ],
+]
+
+/**
+ * The calls to the progress of a run on the pnpm project that gets as far as the install, whose outcome is `install`.
+ */
+function installProgressOf(install: 'done' | 'failed'): ProgressCall[] {
+  return [
+    pnpmPlan,
+    ['start', 'Write the files and scripts'],
+    ['end', 'done'],
+    ['start', installTitle, `${pnpmAdd.command} ${pnpmAdd.args.join(' ')}`],
+    ['end', install],
+  ]
+}
+
+/**
+ * The calls to the progress of a run on the pnpm project that gets to the end, where the addon and the Fallow check
+ * end as given.
+ */
+function fullProgressOf(addon: 'done' | 'warned', check: 'done' | 'warned'): ProgressCall[] {
+  return [
+    ...installProgressOf('done'),
+    ['start', 'Add the Storybook addon to web-app', `${pnpmAddon.command} ${pnpmAddon.args.join(' ')}`],
+    ['end', addon],
+    ['start', 'Check for unlisted dependencies'],
+    ['end', check],
+  ]
+}
+
 afterEach(() => {
   removeProjects()
 })
@@ -56,10 +102,7 @@ describe('runInit', () => {
       'visual:update': 'visual-check update',
     })
     expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddon))
-    expect(record.progress).toEqual([
-      `Running pnpm add --save-dev @visual-check/cli@${cliVersion} @visual-check/chromium@${browserRange} @visual-check/storybook@${cliVersion}\n`,
-      `Running pnpm exec storybook add @visual-check/storybook-addon@${cliVersion} --yes\n`,
-    ])
+    expect(record.progress).toEqual(fullProgressOf('done', 'done'))
     expect(record.probes).toBe(1)
     expect(record.fallowRoots).toEqual([root])
   })
@@ -257,13 +300,15 @@ describe('runInit', () => {
     it('warns when Fallow finds an unlisted dependency', async () => {
       const root = pnpmProject()
       const fallow = [{ name: 'leftpad-zz', paths: ['src/a.js'] }]
-      const result = await runInit(root, toolsOf({}, { fallow }).tools)
+      const { tools, record } = toolsOf({}, { fallow })
+      const result = await runInit(root, tools)
 
       expect(result.exitCode).toBe(0)
       expect(result.stderr).toBe(
         "Warning: Fallow finds imports of packages package.json doesn't list: leftpad-zz (src/a.js). Affected stories follow imports through Fallow's graph, and an alias it can't see, such as one set in viteFinal, shows up this way. List the package, or teach Fallow the alias in its config.\n",
       )
       expectWritten(root, result.stdout)
+      expect(record.progress).toEqual(fullProgressOf('done', 'warned'))
     })
 
     it('warns when storybook add fails, and carries on', async () => {
@@ -277,15 +322,18 @@ describe('runInit', () => {
       )
       expectWritten(root, result.stdout)
       expect(record.fallowRoots).toEqual([root])
+      expect(record.progress).toEqual(fullProgressOf('warned', 'done'))
     })
 
     it('warns when Fallow throws', async () => {
       const root = pnpmProject()
-      const result = await runInit(root, toolsOf({}, { fallow: new Error('Fallow broke.') }).tools)
+      const { tools, record } = toolsOf({}, { fallow: new Error('Fallow broke.') })
+      const result = await runInit(root, tools)
 
       expect(result.exitCode).toBe(0)
       expect(result.stderr).toBe("Warning: Fallow couldn't check this project's imports: Fallow broke.\n")
       expectWritten(root, result.stdout)
+      expect(record.progress).toEqual(fullProgressOf('done', 'warned'))
     })
 
     it('hints at adding a port when the start script sets none, and uses 6006', async () => {
@@ -521,6 +569,7 @@ describe('runInit', () => {
     })
     expect(record.commands).toEqual(commandsIn(root, pnpmAdd))
     expect(record.fallowRoots).toEqual([])
+    expect(record.progress).toEqual(installProgressOf('failed'))
     expect(readText(root, 'visual-check.config.ts')).toBe(webAppConfig)
     expect(readText(root, '.storybook/visual-check.ts')).toBe(modesFile)
     expect(readText(root, '.visual-check/.gitignore')).toBe(gitignore)

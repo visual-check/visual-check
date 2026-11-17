@@ -1,3 +1,4 @@
+import { listOf } from './list-of.js'
 import {
   addDevDependenciesCommandOf,
   type CommandLine,
@@ -9,6 +10,7 @@ import {
 } from './package-manager.js'
 import type { AddonAnswer } from './questions.js'
 import type { RunCommand } from './run-command.js'
+import { runStep, type SetupProgress } from './setup-progress.js'
 import { defaultConfigDir } from './storybook-scripts.js'
 
 /**
@@ -104,6 +106,30 @@ export function dependenciesToAddOf(input: DependenciesToAddInput): Dependencies
 }
 
 /**
+ * Returns the name of a spec, without its version: `@visual-check/cli@0.0.0` gives `@visual-check/cli`. A scoped name
+ * keeps its leading `@`.
+ */
+export function packageNameOf(spec: string): string {
+  const at = spec.lastIndexOf('@')
+
+  return at > 0 ? spec.slice(0, at) : spec
+}
+
+/**
+ * Returns the title of the step that adds the specs.
+ */
+export function installTitleOf(specs: readonly string[]): string {
+  return `Install ${listOf(specs.map(packageNameOf))}`
+}
+
+/**
+ * Returns the title of the step that adds the addon to a Storybook.
+ */
+export function addonTitleOf(name: string): string {
+  return `Add the Storybook addon to ${name}`
+}
+
+/**
  * What `installDependencies` needs.
  */
 interface InstallDependenciesInput {
@@ -120,9 +146,9 @@ interface InstallDependenciesInput {
    */
   runCommand: RunCommand
   /**
-   * Tells the user what is running.
+   * Reports each step as it starts and ends.
    */
-  progress: (text: string) => void
+  progress: SetupProgress
 }
 
 /**
@@ -136,9 +162,12 @@ export async function installDependencies(input: InstallDependenciesInput): Prom
     const commandLine = addDevDependenciesCommandOf(packageManager, specs)
     const shown = commandLineOf(commandLine)
 
-    progress(`Running ${shown}\n`)
-
-    const exitCode = await runCommand(commandLine.command, commandLine.args, dir)
+    const exitCode = await runStep(
+      progress,
+      { title: installTitleOf(specs), command: shown },
+      () => runCommand(commandLine.command, commandLine.args, dir),
+      (code) => (code === 0 ? 'done' : 'failed'),
+    )
 
     if (exitCode !== 0) {
       return `${shown} failed with exit code ${exitCode}. Run it yourself, then run visual-check init again.`
@@ -173,9 +202,9 @@ interface AddAddonsInput {
    */
   runCommand: RunCommand
   /**
-   * Tells the user what is running.
+   * Reports each step as it starts and ends.
    */
-  progress: (text: string) => void
+  progress: SetupProgress
 }
 
 /**
@@ -204,9 +233,12 @@ export async function addAddons(input: AddAddonsInput): Promise<string[]> {
     const commandLine = addonCommandOf(packageManager, cliVersion, configDir)
     const shown = commandLineOf(commandLine)
 
-    progress(`Running ${shown}\n`)
-
-    const exitCode = await runCommand(commandLine.command, commandLine.args, root).catch(() => -1)
+    const exitCode = await runStep(
+      progress,
+      { title: addonTitleOf(name), command: shown },
+      () => runCommand(commandLine.command, commandLine.args, root).catch(() => -1),
+      (code) => (code === 0 ? 'done' : 'warned'),
+    )
 
     if (exitCode !== 0) {
       warnings.push(`Warning: ${shown} failed, so ${name} has no addon. Run it yourself to add it.`)

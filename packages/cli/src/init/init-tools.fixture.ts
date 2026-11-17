@@ -4,6 +4,7 @@ import { listProjectFiles } from './find-storybooks.js'
 import { defaultsPrompter } from './prompter.js'
 import type { RunCommand } from './run-command.js'
 import type { InitTools } from './run-init.js'
+import type { SetupProgress, StepOutcome } from './setup-progress.js'
 import type { UnlistedDependency } from './unlisted-dependencies.js'
 
 /**
@@ -111,6 +112,16 @@ interface RecordedCommand {
 }
 
 /**
+ * A call the fake `SetupProgress` saw: `plan` with the titles, `start` with the title and the command, if any, `output`
+ * with the text, or `end` with the outcome.
+ */
+export type ProgressCall =
+  | readonly ['plan', readonly string[]]
+  | readonly ['start', string, string?]
+  | readonly ['output', string]
+  | readonly ['end', StepOutcome]
+
+/**
  * How the fakes behave.
  */
 interface FakeBehaviour {
@@ -143,9 +154,9 @@ interface FakeRecord {
    */
   commands: RecordedCommand[]
   /**
-   * The progress written, in order.
+   * The calls to the progress, in order.
    */
-  progress: string[]
+  progress: ProgressCall[]
   /**
    * How many times Docker was probed.
    */
@@ -184,6 +195,29 @@ function install(args: readonly string[], cwd: string): void {
 }
 
 /**
+ * Makes a `SetupProgress` that records each call, with the calls it recorded in order.
+ */
+export function recordingProgress(): { progress: SetupProgress; calls: ProgressCall[] } {
+  const calls: ProgressCall[] = []
+  const progress: SetupProgress = {
+    plan: (titles) => {
+      calls.push(['plan', titles])
+    },
+    start: (title, command) => {
+      calls.push(command === undefined ? ['start', title] : ['start', title, command])
+    },
+    output: (text) => {
+      calls.push(['output', text])
+    },
+    end: (outcome) => {
+      calls.push(['end', outcome])
+    },
+  }
+
+  return { progress, calls }
+}
+
+/**
  * Builds the tools of a run: `--yes`, no terminal, Node 22 on Linux, the real git file list, the defaults prompter, and
  * fakes for Docker, the commands and Fallow, behaving as `behaviour` says. `overrides` replaces any of them. Gives the
  * tools with what the fakes see.
@@ -192,7 +226,8 @@ export function toolsOf(
   overrides: Partial<InitTools> = {},
   behaviour: FakeBehaviour = {},
 ): { tools: InitTools; record: FakeRecord } {
-  const record: FakeRecord = { commands: [], progress: [], probes: 0, fallowRoots: [] }
+  const recording = recordingProgress()
+  const record: FakeRecord = { commands: [], progress: recording.calls, probes: 0, fallowRoots: [] }
   const runCommand: RunCommand = (command, args, cwd) => {
     const exitCode = behaviour.exitCodes?.[record.commands.length] ?? 0
 
@@ -227,9 +262,7 @@ export function toolsOf(
         : Promise.resolve(behaviour.fallow ?? [])
     },
     prompter: defaultsPrompter(),
-    progress: (text) => {
-      record.progress.push(text)
-    },
+    progress: recording.progress,
     ...overrides,
   }
 

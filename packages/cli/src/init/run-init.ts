@@ -5,11 +5,12 @@ import { type DetectedProject, detectProject } from './detect-project.js'
 import { type ExistingConfig, existingConfigOf, existingStorybooksOf } from './existing-config.js'
 import type { ListFiles } from './find-storybooks.js'
 import { blockingProblemsOf, dockerWarningOf, versionNotesOf } from './init-checks.js'
-import { addAddons, dependenciesToAddOf, installDependencies } from './install.js'
+import { addAddons, addonTitleOf, dependenciesToAddOf, installDependencies, installTitleOf } from './install.js'
 import { InputEndedError, type Prompter } from './prompter.js'
 import { type Answers, askQuestions } from './questions.js'
 import type { RunCommand } from './run-command.js'
 import { configSourceOf, modesFileSource, setScripts, visualCheckGitignore, writeIfMissing } from './setup-files.js'
+import { runStep, type SetupProgress } from './setup-progress.js'
 import {
   type FindUnlistedDependencies,
   fallowFailureWarningOf,
@@ -71,9 +72,9 @@ export interface InitTools {
    */
   findUnlistedDependencies: FindUnlistedDependencies
   /**
-   * Writes progress as it happens: each command `init` runs, and its output.
+   * Reports the steps after the questions as they happen: each one's start and end, and its command's output.
    */
-  progress: (text: string) => void
+  progress: SetupProgress
 }
 
 /**
@@ -124,6 +125,16 @@ interface Setup {
  * The name of the config `init` writes.
  */
 const configFileName = 'visual-check.config.ts'
+
+/**
+ * The title of the step that writes the files and the scripts.
+ */
+const writeFilesTitle = 'Write the files and scripts'
+
+/**
+ * The title of the step that asks Fallow for unlisted dependencies.
+ */
+const checkUnlistedTitle = 'Check for unlisted dependencies'
 
 /**
  * Sets up visual-check in the project around `cwd`. It detects the project and runs the checks that stop it, before it
@@ -237,21 +248,29 @@ function setupOf(
 async function applySetup(cwd: string, project: DetectedProject, setup: Setup, tools: InitTools): Promise<InitResult> {
   const { packageManager, scripts, addons } = setup.answers
   const { cliVersion, runCommand, progress } = tools
-  const written = writeSetupFiles(project, setup)
-  const writtenLines = writtenLinesOf(written, cwd)
-  const problem = await installDependencies({
-    installs: dependenciesToAddOf({
-      root: project.root,
-      rootManifest: project.manifest,
-      // In a single package, every Storybook belongs to the root package.
-      storybooks: project.storybooks.map(({ packageDir }) => ({ packageDir, manifest: project.manifest })),
-      cliVersion,
-      browserRange: tools.browserRange,
-    }),
-    packageManager,
-    runCommand,
-    progress,
+  const installs = dependenciesToAddOf({
+    root: project.root,
+    rootManifest: project.manifest,
+    // In a single package, every Storybook belongs to the root package.
+    storybooks: project.storybooks.map(({ packageDir }) => ({ packageDir, manifest: project.manifest })),
+    cliVersion,
+    browserRange: tools.browserRange,
   })
+
+  progress.plan([
+    writeFilesTitle,
+    ...installs.map(({ specs }) => installTitleOf(specs)),
+    ...addons.map(({ name }) => addonTitleOf(name)),
+    checkUnlistedTitle,
+  ])
+  const written = await runStep(
+    progress,
+    { title: writeFilesTitle },
+    () => writeSetupFiles(project, setup),
+    () => 'done',
+  )
+  const writtenLines = writtenLinesOf(written, cwd)
+  const problem = await installDependencies({ installs, packageManager, runCommand, progress })
 
   if (problem !== undefined) {
     return { exitCode: 2, stdout: linesOf(writtenLines), stderr: linesOf([...setup.notes, problem]) }
@@ -265,7 +284,14 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
     runCommand,
     progress,
   })
-  const fallowWarnings = await unlistedDependencyNotesOf(project.root, tools.findUnlistedDependencies)
+
+  const fallowWarnings = await runStep(
+    progress,
+    { title: checkUnlistedTitle },
+    () => unlistedDependencyNotesOf(project.root, tools.findUnlistedDependencies),
+    (warnings) => (warnings.length > 0 ? 'warned' : 'done'),
+  )
+
   const closingMessage = closingMessageOf({
     cwd,
     packageManager,

@@ -928,7 +928,9 @@ Other options:
       'node_modules/storybook/package.json': JSON.stringify({ version: '10.6.7' }),
     })
     const commands: string[] = []
+    const written: string[] = []
     const result = await runCli(['init', '--yes'], {}, project, {
+      progress: (text) => written.push(text),
       os: 'linux',
       nodeVersion: '22.23.1',
       probeDocker: hostOptions.probeDocker,
@@ -940,9 +942,14 @@ Other options:
       },
       findUnlistedDependencies: async () => [],
     })
+    const chromiumRange = peerDependencies['@visual-check/chromium']
 
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBe('')
+    expect(written).toEqual([
+      `Running pnpm add --save-dev @visual-check/cli@${version} @visual-check/chromium@${chromiumRange} @visual-check/storybook@${version}\n`,
+      `Running pnpm exec storybook add @visual-check/storybook-addon@${version} --yes\n`,
+    ])
     expect(firstLineOf(result.stdout)).toBe('Wrote visual-check.config.ts')
     expect(result.stdout).toContain('visual-check is set up. Next:\n')
     expect(commands).toEqual([

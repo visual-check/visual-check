@@ -2,6 +2,7 @@ import { dirname, join } from 'node:path'
 import { isFile } from '../config/find-config.js'
 import { docsUrlOf } from '../docs-site/docs-url.js'
 import { relativePathOf } from './find-storybooks.js'
+import { listOf } from './list-of.js'
 import { type PackageManager, runScriptCommandOf } from './package-manager.js'
 import type { Answers } from './questions.js'
 import type { ScriptChanges } from './setup-files.js'
@@ -72,17 +73,6 @@ interface ClosingMessageInput {
  * The extensions a Storybook preview file takes, in the order `init` looks for them.
  */
 const previewExtensions = ['ts', 'tsx', 'js', 'jsx', 'mjs', 'mts', 'cjs', 'cts']
-
-/**
- * Names the items in order: `a`, `a and b`, or `a, b and c`.
- */
-function listOf(items: readonly string[]): string {
-  if (items.length <= 1) {
-    return items.join('')
-  }
-
-  return `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`
-}
 
 /**
  * Lists what `init` wrote: a `Wrote <path>` line per file, a line naming the scripts it added, when it added any, and a

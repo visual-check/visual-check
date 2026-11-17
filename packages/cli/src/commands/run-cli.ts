@@ -19,6 +19,7 @@ import { type ListFiles, listProjectFiles } from '../init/find-storybooks.js'
 import { createTerminalPrompter, defaultsPrompter } from '../init/prompter.js'
 import { createRunCommand, type RunCommand } from '../init/run-command.js'
 import { type InitTools, runInit } from '../init/run-init.js'
+import { plainSetupProgress, type SetupProgress } from '../init/setup-progress.js'
 import { type FindUnlistedDependencies, findUnlistedDependencies } from '../init/unlisted-dependencies.js'
 import { type BrowserPlace, browserPlaceOf } from './browser-route.js'
 import { checkStorybooks } from './check-storybooks.js'
@@ -464,7 +465,7 @@ function readCliManifest(): CliManifest {
  * Gives `init` what it runs with: what the CLI's caller gives, else the defaults.
  */
 function initToolsOf(yes: boolean, cliOptions: RunCliOptions): InitTools {
-  const progress = cliOptions.progress ?? (() => undefined)
+  const progress = plainSetupProgress(cliOptions.progress ?? (() => undefined))
   const { version, browserRange } = readCliManifest()
 
   return {
@@ -502,12 +503,12 @@ function defaultPrompterOf(yes: boolean): InitTools['prompter'] {
  */
 function initAdaptersOf(
   cliOptions: RunCliOptions,
-  progress: (text: string) => void,
+  progress: SetupProgress,
 ): Pick<InitTools, 'probeDocker' | 'listFiles' | 'runCommand' | 'findUnlistedDependencies'> {
   return {
     probeDocker: cliOptions.probeDocker ?? probeDocker,
     listFiles: cliOptions.listFiles ?? listProjectFiles,
-    runCommand: cliOptions.runCommand ?? createRunCommand(progress),
+    runCommand: cliOptions.runCommand ?? createRunCommand((text) => progress.output(text)),
     findUnlistedDependencies: cliOptions.findUnlistedDependencies ?? findUnlistedDependencies,
   }
 }
