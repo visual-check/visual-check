@@ -292,6 +292,20 @@ describe('visual-check binary', () => {
     expect(result.stderr).toContain('Run visual-check --help to see the commands and options.')
   })
 
+  it('prints the error document and writes the error report for test --reporter json with an unknown flag', () => {
+    const project = createProject({
+      'visual-check.config.mjs': "export default { storybooks: { web: { url: 'http://127.0.0.1:6006' } } }\n",
+    })
+    const result = run({ cwd: project }, 'test', '--reporter', 'json', '--bogus')
+    const reportJson = readFileSync(join(project, '.visual-check', 'report', 'report.json'), 'utf8')
+
+    expect(result.status).toBe(2)
+    expect(result.stdout).toBe(reportJson)
+    expect((JSON.parse(reportJson) as TestReport).error?.message).toMatch(/^Unknown option '--bogus'/)
+    expect(result.stderr).toMatch(/^Unknown option '--bogus'/)
+    expect(result.stderr.endsWith('Report: .visual-check/report/report.json\n')).toBe(true)
+  })
+
   it('exits 2 when --all and --filter are given together', () => {
     const result = run({}, 'test', '--all', '--filter', 'x')
 

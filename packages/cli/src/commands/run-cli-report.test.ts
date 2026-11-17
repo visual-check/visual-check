@@ -4,14 +4,19 @@ import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import type { TestReport, TestReportEntry, UpdateReport } from '../report/report-document.js'
 import { greyPng } from '../visual-diff/images.fixture.js'
 import {
+  absentMarkerPath,
+  browserPackage,
   ciStopLine,
   cleanUpRuns,
   createProject,
   createRun,
   defaultRunSnapshot,
   fakeBrowser,
+  fakeDriverOf,
   headerOf,
+  hostOptions,
   installStorybook,
+  newRecord,
   otherSnapshot,
   printed,
   removeMarkerFolder,
@@ -25,7 +30,7 @@ import {
   withoutTimes,
   writeStaleReport,
 } from './run-cli.fixture.js'
-import { runCli } from './run-cli.js'
+import { type RunCliOptions, runCli } from './run-cli.js'
 
 afterEach(cleanUpRuns)
 afterAll(removeMarkerFolder)
@@ -399,7 +404,73 @@ function errorReportOf(error: TestReport['error'], storybooks: TestReport['story
  */
 const writableFix = 'Check that its folder is writable and the disk has room.'
 
+/**
+ * What Node's argument parser says about the unknown flag `--nope`.
+ */
+const unknownFlagMessage =
+  "Unknown option '--nope'. To specify a positional argument starting with a '-', place it at the end of the command " +
+  `after '--', as in '-- "--nope"`
+
+/**
+ * Builds options whose browser throws an error that is a bug, a plain `Error`, when the run reads its version.
+ */
+function buggyBrowserOptions(): RunCliOptions {
+  const driver = fakeDriverOf({ stories: {}, record: newRecord(), version: browserPackage.chromium })
+
+  Object.defineProperty(driver, 'version', {
+    get: () => {
+      throw new Error('A bug in the driver.')
+    },
+  })
+
+  return { ...hostOptions, launchBrowser: async () => driver, imageMarkerPath: absentMarkerPath }
+}
+
 describe('runCli test report on exit 2', () => {
+  it('replaces the report with the error report of an error that is a bug, printing its stack trace', async () => {
+    const { project } = await createRun(['a'])
+
+    writeStaleReport(project)
+
+    const result = await runCli(['test'], {}, project, buggyBrowserOptions())
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr: expect.stringMatching(/^Error: A bug in the driver\.\n {4}at /),
+      reportLine: reportOnStderr,
+    })
+    expect(readdirSync(reportFolderIn(project))).toEqual(['report.json'])
+    expect(readReport(project)).toEqual(
+      errorReportOf({ message: 'A bug in the driver.', storybooks: [] }, [{ name: 'web', url: expect.any(String) }]),
+    )
+  })
+
+  it('prints the error document of an error that is a bug with --reporter json', async () => {
+    const { project } = await createRun(['a'])
+    const result = await runCli(['test', '--reporter', 'json'], {}, project, buggyBrowserOptions())
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stdout).toBe(readFileSync(join(reportFolderIn(project), 'report.json'), 'utf8'))
+    expect(result.stderr).toMatch(/^Error: A bug in the driver\.\n {4}at /)
+    expect(result.reportLine).toEqual(reportOnStderr)
+  })
+
+  it("prints update's error document of an error that is a bug with --reporter json, writing no report", async () => {
+    const { project } = await createRun(['a'])
+    const result = await runCli(['update', '--reporter', 'json'], {}, project, buggyBrowserOptions())
+
+    expect(result.exitCode).toBe(2)
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      command: 'update',
+      exitCode: 2,
+      error: { message: 'A bug in the driver.' },
+    })
+    expect(result.stderr).toMatch(/^Error: A bug in the driver\.\n {4}at /)
+    expect(result.reportLine).toBeUndefined()
+    expect(existsSync(reportFolderIn(project))).toBe(false)
+  })
+
   it('replaces a stale report with one holding the config error, giving the report line for stderr', async () => {
     const { project } = await createRun(['a'], { a: defaultRunSnapshot }, "colour: 'red'")
 
@@ -529,10 +600,27 @@ describe('runCli test report on exit 2', () => {
 
   it('writes nothing for an unknown flag, which stays plain text', async () => {
     const { project } = await createRun(['a'])
-    const result = await runCli(['test', '--nope', '--reporter', 'json'], {}, project)
+    const result = await runCli(['test', '--nope'], {}, project)
 
-    expect(result.stdout).toBe('')
+    expect(result).toEqual({ exitCode: 2, stdout: '', stderr: `${unknownFlagMessage}\n${usageHint}` })
     expect(existsSync(reportFolderIn(project))).toBe(false)
+  })
+
+  it('replaces the report with the error report of an unknown flag with --reporter json, printing its document', async () => {
+    const { project } = await createRun(['a'])
+
+    writeStaleReport(project)
+
+    const result = await runCli(['test', '--nope', '--reporter=json'], {}, project)
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: `${JSON.stringify(errorReportOf({ message: unknownFlagMessage, storybooks: [] }))}\n`,
+      stderr: `${unknownFlagMessage}\n${usageHint}`,
+      reportLine: reportOnStderr,
+    })
+    expect(readdirSync(reportFolderIn(project))).toEqual(['report.json'])
+    expect(readReport(project)).toEqual(errorReportOf({ message: unknownFlagMessage, storybooks: [] }))
   })
 
   it('leaves the report folder untouched when update exits 2', async () => {
@@ -857,6 +945,26 @@ describe('runCli update --reporter json', () => {
       error: { message: result.stderr.trim(), storybooks: [{ name: 'web', url }] },
     })
     expect(existsSync(join(project, '.visual-check'))).toBe(false)
+  })
+
+  it('prints the error document of an unknown flag, leaving the report folder untouched', async () => {
+    const { project } = await createRun(['a'])
+
+    writeStaleReport(project)
+
+    const before = filesIn(reportFolderIn(project))
+    const result = await runCli(['update', '--reporter', 'json', '--nope'], {}, project)
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stderr).toBe(`${unknownFlagMessage}\n${usageHint}`)
+    expect(result.reportLine).toBeUndefined()
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      command: 'update',
+      exitCode: 2,
+      reportDir: null,
+      error: { message: unknownFlagMessage, storybooks: [] },
+    })
+    expect(filesIn(reportFolderIn(project))).toEqual(before)
   })
 
   it('prints the error document of an invalid config, leaving the report folder untouched', async () => {

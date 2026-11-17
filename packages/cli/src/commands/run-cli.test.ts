@@ -4602,7 +4602,7 @@ describe('runCli launching the browser', () => {
     expect(record.closed).toBe(true)
   })
 
-  it('rethrows an error that is a bug, after closing the browser', async () => {
+  it('exits 2 with the stack trace of an error that is a bug, after closing the browser', async () => {
     const { project } = await createRun(['a'])
     const record = newRecord()
     const driver = fakeDriverOf({ stories: {}, record, version: browserPackage.chromium })
@@ -4613,13 +4613,17 @@ describe('runCli launching the browser', () => {
       },
     })
 
-    await expect(
-      runCli(['update'], {}, project, {
-        ...hostOptions,
-        launchBrowser: async () => driver,
-        imageMarkerPath: absentMarkerPath,
-      }),
-    ).rejects.toThrow('A bug in the driver.')
+    const result = await runCli(['update'], {}, project, {
+      ...hostOptions,
+      launchBrowser: async () => driver,
+      imageMarkerPath: absentMarkerPath,
+    })
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr: expect.stringMatching(/^Error: A bug in the driver\.\n {4}at /),
+    })
     expect(record.closed).toBe(true)
   })
 })

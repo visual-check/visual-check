@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { reportJsonOf, type TestReport, type UpdateReport } from '../report/report-document.js'
 import { UsageError } from './parse-command-line.js'
 import {
+  crashedBy,
   type RunStop,
   type StoppedTest,
   stoppedBy,
@@ -86,6 +87,30 @@ describe('stoppedBy', () => {
         storybooks: [],
         unreachable: [],
       },
+    })
+  })
+})
+
+describe('crashedBy', () => {
+  it("prints the error's stack trace on stderr, with its message for the report", () => {
+    const error = new Error('A bug.')
+
+    expect(crashedBy(error, { configPath: '/c.mjs', storybooks: [] })).toEqual({
+      stopped: {
+        stdout: '',
+        stderr: `${error.stack}\n`,
+        message: 'A bug.',
+        configPath: '/c.mjs',
+        storybooks: [],
+        unreachable: [],
+      },
+    })
+  })
+
+  it('prints a thrown value that is no error as it is', () => {
+    expect(crashedBy('A bug.', { configPath: undefined, storybooks: [] }).stopped).toMatchObject({
+      stderr: 'A bug.\n',
+      message: 'A bug.',
     })
   })
 })

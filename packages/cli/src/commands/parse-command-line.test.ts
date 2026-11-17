@@ -368,7 +368,21 @@ describe('parseCommandLine usage errors of a run', () => {
   })
 
   it.each([
+    ['test', ['test', '--reporter', 'json', '--bogus'], 'test', undefined],
+    ['update', ['update', '--bogus', '--reporter=json', '--config', 'c.mjs'], 'update', 'c.mjs'],
+    ['test with a flag missing its value', ['test', '--reporter', 'json', '--config'], 'test', undefined],
+  ] as const)(
+    'names the json run of a %s command line that fails to parse, as far as its flags tell',
+    (_, commandLineArguments, command, config) => {
+      expect(usageErrorOf(...commandLineArguments).run).toEqual({ command, config, reporter: 'json' })
+    },
+  )
+
+  it.each([
     ['an unknown flag', ['test', '--nope']],
+    ['an unknown flag with another reporter', ['test', '--nope', '--reporter', 'log']],
+    ['an unknown flag with no command', ['--nope', '--reporter', 'json']],
+    ['an unknown flag of init', ['init', '--nope', '--reporter', 'json']],
     ['an unknown command', ['tset', '--all']],
     ['no command', ['--all']],
     ['init', ['init', '--all']],

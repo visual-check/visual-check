@@ -29,7 +29,7 @@ import { type TestReportFacts, testReportFor, updateReportFor } from './run-repo
 import { runSnapshots } from './run-snapshots.js'
 import { selectStories } from './select-stories.js'
 import { reportProblemOf } from './stop-message.js'
-import { type RunStop, stoppedBy, stoppedTestOf, stoppedUpdateOf, usageFailureOf } from './stopped-run.js'
+import { crashedBy, type RunStop, stoppedBy, stoppedTestOf, stoppedUpdateOf, usageFailureOf } from './stopped-run.js'
 import { defaultRecaptureDelayMs } from './update-snapshot.js'
 
 /**
@@ -138,8 +138,10 @@ export interface RunCliOptions {
  * Runs the CLI with the given arguments, environment and folder, and returns what it prints on each stream. Only
  * progress is written as it happens, through `options.progress`; `update` also writes and deletes baselines, and
  * `test` writes the report folder. Problems with the command line, the config, the run's setup or the browser exit
- * with code 2. A usage error of `test` whose flags parsed writes its error report beside the config the run would
- * load. Other errors are thrown.
+ * with code 2. A usage error of `test` whose flags parsed, or that asks for `--reporter json`, writes its error report
+ * beside the config the run would load. Once a `test` or `update` has loaded its config, an error that is a bug exits
+ * 2 too, with its stack trace on stderr, as an error report for `test` and an error document with `--reporter json`.
+ * Other errors are thrown.
  *
  * @public
  */
@@ -201,9 +203,10 @@ export async function runCli(
  * stderr; with no config found, or when the report folder itself is what failed, nothing is written. With
  * `--reporter json`, stdout then holds the error document alone. `update` never touches the report folder. With
  * `--reporter json`, its stdout holds its own document alone, the error document when it exits 2. Whatever the
- * command and exit code, `--reporter json` moves the human lines to stderr, before what the run prints there.
+ * command and exit code, `--reporter json` moves the human lines to stderr, before what the run prints there. An
+ * error that is a bug, once the config loads, ends the run as a problem would, with its stack trace and its message.
  *
- * @throws {Error} Any error besides the problems that stop the run with exit 2.
+ * @throws {Error} Any error besides the problems that stop the run with exit 2, before the config loads.
  */
 async function runTestOrUpdate(
   command: 'test' | 'update',
@@ -270,9 +273,10 @@ interface RunContext {
 }
 
 /**
- * Runs `test` or `update` as `runTestOrUpdate` says, and gives how it ended.
+ * Runs `test` or `update` as `runTestOrUpdate` says, and gives how it ended. Once the config loads, an error that is
+ * a bug stops the run too, with its stack trace and its message.
  *
- * @throws {Error} Any error besides the problems that stop the run with exit 2.
+ * @throws {Error} Any error besides the problems that stop the run with exit 2, before the config loads.
  */
 async function runOutcomeOf(context: RunContext): Promise<RunOutcome> {
   const browserCheck = checkBrowserPackage(context.environment)
@@ -290,7 +294,12 @@ async function runOutcomeOf(context: RunContext): Promise<RunOutcome> {
     return loaded
   }
 
-  return await configuredOutcomeOf(context, loaded.config, browserCheck.browserPackage)
+  try {
+    return await configuredOutcomeOf(context, loaded.config, browserCheck.browserPackage)
+  } catch (error) {
+    // A bug once the config loaded still leaves test's error report and prints the error document.
+    return crashedBy(error, { configPath: loaded.config.path, storybooks: loaded.config.storybooks })
+  }
 }
 
 /**

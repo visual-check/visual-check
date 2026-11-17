@@ -103,6 +103,19 @@ export function stoppedBy(problem: string, inRun: Pick<RunStop, 'configPath' | '
 }
 
 /**
+ * Gives the stop of a run that an error ended which is a bug, not a problem visual-check knows: the error's stack
+ * trace on stderr, as for any error the CLI throws, and its message for the report.
+ *
+ * @public
+ */
+export function crashedBy(error: unknown, inRun: Pick<RunStop, 'configPath' | 'storybooks'>): { stopped: RunStop } {
+  const trace = error instanceof Error ? (error.stack ?? String(error)) : String(error)
+  const message = error instanceof Error ? error.message : String(error)
+
+  return { stopped: { ...inRun, stdout: '', stderr: `${trace}\n`, message, unreachable: [] } }
+}
+
+/**
  * Ends a `test` that exits 2. When the stop names a config, the report folder beside it is replaced with a report
  * holding only the error, wiping any images the run wrote, and the report's path is the report line, for stderr; a
  * report folder that can't be written adds its problem to stderr instead. With `--reporter json`, stdout holds the
