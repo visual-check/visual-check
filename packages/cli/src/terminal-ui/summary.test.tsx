@@ -236,6 +236,64 @@ https://visual-check.vercel.app/docs/ci.`)
     })
   })
 
+  it('wraps a command on a line of its own under its own first letter at 40 columns', async () => {
+    const { lastFrame } = await renderSettledAt(
+      <Summary
+        result={{
+          ...resultWith(0, []),
+          summary: {
+            nextSteps: {
+              ...nextSteps,
+              steps: [
+                [
+                  {
+                    command: 'pnpm exec storybook dev -p 60066 -c packages/ui/.storybook',
+                    text: ['Start Storybook, and keep it running'],
+                  },
+                ],
+                ...nextSteps.steps.slice(1),
+              ],
+            },
+          },
+        }}
+      />,
+      40,
+    )
+
+    expect(plainFrameOf(lastFrame())).toBe(`
+✓ visual-check is set up
+
+Next
+  1  pnpm exec storybook dev -p 60066 -c
+     packages/ui/.storybook
+     Start Storybook, and keep it
+     running
+  2  pnpm visual:update
+     Write the first baselines
+  3  pnpm visual:check
+     Check the stories against the
+     baselines
+  4  Commit the changes, baselines
+     included
+
+To set options for every story, see
+.storybook/visual-check.ts.
+To run visual-check in CI, see
+https://visual-check.vercel.app/docs/ci.`)
+  })
+
+  it('wraps the replaced line under its own first letter at 39 columns', async () => {
+    const { lastFrame } = await renderSettledAt(
+      <Summary result={{ ...resultWith(2, []), summary: { replacedLine } }} />,
+      39,
+    )
+
+    // Its first line fills its 37 columns exactly, and the next one starts at the same indent.
+    expect(plainFrameOf(lastFrame())).toBe(`
+  Replaced the scripts visual:check and
+  visual:update in package.json.`)
+  })
+
   it('starts the text of a row without a command where the commands start', async () => {
     const { lastFrame } = await renderSettledAt(
       <Summary

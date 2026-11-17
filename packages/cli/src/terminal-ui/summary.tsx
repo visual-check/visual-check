@@ -14,11 +14,17 @@ import { ColouredText } from './coloured-text.js'
 import { MessageLine } from './message-line.js'
 import { glyphs } from './theme.js'
 import { wrappedSegmentLinesOf } from './wrapped-lines.js'
+import { WrappedText } from './wrapped-text.js'
 
 /**
  * How many columns a step's number takes, with the spaces around it.
  */
 const numberColumnWidth = 5
+
+/**
+ * How far the line that names the replaced scripts is indented.
+ */
+const replacedLineIndent = 2
 
 /**
  * The fewest columns a step's text needs beside the commands' column. In a terminal with less room, every command
@@ -163,7 +169,8 @@ function MessageLines({ messages }: MessageLinesProps): ReactNode {
 }
 
 /**
- * Draws the line that names the scripts `init` replaced, dim and indented, or nothing when it replaced none.
+ * Draws the line that names the scripts `init` replaced, dim and indented, or nothing when it replaced none. A long
+ * one wraps under its own first letter.
  */
 function ReplacedLine({ text }: ReplacedLineProps): ReactNode {
   if (text === undefined) {
@@ -171,8 +178,10 @@ function ReplacedLine({ text }: ReplacedLineProps): ReactNode {
   }
 
   return (
-    <Box marginLeft={2}>
-      <Text dimColor>{text}</Text>
+    <Box marginLeft={replacedLineIndent}>
+      <Text dimColor>
+        <WrappedText indent={replacedLineIndent} text={text} />
+      </Text>
     </Box>
   )
 }
@@ -202,7 +211,9 @@ function StepRow({ row, numberLabel, commandWidth, columns }: StepRowProps): Rea
       <Box flexDirection="column">
         <Box>
           <StepNumber label={numberLabel} />
-          <ColouredText colour="accent">{command}</ColouredText>
+          <Text>
+            <WrappedSegments segments={[{ code: command }]} width={columns - numberColumnWidth} />
+          </Text>
         </Box>
         <Box marginLeft={numberColumnWidth + commandWidth}>
           <Text>
