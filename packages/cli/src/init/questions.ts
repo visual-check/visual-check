@@ -10,7 +10,7 @@ import {
   storybookCommandOf,
 } from './package-manager.js'
 import type { Prompter } from './prompter.js'
-import { defaultConfigDir } from './storybook-scripts.js'
+import { defaultConfigDir, storybookCallsOf } from './storybook-scripts.js'
 
 /**
  * What the person chose for one Storybook.
@@ -203,7 +203,7 @@ async function askStorybooks(
 
 /**
  * Asks for the name, the URL and the start command of one Storybook, and warns when the URL's port isn't the port its
- * start script uses.
+ * start command uses.
  */
 async function askStorybook(
   storybook: DetectedStorybook,
@@ -215,16 +215,28 @@ async function askStorybook(
   const name = await askName(storybook, takenNames, prompter)
   const url = await askUrl(storybook, name, prompter)
   const startCommand = await askStartCommand(storybook, name, url, packageManager, prompter)
-  const scriptPort = storybook.startScript?.port
+  const commandPort = startPortOf(storybook, startCommand)
 
-  if (scriptPort !== undefined && urlPortOf(url) !== scriptPort) {
+  if (commandPort !== undefined && urlPortOf(url) !== commandPort) {
     warnings.push(
       `Warning: ${name}'s URL, ${url}, has port ${urlPortOf(url)}, ` +
-        `and its start command, ${startCommand}, starts Storybook on port ${scriptPort}.`,
+        `and its start command, ${startCommand}, starts Storybook on port ${commandPort}.`,
     )
   }
 
   return { configDir: storybook.configDir, name, url, startCommand }
+}
+
+/**
+ * Returns the port a Storybook's start command starts it on: the one its start script sets, or, for a command the person
+ * typed, the one its `storybook dev` call sets. `undefined` when none is set, or the command runs no `storybook dev`.
+ */
+function startPortOf(storybook: DetectedStorybook, startCommand: string): number | undefined {
+  if (storybook.startScript !== undefined) {
+    return storybook.startScript.port
+  }
+
+  return storybookCallsOf({ start: startCommand }).find((call) => call.subcommand === 'dev')?.port
 }
 
 /**

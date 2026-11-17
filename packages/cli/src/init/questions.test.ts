@@ -174,6 +174,26 @@ describe('askQuestions', () => {
     ])
   })
 
+  it('warns when the URL port differs from the port of a start command the person types', async () => {
+    const { warnings } = await ask(['', '', 'pnpm exec storybook dev -p 7000', '', '', false])
+
+    expect(warnings).toEqual([
+      "Warning: project's URL, http://127.0.0.1:6006, has port 6006, and its start command, pnpm exec storybook dev -p 7000, starts Storybook on port 7000.",
+    ])
+  })
+
+  it('does not warn when a typed start command starts Storybook on the port of the URL', async () => {
+    const { warnings } = await ask(['', '', 'pnpm exec storybook dev -p 6006', '', '', false])
+
+    expect(warnings).toEqual([])
+  })
+
+  it('does not warn about a typed start command that runs no storybook dev', async () => {
+    const { warnings } = await ask(['', '', 'make sb -p 7000', '', '', false])
+
+    expect(warnings).toEqual([])
+  })
+
   it('counts the port of an https URL without one as 443', async () => {
     const startScript = { script: 'storybook', subcommand: 'dev' as const, configDir: undefined, port: 6006 }
     const { warnings } = await ask(['', 'https://sb.test', '', '', false], {
