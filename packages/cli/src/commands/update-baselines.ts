@@ -24,8 +24,6 @@ interface UpdatePlan {
 
 /**
  * A baseline `update` deleted: an orphan, with its Storybook.
- *
- * @public
  */
 export interface DeletedBaseline {
   /**

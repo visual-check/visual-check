@@ -150,7 +150,16 @@ export interface ReportBrokenDetails {
   /**
    * What `play` threw: the message and the first 5 stack lines.
    */
-  play?: { message: string; stack: string[] }
+  play?: {
+    /**
+     * The message `play` threw with.
+     */
+    message: string
+    /**
+     * The first 5 lines of its stack.
+     */
+    stack: string[]
+  }
   /**
    * The timeout that passed, in milliseconds.
    */
@@ -166,7 +175,16 @@ export interface ReportBrokenDetails {
   /**
    * A grid's width and the viewport's.
    */
-  grid?: { width: number; viewportWidth: number }
+  grid?: {
+    /**
+     * The grid's width, in CSS pixels.
+     */
+    width: number
+    /**
+     * The viewport's width, in CSS pixels.
+     */
+    viewportWidth: number
+  }
   /**
    * The error a stories file failed to load with.
    */
@@ -317,11 +335,56 @@ export interface ReportEntryFields {
  */
 export type TestReportEntry = ReportEntryFields &
   (
-    | { status: 'passed'; reason: null }
-    | { status: 'differs'; reason: ReportDiffReason }
-    | { status: 'broken'; reason: ReportBrokenReason }
-    | { status: 'missing'; reason: null }
-    | { status: 'orphan'; reason: null }
+    | {
+        /**
+         * It passed, maybe on a retry.
+         */
+        status: 'passed'
+        /**
+         * None for a pass.
+         */
+        reason: null
+      }
+    | {
+        /**
+         * It differs from its baseline beyond tolerance.
+         */
+        status: 'differs'
+        /**
+         * Whether pixels or the size made it differ.
+         */
+        reason: ReportDiffReason
+      }
+    | {
+        /**
+         * Its story is broken.
+         */
+        status: 'broken'
+        /**
+         * Why the story is broken.
+         */
+        reason: ReportBrokenReason
+      }
+    | {
+        /**
+         * It has no baseline.
+         */
+        status: 'missing'
+        /**
+         * None for a missing baseline.
+         */
+        reason: null
+      }
+    | {
+        /**
+         * It's an orphan.
+         */
+        status: 'orphan'
+        /**
+         * None for an orphan.
+         */
+        reason: null
+      }
   )
 
 /**
@@ -331,9 +394,36 @@ export type TestReportEntry = ReportEntryFields &
  */
 export type UpdateReportEntry = ReportEntryFields &
   (
-    | { status: 'written'; reason: 'missing' | 'differs' }
-    | { status: 'deleted'; reason: null }
-    | { status: 'broken'; reason: ReportBrokenReason }
+    | {
+        /**
+         * Its baseline was written.
+         */
+        status: 'written'
+        /**
+         * Whether the baseline was missing or differed.
+         */
+        reason: 'missing' | 'differs'
+      }
+    | {
+        /**
+         * Its baseline, an orphan, was deleted.
+         */
+        status: 'deleted'
+        /**
+         * None for a deleted baseline.
+         */
+        reason: null
+      }
+    | {
+        /**
+         * Its story is broken.
+         */
+        status: 'broken'
+        /**
+         * Why the story is broken.
+         */
+        reason: ReportBrokenReason
+      }
   ) & {
     /**
      * The hosts the page really requested.
@@ -470,7 +560,7 @@ export interface TestReport {
   /**
    * The document's version.
    */
-  version: 1
+  version: typeof reportVersion
   /**
    * The CLI's version.
    */
@@ -530,7 +620,7 @@ export interface UpdateReport {
   /**
    * The document's version.
    */
-  version: 1
+  version: typeof reportVersion
   /**
    * The CLI's version.
    */

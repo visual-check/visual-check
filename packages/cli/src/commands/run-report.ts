@@ -34,8 +34,6 @@ import type { DeletedBaseline } from './update-baselines.js'
 
 /**
  * What a run that finished, or stopped after its consistency check, found: what the report lists and counts.
- *
- * @public
  */
 export interface RunFindings {
   /**
@@ -63,8 +61,6 @@ export interface RunFindings {
 
 /**
  * What a `test` report is built from.
- *
- * @public
  */
 export interface TestReportFacts {
   /**
@@ -104,8 +100,6 @@ export interface TestReportFacts {
 /**
  * Gives the report's selection: `filter` for `--filter`, else `all`, since affected stories don't exist yet, so
  * nothing is known of a base, changed files or a fallback.
- *
- * @public
  */
 export function selectionOf(selection: Selection): ReportSelection {
   return { by: selection.kind === 'filter' ? 'filter' : 'all', base: null, changedFiles: null, fallback: null }
@@ -169,8 +163,6 @@ function listedOf<Entry>(
  * Plain passes are only counted.
  *
  * @throws {ReportError} When an orphan's baseline can't be copied.
- *
- * @public
  */
 export async function testReportFor(facts: TestReportFacts): Promise<TestReport> {
   const { findings } = facts
@@ -194,8 +186,6 @@ export async function testReportFor(facts: TestReportFacts): Promise<TestReport>
 
 /**
  * What the report of a `test` that exits 2 is built from.
- *
- * @public
  */
 export interface TestErrorReportFacts {
   /**
@@ -235,8 +225,6 @@ export interface TestErrorReportFacts {
 /**
  * Builds the report of a `test` that exits 2: the error, its message trimmed, with the unreachable Storybooks, and no
  * results. Its `reportDir` is `null` when it isn't written.
- *
- * @public
  */
 export function testErrorReportOf(facts: TestErrorReportFacts): TestReport {
   return testReportOf({
@@ -258,8 +246,6 @@ export function testErrorReportOf(facts: TestErrorReportFacts): TestReport {
 
 /**
  * What an `update` report is built from.
- *
- * @public
  */
 export type UpdateReportFacts = Omit<TestReportFacts, 'consistencyOnly' | 'shard'>
 
@@ -267,8 +253,6 @@ export type UpdateReportFacts = Omit<TestReportFacts, 'consistencyOnly' | 'shard
  * Builds the report of an `update` that exits 0 or 1: an entry for each written or broken snapshot, in planned order,
  * then one for each deleted baseline, the counts of every finished snapshot and deleted baseline, and the warnings.
  * Kept baselines are only counted. It has no report folder, since `update` never writes one.
- *
- * @public
  */
 export function updateReportFor(facts: UpdateReportFacts): UpdateReport {
   const { findings } = facts
@@ -290,16 +274,12 @@ export function updateReportFor(facts: UpdateReportFacts): UpdateReport {
 
 /**
  * What the report of an `update` that exits 2 is built from.
- *
- * @public
  */
 export type UpdateErrorReportFacts = Omit<TestErrorReportFacts, 'consistencyOnly' | 'shard' | 'written'>
 
 /**
  * Builds the report of an `update` that exits 2: the error, its message trimmed, with the unreachable Storybooks, and
  * no results or warnings.
- *
- * @public
  */
 export function updateErrorReportOf(facts: UpdateErrorReportFacts): UpdateReport {
   return updateReportOf({

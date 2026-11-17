@@ -13,8 +13,6 @@ const usageHint = 'Run visual-check --help to see the commands and options.\n'
 
 /**
  * What stopped a `test` or `update` with exit 2, and what it printed.
- *
- * @public
  */
 export interface RunStop {
   /**
@@ -46,8 +44,6 @@ export interface RunStop {
 
 /**
  * What ending a `test` that exits 2 needs to know about the run, apart from what stopped it.
- *
- * @public
  */
 export interface StoppedTest {
   /**
@@ -66,8 +62,6 @@ export interface StoppedTest {
 
 /**
  * What ending an `update` that exits 2 needs to know about the run, apart from what stopped it.
- *
- * @public
  */
 export interface StoppedUpdate {
   /**
@@ -82,8 +76,6 @@ export interface StoppedUpdate {
 
 /**
  * What a stopped run prints, and its exit code, 2.
- *
- * @public
  */
 export interface StoppedOutput extends RunOutput {
   /**
@@ -95,8 +87,6 @@ export interface StoppedOutput extends RunOutput {
 /**
  * Gives the stop of a run stopped by a problem before anything was printed on stdout: the problem on stderr, as the
  * report's message too, with no unreachable Storybook.
- *
- * @public
  */
 export function stoppedBy(problem: string, inRun: Pick<RunStop, 'configPath' | 'storybooks'>): { stopped: RunStop } {
   return { stopped: { ...inRun, stdout: '', stderr: problem, message: problem, unreachable: [] } }
@@ -105,8 +95,6 @@ export function stoppedBy(problem: string, inRun: Pick<RunStop, 'configPath' | '
 /**
  * Gives the stop of a run that an error ended which is a bug, not a problem visual-check knows: what the run printed
  * so far, then the error's stack trace on stderr, with its message for the report.
- *
- * @public
  */
 export function crashedBy(
   error: unknown,
@@ -124,8 +112,6 @@ export function crashedBy(
  * error document alone, its `reportDir` `null` when nothing was written.
  *
  * @throws {Error} Any error besides a `ReportError` while writing the report.
- *
- * @public
  */
 export async function stoppedTestOf(stop: RunStop, test: StoppedTest): Promise<StoppedOutput> {
   const { options, cwd } = test
@@ -173,8 +159,6 @@ export async function stoppedTestOf(stop: RunStop, test: StoppedTest): Promise<S
 /**
  * Ends an `update` that exits 2 with what it printed. It never touches the report folder. With `--reporter json`,
  * stdout holds `update`'s error document alone, with no report folder.
- *
- * @public
  */
 export function stoppedUpdateOf(stop: RunStop, update: StoppedUpdate): StoppedOutput {
   const report = updateErrorReportOf({
@@ -194,8 +178,6 @@ export function stoppedUpdateOf(stop: RunStop, update: StoppedUpdate): StoppedOu
  * error, as `stoppedTestOf` says. For one that names its `update` run, it ends as `stoppedUpdateOf` says.
  *
  * @throws {Error} Any error besides a `ReportError` while writing the report.
- *
- * @public
  */
 export async function usageFailureOf(error: UsageError, cwd: string, version: string): Promise<StoppedOutput> {
   const stderr = `${error.message}\n${usageHint}`

@@ -25,8 +25,10 @@ import { displayPathOf } from './run-output.js'
 import type { ReportedComparison, SnapshotResult, SnapshotStatus } from './snapshot-result.js'
 
 /**
- * The report's code for each reason a story is broken: the same code. It fails to compile when the capture's reasons
- * and the report's drift apart.
+ * The report's code for each reason a story is broken: the same code. It fails to compile when the capture has a reason
+ * the report lacks, or the map misses or keeps one the capture doesn't have. The report's `grid-too-wide` is the one
+ * code with no capture reason: the document lists every code of the readiness and stability rules, and grid stories,
+ * which break that way, aren't captured yet.
  */
 export const reportReasons: Record<BrokenReason, ReportBrokenReason> = {
   'load-failed': 'load-failed',
@@ -99,8 +101,6 @@ const noImages: ReportImages = { baseline: null, snapshot: null, diff: null }
 
 /**
  * Whether the report lists a snapshot: anything but a plain pass and a baseline `update` kept, or a flaky pass.
- *
- * @public
  */
 export function isListed(result: SnapshotResult): boolean {
   if (result.status === 'passed') {
@@ -112,8 +112,6 @@ export function isListed(result: SnapshotResult): boolean {
 
 /**
  * Gives the report's pixels of a comparison that differed, with the budget exactly as the tolerance writes it.
- *
- * @public
  */
 export function pixelsOf(comparison: ReportedComparison, tolerance: Required<Tolerance>, scale: number): ReportPixels {
   return { differ: comparison.differ, allowed: comparison.allowed, budget: tolerance.pixels, scale }
@@ -121,8 +119,6 @@ export function pixelsOf(comparison: ReportedComparison, tolerance: Required<Tol
 
 /**
  * Gives both sizes of a size difference, as `[width, height]`. Gives `null` for a difference in pixels.
- *
- * @public
  */
 export function sizeOf(comparison: ReportedComparison): ReportSize | null {
   if (comparison.reason !== 'size') {
@@ -138,8 +134,6 @@ export function sizeOf(comparison: ReportedComparison): ReportSize | null {
  * Gives a broken story's details, with only the keys its reason has, in the document's order. `play`'s message is the
  * error as Storybook described it, or the broken story's message when it described none. A load that failed with no
  * error, or failed rather than timed out, leaves the missing one out.
- *
- * @public
  */
 export function detailsOf(broken: BrokenStory): ReportBrokenDetails {
   switch (broken.reason) {
@@ -166,8 +160,6 @@ export function detailsOf(broken: BrokenStory): ReportBrokenDetails {
 /**
  * Gives the report's console messages: each kind as its level, an uncaught error's text prefixed `Uncaught ` and an
  * unhandled rejection's `Unhandled rejection: `.
- *
- * @public
  */
 export function consoleOf(messages: readonly PageMessage[]): ReportConsoleMessage[] {
   return messages.map(({ kind, text }) => ({ level: consoleLevels[kind], text: `${consolePrefixes[kind]}${text}` }))
@@ -333,8 +325,6 @@ function updateVerdictOf(result: SnapshotResult): [VerdictOf<UpdateReportEntry>,
  * Gives a `test` snapshot's entry, with its baseline's path relative to `configFolder`.
  *
  * @throws {Error} When the result is `update`'s, or lacks what its status carries.
- *
- * @public
  */
 export function testEntryOf(item: PlannedSnapshot, result: SnapshotResult, configFolder: string): TestReportEntry {
   const [verdict, message] = testVerdictOf(result)
@@ -345,8 +335,6 @@ export function testEntryOf(item: PlannedSnapshot, result: SnapshotResult, confi
 /**
  * Gives an orphan's entry: the baseline at `path`, which no story calls for, with its stem as the id, no story, and
  * `image` as its copied baseline, relative to the report folder, or `null` when it wasn't copied.
- *
- * @public
  */
 export function orphanEntryOf(
   storybook: ResolvedStorybook,
@@ -380,8 +368,6 @@ function hostsOf(result: SnapshotResult | undefined): EntryHosts {
  * load.
  *
  * @throws {Error} When the result is `test`'s or a kept baseline, or lacks what its status carries.
- *
- * @public
  */
 export function updateEntryOf(item: PlannedSnapshot, result: SnapshotResult, configFolder: string): UpdateReportEntry {
   const [verdict, message] = updateVerdictOf(result)
@@ -391,8 +377,6 @@ export function updateEntryOf(item: PlannedSnapshot, result: SnapshotResult, con
 
 /**
  * Gives a deleted orphan's entry: the baseline at `path`, with its stem as the id and no story.
- *
- * @public
  */
 export function deletedEntryOf(storybook: ResolvedStorybook, path: string, configFolder: string): UpdateReportEntry {
   return {
@@ -420,8 +404,6 @@ function flakyCountOf(results: readonly SnapshotResult[]): number {
 
 /**
  * Counts a `test` run's results and its `orphans`, the flaky passes among the passed.
- *
- * @public
  */
 export function testCountsOf(results: readonly SnapshotResult[], orphans: number): TestReportCounts {
   return {
@@ -436,8 +418,6 @@ export function testCountsOf(results: readonly SnapshotResult[], orphans: number
 
 /**
  * Counts an `update` run's results and its `deleted` baselines, the flaky ones among the written and kept.
- *
- * @public
  */
 export function updateCountsOf(results: readonly SnapshotResult[], deleted: number): UpdateReportCounts {
   return {

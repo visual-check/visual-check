@@ -19,8 +19,6 @@ import { SnapshotDecodeError } from './snapshot-result.js'
 
 /**
  * What the exit-2 messages need to know about a run, apart from the error that stopped it.
- *
- * @public
  */
 export interface StopContext {
   /**
@@ -71,8 +69,6 @@ const reportFixes: Record<ReportError['action'], string> = {
 
 /**
  * Says what a report call couldn't do, the path relative to `cwd`, the reason, and what to check.
- *
- * @public
  */
 export function reportProblemOf(error: ReportError, cwd: string): string {
   return (
@@ -91,8 +87,6 @@ function browserOutputOf(output: readonly string[]): string {
 /**
  * Says that the first browser exited mid-run: the exit, whether visual-check relaunches the browser for the rest of
  * the run, and the browser's last output. Gives nothing when the browser didn't exit.
- *
- * @public
  */
 export function exitNoticeOf(exit: FirstBrowserExit | undefined): string {
   if (exit === undefined) {
@@ -216,8 +210,6 @@ function visualDiffStopMessageOf(error: VisualDiffError): string {
 /**
  * Gives what to print for an error that is a bug, not a problem visual-check knows: its stack trace on stderr, as for
  * any error the CLI throws, and its message for the report.
- *
- * @public
  */
 export function crashOf(error: unknown): { stderr: string; message: string } {
   const trace = error instanceof Error ? (error.stack ?? String(error)) : String(error)
@@ -237,8 +229,6 @@ export function crashOf(error: unknown): { stderr: string; message: string } {
  * library and both ways out. Any other error gives `undefined`.
  *
  * `capturedAny` is whether a snapshot has been captured, which a broken or missing one hasn't.
- *
- * @public
  */
 export function stopMessageOf(error: unknown, context: StopContext, capturedAny: boolean): string | undefined {
   if (error instanceof BaselineError) {
