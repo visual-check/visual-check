@@ -71,7 +71,7 @@ export const pnpmClosingMessage = [
   'visual-check is set up. Next:',
   '  1. Start Storybook with pnpm run storybook.',
   '  2. Run pnpm run visual:update to write baselines. The first run downloads the browser image.',
-  '  3. Run pnpm run visual:test. It should pass. ' +
+  '  3. Run pnpm run visual:check. It should pass. ' +
     'If a story fails, see https://visual-check.vercel.app/docs/broken-stories.',
   '  4. Commit visual-check.config.ts, .storybook/visual-check.ts and .visual-check/.',
   '',
@@ -89,7 +89,7 @@ export const pnpmClosingMessage = [
 export const pnpmWrittenLines = `Wrote visual-check.config.ts
 Wrote .storybook/visual-check.ts
 Wrote .visual-check/.gitignore
-Added the scripts visual:test and visual:update to package.json.
+Added the scripts visual:check and visual:update to package.json.
 `
 
 /**

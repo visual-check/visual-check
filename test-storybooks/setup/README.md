@@ -9,12 +9,12 @@ The check runs these steps, a line each, and stops at the first that fails:
 1. `pnpm pack` makes a tarball of `@visual-check/cli`, `@visual-check/chromium`, `@visual-check/storybook` and `@visual-check/storybook-addon`.
 2. A registry on `127.0.0.1` serves them. The project's `.npmrc` names it for the `@visual-check` scope, so everything else comes from npm, and gives the project a store and cache of its own, so nothing from an earlier run is reused.
 3. The copy of the fixture becomes a git repo and installs, as a project that has its dependencies is.
-4. `pnpm dlx @visual-check/cli init --yes`, without `CI`, exits 0 without a warning. It writes the config, `.storybook/visual-check.ts` and `.visual-check/.gitignore` exactly as the spec says, and adds the `visual:test` and `visual:update` scripts. It adds `@visual-check/cli` and `@visual-check/storybook` at the CLI's version and `@visual-check/chromium` at the CLI's peer range, and the addon through `storybook add`, which lists it in `.storybook/main.js` too. It leaves `.gitignore` alone, and ends with the closing message's CI line.
+4. `pnpm dlx @visual-check/cli init --yes`, without `CI`, exits 0 without a warning. It writes the config, `.storybook/visual-check.ts` and `.visual-check/.gitignore` exactly as the spec says, and adds the `visual:check` and `visual:update` scripts. It adds `@visual-check/cli` and `@visual-check/storybook` at the CLI's version and `@visual-check/chromium` at the CLI's peer range, and the addon through `storybook add`, which lists it in `.storybook/main.js` too. It leaves `.gitignore` alone, and ends with the closing message's CI line.
 5. `pnpm install --frozen-lockfile` exits 0, and the project has its own `node_modules/.bin/visual-check`, so `pnpm run` and `pnpm exec` can't find another one on the `PATH`, such as this workspace's.
 6. The config gets `image` from `TEST_STORYBOOK_IMAGE`, until the browser package names a published image.
 7. `pnpm run storybook` answers for `index.json` within 120 s.
 8. `pnpm run visual:update`, without `CI`, exits 0 and writes one baseline.
-9. `pnpm run visual:test`, in the check's own environment, exits 0.
+9. `pnpm run visual:check`, in the check's own environment, exits 0.
 10. `pnpm exec visual-check init --yes` exits 0 without a warning, prints no `Wrote` line, and changes no file git lists.
 
 Then it stops Storybook's processes and removes the temporary folder. On a failure, it first copies the project, without `node_modules`, and every command's output to `init-check-output/`; `registry.log` lists the requests the registry didn't answer with 200. A SIGINT or SIGTERM stops every command the check started and skips the steps left; the check cleans up as on a failure and exits 130 or 143.

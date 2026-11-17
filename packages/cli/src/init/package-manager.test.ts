@@ -87,7 +87,7 @@ describe('packageManagerOf', () => {
 
 describe('commands', () => {
   it.each(['npm', 'pnpm', 'yarn', 'bun'] as const)('runs a script with %s', (packageManager) => {
-    expect(runScriptCommandOf(packageManager, 'visual:test')).toBe(`${packageManager} run visual:test`)
+    expect(runScriptCommandOf(packageManager, 'visual:check')).toBe(`${packageManager} run visual:check`)
   })
 
   it('runs the storybook binary', () => {

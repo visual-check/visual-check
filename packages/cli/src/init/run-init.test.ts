@@ -52,7 +52,7 @@ describe('runInit', () => {
     expect(readText(root, '.visual-check/.gitignore')).toBe(gitignore)
     expect(JSON.parse(readText(root, 'package.json')).scripts).toEqual({
       storybook: 'storybook dev -p 6006',
-      'visual:test': 'visual-check test',
+      'visual:check': 'visual-check test',
       'visual:update': 'visual-check update',
     })
     expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddon))
@@ -342,7 +342,7 @@ describe('runInit', () => {
       `${JSON.stringify(
         {
           ...manifest,
-          scripts: { ...manifest.scripts, 'visual:test': 'visual-check test', 'visual:update': 'visual-check update' },
+          scripts: { ...manifest.scripts, 'visual:check': 'visual-check test', 'visual:update': 'visual-check update' },
         },
         null,
         2,
@@ -414,7 +414,7 @@ describe('runInit', () => {
 
   it('replaces a script that has the name with --yes, and says what it ran', async () => {
     const root = pnpmProject({
-      manifest: { scripts: { storybook: 'storybook dev -p 6006', 'visual:test': 'vitest --project visual' } },
+      manifest: { scripts: { storybook: 'storybook dev -p 6006', 'visual:check': 'vitest --project visual' } },
     })
     const result = await runInit(root, toolsOf().tools)
 
@@ -422,12 +422,12 @@ describe('runInit', () => {
     expect(result.stderr).toBe('')
     expect(result.stdout).toContain(
       'Added the script visual:update to package.json.\n' +
-        'Replaced the script visual:test in package.json. It ran: vitest --project visual\n',
+        'Replaced the script visual:check in package.json. It ran: vitest --project visual\n',
     )
     expect(result.stdout).toContain(
-      '  3. Run pnpm run visual:test. It should pass. If a story fails, see https://visual-check.vercel.app/docs/broken-stories.\n',
+      '  3. Run pnpm run visual:check. It should pass. If a story fails, see https://visual-check.vercel.app/docs/broken-stories.\n',
     )
-    expect(JSON.parse(readText(root, 'package.json')).scripts['visual:test']).toBe('visual-check test')
+    expect(JSON.parse(readText(root, 'package.json')).scripts['visual:check']).toBe('visual-check test')
   })
 
   it('exits 2 when the input ends before every answer is in, after the warnings so far, and writes nothing', async () => {

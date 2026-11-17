@@ -130,6 +130,11 @@ const defaultPackageManager: PackageManager = 'npm'
 export const defaultStorybookPort = 6006
 
 /**
+ * The script names `init` suggests, by the visual-check command each runs.
+ */
+const defaultScriptNames = { test: 'visual:check', update: 'visual:update' } as const
+
+/**
  * The name of the addon package.
  */
 const addonPackage = '@visual-check/storybook-addon'
@@ -350,7 +355,7 @@ async function askScript(
   }
 
   const name = await prompter.text(`Name of the script that runs visual-check ${kind}`, {
-    defaultValue: `visual:${kind}`,
+    defaultValue: defaultScriptNames[kind],
     validate(value) {
       if (/\s/.test(value)) {
         return "A script name can't hold spaces."

@@ -169,7 +169,7 @@ export function packageManagerOf(manifest: Manifest, lockfiles: readonly string[
 }
 
 /**
- * The command that runs a `package.json` script, such as `pnpm run visual:test`. All four package managers take the
+ * The command that runs a `package.json` script, such as `pnpm run visual:check`. All four package managers take the
  * same form.
  */
 export function runScriptCommandOf(packageManager: PackageManager, script: string): string {

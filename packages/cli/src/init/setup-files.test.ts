@@ -217,19 +217,19 @@ describe('setScripts', () => {
   /**
    * The scripts the tests add.
    */
-  const scripts = { 'visual:test': 'visual-check test', 'visual:update': 'visual-check update' }
+  const scripts = { 'visual:check': 'visual-check test', 'visual:update': 'visual-check update' }
 
   it('keeps tab indentation', () => {
     const path = manifestWith('{\n\t"name": "x",\n\t"scripts": {\n\t\t"build": "tsc"\n\t}\n}\n')
 
-    expect(setScripts(path, scripts)).toEqual({ added: ['visual:test', 'visual:update'], replaced: [] })
+    expect(setScripts(path, scripts)).toEqual({ added: ['visual:check', 'visual:update'], replaced: [] })
     expect(readFileSync(path, 'utf8')).toBe(
       [
         '{',
         '\t"name": "x",',
         '\t"scripts": {',
         '\t\t"build": "tsc",',
-        '\t\t"visual:test": "visual-check test",',
+        '\t\t"visual:check": "visual-check test",',
         '\t\t"visual:update": "visual-check update"',
         '\t}',
         '}',
@@ -282,17 +282,17 @@ describe('setScripts', () => {
   })
 
   it('replaces a script that runs something else in its place, and gives what it ran', () => {
-    const path = manifestWith('{\n  "scripts": {\n    "visual:test": "mine",\n    "build": "tsc"\n  }\n}\n')
+    const path = manifestWith('{\n  "scripts": {\n    "visual:check": "mine",\n    "build": "tsc"\n  }\n}\n')
 
     expect(setScripts(path, scripts)).toEqual({
       added: ['visual:update'],
-      replaced: [{ name: 'visual:test', previous: 'mine' }],
+      replaced: [{ name: 'visual:check', previous: 'mine' }],
     })
     expect(readFileSync(path, 'utf8')).toBe(
       [
         '{',
         '  "scripts": {',
-        '    "visual:test": "visual-check test",',
+        '    "visual:check": "visual-check test",',
         '    "build": "tsc",',
         '    "visual:update": "visual-check update"',
         '  }',
@@ -309,7 +309,7 @@ describe('setScripts', () => {
   })
 
   it('leaves the file untouched when every script is already set', () => {
-    const text = '{"scripts":{"visual:test":"visual-check test","visual:update":"visual-check update"}}'
+    const text = '{"scripts":{"visual:check":"visual-check test","visual:update":"visual-check update"}}'
     const path = manifestWith(text)
     const past = new Date(1_000_000_000_000)
 

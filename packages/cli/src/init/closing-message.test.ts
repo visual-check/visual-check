@@ -44,7 +44,7 @@ const webApp: SetUpStorybook = {
 /**
  * The scripts `init` adds by default.
  */
-const defaultScripts = { test: { name: 'visual:test', add: true }, update: { name: 'visual:update', add: true } }
+const defaultScripts = { test: { name: 'visual:check', add: true }, update: { name: 'visual:update', add: true } }
 
 describe('closingMessageOf', () => {
   it('tells the four steps, the preview line and the CI docs for one Storybook under pnpm', () => {
@@ -59,7 +59,7 @@ describe('closingMessageOf', () => {
     ).toBe(`visual-check is set up. Next:
   1. Start Storybook with pnpm run storybook.
   2. Run pnpm run visual:update to write baselines. The first run downloads the browser image.
-  3. Run pnpm run visual:test. It should pass. If a story fails, see https://visual-check.vercel.app/docs/broken-stories.
+  3. Run pnpm run visual:check. It should pass. If a story fails, see https://visual-check.vercel.app/docs/broken-stories.
   4. Commit visual-check.config.ts, .storybook/visual-check.ts and .visual-check/.
 
 To set options for every story, spread visualCheck into the parameters in .storybook/preview.ts:
@@ -82,7 +82,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
     expect(message.split('\n').slice(1, 4)).toEqual([
       '  1. Start Storybook with npm run storybook.',
       '  2. Run npm run visual:update to write baselines. The first run downloads the browser image.',
-      '  3. Run npm run visual:test. It should pass. If a story fails, see https://visual-check.vercel.app/docs/broken-stories.',
+      '  3. Run npm run visual:check. It should pass. If a story fails, see https://visual-check.vercel.app/docs/broken-stories.',
     ])
   })
 
@@ -105,7 +105,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
     ).toBe(`visual-check is set up. Next:
   1. Start each Storybook: pnpm run storybook for web-app, pnpm exec storybook dev -p 6007 -c docs/.storybook for docs.
   2. Run pnpm run visual:update to write baselines. The first run downloads the browser image.
-  3. Run pnpm run visual:test. It should pass. If a story fails, see https://visual-check.vercel.app/docs/broken-stories.
+  3. Run pnpm run visual:check. It should pass. If a story fails, see https://visual-check.vercel.app/docs/broken-stories.
   4. Commit visual-check.config.ts, .storybook/visual-check.ts, docs/.storybook/visual-check.ts and .visual-check/.
 
 To set options for every story, spread visualCheck into the parameters in .storybook/preview.ts:
@@ -222,7 +222,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
       'visual-check is set up. Next:',
       '  1. Add your Storybook to visual-check.config.ts, as the hints say, then start it.',
       '  2. Run pnpm run visual:update to write baselines. The first run downloads the browser image.',
-      '  3. Run pnpm run visual:test. It should pass. If a story fails, see https://visual-check.vercel.app/docs/broken-stories.',
+      '  3. Run pnpm run visual:check. It should pass. If a story fails, see https://visual-check.vercel.app/docs/broken-stories.',
       '  4. Commit visual-check.config.ts and .visual-check/.',
       '',
     ])
@@ -256,7 +256,7 @@ describe('writtenLinesOf', () => {
             '/project/.storybook/visual-check.ts',
             '/project/.visual-check/.gitignore',
           ],
-          scripts: { added: ['visual:test', 'visual:update'], replaced: [] },
+          scripts: { added: ['visual:check', 'visual:update'], replaced: [] },
         },
         '/project',
       ),
@@ -264,7 +264,7 @@ describe('writtenLinesOf', () => {
       'Wrote visual-check.config.ts',
       'Wrote .storybook/visual-check.ts',
       'Wrote .visual-check/.gitignore',
-      'Added the scripts visual:test and visual:update to package.json.',
+      'Added the scripts visual:check and visual:update to package.json.',
     ])
   })
 
@@ -276,12 +276,12 @@ describe('writtenLinesOf', () => {
 
   it('gives a line per script replaced, with what it ran', () => {
     const replaced = [
-      { name: 'visual:test', previous: 'vitest --project visual' },
+      { name: 'visual:check', previous: 'vitest --project visual' },
       { name: 'visual:update', previous: 'vitest -u' },
     ]
 
     expect(writtenLinesOf({ files: [], scripts: { added: [], replaced } }, '/project')).toEqual([
-      'Replaced the script visual:test in package.json. It ran: vitest --project visual',
+      'Replaced the script visual:check in package.json. It ran: vitest --project visual',
       'Replaced the script visual:update in package.json. It ran: vitest -u',
     ])
   })

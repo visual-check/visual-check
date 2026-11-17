@@ -134,7 +134,7 @@ describe('init run again with a config there', () => {
       exitCode: 0,
       stdout:
         'Wrote .storybook/visual-check.ts\n' +
-        'Added the scripts visual:test and visual:update to package.json.\n' +
+        'Added the scripts visual:check and visual:update to package.json.\n' +
         `\n${pnpmClosingMessage}`,
       stderr: '',
     })
@@ -194,7 +194,7 @@ describe('init run again with a config there', () => {
       stdout:
         'Wrote .storybook/visual-check.ts\n' +
         'Wrote .visual-check/.gitignore\n' +
-        'Added the scripts visual:test and visual:update to package.json.\n' +
+        'Added the scripts visual:check and visual:update to package.json.\n' +
         `\n${pnpmClosingMessage}`,
       stderr:
         "Warning: visual-check init left visual-check.config.ts alone: Couldn't load visual-check.config.ts: broken config\n",
@@ -252,7 +252,7 @@ describe('init run again with a config there', () => {
     expect(result.stdout).toBe(
       'Wrote .storybook/visual-check.ts\n' +
         'Wrote .visual-check/.gitignore\n' +
-        'Added the scripts visual:test and visual:update to package.json.\n' +
+        'Added the scripts visual:check and visual:update to package.json.\n' +
         `\n${pnpmClosingMessage}`,
     )
     expect(existsSync(join(root, 'old'))).toBe(false)
@@ -295,12 +295,12 @@ describe('init run again with a config there', () => {
     expect(await runInit(root, tools)).toEqual({
       exitCode: 0,
       stdout: `Wrote .visual-check/.gitignore
-Added the scripts visual:test and visual:update to package.json.
+Added the scripts visual:check and visual:update to package.json.
 
 visual-check is set up. Next:
   1. Add your Storybook to visual-check.config.ts, as the hints say, then start it.
   2. Run pnpm run visual:update to write baselines. The first run downloads the browser image.
-  3. Run pnpm run visual:test. It should pass. If a story fails, see https://visual-check.vercel.app/docs/broken-stories.
+  3. Run pnpm run visual:check. It should pass. If a story fails, see https://visual-check.vercel.app/docs/broken-stories.
   4. Commit visual-check.config.ts and .visual-check/.
 
 To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
@@ -325,7 +325,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
 
     expect(result.exitCode).toBe(0)
     expect(prompter.records).toEqual([
-      { kind: 'text', message: 'Name of the script that runs visual-check test', defaultValue: 'visual:test' },
+      { kind: 'text', message: 'Name of the script that runs visual-check test', defaultValue: 'visual:check' },
       { kind: 'text', message: 'Name of the script that runs visual-check update', defaultValue: 'visual:update' },
       { kind: 'confirm', message: 'Add the Storybook addon to web?', defaultValue: true },
     ])

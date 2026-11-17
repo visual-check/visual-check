@@ -43,7 +43,7 @@ describe('askQuestions', () => {
       { kind: 'text', message: 'Name of the Storybook in .storybook', defaultValue: 'project' },
       { kind: 'text', message: 'URL of project', defaultValue: 'http://127.0.0.1:6006' },
       { kind: 'text', message: 'Command that starts project', defaultValue: 'pnpm exec storybook dev -p 6006' },
-      { kind: 'text', message: 'Name of the script that runs visual-check test', defaultValue: 'visual:test' },
+      { kind: 'text', message: 'Name of the script that runs visual-check test', defaultValue: 'visual:check' },
       { kind: 'text', message: 'Name of the script that runs visual-check update', defaultValue: 'visual:update' },
       { kind: 'confirm', message: 'Add the Storybook addon to project?', defaultValue: true },
     ])
@@ -57,7 +57,7 @@ describe('askQuestions', () => {
           startCommand: 'pnpm exec storybook dev -p 6006',
         },
       ],
-      scripts: { test: { name: 'visual:test', add: true }, update: { name: 'visual:update', add: true } },
+      scripts: { test: { name: 'visual:check', add: true }, update: { name: 'visual:update', add: true } },
       addons: [{ configDir: '.storybook', name: 'project' }],
     })
     expect(warnings).toEqual([])
@@ -248,15 +248,15 @@ describe('askQuestions', () => {
       project: { manifest: { scripts: { a: 1, b: null } } },
     })
 
-    expect(answers.scripts.test).toEqual({ name: 'visual:test', add: true })
+    expect(answers.scripts.test).toEqual({ name: 'visual:check', add: true })
   })
 
   it('takes a name another script has, so that script is replaced', async () => {
-    const manifest = { scripts: { 'visual:test': 'vitest', 'visual:update': 'vitest -u' } }
+    const manifest = { scripts: { 'visual:check': 'vitest', 'visual:update': 'vitest -u' } }
     const { answers, records, warnings } = await ask(['', '', '', '', '', false], { project: { manifest } })
 
     expect(answers.scripts).toEqual({
-      test: { name: 'visual:test', add: true },
+      test: { name: 'visual:check', add: true },
       update: { name: 'visual:update', add: true },
     })
     expect(messagesOf(records, 'invalid')).toEqual([])
@@ -357,7 +357,7 @@ describe('askQuestions', () => {
     async (command) => {
       const { answers } = await ask(['', '', '', '', '', false], { project: { manifest: { scripts: { a: command } } } })
 
-      expect(answers.scripts.test).toEqual({ name: 'visual:test', add: true })
+      expect(answers.scripts.test).toEqual({ name: 'visual:check', add: true })
     },
   )
 
@@ -385,7 +385,7 @@ describe('askQuestions', () => {
       storybooks: [
         { configDir: '.storybook', name: 'project', url: 'http://127.0.0.1:6006', startCommand: 'pnpm run sb' },
       ],
-      scripts: { test: { name: 'visual:test', add: true }, update: { name: 'visual:update', add: true } },
+      scripts: { test: { name: 'visual:check', add: true }, update: { name: 'visual:update', add: true } },
       addons: [{ configDir: '.storybook', name: 'project' }],
     })
     expect(warnings).toEqual([])

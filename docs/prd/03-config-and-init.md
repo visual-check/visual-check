@@ -122,7 +122,7 @@ Rules for the keys:
 
 1. **Which Storybooks to include.** A checklist with all ticked, shown only when there's more than one.
 2. **For each Storybook:** its name (the package name without its scope, or the folder name), its URL, and its start command when none was found.
-3. **Script names,** `visual:test` and `visual:update` by default. A name another script has replaces that script, unless it starts a Storybook.
+3. **Script names,** `visual:check` and `visual:update` by default. A name another script has replaces that script, unless it starts a Storybook.
 4. **"Install the agent skill?"**, yes by default.
 5. **"Add the Storybook addon?"** A checklist of the chosen Storybooks on 10, all ticked, or one item when there's only one. It's shown only when at least one is on 10. Storybook 9 and 11 entries are skipped with a note.
 
@@ -181,7 +181,7 @@ It warns and still writes when:
 
 1. Start each Storybook with its command.
 2. Run `visual:update` to write baselines. The first run downloads the browser image.
-3. Run `visual:test`. It should pass. If a story fails, ask your agent to run visual-check, or see the docs.
+3. Run `visual:check`. It should pass. If a story fails, ask your agent to run visual-check, or see the docs.
 4. Commit the config, `.visual-check/baselines/`, `.agents/skills/visual-check/` and the `.claude/skills/visual-check` link.
 
 Then it prints the line to add to `preview` and a docs link for CI. It says nothing about remote content.

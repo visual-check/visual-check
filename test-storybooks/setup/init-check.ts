@@ -390,7 +390,7 @@ const expectedGitignore = '/*\n!/baselines/\n!/.gitignore\n'
  * The scripts `init` adds, by name.
  */
 const addedScripts: Record<string, string> = {
-  'visual:test': 'visual-check test',
+  'visual:check': 'visual-check test',
   'visual:update': 'visual-check update',
 }
 
@@ -1198,7 +1198,7 @@ async function checkUpdate(check: Check): Promise<string[]> {
  * Runs `test` through its script, in the check's own environment, and checks it exits 0.
  */
 async function checkTest(check: Check): Promise<string[]> {
-  return exitProblems(await runCommand(check, 'test', 'pnpm', ['run', 'visual:test'], { cwd: check.project }))
+  return exitProblems(await runCommand(check, 'test', 'pnpm', ['run', 'visual:check'], { cwd: check.project }))
 }
 
 /**
@@ -1341,7 +1341,7 @@ function stepsOf(check: Check): Step[] {
       name: 'update: pnpm run visual:update without CI exits 0 and writes one baseline',
       run: () => checkUpdate(check),
     },
-    { name: 'test: pnpm run visual:test exits 0', run: () => checkTest(check) },
+    { name: 'test: pnpm run visual:check exits 0', run: () => checkTest(check) },
     {
       name: 'init again: pnpm exec visual-check init --yes exits 0 without a warning and changes no file',
       run: () => checkInitAgain(check),
