@@ -6,9 +6,9 @@ import { type CaptureSettings, openCaptureSession, remoteContentBoxesOf, remoteH
 import {
   BrowserExitedError,
   CaptureTooLargeError,
+  type ConsoleMessage,
   PageCrashedError,
   PageLoadError,
-  type PageMessage,
   PageNavigatedAwayError,
   PageTimeoutError,
 } from './driver/driver.js'
@@ -2253,13 +2253,13 @@ describe('the console messages of a capture', () => {
   /**
    * A console message a page sent, named by `text`.
    */
-  const logged = (text: string): PageMessage => ({ kind: 'console.log', text })
+  const logged = (text: string): ConsoleMessage => ({ kind: 'console.log', text })
 
   /**
    * A page that gives `sent` as its messages until it's closed, and none after, answering the rest as `behaviour`
    * says.
    */
-  const sendingUntilClosed = (sent: PageMessage[], behaviour: FakePageBehaviour = {}): FakePageBehaviour => {
+  const sendingUntilClosed = (sent: ConsoleMessage[], behaviour: FakePageBehaviour = {}): FakePageBehaviour => {
     let closed = false
 
     return {
@@ -2267,7 +2267,7 @@ describe('the console messages of a capture', () => {
       close: async () => {
         closed = true
       },
-      messages: () => (closed ? [] : sent),
+      consoleMessages: () => (closed ? [] : sent),
     }
   }
 
@@ -2281,7 +2281,7 @@ describe('the console messages of a capture', () => {
 
             return defaultSnapshot
           },
-          messages: () => (captured ? [logged('captured')] : []),
+          consoleMessages: () => (captured ? [logged('captured')] : []),
         },
       ],
     })
@@ -2294,7 +2294,7 @@ describe('the console messages of a capture', () => {
   })
 
   it('come with the first snapshot when the page is captured again', async () => {
-    const driver = new FakeDriver({ pages: [{ messages: () => [logged('a line')] }] })
+    const driver = new FakeDriver({ pages: [{ consoleMessages: () => [logged('a line')] }] })
     const capture = await openCaptureSession(driver, settings).capture({
       ...primary,
       captureAgainIf: async () => true,
@@ -2380,7 +2380,7 @@ describe('the console messages of a capture', () => {
             throw new PageNavigatedAwayError('http://localhost:6006/away', 'The page navigated away.')
           },
         }),
-        { messages: () => [logged('two')] },
+        { consoleMessages: () => [logged('two')] },
       ],
     })
 

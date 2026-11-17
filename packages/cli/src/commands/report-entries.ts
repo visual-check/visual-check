@@ -1,7 +1,7 @@
 import { basename } from 'node:path'
 import { baselinePathOf, stemOfFileName } from '../baselines/baseline-files.js'
 import type { BrokenReason, BrokenStory } from '../capture/capture-session.js'
-import type { PageMessage } from '../capture/driver/driver.js'
+import type { ConsoleMessage } from '../capture/driver/driver.js'
 import type { Tolerance } from '../config/define-config.js'
 import type { ResolvedStorybook } from '../config/resolve-config.js'
 import type {
@@ -47,9 +47,9 @@ export const reportReasons: Record<BrokenReason, ReportBrokenReason> = {
 }
 
 /**
- * The console level of each kind of page message. Uncaught errors and unhandled rejections are errors.
+ * The console level of each kind of console message. Uncaught errors and unhandled rejections are errors.
  */
-const consoleLevels: Record<PageMessage['kind'], ReportConsoleLevel> = {
+const consoleLevels: Record<ConsoleMessage['kind'], ReportConsoleLevel> = {
   'console.debug': 'debug',
   'console.info': 'info',
   'console.log': 'log',
@@ -60,9 +60,9 @@ const consoleLevels: Record<PageMessage['kind'], ReportConsoleLevel> = {
 }
 
 /**
- * What the text of each kind of page message starts with in the report.
+ * What the text of each kind of console message starts with in the report.
  */
-const consolePrefixes: Record<PageMessage['kind'], string> = {
+const consolePrefixes: Record<ConsoleMessage['kind'], string> = {
   'console.debug': '',
   'console.info': '',
   'console.log': '',
@@ -161,7 +161,7 @@ export function detailsOf(broken: BrokenStory): ReportBrokenDetails {
  * Gives the report's console messages: each kind as its level, an uncaught error's text prefixed `Uncaught ` and an
  * unhandled rejection's `Unhandled rejection: `.
  */
-export function consoleOf(messages: readonly PageMessage[]): ReportConsoleMessage[] {
+export function consoleOf(messages: readonly ConsoleMessage[]): ReportConsoleMessage[] {
   return messages.map(({ kind, text }) => ({ level: consoleLevels[kind], text: `${consolePrefixes[kind]}${text}` }))
 }
 

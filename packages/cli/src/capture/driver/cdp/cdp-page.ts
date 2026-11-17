@@ -3,16 +3,16 @@ import {
   type CaptureArea,
   type CaptureBox,
   CaptureTooLargeError,
-  keptPageMessages,
+  type ConsoleMessage,
+  consoleMessageFunction,
+  keptConsoleMessages,
   maxCaptureSide,
   type Page,
   PageCrashedError,
-  type PageMessage,
   type PageSetup,
   PageTimeoutError,
   type PageViewport,
-  pageMessageFunction,
-  readPageMessage,
+  readConsoleMessage,
 } from '../driver.js'
 import { type CdpConnection, type CdpEvent, isRecord } from './cdp-connection.js'
 import { fontFamiliesOf } from './font-families.js'
@@ -222,12 +222,12 @@ function mainWorldContextOf(event: CdpEvent, mainFrameId: string): number | unde
  * of `contexts`, or undefined for any other event, another function's call, a call from another context or a payload
  * it can't read.
  */
-function pageMessageOf(event: CdpEvent, contexts: ReadonlySet<number>): PageMessage | undefined {
+function consoleMessageOf(event: CdpEvent, contexts: ReadonlySet<number>): ConsoleMessage | undefined {
   const { name, payload, executionContextId } = event.params
 
   if (
     event.method !== 'Runtime.bindingCalled' ||
-    name !== pageMessageFunction ||
+    name !== consoleMessageFunction ||
     typeof payload !== 'string' ||
     typeof executionContextId !== 'number' ||
     !contexts.has(executionContextId)
@@ -235,7 +235,7 @@ function pageMessageOf(event: CdpEvent, contexts: ReadonlySet<number>): PageMess
     return undefined
   }
 
-  return readPageMessage(payload)
+  return readConsoleMessage(payload)
 }
 
 /**
@@ -358,7 +358,7 @@ class CdpPage implements Page {
   /**
    * The last 50 messages the page script sent since the last `goto` started, oldest first.
    */
-  private pageMessages: PageMessage[] = []
+  private recentConsoleMessages: ConsoleMessage[] = []
 
   /**
    * The execution contexts whose messages count: the main world of each document of the main frame created since the
@@ -407,7 +407,7 @@ class CdpPage implements Page {
         }),
         this.send('Emulation.setFocusEmulationEnabled', { enabled: true }),
         this.send('Runtime.enable'),
-        this.send('Runtime.addBinding', { name: pageMessageFunction }),
+        this.send('Runtime.addBinding', { name: consoleMessageFunction }),
         this.send('Page.addScriptToEvaluateOnNewDocument', { source: setup.initScript }),
         this.connection.send('Browser.setDownloadBehavior', {
           behavior: 'deny',
@@ -465,7 +465,7 @@ class CdpPage implements Page {
     this.loadedDocument = undefined
     this.gotoOrigin = undefined
     this.requestWatch?.reset()
-    this.pageMessages = []
+    this.recentConsoleMessages = []
     this.messageContexts.clear()
 
     const navigation = new MainFrameNavigation(url, this.ids.targetId, this.loaderIds, (later: readonly CdpEvent[]) =>
@@ -557,8 +557,8 @@ class CdpPage implements Page {
   /**
    * Gives a copy of the last 50 messages the page script sent since the last `goto` started, oldest first.
    */
-  messages(): PageMessage[] {
-    return [...this.pageMessages]
+  consoleMessages(): ConsoleMessage[] {
+    return [...this.recentConsoleMessages]
   }
 
   /**
@@ -661,14 +661,14 @@ class CdpPage implements Page {
       this.messageContexts.add(context)
     }
 
-    const message = pageMessageOf(event, this.messageContexts)
+    const message = consoleMessageOf(event, this.messageContexts)
 
     if (message === undefined) {
       return
     }
 
-    this.pageMessages.push(message)
-    this.pageMessages.splice(0, this.pageMessages.length - keptPageMessages)
+    this.recentConsoleMessages.push(message)
+    this.recentConsoleMessages.splice(0, this.recentConsoleMessages.length - keptConsoleMessages)
   }
 
   /**

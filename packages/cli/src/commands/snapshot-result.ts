@@ -1,6 +1,6 @@
 import { BaselineError } from '../baselines/baseline-error.js'
 import type { BrokenStory, StoryCapture, StoryHosts, StoryToCapture } from '../capture/capture-session.js'
-import type { PageMessage } from '../capture/driver/driver.js'
+import type { ConsoleMessage } from '../capture/driver/driver.js'
 import type { StoryMask } from '../capture/prepare-capture.js'
 import type { StoryOptions } from '../config/story-options.js'
 import type { ReportImages } from '../report/report-document.js'
@@ -88,7 +88,7 @@ export interface SnapshotResult {
    * The console messages and errors of the capture the report lists: `test`'s first capture, or the load `update`
    * wrote or broke on. Left out when that capture had no page.
    */
-  console?: PageMessage[]
+  console?: ConsoleMessage[]
   /**
    * The images `test` wrote to the report folder, relative to it: the first capture's baseline, snapshot and visual
    * diff of a snapshot that differs or passed only on a retry, or a broken story's image of its page as the snapshot.
@@ -112,7 +112,7 @@ interface BrokenAttempts {
   /**
    * The console messages and errors of the capture that broke. `undefined` when it had no page or no capture.
    */
-  console?: PageMessage[] | undefined
+  console?: ConsoleMessage[] | undefined
 }
 
 /**

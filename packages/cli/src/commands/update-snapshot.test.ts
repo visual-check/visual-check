@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import type { BrokenStory, StoryCapture, StoryHosts, StoryToCapture } from '../capture/capture-session.js'
-import type { PageMessage } from '../capture/driver/driver.js'
+import type { ConsoleMessage } from '../capture/driver/driver.js'
 import type { Tolerance } from '../config/define-config.js'
 import { greyPng, type PixelChange, whitePixels } from '../visual-diff/images.fixture.js'
 import { createVisualDiff, type VisualDiff } from '../visual-diff/visual-diff.js'
@@ -180,7 +180,7 @@ type FakeLoad =
       /**
        * The console messages of the load's page. None when not given.
        */
-      console?: PageMessage[]
+      console?: ConsoleMessage[]
       /**
        * The snapshots of the attempts before the last, in order, each of whose second capture navigated away, so the
        * session tried again. None when not given.
@@ -200,7 +200,7 @@ type FakeLoad =
       /**
        * The console messages of the load's page. Left out when not given, as for a load with no page.
        */
-      console?: PageMessage[]
+      console?: ConsoleMessage[]
     }
 
 /**
@@ -667,7 +667,7 @@ describe('updateSnapshot', () => {
   })
 
   it('gives the console messages of the load it writes or breaks on', async () => {
-    const consoleOf = (text: string): PageMessage[] => [{ kind: 'console.log', text }]
+    const consoleOf = (text: string): ConsoleMessage[] => [{ kind: 'console.log', text }]
     const second = snapshotOf()
     const secondFake = fakeCapturesOf([
       { snapshot: black, console: consoleOf('first') },

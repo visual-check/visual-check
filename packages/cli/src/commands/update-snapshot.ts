@@ -1,7 +1,7 @@
 import { setTimeout as sleep } from 'node:timers/promises'
 import { baselinePathOf, readBaseline, writeBaseline } from '../baselines/baseline-files.js'
 import type { BrokenStory, StoryCapture } from '../capture/capture-session.js'
-import type { PageMessage } from '../capture/driver/driver.js'
+import type { ConsoleMessage } from '../capture/driver/driver.js'
 import type { VisualDiff, VisualDiffFailure, VisualDiffResult } from '../visual-diff/visual-diff.js'
 import type { SnapshotToCapture } from './plan-snapshots.js'
 import {
@@ -69,7 +69,7 @@ type FirstLoad =
       /**
        * The console messages and errors of the load that broke, left out when it had no page.
        */
-      console?: PageMessage[]
+      console?: ConsoleMessage[]
     }
   | {
       /**

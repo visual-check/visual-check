@@ -2,7 +2,7 @@ import { type Context, createContext, runInContext } from 'node:vm'
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest'
 import { animationClasses, fakeAnimation, restoreFinish } from '../storybook/preview-script.fixture.js'
 import { readStoryWait, storyWaitExpression } from '../storybook/preview-script.js'
-import { pageMessageFunction } from './driver/driver.js'
+import { consoleMessageFunction } from './driver/driver.js'
 import { animationsTimedOutAnswer, FakeFrames, fakeDocument, settledAnswer } from './end-state.fixture.js'
 import { fontsTimedOutAnswer, imagesTimedOutAnswer, readyAnswer } from './page-script.fixture.js'
 import {
@@ -511,7 +511,7 @@ function pageSendingMessages(
   const sent: unknown[] = []
 
   page.run(top === 'self' ? 'globalThis.top = globalThis' : 'globalThis.top = {}')
-  page.setGlobal(pageMessageFunction, (payload: unknown) => {
+  page.setGlobal(consoleMessageFunction, (payload: unknown) => {
     sent.push(payload)
 
     if (throws) {
@@ -541,8 +541,8 @@ describe('the message function', () => {
   it("is hidden from the page's own scripts", () => {
     const { page } = pageSendingMessages('self')
 
-    expect(page.run(`typeof globalThis.${pageMessageFunction}`)).toBe('undefined')
-    expect(page.run(`'${pageMessageFunction}' in globalThis`)).toBe(false)
+    expect(page.run(`typeof globalThis.${consoleMessageFunction}`)).toBe('undefined')
+    expect(page.run(`'${consoleMessageFunction}' in globalThis`)).toBe(false)
   })
 
   it('is sent nothing from a frame inside another, and hidden there too', () => {
@@ -551,7 +551,7 @@ describe('the message function', () => {
     page.run("console.log('a line')")
     expect(sent).toEqual([])
     expect(messages(page)).toEqual([{ kind: 'console.log', text: 'a line' }])
-    expect(page.run(`'${pageMessageFunction}' in globalThis`)).toBe(false)
+    expect(page.run(`'${consoleMessageFunction}' in globalThis`)).toBe(false)
   })
 
   it('keeps recording and passing messages on when it throws', () => {
@@ -566,9 +566,9 @@ describe('the message function', () => {
   it("is hidden from the page's own scripts even when the Storybook adapter's script fails", () => {
     const page = blankPage({ setTimeout: undefined })
 
-    page.setGlobal(pageMessageFunction, () => undefined)
+    page.setGlobal(consoleMessageFunction, () => undefined)
     expect(() => page.run(pageInitScript)).toThrow("Cannot read properties of undefined (reading 'bind')")
-    expect(page.run(`'${pageMessageFunction}' in globalThis`)).toBe(false)
+    expect(page.run(`'${consoleMessageFunction}' in globalThis`)).toBe(false)
   })
 
   it("is sent the message as the page script's own JSON.stringify made it, though the page replaced it", () => {

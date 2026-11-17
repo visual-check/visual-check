@@ -5,11 +5,11 @@ import {
   BrowserExitedError,
   type CaptureArea,
   CaptureTooLargeError,
+  type ConsoleMessage,
   type Driver,
   maxCaptureSide,
   type Page,
   PageCrashedError,
-  type PageMessage,
   PageNavigatedAwayError,
   type PageSetup,
   PageTimeoutError,
@@ -382,7 +382,7 @@ export type StoryCapture =
        * captured it, as the page gives them right after the first capture, before the story's `captureAgainIf` is
        * called.
        */
-      console: PageMessage[]
+      console: ConsoleMessage[]
       /**
        * The remote content the snapshot shows, when the story asked for it with `findRemoteContent` and the search
        * answered in time. Without it, the remote content is unknown.
@@ -409,7 +409,7 @@ export type StoryCapture =
        * before the page is closed, from the document the story went to too when it navigated away. Left out when the
        * story had no page: a page that couldn't be opened, or a browser that exited.
        */
-      console?: PageMessage[]
+      console?: ConsoleMessage[]
       /**
        * The full page as it was when the story broke, as PNG bytes exactly as the browser made them. Present only when
        * the story asked for it with `imageWhenBroken`, broke for a reason whose page still shows something, and the
@@ -904,7 +904,7 @@ async function captureOnPage(
    */
   const brokenBy = (broken: BrokenStory): Extract<StoryCapture, { broken: BrokenStory }> => ({
     broken,
-    console: page.messages(),
+    console: page.consoleMessages(),
   })
 
   /**
@@ -1023,7 +1023,7 @@ async function captureOnPage(
       result: {
         snapshot,
         completingMs: wait.completingMs,
-        console: page.messages(),
+        console: page.consoleMessages(),
         ...capturedExtrasOf(page, story, settings, prepared),
       },
       area: prepared.area,
@@ -1123,7 +1123,7 @@ async function captureAgainIfAsked(
 
     return {
       broken: describeFailure(error, 'capture-again', story, settings.readyTimeoutMs),
-      console: page.messages(),
+      console: page.consoleMessages(),
     }
   }
 }

@@ -3,9 +3,9 @@ import { finishedAnswer } from '../storybook/preview-script.fixture.js'
 import type {
   BrowserExitedError,
   CaptureArea,
+  ConsoleMessage,
   Driver,
   Page,
-  PageMessage,
   PageSetup,
   PageViewport,
 } from './driver/driver.js'
@@ -114,9 +114,9 @@ export interface FakePageBehaviour extends FakeEvaluation {
    */
   requestHosts?: () => string[]
   /**
-   * Answers `messages`. The page sent no console message or error when it is left out.
+   * Answers `consoleMessages`. The page sent no console message or error when it is left out.
    */
-  messages?: () => PageMessage[]
+  consoleMessages?: () => ConsoleMessage[]
 }
 
 /**
@@ -234,7 +234,7 @@ export class FakeDriver implements Driver {
         await answers.close?.()
       },
       requestHosts: () => answers.requestHosts?.() ?? [],
-      messages: () => answers.messages?.() ?? [],
+      consoleMessages: () => answers.consoleMessages?.() ?? [],
     }
   }
 

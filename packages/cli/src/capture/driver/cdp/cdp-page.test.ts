@@ -4,12 +4,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   type BrowserSystem,
   CaptureTooLargeError,
+  type ConsoleMessage,
+  consoleMessageFunction,
   type Driver,
   type Page,
   PageLoadError,
-  type PageMessage,
   PageTimeoutError,
-  pageMessageFunction,
 } from '../driver.js'
 import { launchCdpDriver } from './cdp-driver.js'
 import {
@@ -309,7 +309,7 @@ function sendMessage(
   fake: FakeBrowser,
   payload: string,
   contextId: number,
-  { session = sessionId, name = pageMessageFunction }: { session?: string; name?: string } = {},
+  { session = sessionId, name = consoleMessageFunction }: { session?: string; name?: string } = {},
 ): void {
   fake.emit('Runtime.bindingCalled', { name, payload, executionContextId: contextId }, session)
 }
@@ -322,9 +322,9 @@ function logged(text: string): string {
 }
 
 /**
- * A `console.log` message of `text`, as `Page.messages` gives it.
+ * A `console.log` message of `text`, as `Page.consoleMessages` gives it.
  */
-function logMessage(text: string): PageMessage {
+function logMessage(text: string): ConsoleMessage {
   return { kind: 'console.log', text }
 }
 
@@ -2523,11 +2523,11 @@ describe('Page.close', () => {
   })
 })
 
-describe('Page.messages', () => {
+describe('Page.consoleMessages', () => {
   it('gives none before the page sent any', async () => {
     const { page } = await openPage()
 
-    expect(page.messages()).toEqual([])
+    expect(page.consoleMessages()).toEqual([])
   })
 
   it("gives the messages the main world of the goto's document sent, in order", async () => {
@@ -2537,7 +2537,7 @@ describe('Page.messages', () => {
     sendMessage(browser, logged('first'), 1)
     sendMessage(browser, JSON.stringify({ kind: 'unhandledrejection', text: 'nope' }), 1)
     await flush()
-    expect(page.messages()).toEqual([logMessage('first'), { kind: 'unhandledrejection', text: 'nope' }])
+    expect(page.consoleMessages()).toEqual([logMessage('first'), { kind: 'unhandledrejection', text: 'nope' }])
   })
 
   it('keeps only the last 50', async () => {
@@ -2550,7 +2550,7 @@ describe('Page.messages', () => {
 
     await flush()
 
-    const kept = page.messages()
+    const kept = page.consoleMessages()
 
     expect(kept).toHaveLength(50)
     expect(kept[0]).toEqual(logMessage('line 11'))
@@ -2566,7 +2566,7 @@ describe('Page.messages', () => {
     await page.goto(burgersUrl, 1000)
     sendMessage(browser, logged('this story'), 2)
     await flush()
-    expect(page.messages()).toEqual([logMessage('this story')])
+    expect(page.consoleMessages()).toEqual([logMessage('this story')])
   })
 
   it("ignores what the document before a goto sends once it started, though it comes after the goto's document", async () => {
@@ -2595,7 +2595,7 @@ describe('Page.messages', () => {
     await page.goto(burgersUrl, 1000)
     sendMessage(browser, logged('the earlier story, last'), 1)
     await flush()
-    expect(page.messages()).toEqual([logMessage('this story')])
+    expect(page.consoleMessages()).toEqual([logMessage('this story')])
   })
 
   it('keeps the messages of a story that navigated away, and those of the document it went to', async () => {
@@ -2608,7 +2608,7 @@ describe('Page.messages', () => {
     sendMessage(browser, logged('after leaving'), 9)
     await flush()
     await expect(page.evaluate('1', 1000)).rejects.toMatchObject(navigatedAway(burgersUrl))
-    expect(page.messages()).toEqual([logMessage('before leaving'), logMessage('after leaving')])
+    expect(page.consoleMessages()).toEqual([logMessage('before leaving'), logMessage('after leaving')])
   })
 
   it("ignores a subframe's context, an isolated world and a context it wasn't told of", async () => {
@@ -2624,7 +2624,7 @@ describe('Page.messages', () => {
     sendMessage(browser, logged('an unknown context'), 42)
     sendMessage(browser, logged('kept'), 1)
     await flush()
-    expect(page.messages()).toEqual([logMessage('kept')])
+    expect(page.consoleMessages()).toEqual([logMessage('kept')])
   })
 
   it("ignores a payload it can't read, another function's calls and another session's", async () => {
@@ -2637,7 +2637,7 @@ describe('Page.messages', () => {
     sendMessage(browser, logged('another session'), 1, { session: 'session-9' })
     sendMessage(browser, logged('kept'), 1)
     await flush()
-    expect(page.messages()).toEqual([logMessage('kept')])
+    expect(page.consoleMessages()).toEqual([logMessage('kept')])
   })
 
   it('gives a copy, which the page never changes', async () => {
@@ -2647,7 +2647,7 @@ describe('Page.messages', () => {
     sendMessage(browser, logged('first'), 1)
     await flush()
 
-    const given = page.messages()
+    const given = page.consoleMessages()
 
     sendMessage(browser, logged('second'), 1)
     await flush()

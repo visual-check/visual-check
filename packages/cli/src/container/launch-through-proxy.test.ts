@@ -78,7 +78,7 @@ function fakeDriverOf(proxyPort: () => number, behaviour: FakeBehaviour = {}): F
     clearStorage: async () => undefined,
     close: async () => undefined,
     requestHosts: () => [],
-    messages: () => [],
+    consoleMessages: () => [],
   }
   const driver: Driver = {
     version: '157.0.8103.78',

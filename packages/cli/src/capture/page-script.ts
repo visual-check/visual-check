@@ -1,5 +1,5 @@
 import { parkedByStorybookSource, storybookPageScript } from '../storybook/preview-script.js'
-import { keptPageMessageCharacters, keptPageMessages, pageMessageFunction } from './driver/driver.js'
+import { consoleMessageFunction, keptConsoleMessageCharacters, keptConsoleMessages } from './driver/driver.js'
 import { endStateFunction } from './end-state.js'
 import { type CapturePrepRequest, prepareCaptureFunction } from './prepare-capture.js'
 import { remoteContentFunction } from './remote-content.js'
@@ -89,7 +89,7 @@ ${storybookPageScript};
 
   const sketch = (value, depth) => {
     if (typeof value === 'string') {
-      return stringify(value.slice(0, ${keptPageMessageCharacters}))
+      return stringify(value.slice(0, ${keptConsoleMessageCharacters}))
     }
     if (typeof value === 'function') {
       return '[function]'
@@ -105,7 +105,7 @@ ${storybookPageScript};
     const count = array ? value.length : keys.length
     const parts = []
     let length = 0
-    for (let index = 0; index < count && length < ${keptPageMessageCharacters}; index += 1) {
+    for (let index = 0; index < count && length < ${keptConsoleMessageCharacters}; index += 1) {
       const key = array ? String(index) : keys[index]
       const property = typeof key === 'string' ? Reflect.getOwnPropertyDescriptor(value, key) : undefined
       if (!array && (property === undefined || !property.enumerable)) {
@@ -125,7 +125,7 @@ ${storybookPageScript};
   const describe = (value) => {
     try {
       if (typeof value === 'string') {
-        return value.slice(0, ${keptPageMessageCharacters})
+        return value.slice(0, ${keptConsoleMessageCharacters})
       }
       if (isError(value)) {
         return typeof value.stack === 'string' ? value.stack : String(value)
@@ -138,10 +138,10 @@ ${storybookPageScript};
 
   const record = (kind, values) => {
     try {
-      const message = { kind, text: values.map(describe).join(' ').slice(0, ${keptPageMessageCharacters}) }
+      const message = { kind, text: values.map(describe).join(' ').slice(0, ${keptConsoleMessageCharacters}) }
       messages.push(message)
-      if (messages.length > ${keptPageMessages}) {
-        messages.splice(0, messages.length - ${keptPageMessages})
+      if (messages.length > ${keptConsoleMessages}) {
+        messages.splice(0, messages.length - ${keptConsoleMessages})
       }
       if (send !== undefined) {
         send(stringify(message))
@@ -325,8 +325,8 @@ ${storybookPageScript};
 })()
 })((() => {
   try {
-    const sendMessage = globalThis['${pageMessageFunction}']
-    delete globalThis['${pageMessageFunction}']
+    const sendMessage = globalThis['${consoleMessageFunction}']
+    delete globalThis['${consoleMessageFunction}']
     return typeof sendMessage === 'function' && globalThis.top === globalThis ? sendMessage : undefined
   } catch {
     return undefined

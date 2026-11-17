@@ -209,7 +209,7 @@ describe('runCli test report', () => {
 
   it('lists a broken story with the image of its page, its details and its console', async () => {
     const { project } = await createRun(['a'], { a: defaultRunSnapshot })
-    const story = { broken: true, messages: [{ kind: 'console.error' as const, text: 'boom' }] }
+    const story = { broken: true, consoleMessages: [{ kind: 'console.error' as const, text: 'boom' }] }
     const result = await runCli(['test'], {}, project, fakeBrowser({ a: story }).options)
     const entry = onlyEntryOf(readReport(project))
 

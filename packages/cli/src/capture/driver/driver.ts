@@ -189,33 +189,33 @@ export type CaptureArea = 'full-page' | CaptureBox
 /**
  * The name of the function every driver provides in each document of a page's main frame and its same-process frames,
  * before the page's init script runs there. The init script calls it with one JSON string per console message or error
- * it records, `{ kind, text }`, as `PageMessage` describes, and deletes it from the page before the page's own scripts
+ * it records, `{ kind, text }`, as `ConsoleMessage` describes, and deletes it from the page before the page's own scripts
  * run, so they never see it.
  *
  * @public
  */
-export const pageMessageFunction = '__visualCheckMessage'
+export const consoleMessageFunction = '__visualCheckMessage'
 
 /**
  * How many console messages and errors a page keeps: the latest ones.
  *
  * @public
  */
-export const keptPageMessages = 50
+export const keptConsoleMessages = 50
 
 /**
  * How many characters a page keeps of each console message or error.
  *
  * @public
  */
-export const keptPageMessageCharacters = 500
+export const keptConsoleMessageCharacters = 500
 
 /**
  * A console message or error a page's document sent.
  *
  * @public
  */
-export interface PageMessage {
+export interface ConsoleMessage {
   /**
    * What sent it: a console method of that level, an uncaught error (`error`) or an unhandled rejection
    * (`unhandledrejection`).
@@ -237,7 +237,7 @@ export interface PageMessage {
 /**
  * Every kind of message a page sends.
  */
-const pageMessageKinds: readonly PageMessage['kind'][] = [
+const consoleMessageKinds: readonly ConsoleMessage['kind'][] = [
   'console.debug',
   'console.info',
   'console.log',
@@ -250,8 +250,8 @@ const pageMessageKinds: readonly PageMessage['kind'][] = [
 /**
  * Whether a value is a kind of message a page sends.
  */
-function isPageMessageKind(kind: unknown): kind is PageMessage['kind'] {
-  return pageMessageKinds.some((known) => known === kind)
+function isConsoleMessageKind(kind: unknown): kind is ConsoleMessage['kind'] {
+  return consoleMessageKinds.some((known) => known === kind)
 }
 
 /**
@@ -260,7 +260,7 @@ function isPageMessageKind(kind: unknown): kind is PageMessage['kind'] {
  *
  * @public
  */
-export function readPageMessage(payload: string): PageMessage | undefined {
+export function readConsoleMessage(payload: string): ConsoleMessage | undefined {
   let message: unknown
 
   try {
@@ -275,11 +275,11 @@ export function readPageMessage(payload: string): PageMessage | undefined {
 
   const { kind, text } = message
 
-  if (!isPageMessageKind(kind) || typeof text !== 'string') {
+  if (!isConsoleMessageKind(kind) || typeof text !== 'string') {
     return undefined
   }
 
-  return { kind, text: text.slice(0, keptPageMessageCharacters) }
+  return { kind, text: text.slice(0, keptConsoleMessageCharacters) }
 }
 
 /**
@@ -380,7 +380,7 @@ export interface Page {
    * so they survive a story that navigates away. They are kept after the page can no longer be used too, so a caller
    * reads them once a call failed, before it closes the page. Never fails.
    */
-  messages: () => PageMessage[]
+  consoleMessages: () => ConsoleMessage[]
   /**
    * Closes the page and its browser context. Every call in flight and every later call fails. Calling it again returns
    * the same promise.

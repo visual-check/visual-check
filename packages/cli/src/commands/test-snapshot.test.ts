@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import type { BrokenStory, StoryCapture } from '../capture/capture-session.js'
-import type { PageMessage } from '../capture/driver/driver.js'
+import type { ConsoleMessage } from '../capture/driver/driver.js'
 import { greyPng, whitePixels } from '../visual-diff/images.fixture.js'
 import { createVisualDiff } from '../visual-diff/visual-diff.js'
 import type { SnapshotToCapture } from './plan-snapshots.js'
@@ -38,7 +38,7 @@ const brokenImage = new Uint8Array(await greyPng(10, 10, 128))
 /**
  * The console messages of the first capture.
  */
-const firstConsole: PageMessage[] = [{ kind: 'console.log', text: 'first' }]
+const firstConsole: ConsoleMessage[] = [{ kind: 'console.log', text: 'first' }]
 
 /**
  * The broken story the fake gives for a story whose `play` threw.
@@ -139,7 +139,7 @@ function captureStoryOf(captures: readonly StoryCapture[]): CaptureStory {
 /**
  * A capture of `snapshot`, with `console` as its console messages, none when not given.
  */
-function captureOf(snapshot: Uint8Array, console: PageMessage[] = []): StoryCapture {
+function captureOf(snapshot: Uint8Array, console: ConsoleMessage[] = []): StoryCapture {
   return { snapshot, completingMs: undefined, console }
 }
 

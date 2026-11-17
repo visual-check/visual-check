@@ -8,7 +8,7 @@ import {
   PageLoadError,
   PageNavigatedAwayError,
   PageTimeoutError,
-  readPageMessage,
+  readConsoleMessage,
 } from './driver.js'
 
 describe('describeExit', () => {
@@ -133,7 +133,7 @@ describe('browserThatFailedToStart', () => {
   })
 })
 
-describe('readPageMessage', () => {
+describe('readConsoleMessage', () => {
   it.each([
     ['console.debug'],
     ['console.info'],
@@ -143,18 +143,18 @@ describe('readPageMessage', () => {
     ['error'],
     ['unhandledrejection'],
   ])('reads a %s message', (kind) => {
-    expect(readPageMessage(JSON.stringify({ kind, text: 'a line' }))).toEqual({ kind, text: 'a line' })
+    expect(readConsoleMessage(JSON.stringify({ kind, text: 'a line' }))).toEqual({ kind, text: 'a line' })
   })
 
   it('keeps only the kind and the text', () => {
-    expect(readPageMessage(JSON.stringify({ kind: 'console.log', text: 'a line', extra: 1 }))).toEqual({
+    expect(readConsoleMessage(JSON.stringify({ kind: 'console.log', text: 'a line', extra: 1 }))).toEqual({
       kind: 'console.log',
       text: 'a line',
     })
   })
 
   it('cuts the text to 500 characters', () => {
-    expect(readPageMessage(JSON.stringify({ kind: 'console.log', text: 'x'.repeat(600) }))).toEqual({
+    expect(readConsoleMessage(JSON.stringify({ kind: 'console.log', text: 'x'.repeat(600) }))).toEqual({
       kind: 'console.log',
       text: 'x'.repeat(500),
     })
@@ -169,6 +169,6 @@ describe('readPageMessage', () => {
     ['a text that is not a string', JSON.stringify({ kind: 'console.log', text: 42 })],
     ['a missing text', JSON.stringify({ kind: 'console.log' })],
   ])('rejects %s', (_case, payload) => {
-    expect(readPageMessage(payload)).toBeUndefined()
+    expect(readConsoleMessage(payload)).toBeUndefined()
   })
 })
