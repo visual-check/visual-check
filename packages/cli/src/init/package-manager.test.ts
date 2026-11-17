@@ -3,6 +3,7 @@ import {
   addDevDependenciesCommandOf,
   commandLineOf,
   isPackageManager,
+  listsDependency,
   lockfileNames,
   packageManagerOf,
   runScriptCommandOf,
@@ -145,5 +146,26 @@ describe('isPackageManager', () => {
 
   it.each(['pip', 'NPM', '', undefined, 3])('does not know %j', (value) => {
     expect(isPackageManager(value)).toBe(false)
+  })
+})
+
+describe('listsDependency', () => {
+  it('finds a name in each dependency field', () => {
+    for (const field of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']) {
+      expect(listsDependency({ [field]: { left: '1.0.0' } }, 'left')).toBe(true)
+    }
+  })
+
+  it('does not find a name that is not listed', () => {
+    expect(listsDependency({ dependencies: { left: '1.0.0' } }, 'right')).toBe(false)
+    expect(listsDependency({}, 'left')).toBe(false)
+  })
+
+  it('ignores a field that is not an object', () => {
+    expect(listsDependency({ dependencies: ['left'], devDependencies: 'left' }, 'left')).toBe(false)
+  })
+
+  it('does not find an inherited property', () => {
+    expect(listsDependency({ dependencies: {} }, 'toString')).toBe(false)
   })
 })

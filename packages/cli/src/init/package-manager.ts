@@ -50,6 +50,22 @@ export function isJsonObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * The manifest fields that list dependencies.
+ */
+const dependencyFields = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'] as const
+
+/**
+ * Returns whether the manifest lists `name` in any of its dependency fields.
+ */
+export function listsDependency(manifest: Manifest, name: string): boolean {
+  return dependencyFields.some((field) => {
+    const listed = manifest[field]
+
+    return isJsonObject(listed) && Object.hasOwn(listed, name)
+  })
+}
+
+/**
  * Returns the manifest's scripts that are text, in key order. A script that isn't text is left out.
  */
 export function scriptsOf(manifest: Manifest): Record<string, string> {

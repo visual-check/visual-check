@@ -34,8 +34,7 @@ export default defineConfig({
 /**
  * The sentence a missing or stopped Docker gets after its message.
  */
-const dockerFix =
-  "visual-check runs the browser in Docker: start or install Docker before you run visual-check update, or set platform: 'host' in the config."
+const dockerFix = "Start or install Docker before you run visual-check update, or set platform: 'host' in the config."
 
 afterEach(() => {
   removeProjects()
@@ -194,7 +193,7 @@ describe('runInit', () => {
       expect(prompter.records[0]).toEqual({
         kind: 'note',
         message:
-          'Warning: The Storybook in .storybook runs storybook 12.0.0, and visual-check is tested on 9.1 to 11. init carries on.',
+          'Warning: The Storybook in .storybook runs storybook 12.0.0, and visual-check is tested on 9.1 to 11. visual-check init carries on.',
       })
       expectWritten(root, result.stdout)
       expect(prompter.records.filter(({ kind }) => kind === 'confirm')).toEqual([])

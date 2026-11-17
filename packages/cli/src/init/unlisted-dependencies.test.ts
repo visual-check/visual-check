@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  failureOf,
+  fallowFailureOf,
   fallowFailureWarningOf,
   findUnlistedDependencies,
   unlistedDependenciesOf,
@@ -86,22 +86,22 @@ describe('unlistedDependenciesWarningOf', () => {
   })
 })
 
-describe('failureOf', () => {
+describe('fallowFailureOf', () => {
   it('names the timeout when the process was killed', () => {
-    expect(failureOf({ killed: true, stderr: 'x', code: 1 })).toBe("Fallow didn't finish within 120 s.")
+    expect(fallowFailureOf({ killed: true, stderr: 'x', code: 1 })).toBe("Fallow didn't finish within 120 s.")
   })
 
   it('gives the first non-empty line of stderr', () => {
-    expect(failureOf({ stderr: '\n  \n boom \nmore\n', code: 2 })).toBe('boom')
+    expect(fallowFailureOf({ stderr: '\n  \n boom \nmore\n', code: 2 })).toBe('boom')
   })
 
   it('gives the exit code when stderr is empty', () => {
-    expect(failureOf({ stderr: '', code: 2 })).toBe('exit code 2')
+    expect(fallowFailureOf({ stderr: '', code: 2 })).toBe('exit code 2')
   })
 
   it('gives the message, or a fallback, when there is no exit code', () => {
-    expect(failureOf({ code: 'ENOENT', message: 'spawn failed' })).toBe('spawn failed')
-    expect(failureOf({})).toBe('it failed')
+    expect(fallowFailureOf({ code: 'ENOENT', message: 'spawn failed' })).toBe('spawn failed')
+    expect(fallowFailureOf({})).toBe('it failed')
   })
 })
 

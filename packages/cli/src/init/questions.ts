@@ -2,8 +2,8 @@ import { findStorybookUrlProblem, serveStorybookFix } from '../config/find-story
 import type { DetectedProject, DetectedStorybook } from './detect-project.js'
 import {
   commandLineOf,
-  isJsonObject,
   isPackageManager,
+  listsDependency,
   type PackageManager,
   runScriptCommandOf,
   scriptsOf,
@@ -138,11 +138,6 @@ export const defaultStorybookPort = 6006
  * The name of the addon package.
  */
 const addonPackage = '@visual-check/storybook-addon'
-
-/**
- * The `package.json` fields that may list the addon.
- */
-const dependencyFields = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'] as const
 
 /**
  * The Storybook major version the addon is added to.
@@ -380,17 +375,6 @@ async function askScript(
 }
 
 /**
- * Returns whether a manifest lists the addon in any of its dependency fields.
- */
-function listsAddon(manifest: DetectedProject['manifest']): boolean {
-  return dependencyFields.some((field) => {
-    const dependencies = manifest[field]
-
-    return isJsonObject(dependencies) && addonPackage in dependencies
-  })
-}
-
-/**
  * Returns the major version of a version text, or `undefined` for one that starts with no number.
  */
 function majorOf(version: string): number | undefined {
@@ -435,7 +419,10 @@ async function askAddons(
 
   for (const { storybook, name } of named) {
     const { configDir, version } = storybook
-    const wanted = version !== undefined && majorOf(version) === addonStorybookMajor && !listsAddon(project.manifest)
+    const wanted =
+      version !== undefined &&
+      majorOf(version) === addonStorybookMajor &&
+      !listsDependency(project.manifest, addonPackage)
 
     if (wanted && (await prompter.confirm(`Add the Storybook addon to ${name}?`, true))) {
       addons.push({ configDir, name })

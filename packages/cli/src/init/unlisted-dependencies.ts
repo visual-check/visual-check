@@ -113,7 +113,7 @@ interface FallowRun {
 /**
  * Words why a failed run failed: the timeout, Fallow's first line of stderr, or its exit code.
  */
-export function failureOf({ stderr = '', code, killed, message }: ExecFailure): string {
+export function fallowFailureOf({ stderr = '', code, killed, message }: ExecFailure): string {
   if (killed === true) {
     return `Fallow didn't finish within ${timeoutMs / 1000} s.`
   }
@@ -143,7 +143,7 @@ async function runFallow(root: string): Promise<FallowRun> {
   } catch (error) {
     const failure = error as ExecFailure
 
-    return { stdout: failure.stdout ?? '', failure: failureOf(failure) }
+    return { stdout: failure.stdout ?? '', failure: fallowFailureOf(failure) }
   }
 }
 

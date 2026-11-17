@@ -74,7 +74,7 @@ describe('existingConfigOf', () => {
       names: { '.storybook': 'web-app' },
       storybooks: [{ name: 'web-app', dir: root, configDir: join(root, '.storybook'), url: undefined }],
       notes: [
-        "Warning: visual-check init couldn't load ../visual-check.config.ts, so it left it alone: Couldn't load ../visual-check.config.ts: broken config",
+        "Warning: visual-check init left ../visual-check.config.ts alone: Couldn't load ../visual-check.config.ts: broken config",
       ],
     })
   })
@@ -197,7 +197,7 @@ describe('init run again with a config there', () => {
         'Added the scripts visual:test and visual:update to package.json.\n' +
         `\n${pnpmClosingMessage}`,
       stderr:
-        "Warning: visual-check init couldn't load visual-check.config.ts, so it left it alone: Couldn't load visual-check.config.ts: broken config\n",
+        "Warning: visual-check init left visual-check.config.ts alone: Couldn't load visual-check.config.ts: broken config\n",
     })
     expect(readText(root, 'visual-check.config.ts')).toBe(config)
     expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddon))

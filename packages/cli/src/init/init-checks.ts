@@ -136,7 +136,7 @@ export function versionNotesOf(project: DetectedProject): string[] {
     if (classifyStorybookVersion(version) === 'above-maximum') {
       return [
         `Warning: The Storybook in ${configDir} runs storybook ${version}, ` +
-          `and visual-check is tested on ${minimumText} to ${newestSupportedMajor}. init carries on.`,
+          `and visual-check is tested on ${minimumText} to ${newestSupportedMajor}. visual-check init carries on.`,
       ]
     }
 
@@ -160,8 +160,8 @@ export function dockerWarningOf(error: unknown, os: NodeJS.Platform): string {
   }
 
   const warning =
-    `Warning: ${error.message} visual-check runs the browser in Docker: start or install Docker before you ` +
-    "run visual-check update, or set platform: 'host' in the config."
+    `Warning: ${error.message} Start or install Docker before you run visual-check update, ` +
+    "or set platform: 'host' in the config."
 
   return os === 'win32' && error instanceof DockerMissingError
     ? `${warning} If Docker runs inside WSL, run visual-check from inside WSL too.`

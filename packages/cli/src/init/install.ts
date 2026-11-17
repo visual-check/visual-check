@@ -2,7 +2,7 @@ import {
   addDevDependenciesCommandOf,
   type CommandLine,
   commandLineOf,
-  isJsonObject,
+  listsDependency,
   type Manifest,
   type PackageManager,
   storybookCommandOf,
@@ -63,22 +63,6 @@ interface DependenciesToAddInput {
    * The range of `@visual-check/chromium` the CLI works with.
    */
   browserRange: string
-}
-
-/**
- * The manifest fields that list dependencies.
- */
-const dependencyFields = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'] as const
-
-/**
- * Returns whether the manifest lists `name` in any of its dependency fields.
- */
-function listsDependency(manifest: Manifest, name: string): boolean {
-  return dependencyFields.some((field) => {
-    const listed = manifest[field]
-
-    return isJsonObject(listed) && Object.hasOwn(listed, name)
-  })
 }
 
 /**

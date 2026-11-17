@@ -118,7 +118,7 @@ describe('versionNotesOf', () => {
 
   it('warns of a version above the tested ones', () => {
     expect(versionNotesOf(projectOf({ storybooks: [storybookOf({ version: '12.0.0' })] }))).toEqual([
-      'Warning: The Storybook in .storybook runs storybook 12.0.0, and visual-check is tested on 9.1 to 11. init carries on.',
+      'Warning: The Storybook in .storybook runs storybook 12.0.0, and visual-check is tested on 9.1 to 11. visual-check init carries on.',
     ])
   })
 
@@ -133,8 +133,7 @@ describe('dockerWarningOf', () => {
   /**
    * The sentence a missing or stopped Docker gets after its message.
    */
-  const dockerFix =
-    "visual-check runs the browser in Docker: start or install Docker before you run visual-check update, or set platform: 'host' in the config."
+  const dockerFix = "Start or install Docker before you run visual-check update, or set platform: 'host' in the config."
 
   it('tells to install a missing Docker', () => {
     const error = new DockerMissingError("there's no docker command on PATH.")

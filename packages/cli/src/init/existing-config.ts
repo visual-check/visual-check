@@ -187,9 +187,7 @@ function unloadableConfigOf(cwd: string, project: DetectedProject, path: string,
       configDir: join(project.root, configDir),
       url: undefined,
     })),
-    notes: [
-      `Warning: visual-check init couldn't load ${relativePathOf(cwd, path)}, so it left it alone: ${error.message}`,
-    ],
+    notes: [`Warning: visual-check init left ${relativePathOf(cwd, path)} alone: ${error.message}`],
   }
 }
 
