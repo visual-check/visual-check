@@ -1,5 +1,5 @@
 {
   "extends": "@visual-check/typescript-config/base.json",
-  "compilerOptions": { "types": ["node"] },
+  "compilerOptions": { "types": ["node"], "jsx": "react-jsx" },
   "include": ["src", "test"]
 }

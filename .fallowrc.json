@@ -45,6 +45,7 @@
       { "name": "cli/sharding", "patterns": ["packages/cli/src/sharding/**"] },
       { "name": "cli/storybook", "patterns": ["packages/cli/src/storybook/**"] },
       { "name": "cli/system-error", "patterns": ["packages/cli/src/system-error/**"] },
+      { "name": "cli/terminal-ui", "patterns": ["packages/cli/src/terminal-ui/**"] },
       { "name": "cli/visual-diff", "patterns": ["packages/cli/src/visual-diff/**"] },
       { "name": "storybook/per-story-options", "patterns": ["packages/storybook/src/per-story-options/**"] },
       { "name": "repo-checks/workspace", "patterns": ["packages/repo-checks/src/workspace/**"] },
@@ -79,6 +80,7 @@
           "cli/report",
           "cli/sharding",
           "cli/storybook",
+          "cli/terminal-ui",
           "cli/visual-diff"
         ]
       },
@@ -89,6 +91,7 @@
       { "from": "cli/sharding", "allow": ["cli/baselines", "cli/storybook"] },
       { "from": "cli/storybook", "allow": [] },
       { "from": "cli/system-error", "allow": [] },
+      { "from": "cli/terminal-ui", "allow": ["cli/init"] },
       { "from": "cli/visual-diff", "allow": ["cli/config"] },
       { "from": "storybook/per-story-options", "allow": [] },
       { "from": "repo-checks/workspace", "allow": [] },
