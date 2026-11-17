@@ -689,6 +689,21 @@ describe('visual-check binary reaching Storybooks', () => {
     )
   })
 
+  it('writes the header to stderr as it happens with --reporter json, before the document', async () => {
+    const url = await startStorybookServer({ c: entryOf('button--primary:test', { subtype: 'test' }) })
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
+      'button.stories.tsx': '',
+    })
+    const result = await runIntoOneFile({ cwd: project }, 'test', '--reporter', 'json')
+    const [header, document = '', ...rest] = withoutElapsed(result.output).split('\n')
+
+    expect(result.status).toBe(0)
+    expect(header).toBe(`visual-check ${version} · test · 0 snapshots · 4 workers`)
+    expect(JSON.parse(document)).toMatchObject({ command: 'test', exitCode: 0 })
+    expect(rest).toEqual(['0 passed · N', 'Report: .visual-check/report/report.json', ''])
+  })
+
   it('reaches the browser to read the per-story options of every story, even when --filter selects none', async () => {
     const url = await startStorybookServer({ a: entryOf('button--primary'), b: entryOf('button--secondary') })
     const project = createProject({

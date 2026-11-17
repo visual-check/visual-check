@@ -16,7 +16,8 @@ const usageHint = 'Run visual-check --help to see the commands and options.\n'
  */
 export interface RunStop {
   /**
-   * The lines the run printed on stdout before it stopped.
+   * What the run printed on stdout before it stopped, besides the lines its reporter wrote as they happened: the
+   * consistency output of a `test` that stopped after its check, else nothing.
    */
   stdout: string
   /**

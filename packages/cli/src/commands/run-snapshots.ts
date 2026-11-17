@@ -6,6 +6,7 @@ import { runWorkerPool } from '../capture/worker-pool.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
 import type { ReportWarning } from '../report/report-document.js'
 import { ReportError, reportFolderOf } from '../report/report-folder.js'
+import type { RunEvent } from '../reporter/run-event.js'
 import type { Shard } from '../sharding/shard.js'
 import type { Story } from '../storybook/read-stories.js'
 import { testPathWarningOf } from '../storybook/test-path.js'
@@ -16,7 +17,7 @@ import type { LaunchBrowser } from './launch-browser.js'
 import { networkWarningsOf, warningsTextOf } from './network-warning.js'
 import { type PlannedSnapshot, planSnapshots } from './plan-snapshots.js'
 import { type RunBrowser, runBrowserOf } from './run-browser.js'
-import { snapshotCountOf, snapshotLineOf, snapshotNameOf } from './run-output.js'
+import { markOf, snapshotCountOf, snapshotLineOf, snapshotNameOf } from './run-output.js'
 import type { RunFindings } from './run-report.js'
 import { type ShardShare, shardHeaderPartOf, shardNotesOf, shardShareOf } from './shard-share.js'
 import type { CaptureStory, SnapshotResult, SnapshotStatus } from './snapshot-result.js'
@@ -130,6 +131,11 @@ interface SnapshotRun {
    * Writes the progress of the browser's launch, such as an image pull or a download, as it happens.
    */
   progress: (text: string) => void
+  /**
+   * Takes the run's progress stream as it happens: the planned snapshots with the header and a shard's notes, then
+   * each snapshot's start and its line once it finishes.
+   */
+  events: (event: RunEvent) => void
 }
 
 /**
@@ -141,10 +147,11 @@ interface SnapshotRunEnd {
    */
   exitCode: number
   /**
-   * The header, a shard's notes and one line per snapshot, then for `update` its counts, the path of each baseline
-   * written and each orphan deleted and its flaky snapshots. `test`'s end block is built from its report. For a CI
-   * `test` whose consistency check found anything, the consistency output, then a line that says why it captured
-   * nothing. For `test --consistency`, the consistency output alone.
+   * What the run prints at its end, after the header, a shard's notes and the snapshot lines it emitted as they
+   * happened: for `update` its counts, the path of each baseline written and each orphan deleted and its flaky
+   * snapshots, and nothing for `test`, whose end block is built from its report. For a CI `test` whose consistency
+   * check found anything, the consistency output, then a line that says why it captured nothing. For
+   * `test --consistency`, the consistency output alone.
    */
   stdout: string
   /**
@@ -168,18 +175,14 @@ interface SnapshotRunEnd {
 }
 
 /**
- * What a run that stopped with exit 2 printed, and what stopped it.
+ * What a run that stopped with exit 2 printed on stderr, and what stopped it. Its stdout is the header and the lines
+ * of the snapshots that finished before the stop, already emitted.
  */
 interface SnapshotRunStop {
   /**
    * The exit code: 2.
    */
   exitCode: 2
-  /**
-   * The header and the lines of the snapshots that finished before the stop. Nothing when the run stopped before any
-   * capture, while it planned the snapshots or checked the baselines folders.
-   */
-  stdout: string
   /**
    * When the first browser exited mid-run, that it exited, whether visual-check relaunches it once, and its last
    * output, then what stopped the run: a problem visual-check knows, or the stack trace of an error that is a bug.
@@ -200,7 +203,7 @@ interface SnapshotRunStop {
  * What a run printed and how it exits: a run that finished, or stopped after its consistency check, or one that
  * stopped with exit 2.
  */
-type SnapshotRunResult = SnapshotRunEnd | SnapshotRunStop
+export type SnapshotRunResult = SnapshotRunEnd | SnapshotRunStop
 
 /**
  * Per command, the statuses that make the run exit 1.
@@ -419,17 +422,6 @@ function plannedSnapshotsOf(run: SnapshotRun, share: RunShare | undefined, items
 }
 
 /**
- * Gives the line of each snapshot that has finished, in the snapshots' order: its mark, name and detail.
- */
-function linesOf({ items, results }: PlannedSnapshots): string[] {
-  return items.flatMap((item, index) => {
-    const result = results[index]
-
-    return result === undefined ? [] : [snapshotLineOf(item, result)]
-  })
-}
-
-/**
  * Lists `update`'s flaky snapshots by name under their heading, in the snapshots' order, each indented by two spaces.
  * Gives no line when none is flaky.
  */
@@ -437,13 +429,6 @@ function updateFlakyLinesOf({ items, results }: PlannedSnapshots): string[] {
   const names = items.flatMap((item, index) => (results[index]?.flaky === true ? [`  ${snapshotNameOf(item)}`] : []))
 
   return names.length === 0 ? [] : [updateFlakyHeading, ...names]
-}
-
-/**
- * Writes the header, the notes and the lines, each ending with a newline.
- */
-function printedOf(snapshots: PlannedSnapshots, lines: string[]): string {
-  return [snapshots.header, ...snapshots.notes, ...lines].map((line) => `${line}\n`).join('')
 }
 
 /**
@@ -455,7 +440,7 @@ function capturedAnyOf(snapshots: PlannedSnapshots | undefined): boolean {
 
 /**
  * Takes every snapshot with a pool of `workers` that share the run's browser, testing each for `test` and updating its
- * baseline for `update`.
+ * baseline for `update`. Emits each snapshot's start as a worker picks it up, and its line once it finishes.
  */
 async function takeSnapshots(
   run: SnapshotRun,
@@ -466,16 +451,23 @@ async function takeSnapshots(
   await runWorkerPool(run.workers, snapshots.items, async (item, index, worker) => {
     const captureStory: CaptureStory = (toCapture, started) => browser.capture(worker, toCapture, started)
 
-    snapshots.results[index] = await takeSnapshot(item, captureStory, tools)
+    run.events({ kind: 'started', index })
+
+    const result = await takeSnapshot(item, captureStory, tools)
+
+    snapshots.results[index] = result
+    run.events({ kind: 'finished', index, mark: markOf(result), line: snapshotLineOf(item, result) })
   })
 }
 
 /**
  * Reads every Storybook's per-story options before any capture, then takes the snapshots of every selected story that
  * isn't disabled with a pool of `workers` that share one browser: its default capture, then one snapshot per mode it
- * lists, each at its own viewport and with its mode's globals in the story's URL. It prints one line per snapshot after
- * the header, which counts them; a mode's line names the mode after the story ID. The lines follow config order, then
- * `index.json` order, then the story's default capture and its modes in order, whatever order the captures finish in.
+ * lists, each at its own viewport and with its mode's globals in the story's URL. Through `events` it emits the
+ * planned snapshots with the header, which counts them, then each snapshot's start as a worker picks it up and its line
+ * once it finishes, so the lines come in the order the captures finish. A mode's line names the mode after the story
+ * ID. The snapshots are planned in config order, then `index.json` order, then each story's default capture and its
+ * modes in order.
  * Each snapshot has its own baseline, `<story-id>.png` for the default capture and `<story-id>.<mode>.png` for a mode,
  * a key over 240 bytes shortened to its first 223 bytes, `-` and 16 hex characters of its SHA-256. `test` compares each
  * snapshot with its baseline by the story's tolerance, at the viewport's device scale factor, and never captures a
@@ -554,7 +546,7 @@ async function takeSnapshots(
  * block. The warnings never change the exit code.
  *
  * Any other error, an error that is a bug, stops the run with exit 2 too, after closing the sessions and the browsers,
- * with its stack trace on stderr after the lines printed so far.
+ * with its stack trace on stderr after the lines emitted so far.
  */
 export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult> {
   const browser = runBrowserOf(run.launchBrowser, {
@@ -585,7 +577,6 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
 
       return {
         exitCode: 2,
-        stdout: '',
         stderr: `${exitNoticeOf(browser.firstExit())}${stopMessage}`,
         stopMessage,
         reportFailed: false,
@@ -600,6 +591,13 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
 
     baselines = taking.baselines
     snapshots = plannedSnapshotsOf(run, share, taking.taken)
+    run.events({
+      kind: 'planned',
+      header: snapshots.header,
+      notes: snapshots.notes,
+      total: snapshots.items.length,
+      workers: run.workers,
+    })
     await takeSnapshots(run, browser, snapshots, tools)
 
     if (tools.command === 'update') {
@@ -607,13 +605,11 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
     }
   } catch (error) {
     const stopMessage = stopMessageOf(error, run, capturedAnyOf(snapshots))
-    // An error that is a bug stops the run too, keeping the lines printed so far, with its stack trace.
+    // An error that is a bug stops the run too, after the lines emitted so far, with its stack trace.
     const stop = stopMessage === undefined ? crashOf(error) : { stderr: stopMessage, message: stopMessage }
-    const stdout = snapshots === undefined ? '' : printedOf(snapshots, linesOf(snapshots))
 
     return {
       exitCode: 2,
-      stdout,
       stderr: `${exitNoticeOf(browser.firstExit())}${stop.stderr}`,
       stopMessage: stop.message,
       reportFailed: error instanceof ReportError,
@@ -631,10 +627,12 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
   return {
     exitCode: exitCodeOf(run.command, snapshots, baselines),
     // test's end block is built by runCli from its report.
-    stdout: printedOf(snapshots, [
-      ...linesOf(snapshots),
-      ...(run.command === 'update' ? updateEndOf(run, snapshots, deleted) : []),
-    ]),
+    stdout:
+      run.command === 'update'
+        ? updateEndOf(run, snapshots, deleted)
+            .map((line) => `${line}\n`)
+            .join('')
+        : '',
     stderr:
       exitNoticeOf(browser.firstExit()) +
       testPathWarningsOf(run.selections, snapshots.items, snapshots.results) +

@@ -2,18 +2,19 @@ import { join } from 'node:path'
 import { displayPathOf } from '../report/display-path.js'
 import { type Report, reportJsonOf } from '../report/report-document.js'
 import type { Reporter } from '../reporter/reporter-choice.js'
+import type { SnapshotMark } from '../reporter/run-event.js'
 import type { PlannedSnapshot } from './plan-snapshots.js'
 import type { SnapshotResult, SnapshotStatus } from './snapshot-result.js'
 
 /**
  * The mark of a line that fails the run: a snapshot that differs or is missing, and an orphan.
  */
-export const failMark = '✗'
+export const failMark: SnapshotMark = '✗'
 
 /**
  * The mark each status's line starts with.
  */
-const marks: Record<SnapshotStatus, string> = {
+const marks: Record<SnapshotStatus, SnapshotMark> = {
   passed: '✓',
   written: '✓',
   kept: '✓',
@@ -107,5 +108,12 @@ export function snapshotNameOf({ storybook, story, mode }: PlannedSnapshot): str
  * out the result's hint.
  */
 export function snapshotLineOf(item: PlannedSnapshot, result: SnapshotResult): string {
-  return `${marks[result.status]} ${snapshotNameOf(item)}  ${result.detail}`
+  return `${markOf(result)} ${snapshotNameOf(item)}  ${result.detail}`
+}
+
+/**
+ * Gives the mark a finished snapshot's line starts with: `✓` for a pass, `✗` for a failure, `!` for a broken story.
+ */
+export function markOf(result: SnapshotResult): SnapshotMark {
+  return marks[result.status]
 }

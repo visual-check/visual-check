@@ -25,7 +25,9 @@ import { plainSetupProgress, type SetupProgress } from '../init/setup-progress.j
 import { type FindUnlistedDependencies, findUnlistedDependencies } from '../init/unlisted-dependencies.js'
 import { clearReport, ReportError, reportFolderOf, writeReportJson } from '../report/report-folder.js'
 import { testEndLinesOf } from '../reporter/end-block.js'
+import { logReporterOf } from '../reporter/log-reporter.js'
 import { reporterOf } from '../reporter/reporter-choice.js'
+import type { RunReporter } from '../reporter/run-event.js'
 import type { Story } from '../storybook/read-stories.js'
 import { type BrowserPlace, browserPlaceOf } from './browser-route.js'
 import { checkStorybooks } from './check-storybooks.js'
@@ -35,7 +37,7 @@ import { parseCommandLine, type RunOptions, UsageError } from './parse-command-l
 import { readImageFit } from './read-image-fit.js'
 import { type RunOutput, reportLineOf, runOutputOf } from './run-output.js'
 import { type TestReportFacts, testReportFor, updateReportFor } from './run-report.js'
-import { runSnapshots } from './run-snapshots.js'
+import { runSnapshots, type SnapshotRunResult } from './run-snapshots.js'
 import { selectStories } from './select-stories.js'
 import { reportProblemOf } from './stop-message.js'
 import { crashedBy, type RunStop, stoppedBy, stoppedTestOf, stoppedUpdateOf, usageFailureOf } from './stopped-run.js'
@@ -71,7 +73,8 @@ Other options:
 `
 
 /**
- * What a CLI run produced: the exit code, the text for each output stream, and the report line to write after both.
+ * What a CLI run produced: the exit code, the text for each output stream, which comes after what was written as it
+ * happened, and the report line to write after both.
  *
  * @public
  */
@@ -151,6 +154,12 @@ export interface RunCliOptions {
    */
   progress?: (text: string) => void
   /**
+   * Writes what a `test` or `update` run's reporter prints as it happens: the header, a shard's notes and each
+   * snapshot's line as it finishes, on stdout, or on stderr with `--reporter json`. When it isn't given, that text is
+   * kept, and the result's text for each stream starts with it. A test leaves it out.
+   */
+  write?: (stream: 'stdout' | 'stderr', text: string) => void
+  /**
    * Launches the browser that `test` and `update` capture in. By default, in visual-check's container the image is
    * pulled when Docker lacks it and the browser starts in the container, reaching a Storybook by the launch's route;
    * inside visual-check's image the browser starts directly as a child process; and on the host the headless shell is
@@ -188,13 +197,14 @@ export interface RunCliOptions {
 }
 
 /**
- * Runs the CLI with the given arguments, environment and folder, and returns what it prints on each stream. Only
- * progress is written as it happens, through `options.progress`; `update` also writes and deletes baselines, `test`
- * writes the report folder, and `init` writes the setup files and runs the package manager. Problems with the command
- * line, the config, the run's setup or the browser exit with code 2. A usage error of a `test` command line, even one
- * whose flags fail to parse, writes its error report beside the config the run would load. Once a `test` or `update`
- * has loaded its config, an error that is a bug exits 2 too, with its stack trace on stderr, as an error report for
- * `test` and an error document with `--reporter json`. Other errors are thrown.
+ * Runs the CLI with the given arguments, environment and folder, and returns what it prints on each stream. Progress is
+ * written as it happens, through `options.progress`, and so are a `test` or `update` run's header and snapshot lines,
+ * through `options.write`; the result holds the rest, which comes after them. `update` also writes and deletes
+ * baselines, `test` writes the report folder, and `init` writes the setup files and runs the package manager. Problems
+ * with the command line, the config, the run's setup or the browser exit with code 2. A usage error of a `test` command
+ * line, even one whose flags fail to parse, writes its error report beside the config the run would load. Once a `test`
+ * or `update` has loaded its config, an error that is a bug exits 2 too, with its stack trace on stderr, as an error
+ * report for `test` and an error document with `--reporter json`. Other errors are thrown.
  *
  * @public
  */
@@ -278,6 +288,12 @@ async function runTestOrUpdate(
     ...parsed,
     reporter: reporterOf(parsed.reporter, { ci, tty: cliOptions.tty ?? process.stdout.isTTY === true }),
   }
+  const kept = { stdout: '', stderr: '' }
+  const write =
+    cliOptions.write ??
+    ((stream: 'stdout' | 'stderr', text: string) => {
+      kept[stream] += text
+    })
   const outcome =
     command === 'update' && ci
       ? stoppedBy(
@@ -285,17 +301,25 @@ async function runTestOrUpdate(
             'Run it on your machine and commit the baselines, or unset CI.\n',
           { configPath: undefined, storybooks: [] },
         )
-      : await runOutcomeOf({ command, options, environment, cwd, cliOptions, ci, elapsedMs })
+      : await runOutcomeOf({ command, options, environment, cwd, cliOptions, ci, elapsedMs, write })
 
   if ('finished' in outcome) {
-    return outcome.finished
+    return withKept(kept, outcome.finished)
   }
 
   if (command === 'update') {
-    return stoppedUpdateOf(outcome.stopped, { version: readCliManifest().version, options })
+    return withKept(kept, stoppedUpdateOf(outcome.stopped, { version: readCliManifest().version, options }))
   }
 
-  return await stoppedTestOf(outcome.stopped, { version: readCliManifest().version, cwd, options })
+  return withKept(kept, await stoppedTestOf(outcome.stopped, { version: readCliManifest().version, cwd, options }))
+}
+
+/**
+ * Starts each stream of the result with the text the run's reporter wrote to it as it happened and that was kept,
+ * since the CLI's caller gave no `write`.
+ */
+function withKept(kept: { stdout: string; stderr: string }, result: CliResult): CliResult {
+  return { ...result, stdout: `${kept.stdout}${result.stdout}`, stderr: `${kept.stderr}${result.stderr}` }
 }
 
 /**
@@ -336,6 +360,10 @@ interface RunContext {
    * Gives how long the run has taken so far, in ms.
    */
   elapsedMs: () => number
+  /**
+   * Writes what the run's reporter prints as it happens: the caller's `write`, else one that keeps the text.
+   */
+  write: (stream: 'stdout' | 'stderr', text: string) => void
 }
 
 /**
@@ -469,8 +497,9 @@ interface CheckedRun {
 }
 
 /**
- * Takes the snapshots, then for `test` writes the report of a run that exits 0 or 1, and for `update` prints its
- * document with `--reporter json`. Gives the stop of a run that stopped with exit 2.
+ * Takes the snapshots, with the run's reporter showing their progress as it happens and ended once they are taken, then
+ * for `test` writes the report of a run that exits 0 or 1, and for `update` prints its document with `--reporter json`.
+ * Gives the stop of a run that stopped with exit 2.
  *
  * @throws {Error} Any error besides the problems that stop the run with exit 2.
  */
@@ -481,33 +510,47 @@ async function snapshotsOutcomeOf(
 ): Promise<RunOutcome> {
   const { command, options } = context
   const version = readCliManifest().version
-  const result = await runSnapshots({
-    command,
-    version,
-    ci: context.ci,
-    consistencyOnly: options.consistency,
-    shard: options.shard,
-    config,
-    workers: workersOf(options, config, checked.placement.host),
-    place: checked.placement.place,
-    browserPackage: checked.browserPackage,
-    selections: checked.storybooks.map(({ storybook, version, stories }) => ({
-      storybook,
+  const reporter = await runReporterOf(context)
+  let result: SnapshotRunResult
+
+  try {
+    result = await runSnapshots({
+      command,
       version,
-      stories: selectStories(stories, options.selection),
-      allStories: stories,
-    })),
-    cwd: context.cwd,
-    insideContainer: checked.insideContainer,
-    environment: context.environment,
-    ...runDefaultsOf(context.cliOptions),
-  })
-  const output = { stdout: result.stdout, stderr: `${checked.warnings}${result.stderr}` }
+      ci: context.ci,
+      consistencyOnly: options.consistency,
+      shard: options.shard,
+      config,
+      workers: workersOf(options, config, checked.placement.host),
+      place: checked.placement.place,
+      browserPackage: checked.browserPackage,
+      selections: checked.storybooks.map(({ storybook, version, stories }) => ({
+        storybook,
+        version,
+        stories: selectStories(stories, options.selection),
+        allStories: stories,
+      })),
+      cwd: context.cwd,
+      insideContainer: checked.insideContainer,
+      environment: context.environment,
+      ...runDefaultsOf(context.cliOptions),
+      events: (event) => reporter.event(event),
+    })
+  } catch (error) {
+    // The run's error says what went wrong, so a reporter that also fails to end can't hide it.
+    await reporter.finish().catch(() => undefined)
+
+    throw error
+  }
+
+  await reporter.finish()
 
   if ('stopMessage' in result) {
     return {
       stopped: {
-        ...output,
+        // The lines of the snapshots that finished before the stop are already written.
+        stdout: '',
+        stderr: `${checked.warnings}${result.stderr}`,
         message: result.stopMessage,
         // The report folder that failed can't take an error report either.
         configPath: result.reportFailed ? undefined : config.path,
@@ -517,6 +560,7 @@ async function snapshotsOutcomeOf(
     }
   }
 
+  const output = { stdout: result.stdout, stderr: `${checked.warnings}${result.stderr}` }
   const facts = {
     version,
     configPath: config.path,
@@ -543,6 +587,17 @@ async function snapshotsOutcomeOf(
     { ...facts, consistencyOnly: options.consistency, shard: options.shard },
     result.checkedOnly,
   )
+}
+
+/**
+ * Starts the reporter that shows the run's progress stream as it happens. For now every reporter writes the `log`
+ * lines through the run's `write`: on stdout, or on stderr with `--reporter json`, whose stdout holds its document
+ * alone.
+ */
+async function runReporterOf(context: RunContext): Promise<RunReporter> {
+  const stream = context.options.reporter === 'json' ? 'stderr' : 'stdout'
+
+  return logReporterOf((text) => context.write(stream, text))
 }
 
 /**

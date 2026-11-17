@@ -582,12 +582,13 @@ type InitOnlyOption =
 
 /**
  * Builds options whose every launch writes pull progress and gives a fresh fake driver of the given version, answering
- * each story as `stories` says and the options read as `read` says. Returns them with what the fake browsers saw.
+ * each story as `stories` says and the options read as `read` says. Returns them with what the fake browsers saw. They
+ * give no `write`, so the result's streams start with what the run's reporter wrote.
  */
 export function fakeBrowser(
   stories: Record<string, FakeStory> = {},
   { version: driverVersion = browserPackage.chromium, read = {} }: FakeBrowserOptions = {},
-): { options: Required<Omit<RunCliOptions, InitOnlyOption>>; record: FakeBrowserRecord; progress: string[] } {
+): { options: Required<Omit<RunCliOptions, InitOnlyOption | 'write'>>; record: FakeBrowserRecord; progress: string[] } {
   const record = newRecord()
   const progress: string[] = []
   const gates: StoryGates = new Map()
@@ -883,6 +884,36 @@ export async function createRun(
  */
 export function withoutTimes(text: string): string {
   return text.replace(/ {2}\d+ ms( · flaky)?$/gm, '  N ms$1')
+}
+
+/**
+ * Gives a `write` that records each write as its stream and its text, with the times of pass lines replaced, and the
+ * writes it recorded.
+ */
+export function recordingWrite(): { write: NonNullable<RunCliOptions['write']>; writes: [string, string][] } {
+  const writes: [string, string][] = []
+
+  return {
+    write: (stream, text) => {
+      writes.push([stream, withoutTimes(text)])
+    },
+    writes,
+  }
+}
+
+/**
+ * Sorts each run of snapshot lines in `text` by what follows the mark, the snapshot's name then its detail, for a run
+ * whose concurrent captures finish in no fixed order. The other lines keep their places.
+ */
+export function withSnapshotLinesSorted(text: string): string {
+  return text.replace(/(^[✓✗!] .*\n)+/gm, (block) =>
+    block
+      .split('\n')
+      .slice(0, -1)
+      .sort((first, second) => (first.slice(2) < second.slice(2) ? -1 : 1))
+      .map((line) => `${line}\n`)
+      .join(''),
+  )
 }
 
 /**
