@@ -1,7 +1,7 @@
 import type { RunEvent, RunReporter } from './run-event.js'
 
 /**
- * Builds the `log` reporter, which appends and never redraws: at `planned` it writes the header, then a shard's notes,
+ * Builds the `log` reporter, which appends and never redraws: at `planned` it writes the header, then its notes,
  * and as each snapshot finishes its line, so lines come in the order the snapshots finish. Each ends with a newline.
  * It writes nothing when a snapshot starts, and nothing at the end.
  *

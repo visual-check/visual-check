@@ -1,9 +1,9 @@
 import { locateConfig } from '../config/find-config.js'
-import type { ReportStorybook } from '../report/report-document.js'
+import type { ReportSelection, ReportStorybook } from '../report/report-document.js'
 import { ReportError, reportFolderOf, writeErrorReport } from '../report/report-folder.js'
 import type { RunOptions, UsageError } from './parse-command-line.js'
 import { type RunOutput, reportLineOf, runOutputOf } from './run-output.js'
-import { testErrorReportOf, updateErrorReportOf } from './run-report.js'
+import { reportSelectionOf, testErrorReportOf, updateErrorReportOf } from './run-report.js'
 import { crashOf, reportProblemOf } from './stop-message.js'
 
 /**
@@ -41,6 +41,11 @@ export interface RunStop {
    * The Storybooks where nothing answers, in config order.
    */
   unreachable: readonly ReportStorybook[]
+  /**
+   * How the run picked its stories, once it worked out its affected stories. When it's absent, the report reads the
+   * selection from the run's options.
+   */
+  selection?: ReportSelection
 }
 
 /**
@@ -95,11 +100,12 @@ export function stoppedBy(problem: string, inRun: Pick<RunStop, 'configPath' | '
 
 /**
  * Gives the stop of a run that an error ended which is a bug, not a problem visual-check knows: what the run printed
- * so far, then the error's stack trace on stderr, with its message for the report.
+ * so far, then the error's stack trace on stderr, with its message for the report, and how the run picked its stories
+ * once it worked them out.
  */
 export function crashedBy(
   error: unknown,
-  inRun: Pick<RunStop, 'stdout' | 'stderr' | 'configPath' | 'storybooks'>,
+  inRun: Pick<RunStop, 'stdout' | 'stderr' | 'configPath' | 'storybooks' | 'selection'>,
 ): { stopped: RunStop } {
   const crash = crashOf(error)
 
@@ -120,7 +126,7 @@ export async function stoppedTestOf(stop: RunStop, test: StoppedTest): Promise<S
     version: test.version,
     consistencyOnly: options.consistency,
     shard: options.shard,
-    selection: options.selection,
+    selection: stop.selection ?? reportSelectionOf(options.selection),
     storybooks: stop.storybooks,
     message: stop.message,
     unreachable: stop.unreachable,
@@ -164,7 +170,7 @@ export async function stoppedTestOf(stop: RunStop, test: StoppedTest): Promise<S
 export function stoppedUpdateOf(stop: RunStop, update: StoppedUpdate): StoppedOutput {
   const report = updateErrorReportOf({
     version: update.version,
-    selection: update.options.selection,
+    selection: stop.selection ?? reportSelectionOf(update.options.selection),
     storybooks: stop.storybooks,
     message: stop.message,
     unreachable: stop.unreachable,

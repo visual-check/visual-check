@@ -30,7 +30,7 @@ interface LiveViewOptions {
 /**
  * Starts the `live` reporter, which draws a `test` or `update` run's progress stream in the terminal. It draws nothing
  * until the run is planned, so what the run writes before, such as an image pull's progress on stderr, never mixes with
- * it. Then it prints the header and a shard's notes, then each `✗` and `!` line as its snapshot finishes, above one
+ * it. Then it prints the header and its notes, then each `✗` and `!` line as its snapshot finishes, above one
  * progress line: a spinner, the snapshots done of the total, the workers and the time taken, redrawn every second.
  * Passes print nothing. `finish` removes the progress line, keeps the printed lines, and hands the terminal back; it
  * never rejects. With `--reporter live` and no TTY it still draws as in one: erase sequences and spinner frames,

@@ -29,6 +29,8 @@ export function makeFolder(options: { shared?: boolean } = {}): string {
 /**
  * Keeps git in the tests from the user's own config and from any repository above the temporary folders, and gives
  * commits a fixed author. It stubs `process.env`, so `vi.unstubAllEnvs` undoes it.
+ *
+ * @public
  */
 export function isolateGit(): void {
   const configFolder = makeFolder()
@@ -50,6 +52,8 @@ export function isolateGit(): void {
 
 /**
  * Removes the temporary folders made since the last call.
+ *
+ * @public
  */
 export function removeRepos(): void {
   for (const folder of folders.splice(0)) {
@@ -68,6 +72,8 @@ export function removeSharedRepos(): void {
 
 /**
  * Runs git in `repo` and returns its output without the final newline.
+ *
+ * @public
  */
 export function git(repo: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd: repo, encoding: 'utf8', windowsHide: true }).replace(/\n$/, '')
@@ -76,6 +82,8 @@ export function git(repo: string, ...args: string[]): string {
 /**
  * Makes a temporary repository on branch `main`, with no commits, and returns its real path. A shared one outlives
  * `removeRepos`.
+ *
+ * @public
  */
 export function makeRepo(options: { shared?: boolean } = {}): string {
   const repo = makeFolder(options)
@@ -87,6 +95,8 @@ export function makeRepo(options: { shared?: boolean } = {}): string {
 
 /**
  * Writes each file, a path relative to the repository mapped to its content, creating the parent folders.
+ *
+ * @public
  */
 export function writeFiles(repo: string, files: Record<string, string>): void {
   for (const [path, content] of Object.entries(files)) {
@@ -97,6 +107,8 @@ export function writeFiles(repo: string, files: Record<string, string>): void {
 
 /**
  * Writes the files, commits every change in the repository and returns the new commit's SHA.
+ *
+ * @public
  */
 export function commit(repo: string, files: Record<string, string> = {}): string {
   writeFiles(repo, files)

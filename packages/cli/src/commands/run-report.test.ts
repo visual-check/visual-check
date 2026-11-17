@@ -7,7 +7,7 @@ import type { StorybookBaselines } from './consistency-check.js'
 import type { SnapshotToCapture } from './plan-snapshots.js'
 import {
   type RunFindings,
-  selectionOf,
+  reportSelectionOf,
   type TestErrorReportFacts,
   type TestReportFacts,
   testErrorReportOf,
@@ -69,7 +69,7 @@ function factsOf(project: string, storybook: ResolvedStorybook, findings: RunFin
     configPath: join(project, 'visual-check.config.mjs'),
     consistencyOnly: false,
     shard: undefined,
-    selection: { kind: 'default' },
+    selection: { by: 'all', base: null, changedFiles: null, fallback: null },
     storybooks: [storybook],
     exitCode: 1,
     findings,
@@ -167,13 +167,14 @@ describe('testReportFor', () => {
   })
 })
 
-describe('selectionOf', () => {
-  it('gives all without --filter and filter with it, knowing nothing of affected stories', () => {
+describe('reportSelectionOf', () => {
+  it('gives what picked the stories, knowing nothing of a base, changed files or a fallback', () => {
     const unknown = { base: null, changedFiles: null, fallback: null }
 
-    expect(selectionOf({ kind: 'default' })).toEqual({ by: 'all', ...unknown })
-    expect(selectionOf({ kind: 'all' })).toEqual({ by: 'all', ...unknown })
-    expect(selectionOf({ kind: 'filter', pattern: /button/ })).toEqual({ by: 'filter', ...unknown })
+    expect(reportSelectionOf({ kind: 'default' })).toEqual({ by: 'all', ...unknown })
+    expect(reportSelectionOf({ kind: 'all' })).toEqual({ by: 'all', ...unknown })
+    expect(reportSelectionOf({ kind: 'affected' })).toEqual({ by: 'affected', ...unknown })
+    expect(reportSelectionOf({ kind: 'filter', pattern: /button/ })).toEqual({ by: 'filter', ...unknown })
   })
 })
 
@@ -184,7 +185,7 @@ const errorFacts: TestErrorReportFacts = {
   version: '1.2.3',
   consistencyOnly: false,
   shard: { index: 2, total: 3 },
-  selection: { kind: 'filter', pattern: /button/ },
+  selection: { by: 'filter', base: null, changedFiles: null, fallback: null },
   storybooks: [
     { name: 'docs', url: 'http://docs.test' },
     { name: 'web', url: 'http://web.test' },
@@ -247,7 +248,7 @@ function updateFactsOf(findings: Partial<RunFindings>): UpdateReportFacts {
   return {
     version: '1.2.3',
     configPath: '/project/visual-check.config.mjs',
-    selection: { kind: 'default' },
+    selection: { by: 'all', base: null, changedFiles: null, fallback: null },
     storybooks: [updateStorybook],
     exitCode: 1,
     findings: { items: [], results: [], baselines: [], deleted: [], warnings: [], ...findings },

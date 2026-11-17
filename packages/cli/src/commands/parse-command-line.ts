@@ -48,9 +48,13 @@ export interface UsageErrorRun {
 }
 
 /**
- * Which stories a run covers. `default` is no selection flag: every story until affected stories exist.
+ * Which stories a run covers. `default` is no selection flag, which the run turns into `affected` or `all`.
  */
-export type Selection = { kind: 'default' } | { kind: 'all' } | { kind: 'filter'; pattern: RegExp }
+export type Selection =
+  | { kind: 'default' }
+  | { kind: 'all' }
+  | { kind: 'affected' }
+  | { kind: 'filter'; pattern: RegExp }
 
 /**
  * The options `test` and `update` share.
@@ -60,6 +64,11 @@ export interface RunOptions {
    * Which stories the run covers.
    */
   selection: Selection
+  /**
+   * The ref `--base` names, which the base of the affected stories is worked out from, or `undefined` when the flag
+   * isn't given.
+   */
+  baseRef: string | undefined
   /**
    * The Storybook `--storybook` names, or `undefined` when the flag isn't given.
    */
@@ -115,6 +124,8 @@ export type CommandLine =
  */
 const flagsInitRejects = [
   'all',
+  'affected',
+  'base',
   'filter',
   'storybook',
   'url',
@@ -128,7 +139,7 @@ const flagsInitRejects = [
 /**
  * The flags that take a value, which can't be empty.
  */
-const flagsWithValue = ['filter', 'storybook', 'url', 'config', 'workers', 'shard', 'reporter'] as const
+const flagsWithValue = ['filter', 'base', 'storybook', 'url', 'config', 'workers', 'shard', 'reporter'] as const
 
 /**
  * Turns a thrown value into its message.
@@ -138,17 +149,27 @@ function messageOf(error: unknown): string {
 }
 
 /**
- * Builds the selection from `--all` and `--filter`.
+ * Builds the selection from `--all`, `--affected` and `--filter`.
  *
- * @throws {UsageError} When both are given, or `--filter` isn't a regular expression.
+ * @throws {UsageError} When two of them are given, or `--filter` isn't a regular expression.
  */
-function selectionOf(all: boolean | undefined, filter: string | undefined): Selection {
-  if (all && filter !== undefined) {
-    throw new UsageError("--all and --filter can't be used together. Pick one.")
+function selectionOf(values: {
+  all?: boolean | undefined
+  affected?: boolean | undefined
+  filter?: string | undefined
+}): Selection {
+  const { all, affected, filter } = values
+
+  if ([all === true, affected === true, filter !== undefined].filter(Boolean).length > 1) {
+    throw new UsageError("--all, --affected and --filter can't be used together. Pick one.")
   }
 
   if (all) {
     return { kind: 'all' }
+  }
+
+  if (affected) {
+    return { kind: 'affected' }
   }
 
   if (filter === undefined) {
@@ -167,6 +188,8 @@ function selectionOf(all: boolean | undefined, filter: string | undefined): Sele
  */
 const flagOptions = {
   all: { type: 'boolean' },
+  affected: { type: 'boolean' },
+  base: { type: 'string' },
   filter: { type: 'string' },
   storybook: { type: 'string' },
   url: { type: 'string' },
@@ -278,14 +301,19 @@ function workersFlagOf(workers: string | undefined): number | undefined {
 }
 
 /**
- * Reads the `--consistency` flag for `test` or `update`. It covers every story, so every flag that selects stories must
- * be rejected here, `--all` and `--filter` today, and any added later, such as `--affected`.
+ * Reads the `--consistency` flag for `test` or `update`. It covers every story, so every flag that selects stories is
+ * rejected here: `--all`, `--affected` and `--filter`.
  *
- * @throws {UsageError} When it's given to `update`, or with `--all` or `--filter`.
+ * @throws {UsageError} When it's given to `update`, or with `--all`, `--affected` or `--filter`.
  */
 function consistencyFlagOf(
   command: 'test' | 'update',
-  values: { consistency?: boolean | undefined; all?: boolean | undefined; filter?: string | undefined },
+  values: {
+    consistency?: boolean | undefined
+    all?: boolean | undefined
+    affected?: boolean | undefined
+    filter?: string | undefined
+  },
 ): boolean {
   if (!values.consistency) {
     return false
@@ -295,9 +323,9 @@ function consistencyFlagOf(
     throw new UsageError('--consistency applies only to test.')
   }
 
-  if (values.all || values.filter !== undefined) {
+  if (values.all || values.affected || values.filter !== undefined) {
     throw new UsageError(
-      '--consistency covers every story, so it takes no --all or --filter. Use --storybook to narrow it.',
+      '--consistency covers every story, so it takes no --all, --affected or --filter. Use --storybook to narrow it.',
     )
   }
 
@@ -338,14 +366,15 @@ function parseShard(value: string): Shard | undefined {
 /**
  * Reads the `--shard` flag for `test` into a shard: `k/n`, two whole numbers written in digits, with 1 ≤ k ≤ n.
  * `--filter`, `--all` and `--storybook` narrow the run before the split, so they are accepted. `--consistency` runs in
- * a job of its own, so it is rejected, as `--affected` must be once it exists: affected stories differ between
- * machines, so the shards wouldn't agree on the split.
+ * a job of its own, so it is rejected, and so is `--affected`: affected stories differ between machines, so the shards
+ * wouldn't agree on the split.
  *
- * @throws {UsageError} When it's given to `update` or with `--consistency`, or the value isn't `k/n` in range.
+ * @throws {UsageError} When it's given to `update`, with `--consistency` or with `--affected`, or the value isn't `k/n`
+ * in range.
  */
 function shardFlagOf(
   command: 'test' | 'update',
-  values: { shard?: string | undefined; consistency?: boolean | undefined },
+  values: { shard?: string | undefined; consistency?: boolean | undefined; affected?: boolean | undefined },
 ): Shard | undefined {
   const { shard } = values
 
@@ -361,6 +390,12 @@ function shardFlagOf(
     throw new UsageError('--consistency runs in a job of its own, so it takes no --shard.')
   }
 
+  if (values.affected) {
+    throw new UsageError(
+      '--shard takes its share of every story, so it takes no --affected: the affected stories differ between machines.',
+    )
+  }
+
   const parsed = parseShard(shard)
 
   if (parsed === undefined) {
@@ -368,6 +403,33 @@ function shardFlagOf(
   }
 
   return parsed
+}
+
+/**
+ * The flags `--base` can't be given with, in the order a message names the first one given: each covers a run whose
+ * stories aren't the affected ones.
+ */
+const flagsBaseRejects = ['all', 'filter', 'consistency', 'shard'] as const
+
+/**
+ * Reads the `--base` flag for `test` or `update`. It applies only to affected stories, so it's rejected with a flag
+ * that covers other stories. With no selection flag it's accepted, and a run in CI, which covers every story, leaves
+ * it unused.
+ *
+ * @throws {UsageError} When it's given with `--all`, `--filter`, `--consistency` or `--shard`.
+ */
+function baseFlagOf(values: ParsedFlags): string | undefined {
+  if (values.base === undefined) {
+    return undefined
+  }
+
+  const rejected = flagsBaseRejects.find((flag) => values[flag] !== undefined)
+
+  if (rejected !== undefined) {
+    throw new UsageError(`--base applies only to affected stories, so it takes no --${rejected}.`)
+  }
+
+  return values.base
 }
 
 /**
@@ -391,12 +453,14 @@ function reporterFlagOf(reporter: string | undefined): Reporter | undefined {
  * Reads the command line into the command it names and its options.
  *
  * @throws {UsageError} For an unknown command or flag, a missing, empty or extra argument, a flag that doesn't apply to
- * the command, flags that clash, a `--url` that isn't an http(s) URL or holds a login, a `--filter` that isn't a
- * regular expression, a `--workers` that isn't a whole number of 1 or more, `--consistency` on `update` or with `--all`
- * or `--filter`, a `--reporter` that isn't `live`, `log` or `json`, a `--shard` that isn't `k/n` with 1 ≤ k ≤ n, or
- * is on `update` or with `--consistency`, and `--yes` on `test` or `update`. Once the flags parse, an error of a `test`
- * or `update` command line names its run; one whose flags fail to parse names it as far as a loose parse tells.
- * `--help` anywhere before a `--` separator wins, so it never throws.
+ * the command, flags that clash, a `--url` that isn't an http(s) URL or holds a login, two of `--all`, `--affected`
+ * and `--filter`, a `--filter` that isn't a regular expression, a `--workers` that isn't a whole number of 1 or more,
+ * `--consistency` on `update` or with `--all`, `--affected` or `--filter`, a `--reporter` that isn't `live`, `log` or
+ * `json`, a `--shard` that isn't `k/n` with 1 ≤ k ≤ n, or is on `update` or with `--consistency` or `--affected`, a
+ * `--base` with `--all`, `--filter`, `--consistency` or `--shard`, and `--yes` on `test` or `update`. Two of `--all`,
+ * `--affected` and `--filter` are reported before any other clash of a run's flags. Once the flags parse, an error of
+ * a `test` or `update` command line names its run; one whose flags fail to parse names it as far as a loose parse
+ * tells. `--help` anywhere before a `--` separator wins, so it never throws.
  */
 export function parseCommandLine(commandLineArguments: string[]): CommandLine {
   if (asksForHelp(commandLineArguments)) {
@@ -544,11 +608,15 @@ function runOptionsOf(command: 'test' | 'update', values: ParsedFlags): RunOptio
 
   checkUrlFlag(values.url)
 
+  // The selection flags come first, so flags that clash with each other say so before any other flag rejects them.
+  const selection = selectionOf(values)
   const consistency = consistencyFlagOf(command, values)
   const shard = shardFlagOf(command, values)
+  const baseRef = baseFlagOf(values)
 
   return {
-    selection: selectionOf(values.all, values.filter),
+    selection,
+    baseRef,
     storybook: values.storybook,
     url: values.url,
     config: values.config,

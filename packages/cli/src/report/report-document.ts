@@ -83,18 +83,21 @@ export interface ReportSelection {
    */
   by: 'affected' | 'all' | 'filter'
   /**
-   * The git base the changes were measured from, or `null` when affected stories didn't pick them.
+   * The SHA of the base commit the changes were measured from: the merge base of `HEAD` and the base branch. `null`
+   * when affected stories didn't pick the stories, or git couldn't tell.
    */
   base: string | null
   /**
-   * The changed files, or `null` when affected stories didn't pick the stories.
+   * How many files changed since the base. `null` when affected stories didn't pick the stories, or git couldn't
+   * tell.
    */
-  changedFiles: string[] | null
+  changedFiles: number | null
   /**
-   * Whether the selection couldn't be worked out and every story was selected, or `null` when affected stories didn't
-   * pick the stories.
+   * Why the affected stories couldn't be worked out, so every story was selected, such as `there's no merge base with
+   * origin/main, as in a shallow clone or with unrelated history`. `null` when they were worked out, or affected
+   * stories didn't pick the stories.
    */
-  fallback: boolean | null
+  fallback: string | null
 }
 
 /**

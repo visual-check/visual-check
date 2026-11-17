@@ -76,7 +76,8 @@ export const noMarker: RunCliOptions = { imageMarkerPath: absentMarkerPath }
  * The options every run gets: a Docker probe and a machine that both have 4 CPUs and 16 GiB, an engine that isn't
  * Docker Desktop's, Linux on x64, and no container around the run, so no test runs the real `docker` or reads the
  * machine it runs on. `update` captures a page again at once, so no test waits a second for it. The clock stands
- * still, so every `test`'s counts end with ` · 0 ms`.
+ * still, so every `test`'s counts end with ` · 0 ms`. Asking for the import graph fails the run, so no test runs the
+ * real Fallow: a test of affected stories gives its own.
  */
 export const hostOptions = {
   probeDocker: async () => ({ cpus: 4, memoryBytes: 16 * 2 ** 30, desktop: false }),
@@ -88,6 +89,7 @@ export const hostOptions = {
   findKnownContainer: async () => undefined,
   recaptureDelayMs: 0,
   now: () => 0,
+  findReachedFiles: () => Promise.reject(new Error('The run asked for the import graph.')),
 } satisfies RunCliOptions
 
 /**

@@ -70,6 +70,7 @@
       {
         "from": "cli/commands",
         "allow": [
+          "cli/affected-stories",
           "cli/baselines",
           "cli/browser",
           "cli/browser-download",

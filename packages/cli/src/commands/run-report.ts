@@ -80,9 +80,9 @@ export interface TestReportFacts {
    */
   shard: Shard | undefined
   /**
-   * How the run picked its stories.
+   * How the run picked its stories, as the report says it.
    */
-  selection: Selection
+  selection: ReportSelection
   /**
    * The Storybooks in the run, in config order.
    */
@@ -98,11 +98,14 @@ export interface TestReportFacts {
 }
 
 /**
- * Gives the report's selection: `filter` for `--filter`, else `all`, since affected stories don't exist yet, so
- * nothing is known of a base, changed files or a fallback.
+ * Gives the report's selection of a run that hasn't worked out its affected stories: what picked the stories, with
+ * nothing known of a base, changed files or a fallback. `default` is left only on a usage error, whose run never
+ * worked out what it covers, and reads as `all`.
  */
-export function selectionOf(selection: Selection): ReportSelection {
-  return { by: selection.kind === 'filter' ? 'filter' : 'all', base: null, changedFiles: null, fallback: null }
+export function reportSelectionOf(selection: Selection): ReportSelection {
+  const by = selection.kind === 'filter' || selection.kind === 'affected' ? selection.kind : 'all'
+
+  return { by, base: null, changedFiles: null, fallback: null }
 }
 
 /**
@@ -175,7 +178,7 @@ export async function testReportFor(facts: TestReportFacts): Promise<TestReport>
     consistencyOnly: facts.consistencyOnly,
     exitCode: facts.exitCode,
     shard: reportShardOf(facts.shard),
-    selection: selectionOf(facts.selection),
+    selection: facts.selection,
     reportDir,
     storybooks: facts.storybooks.map(({ name, url }) => ({ name, url })),
     counts: testCountsOf(results, orphans.length),
@@ -201,9 +204,9 @@ export interface TestErrorReportFacts {
    */
   shard: Shard | undefined
   /**
-   * How the run picked its stories.
+   * How the run picked its stories, as the report says it.
    */
-  selection: Selection
+  selection: ReportSelection
   /**
    * The Storybooks in the run, in config order. None when the run stopped before its config was loaded.
    */
@@ -232,7 +235,7 @@ export function testErrorReportOf(facts: TestErrorReportFacts): TestReport {
     consistencyOnly: facts.consistencyOnly,
     exitCode: 2,
     shard: reportShardOf(facts.shard),
-    selection: selectionOf(facts.selection),
+    selection: facts.selection,
     reportDir: facts.written ? reportDir : null,
     storybooks: facts.storybooks.map(({ name, url }) => ({ name, url })),
     counts: emptyTestCounts(),
@@ -263,7 +266,7 @@ export function updateReportFor(facts: UpdateReportFacts): UpdateReport {
   return updateReportOf({
     visualCheck: facts.version,
     exitCode: facts.exitCode,
-    selection: selectionOf(facts.selection),
+    selection: facts.selection,
     storybooks: facts.storybooks.map(({ name, url }) => ({ name, url })),
     counts: updateCountsOf(results, deleted.length),
     snapshots: [...entries, ...deleted],
@@ -285,7 +288,7 @@ export function updateErrorReportOf(facts: UpdateErrorReportFacts): UpdateReport
   return updateReportOf({
     visualCheck: facts.version,
     exitCode: 2,
-    selection: selectionOf(facts.selection),
+    selection: facts.selection,
     storybooks: facts.storybooks.map(({ name, url }) => ({ name, url })),
     counts: emptyUpdateCounts(),
     snapshots: [],
