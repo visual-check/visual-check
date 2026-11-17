@@ -92,25 +92,12 @@ describe('stoppedBy', () => {
 })
 
 describe('crashedBy', () => {
-  it("prints the error's stack trace on stderr, with its message for the report", () => {
+  it("keeps what the run printed, then prints the error's stack trace, with its message for the report", () => {
     const error = new Error('A bug.')
+    const inRun = { stdout: '✓ web  a  12 ms\n', stderr: 'Warning.\n', configPath: '/c.mjs', storybooks: [] }
 
-    expect(crashedBy(error, { configPath: '/c.mjs', storybooks: [] })).toEqual({
-      stopped: {
-        stdout: '',
-        stderr: `${error.stack}\n`,
-        message: 'A bug.',
-        configPath: '/c.mjs',
-        storybooks: [],
-        unreachable: [],
-      },
-    })
-  })
-
-  it('prints a thrown value that is no error as it is', () => {
-    expect(crashedBy('A bug.', { configPath: undefined, storybooks: [] }).stopped).toMatchObject({
-      stderr: 'A bug.\n',
-      message: 'A bug.',
+    expect(crashedBy(error, inRun)).toEqual({
+      stopped: { ...inRun, stderr: `Warning.\n${error.stack}\n`, message: 'A bug.', unreachable: [] },
     })
   })
 })

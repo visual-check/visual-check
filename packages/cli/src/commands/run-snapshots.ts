@@ -21,7 +21,7 @@ import { countsLineOf, snapshotCountOf, snapshotLineOf, snapshotNameOf } from '.
 import type { RunFindings } from './run-report.js'
 import { type ShardShare, shardHeaderPartOf, shardNotesOf, shardShareOf } from './shard-share.js'
 import type { CaptureStory, SnapshotResult, SnapshotStatus } from './snapshot-result.js'
-import { exitNoticeOf, stopMessageOf } from './stop-message.js'
+import { crashOf, exitNoticeOf, stopMessageOf } from './stop-message.js'
 import { type SnapshotTools, takeSnapshot } from './take-snapshot.js'
 import { type Taking, testPlanOf } from './test-plan.js'
 import {
@@ -178,11 +178,11 @@ interface SnapshotRunStop {
   stdout: string
   /**
    * When the first browser exited mid-run, that it exited, whether visual-check relaunches it once, and its last
-   * output, then what stopped the run.
+   * output, then what stopped the run: a problem visual-check knows, or the stack trace of an error that is a bug.
    */
   stderr: string
   /**
-   * What stopped the run, as stderr ends with it.
+   * What stopped the run, for the report: the problem, as stderr ends with it, or the error's message.
    */
   stopMessage: string
   /**
@@ -591,7 +591,8 @@ async function takeSnapshots(
  * `silenceHosts` leaves both kinds of host out. Only `update` watches requests: `test` never does and prints no such
  * block. The warnings never change the exit code.
  *
- * @throws {Error} Any other error, after closing the sessions and the browsers.
+ * Any other error, an error that is a bug, stops the run with exit 2 too, after closing the sessions and the browsers,
+ * with its stack trace on stderr after the lines printed so far.
  */
 export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult> {
   const browser = runBrowserOf(run.launchBrowser, {
@@ -644,18 +645,15 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
     }
   } catch (error) {
     const stopMessage = stopMessageOf(error, run, capturedAnyOf(snapshots))
-
-    if (stopMessage === undefined) {
-      throw error
-    }
-
+    // An error that is a bug stops the run too, keeping the lines printed so far, with its stack trace.
+    const stop = stopMessage === undefined ? crashOf(error) : { stderr: stopMessage, message: stopMessage }
     const stdout = snapshots === undefined ? '' : printedOf(snapshots, linesOf(snapshots))
 
     return {
       exitCode: 2,
       stdout,
-      stderr: `${exitNoticeOf(browser.firstExit())}${stopMessage}`,
-      stopMessage,
+      stderr: `${exitNoticeOf(browser.firstExit())}${stop.stderr}`,
+      stopMessage: stop.message,
       reportFailed: error instanceof ReportError,
     }
   } finally {

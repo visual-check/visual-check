@@ -11,6 +11,7 @@ import {
   createProject,
   createRun,
   defaultRunSnapshot,
+  type FakeStory,
   fakeBrowser,
   fakeDriverOf,
   headerOf,
@@ -426,6 +427,39 @@ function buggyBrowserOptions(): RunCliOptions {
   return { ...hostOptions, launchBrowser: async () => driver, imageMarkerPath: absentMarkerPath }
 }
 
+/**
+ * Builds options for the fake browser whose stories answer as `stories` say, and whose browser, once relaunched after
+ * an exit, throws an error that is a bug, a plain `Error`, when the run reads its version.
+ */
+function buggyRelaunchOptions(stories: Record<string, FakeStory>): RunCliOptions {
+  const { options } = fakeBrowser(stories)
+  const { launchBrowser } = options
+  let launches = 0
+
+  if (launchBrowser === undefined) {
+    throw new Error('The fake browser gives no launch.')
+  }
+
+  return {
+    ...options,
+    launchBrowser: async (launch) => {
+      const driver = await launchBrowser(launch)
+
+      launches += 1
+
+      if (launches > 1) {
+        Object.defineProperty(driver, 'version', {
+          get: () => {
+            throw new Error('A bug in the relaunched driver.')
+          },
+        })
+      }
+
+      return driver
+    },
+  }
+}
+
 describe('runCli test report on exit 2', () => {
   it('replaces the report with the error report of an error that is a bug, printing its stack trace', async () => {
     const { project } = await createRun(['a'])
@@ -444,6 +478,25 @@ describe('runCli test report on exit 2', () => {
     expect(readReport(project)).toEqual(
       errorReportOf({ message: 'A bug in the driver.', storybooks: [] }, [{ name: 'web', url: expect.any(String) }]),
     )
+  })
+
+  it('keeps the warnings and the lines printed before an error that is a bug mid-run', async () => {
+    const { project } = await createRun(
+      ['a', 'b', 'c'],
+      { a: defaultRunSnapshot, b: defaultRunSnapshot, c: defaultRunSnapshot },
+      'workers: 1',
+    )
+
+    installStorybook(project, '12.0.0')
+
+    const result = await runCli(['test'], {}, project, buggyRelaunchOptions({ b: { browserExits: true } }))
+
+    expect(result.exitCode).toBe(2)
+    expect(withoutTimes(result.stdout)).toMatch(new RegExp(`^${headerOf('test', 3, 1)}\n✓ web  a  N ms\n`))
+    expect(result.stderr).toMatch(/^Warning: Storybook web runs storybook 12\.0\.0[^\n]*\n/)
+    expect(result.stderr).toMatch(/\nError: A bug in the relaunched driver\.\n {4}at /)
+    expect(result.reportLine).toEqual(reportOnStderr)
+    expect(readReport(project).error?.message).toBe('A bug in the relaunched driver.')
   })
 
   it('prints the error document of an error that is a bug with --reporter json', async () => {

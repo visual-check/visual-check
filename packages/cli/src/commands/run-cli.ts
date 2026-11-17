@@ -298,7 +298,12 @@ async function runOutcomeOf(context: RunContext): Promise<RunOutcome> {
     return await configuredOutcomeOf(context, loaded.config, browserCheck.browserPackage)
   } catch (error) {
     // A bug once the config loaded still leaves test's error report and prints the error document.
-    return crashedBy(error, { configPath: loaded.config.path, storybooks: loaded.config.storybooks })
+    return crashedBy(error, {
+      stdout: '',
+      stderr: '',
+      configPath: loaded.config.path,
+      storybooks: loaded.config.storybooks,
+    })
   }
 }
 
@@ -506,9 +511,7 @@ async function clearReportProblemOf(
  * Writes the report of a `test` that exits 0 or 1, then gives the report's path as the report line for stdout. With
  * `--reporter json` stdout holds the report's JSON document alone, the human lines move to stderr, and the report
  * line is for stderr. When the report can't be written, the run stops with exit 2 with what went wrong after its
- * stderr, and no error report is written.
- *
- * @throws {Error} Any error besides a `ReportError`.
+ * stderr, and no error report is written. An error that is a bug stops it too, after what it printed.
  */
 async function withTestReport(
   result: CliResult,
@@ -545,7 +548,7 @@ async function withTestReport(
       }
     }
 
-    throw error
+    return crashedBy(error, { ...result, configPath: facts.configPath, storybooks: facts.storybooks })
   }
 }
 

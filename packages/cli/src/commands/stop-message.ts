@@ -214,6 +214,19 @@ function visualDiffStopMessageOf(error: VisualDiffError): string {
 }
 
 /**
+ * Gives what to print for an error that is a bug, not a problem visual-check knows: its stack trace on stderr, as for
+ * any error the CLI throws, and its message for the report.
+ *
+ * @public
+ */
+export function crashOf(error: unknown): { stderr: string; message: string } {
+  const trace = error instanceof Error ? (error.stack ?? String(error)) : String(error)
+  const message = error instanceof Error ? error.message : String(error)
+
+  return { stderr: `${trace}\n`, message }
+}
+
+/**
  * Gives what to print for an error that stops the run with exit 2: a baseline that can't be read, decoded, written or
  * deleted, a baselines folder that can't be listed, a report folder that can't be cleared or written to, a snapshot
  * the browser returned that can't be decoded, sharp that can't be loaded, a visual diff thread that stopped, Docker's

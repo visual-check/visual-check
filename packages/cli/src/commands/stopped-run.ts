@@ -4,7 +4,7 @@ import { ReportError, reportFolderOf, writeErrorReport } from '../report/report-
 import type { RunOptions, UsageError } from './parse-command-line.js'
 import { type RunOutput, reportLineOf, runOutputOf } from './run-output.js'
 import { testErrorReportOf, updateErrorReportOf } from './run-report.js'
-import { reportProblemOf } from './stop-message.js'
+import { crashOf, reportProblemOf } from './stop-message.js'
 
 /**
  * The hint every usage error ends with.
@@ -103,16 +103,18 @@ export function stoppedBy(problem: string, inRun: Pick<RunStop, 'configPath' | '
 }
 
 /**
- * Gives the stop of a run that an error ended which is a bug, not a problem visual-check knows: the error's stack
- * trace on stderr, as for any error the CLI throws, and its message for the report.
+ * Gives the stop of a run that an error ended which is a bug, not a problem visual-check knows: what the run printed
+ * so far, then the error's stack trace on stderr, with its message for the report.
  *
  * @public
  */
-export function crashedBy(error: unknown, inRun: Pick<RunStop, 'configPath' | 'storybooks'>): { stopped: RunStop } {
-  const trace = error instanceof Error ? (error.stack ?? String(error)) : String(error)
-  const message = error instanceof Error ? error.message : String(error)
+export function crashedBy(
+  error: unknown,
+  inRun: Pick<RunStop, 'stdout' | 'stderr' | 'configPath' | 'storybooks'>,
+): { stopped: RunStop } {
+  const crash = crashOf(error)
 
-  return { stopped: { ...inRun, stdout: '', stderr: `${trace}\n`, message, unreachable: [] } }
+  return { stopped: { ...inRun, stderr: `${inRun.stderr}${crash.stderr}`, message: crash.message, unreachable: [] } }
 }
 
 /**

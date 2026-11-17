@@ -8,7 +8,7 @@ import { ContainerError } from '../container/container-error.js'
 import { ReportError } from '../report/report-folder.js'
 import { VisualDiffError } from '../visual-diff/visual-diff.js'
 import { SnapshotDecodeError } from './snapshot-result.js'
-import { exitNoticeOf, type StopContext, stopMessageOf } from './stop-message.js'
+import { crashOf, exitNoticeOf, type StopContext, stopMessageOf } from './stop-message.js'
 
 /**
  * The browser package every context holds.
@@ -182,6 +182,18 @@ describe('stopMessageOf', () => {
   it('gives undefined for any other error', () => {
     expect(stopMessageOf(new Error('boom'), contextOf(), false)).toBeUndefined()
     expect(stopMessageOf('boom', contextOf(), false)).toBeUndefined()
+  })
+})
+
+describe('crashOf', () => {
+  it("gives an error's stack trace to print and its message for the report", () => {
+    const error = new Error('A bug.')
+
+    expect(crashOf(error)).toEqual({ stderr: `${error.stack}\n`, message: 'A bug.' })
+  })
+
+  it('gives a thrown value that is no error as it is', () => {
+    expect(crashOf('A bug.')).toEqual({ stderr: 'A bug.\n', message: 'A bug.' })
   })
 })
 
