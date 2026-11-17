@@ -112,9 +112,19 @@ const errorPayloads = Object.fromEntries(errorRules.map((rule) => [rule.event, r
 const keptErrors = 10
 
 /**
- * How many characters the page keeps of each error event's description.
+ * How many characters the page keeps of each error event's description, and of each line of play's stack.
  */
 const keptCharacters = 500
+
+/**
+ * How many frames of play's stack the page keeps: lines that start with `at `, leaving out the error's message.
+ */
+const keptStackLines = 5
+
+/**
+ * The error events that come from the story's `play` function, whose stack the page keeps.
+ */
+const playErrorEvents = errorRules.filter((rule) => rule.outcome === 'play-threw').map((rule) => rule.event)
 
 /**
  * Matches the text of the two stylesheets Storybook 9.1 and 10 append to the document on the test path while a story
@@ -144,7 +154,10 @@ const pauseSheetPattern = new RegExp(
  * - records Storybook's error events in the order they come: the first 10, each as `event` and one line of `text` of
  *   up to 500 characters. An error is described as `name: message`, or whichever of the two isn't empty, what the
  *   error display shows as `title: description` the same way, and a list of errors joined by `; `. Any other payload
- *   is described as text;
+ *   is described as text. An event from the story's `play` function also keeps `stack`: the error's, or the first
+ *   error's of a list, as up to its first 5 frames, the lines after its first that start with `at ` once trimmed,
+ *   each trimmed and cut to 500 characters, so a message over several lines, such as an `expect` diff, is left out;
+ *   none when it isn't text;
  * - hooks Storybook's preview when it sets `__STORYBOOK_PREVIEW__`, to keep it and note that it started, and calls its
  *   `ready()` just after, to note when it becomes ready, or why it failed, on one line of up to 500 characters as an
  *   error is described. A preview that replaces another is waited for on its own;
@@ -190,6 +203,7 @@ export const storybookPageScript = `(() => {
   const clearTimer = globalThis.clearTimeout.bind(globalThis)
   const now = performance.now.bind(performance)
   const errorPayloads = ${JSON.stringify(errorPayloads)}
+  const playErrorEvents = ${JSON.stringify(playErrorEvents)}
   const finished = new Map()
   const lastSteps = new Map()
   const completingTimes = new Map()
@@ -255,6 +269,25 @@ export const storybookPageScript = `(() => {
     }
   }
 
+  const stackOf = (event, value) => {
+    try {
+      const error = errorPayloads[event] === 'errors' ? (Array.isArray(value) ? value[0] : undefined) : value
+      const stack = typeof error === 'object' && error !== null ? error.stack : undefined
+      if (typeof stack !== 'string') {
+        return []
+      }
+      return stack
+        .split('\\n')
+        .slice(1)
+        .map((line) => line.trim())
+        .filter((line) => line.startsWith('at '))
+        .slice(0, ${keptStackLines})
+        .map((line) => line.slice(0, ${keptCharacters}))
+    } catch {
+      return []
+    }
+  }
+
   // Recording what Storybook sends on its channel.
 
   const recordError = (event, value) => {
@@ -268,7 +301,11 @@ export const storybookPageScript = `(() => {
       } catch {
         text = textOf(value)
       }
-      errors.push({ event, text: oneLine(text) })
+      const recorded = { event, text: oneLine(text) }
+      if (playErrorEvents.includes(event)) {
+        recorded.stack = stackOf(event, value)
+      }
+      errors.push(recorded)
     } catch {}
   }
 
@@ -724,6 +761,10 @@ interface RecordedError {
    * One line describing the event's payload.
    */
   text: string
+  /**
+   * For an event from the story's `play` function, up to the first 5 frames of its error's stack.
+   */
+  stack?: string[]
 }
 
 /**
@@ -779,6 +820,16 @@ export type StoryWait =
        * One line for people saying what went wrong.
        */
       message: string
+      /**
+       * The error as Storybook described it, such as `Error: boom`, or the unhandled errors, `; ` apart. Empty when it
+       * described none.
+       */
+      errorText: string
+      /**
+       * Up to the first 5 frames of the stack of the error `play` threw, or of its first unhandled error: the lines
+       * that start with `at `, each trimmed, without the message. None when the error had no stack.
+       */
+      stack: string[]
     }
   | {
       /**
@@ -856,9 +907,20 @@ function classifyFinished(answer: FinishedAnswer): StoryWait {
   for (const rule of errorRules) {
     const error = answer.errors.find((recorded) => recorded.event === rule.event)
 
-    if (error !== undefined) {
-      return { outcome: rule.outcome, message: rule.message(error.text) }
+    if (error === undefined) {
+      continue
     }
+
+    if (rule.outcome === 'play-threw') {
+      return {
+        outcome: 'play-threw',
+        message: rule.message(error.text),
+        errorText: error.text,
+        stack: error.stack ?? [],
+      }
+    }
+
+    return { outcome: rule.outcome, message: rule.message(error.text) }
   }
 
   if (answer.errorDisplay) {
@@ -886,7 +948,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * Whether a value is an error event as the page records it.
  */
 function isRecordedError(value: unknown): value is RecordedError {
-  return isRecord(value) && errorRules.some((rule) => rule.event === value.event) && typeof value.text === 'string'
+  return (
+    isRecord(value) &&
+    errorRules.some((rule) => rule.event === value.event) &&
+    typeof value.text === 'string' &&
+    (value.stack === undefined ||
+      (Array.isArray(value.stack) && value.stack.every((line: unknown) => typeof line === 'string')))
+  )
 }
 
 /**

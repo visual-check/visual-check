@@ -1,6 +1,14 @@
 import { answerOptionsReadExpression } from '../storybook/options-read.fixture.js'
 import { finishedAnswer } from '../storybook/preview-script.fixture.js'
-import type { BrowserExitedError, CaptureArea, Driver, Page, PageSetup, PageViewport } from './driver/driver.js'
+import type {
+  BrowserExitedError,
+  CaptureArea,
+  ConsoleMessage,
+  Driver,
+  Page,
+  PageSetup,
+  PageViewport,
+} from './driver/driver.js'
 import { settledAnswer } from './end-state.fixture.js'
 import { readyAnswer } from './page-script.fixture.js'
 
@@ -105,6 +113,10 @@ export interface FakePageBehaviour extends FakeEvaluation {
    * Answers `requestHosts`. The page made no real network request when it is left out.
    */
   requestHosts?: () => string[]
+  /**
+   * Answers `consoleMessages`. The page sent no console message or error when it is left out.
+   */
+  consoleMessages?: () => ConsoleMessage[]
 }
 
 /**
@@ -222,6 +234,7 @@ export class FakeDriver implements Driver {
         await answers.close?.()
       },
       requestHosts: () => answers.requestHosts?.() ?? [],
+      consoleMessages: () => answers.consoleMessages?.() ?? [],
     }
   }
 

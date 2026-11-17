@@ -23,6 +23,20 @@ interface UpdatePlan {
 }
 
 /**
+ * A baseline `update` deleted: an orphan, with its Storybook.
+ */
+export interface DeletedBaseline {
+  /**
+   * The Storybook whose baselines folder held it.
+   */
+  storybook: ResolvedStorybook
+  /**
+   * Its path.
+   */
+  path: string
+}
+
+/**
  * What `update` did, for the counts and path lines of the block that ends its output.
  */
 interface UpdateSummary {
@@ -123,16 +137,16 @@ export async function planUpdate(
 }
 
 /**
- * Deletes the orphans, Storybook by Storybook in the order given, and gives the paths deleted. An orphan the file
- * system takes for one of its Storybook's expected baselines stays.
+ * Deletes the orphans, Storybook by Storybook in the order given, and gives the baselines deleted, each with its
+ * Storybook. An orphan the file system takes for one of its Storybook's expected baselines stays.
  *
  * @throws {BaselineError} When one can't be deleted. The ones after it stay.
  */
-export async function deleteStorybookOrphans(storybooks: readonly StorybookBaselines[]): Promise<string[]> {
-  const deleted: string[] = []
+export async function deleteStorybookOrphans(storybooks: readonly StorybookBaselines[]): Promise<DeletedBaseline[]> {
+  const deleted: DeletedBaseline[] = []
 
-  for (const { orphans, expected } of storybooks) {
-    deleted.push(...(await deleteOrphans(orphans, expected)))
+  for (const { storybook, orphans, expected } of storybooks) {
+    deleted.push(...(await deleteOrphans(orphans, expected)).map((path) => ({ storybook, path })))
   }
 
   return deleted

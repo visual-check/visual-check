@@ -365,13 +365,15 @@ export const SrcdocIframe: Story = {
 }
 
 /**
- * Follows a link out of Storybook in `play`, then waits forever, so its document always leaves before Storybook
- * reports the story finished. The story is broken, `navigated-away`, after visual-check loads it 3 times. Like
- * `Crashes`, its committed baseline is the story without its `play`.
+ * Logs a warning, then follows a link out of Storybook in `play` and waits forever, so its document always leaves
+ * before Storybook reports the story finished. The story is broken, `navigated-away`, after visual-check loads it 3
+ * times, and its report entry keeps the warning, logged in the document it left. Like `Crashes`, its committed baseline
+ * is the story without its `play`.
  */
 export const NavigatesAway: Story = {
   render: () => <BurgersLink />,
   play: async ({ canvasElement }) => {
+    console.warn('Following the burgers link')
     canvasElement.querySelector('a')?.click()
     await new Promise<never>(() => undefined)
   },

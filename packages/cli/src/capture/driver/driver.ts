@@ -187,6 +187,102 @@ export interface CaptureBox {
 export type CaptureArea = 'full-page' | CaptureBox
 
 /**
+ * The name of the function every driver provides in each document of a page's main frame and its same-process frames,
+ * before the page's init script runs there. The init script calls it with one JSON string per console message or error
+ * it records, `{ kind, text }`, as `ConsoleMessage` describes, and deletes it from the page before the page's own scripts
+ * run, so they never see it.
+ *
+ * @public
+ */
+export const consoleMessageFunction = '__visualCheckMessage'
+
+/**
+ * How many console messages and errors a page keeps: the latest ones.
+ *
+ * @public
+ */
+export const keptConsoleMessages = 50
+
+/**
+ * How many characters a page keeps of each console message or error.
+ *
+ * @public
+ */
+export const keptConsoleMessageCharacters = 500
+
+/**
+ * A console message or error a page's document sent.
+ *
+ * @public
+ */
+export interface ConsoleMessage {
+  /**
+   * What sent it: a console method of that level, an uncaught error (`error`) or an unhandled rejection
+   * (`unhandledrejection`).
+   */
+  kind:
+    | 'console.debug'
+    | 'console.info'
+    | 'console.log'
+    | 'console.warn'
+    | 'console.error'
+    | 'error'
+    | 'unhandledrejection'
+  /**
+   * The message, up to 500 characters.
+   */
+  text: string
+}
+
+/**
+ * Every kind of message a page sends.
+ */
+const consoleMessageKinds: readonly ConsoleMessage['kind'][] = [
+  'console.debug',
+  'console.info',
+  'console.log',
+  'console.warn',
+  'console.error',
+  'error',
+  'unhandledrejection',
+]
+
+/**
+ * Whether a value is a kind of message a page sends.
+ */
+function isConsoleMessageKind(kind: unknown): kind is ConsoleMessage['kind'] {
+  return consoleMessageKinds.some((known) => known === kind)
+}
+
+/**
+ * Reads one payload the init script passed to the message function: a JSON object with a known `kind` and a string
+ * `text`, which is cut to 500 characters. Gives undefined for anything else, as for a payload a page's own script sent.
+ *
+ * @public
+ */
+export function readConsoleMessage(payload: string): ConsoleMessage | undefined {
+  let message: unknown
+
+  try {
+    message = JSON.parse(payload)
+  } catch {
+    return undefined
+  }
+
+  if (typeof message !== 'object' || message === null || !('kind' in message) || !('text' in message)) {
+    return undefined
+  }
+
+  const { kind, text } = message
+
+  if (!isConsoleMessageKind(kind) || typeof text !== 'string') {
+    return undefined
+  }
+
+  return { kind, text: text.slice(0, keptConsoleMessageCharacters) }
+}
+
+/**
  * A page in a browser context of its own, set up once, that stories are loaded and captured in. It emulates
  * `prefers-reduced-motion: no-preference` and keeps focus as if its window were focused.
  *
@@ -278,6 +374,13 @@ export interface Page {
    * page's setup has `watchRequests` off. Never fails.
    */
   requestHosts: () => string[]
+  /**
+   * Gives the last 50 console messages and errors the page's main frame sent through the message function since the
+   * last `goto` started, or since the page opened before any, oldest first, from every document it showed since then,
+   * so they survive a story that navigates away. They are kept after the page can no longer be used too, so a caller
+   * reads them once a call failed, before it closes the page. Never fails.
+   */
+  consoleMessages: () => ConsoleMessage[]
   /**
    * Closes the page and its browser context. Every call in flight and every later call fails. Calling it again returns
    * the same promise.

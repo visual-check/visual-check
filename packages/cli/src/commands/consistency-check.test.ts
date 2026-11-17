@@ -78,7 +78,12 @@ function brokenOf(storybook: ResolvedStorybook, id: string, selected = true): Pl
     mode: undefined,
     key: id,
     selected,
-    broken: { reason: 'load-failed', message: "Its stories file didn't load." },
+    broken: {
+      reason: 'load-failed',
+      message: "Its stories file didn't load.",
+      loadError: undefined,
+      readyTimeoutMs: 5000,
+    },
   }
 }
 

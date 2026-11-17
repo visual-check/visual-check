@@ -6,6 +6,7 @@ import {
   diffThreadCount,
   ImageDecodeError,
   type VisualDiff,
+  VisualDiffError,
   type VisualDiffResult,
 } from './visual-diff.js'
 
@@ -25,6 +26,16 @@ const threadScript = new URL('./diff-thread.ts', import.meta.url)
 const crashingScript = new URL('data:text/javascript,process.exit(1)')
 
 /**
+ * A thread script that answers every task with the error a comparison failed with.
+ */
+const failingScript = new URL(
+  `data:text/javascript,${encodeURIComponent(
+    "import { parentPort } from 'node:worker_threads'\n" +
+      "parentPort.on('message', () => parentPort.postMessage({ error: 'vips: out of memory' }))\n",
+  )}`,
+)
+
+/**
  * A thread script that answers every task with a comparison's `passed`, as no decode check may.
  */
 const passingScript = new URL(
@@ -33,6 +44,16 @@ const passingScript = new URL(
       "parentPort.on('message', () => parentPort.postMessage({ result: { outcome: 'passed' } }))\n",
   )}`,
 )
+
+/**
+ * A thread script that throws as it starts.
+ */
+const throwingScript = new URL(`data:text/javascript,${encodeURIComponent("throw new Error('no libvips')")}`)
+
+/**
+ * A comparison of two different one-byte files, which needs a thread.
+ */
+const differingRequest = { baseline: Uint8Array.of(1), snapshot: Uint8Array.of(2), tolerance: defaults, scale: 1 }
 
 /**
  * Gives each settled comparison's error message, or its outcome when it resolved.
@@ -243,23 +264,50 @@ describe('createThreadPool', () => {
     ])
   })
 
-  it('rejects every comparison that needs a thread when sharp fails to load', async () => {
+  it('rejects every comparison that needs a thread with a VisualDiffError when sharp fails to load', async () => {
     let loads = 0
 
     pool = createThreadPool(threadScript, 1, async () => {
       loads += 1
 
-      throw new Error('libvips is missing')
+      throw new Error('Could not load the "sharp" module using the linux-x64 runtime')
     })
 
-    const request = { baseline: Uint8Array.of(1), snapshot: Uint8Array.of(2), tolerance: defaults, scale: 1 }
+    const settled = await Promise.allSettled([pool.compare(differingRequest), pool.compare(differingRequest)])
 
-    expect(messagesOf(await Promise.allSettled([pool.compare(request), pool.compare(request)]))).toEqual([
-      'libvips is missing',
-      'libvips is missing',
-    ])
+    for (const result of settled) {
+      expect(result).toMatchObject({
+        status: 'rejected',
+        reason: {
+          kind: 'sharp-unavailable',
+          reason: 'Could not load the "sharp" module using the linux-x64 runtime',
+          message: 'Couldn\'t load sharp: Could not load the "sharp" module using the linux-x64 runtime.',
+        },
+      })
+      expect((result as PromiseRejectedResult).reason).toBeInstanceOf(VisualDiffError)
+    }
+
     expect(loads).toBe(1)
-    expect(await pool.compare({ ...request, snapshot: Uint8Array.of(1) })).toEqual({ outcome: 'passed' })
+    expect(await pool.compare({ ...differingRequest, snapshot: Uint8Array.of(1) })).toEqual({ outcome: 'passed' })
+  })
+
+  it("keeps sharp's own reason and leaves out the solutions it lists", async () => {
+    pool = createThreadPool(threadScript, 1, async () => {
+      throw new Error(
+        'Could not load the "sharp" module using the linux-x64 runtime\n' +
+          'ERR_DLOPEN_FAILED: libvips-cpp.so.42: cannot open shared object file\n' +
+          'Possible solutions:\n' +
+          '- Ensure optional dependencies can be installed:\n' +
+          '    npm install --include=optional sharp',
+      )
+    })
+
+    await expect(pool.compare(differingRequest)).rejects.toMatchObject({
+      kind: 'sharp-unavailable',
+      reason:
+        'Could not load the "sharp" module using the linux-x64 runtime; ' +
+        'ERR_DLOPEN_FAILED: libvips-cpp.so.42: cannot open shared object file',
+    })
   })
 
   it("rejects a decode check whose thread gives a comparison's result", async () => {
@@ -270,14 +318,39 @@ describe('createThreadPool', () => {
     )
   })
 
-  it('rejects the comparison of a thread that stops, and starts another for the next one', async () => {
+  it('rejects the comparison of a thread that stops with a VisualDiffError, and starts another for the next one', async () => {
     pool = createThreadPool(crashingScript, 1)
 
-    const request = { baseline: Uint8Array.of(1), snapshot: Uint8Array.of(2), tolerance: defaults, scale: 1 }
+    const settled = await Promise.allSettled([pool.compare(differingRequest), pool.compare(differingRequest)])
 
-    expect(messagesOf(await Promise.allSettled([pool.compare(request), pool.compare(request)]))).toEqual([
-      'A visual diff thread stopped with exit code 1.',
-      'A visual diff thread stopped with exit code 1.',
-    ])
+    for (const result of settled) {
+      expect(result).toMatchObject({
+        status: 'rejected',
+        reason: {
+          kind: 'thread-stopped',
+          reason: 'exit code 1',
+          message: 'A visual diff thread stopped: exit code 1.',
+        },
+      })
+      expect((result as PromiseRejectedResult).reason).toBeInstanceOf(VisualDiffError)
+    }
+  })
+
+  it('gives the error a thread failed with as the reason it stopped', async () => {
+    pool = createThreadPool(throwingScript, 1)
+
+    await expect(pool.compare(differingRequest)).rejects.toMatchObject({
+      kind: 'thread-stopped',
+      reason: 'no libvips',
+    })
+  })
+
+  it('rejects the comparison a thread answers with an error with a VisualDiffError', async () => {
+    pool = createThreadPool(failingScript, 1)
+
+    const comparison = pool.compare(differingRequest)
+
+    await expect(comparison).rejects.toThrow(VisualDiffError)
+    await expect(comparison).rejects.toMatchObject({ kind: 'thread-stopped', reason: 'vips: out of memory' })
   })
 })

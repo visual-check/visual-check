@@ -592,9 +592,9 @@ describe('the error events', () => {
         status: 'error',
         errors: [
           { event: 'storyErrored', text: 'No component: The story has no component.' },
-          { event: 'playFunctionThrewException', text: 'Error: boom' },
+          { event: 'playFunctionThrewException', text: 'Error: boom', stack: ['at play'] },
           { event: 'storyThrewException', text: 'TypeError: x is undefined' },
-          { event: 'unhandledErrorsWhilePlaying', text: 'Error: one; RangeError: two' },
+          { event: 'unhandledErrorsWhilePlaying', text: 'Error: one; RangeError: two', stack: [] },
         ],
       }),
     )
@@ -609,10 +609,10 @@ describe('the error events', () => {
     channel.emit('unhandledErrorsWhilePlaying', [{ message: 'one' }, 'two'])
     channel.emit('storyFinished', { storyId: 'button--primary', status: 'success' })
     expect(await page.evaluate(storyWaitExpression('button--primary', 1000))).toHaveProperty('errors', [
-      { event: 'playFunctionThrewException', text: 'boom' },
+      { event: 'playFunctionThrewException', text: 'boom', stack: [] },
       { event: 'storyThrewException', text: 'a thrown string' },
       { event: 'storyErrored', text: '42' },
-      { event: 'unhandledErrorsWhilePlaying', text: 'one; two' },
+      { event: 'unhandledErrorsWhilePlaying', text: 'one; two', stack: [] },
     ])
   })
 
@@ -626,11 +626,11 @@ describe('the error events', () => {
     channel.emit('unhandledErrorsWhilePlaying', [{ message: '' }])
     channel.emit('storyFinished', { storyId: 'button--primary', status: 'success' })
     expect(await page.evaluate(storyWaitExpression('button--primary', 1000))).toHaveProperty('errors', [
-      { event: 'playFunctionThrewException', text: 'Error' },
+      { event: 'playFunctionThrewException', text: 'Error', stack: [] },
       { event: 'storyThrewException', text: '' },
       { event: 'storyErrored', text: 'The story has no component.' },
-      { event: 'unhandledErrorsWhilePlaying', text: 'RangeError' },
-      { event: 'unhandledErrorsWhilePlaying', text: '' },
+      { event: 'unhandledErrorsWhilePlaying', text: 'RangeError', stack: [] },
+      { event: 'unhandledErrorsWhilePlaying', text: '', stack: [] },
     ])
   })
 
@@ -646,7 +646,70 @@ describe('the error events', () => {
       {
         event: 'playFunctionThrewException',
         text: 'TestingLibraryElementError: Unable to find a button <div> <p>Hi</p> </div>',
+        stack: [],
       },
+    ])
+  })
+
+  it("keep up to 5 lines of play's stack after its first, each trimmed and in up to 500 characters", async () => {
+    const { page, channel } = openStorybookPage()
+    const frames = ['at one (a.js:1)', '', `at two (${'x'.repeat(600)})`, 'at three', 'at four', 'at five', 'at six']
+
+    channel.emit('playFunctionThrewException', {
+      name: 'Error',
+      message: 'boom',
+      stack: ['Error: boom', ...frames.map((frame) => `    ${frame}  `)].join('\n'),
+    })
+    channel.emit('storyFinished', { storyId: 'button--primary', status: 'success' })
+    expect(await page.evaluate(storyWaitExpression('button--primary', 1000))).toHaveProperty('errors', [
+      {
+        event: 'playFunctionThrewException',
+        text: 'Error: boom',
+        stack: ['at one (a.js:1)', `at two (${'x'.repeat(492)}`, 'at three', 'at four', 'at five'],
+      },
+    ])
+  })
+
+  it("keep only the frames of play's stack when its message spans several lines", async () => {
+    const { page, channel } = openStorybookPage()
+    const message = 'expect(element).toHaveTextContent()\n\nExpected: "Hi"\nReceived: "Bye"'
+
+    channel.emit('playFunctionThrewException', {
+      name: 'Error',
+      message,
+      stack: `Error: ${message}\n    at play (button.stories.tsx:12:5)\n    at async runPlay (preview.js:1:2)`,
+    })
+    channel.emit('storyFinished', { storyId: 'button--primary', status: 'success' })
+    expect(await page.evaluate(storyWaitExpression('button--primary', 1000))).toHaveProperty('errors.0.stack', [
+      'at play (button.stories.tsx:12:5)',
+      'at async runPlay (preview.js:1:2)',
+    ])
+  })
+
+  it("keep the stack of the first of play's unhandled errors", async () => {
+    const { page, channel } = openStorybookPage()
+
+    channel.emit('unhandledErrorsWhilePlaying', [
+      { name: 'Error', message: 'one', stack: 'Error: one\n    at first' },
+      { name: 'Error', message: 'two', stack: 'Error: two\n    at second' },
+    ])
+    channel.emit('storyFinished', { storyId: 'button--primary', status: 'success' })
+    expect(await page.evaluate(storyWaitExpression('button--primary', 1000))).toHaveProperty('errors', [
+      { event: 'unhandledErrorsWhilePlaying', text: 'Error: one; Error: two', stack: ['at first'] },
+    ])
+  })
+
+  it("keep no stack for a play error whose stack isn't text, or for the story's own errors", async () => {
+    const { page, channel } = openStorybookPage()
+
+    channel.emit('playFunctionThrewException', { name: 'Error', message: 'boom', stack: 42 })
+    channel.emit('unhandledErrorsWhilePlaying', 'not a list')
+    channel.emit('storyThrewException', { name: 'Error', message: 'render', stack: 'Error: render\n    at render' })
+    channel.emit('storyFinished', { storyId: 'button--primary', status: 'success' })
+    expect(await page.evaluate(storyWaitExpression('button--primary', 1000))).toHaveProperty('errors', [
+      { event: 'playFunctionThrewException', text: 'Error: boom', stack: [] },
+      { event: 'unhandledErrorsWhilePlaying', text: 'not a list', stack: [] },
+      { event: 'storyThrewException', text: 'Error: render' },
     ])
   })
 
@@ -2001,12 +2064,22 @@ describe('readStoryWait', () => {
     [
       'play threw',
       { errors: [recorded('playFunctionThrewException', 'Error: boom')] },
-      { outcome: 'play-threw', message: "The story's play function threw Error: boom." },
+      {
+        outcome: 'play-threw',
+        message: "The story's play function threw Error: boom.",
+        errorText: 'Error: boom',
+        stack: [],
+      },
     ],
     [
       'play left unhandled errors',
       { errors: [recorded('unhandledErrorsWhilePlaying', 'Error: one; Error: two')] },
-      { outcome: 'play-threw', message: "The story's play function left unhandled errors: Error: one; Error: two." },
+      {
+        outcome: 'play-threw',
+        message: "The story's play function left unhandled errors: Error: one; Error: two.",
+        errorText: 'Error: one; Error: two',
+        stack: [],
+      },
     ],
     [
       'the story threw',
@@ -2049,7 +2122,12 @@ describe('readStoryWait', () => {
           recorded('playFunctionThrewException', 'Error: play'),
         ],
       },
-      { outcome: 'play-threw', message: "The story's play function threw Error: play." },
+      {
+        outcome: 'play-threw',
+        message: "The story's play function threw Error: play.",
+        errorText: 'Error: play',
+        stack: [],
+      },
     ],
     [
       'unhandled errors, over the story throwing, storyErrored, the error display and the status',
@@ -2062,7 +2140,12 @@ describe('readStoryWait', () => {
           recorded('unhandledErrorsWhilePlaying', 'Error: unhandled'),
         ],
       },
-      { outcome: 'play-threw', message: "The story's play function left unhandled errors: Error: unhandled." },
+      {
+        outcome: 'play-threw',
+        message: "The story's play function left unhandled errors: Error: unhandled.",
+        errorText: 'Error: unhandled',
+        stack: [],
+      },
     ],
     [
       'the story throwing, over storyErrored, the error display and the status',
@@ -2091,10 +2174,26 @@ describe('readStoryWait', () => {
           recorded('playFunctionThrewException', 'Error: second'),
         ],
       },
-      { outcome: 'play-threw', message: "The story's play function threw Error: first." },
+      {
+        outcome: 'play-threw',
+        message: "The story's play function threw Error: first.",
+        errorText: 'Error: first',
+        stack: [],
+      },
     ],
   ])('reads %s', (_what, answer, wait) => {
     expect(readStoryWait(finishedAnswer(answer))).toEqual(wait)
+  })
+
+  it("reads the stack lines play's error came with", () => {
+    const error = { event: 'playFunctionThrewException', text: 'Error: boom', stack: ['at play (a.js:1)', 'at run'] }
+
+    expect(readStoryWait(finishedAnswer({ errors: [error] }))).toEqual({
+      outcome: 'play-threw',
+      message: "The story's play function threw Error: boom.",
+      errorText: 'Error: boom',
+      stack: ['at play (a.js:1)', 'at run'],
+    })
   })
 
   it("doesn't end a message with two periods", () => {
@@ -2142,6 +2241,10 @@ describe('readStoryWait', () => {
     ['errors other than a list', finishedAnswer({ errors: 'none' })],
     ['an error event of another name', finishedAnswer({ errors: [recorded('storyBroke', 'Error: boom')] })],
     ['an error event without text', finishedAnswer({ errors: [{ event: 'storyErrored' }] })],
+    [
+      'an error event with a stack other than lines of text',
+      finishedAnswer({ errors: [{ event: 'playFunctionThrewException', text: 'Error: boom', stack: [42] }] }),
+    ],
     ['a time other than a number', finishedAnswer({ completingMs: '80' })],
     ['a timeout in another step', timedOutAnswer('somewhere')],
     ['a timeout without a last render step', { outcome: 'timed-out', step: 'story' }],

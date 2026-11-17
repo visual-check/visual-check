@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { findConfig } from './find-config.js'
+import { findConfig, locateConfig } from './find-config.js'
 
 /**
  * The temporary folders the tests made, removed after each test.
@@ -128,5 +128,43 @@ describe('findConfig', () => {
     })
 
     expect(findConfig(root)).toBe(join(root, 'visual-check.config.js'))
+  })
+})
+
+describe('locateConfig', () => {
+  it('gives the config the search finds when no path is given', () => {
+    const root = createFolder({ '.git/HEAD': gitHead, 'visual-check.config.ts': content, 'apps/.keep': '' })
+
+    expect(locateConfig(join(root, 'apps'), undefined)).toBe(join(root, 'visual-check.config.ts'))
+  })
+
+  it('gives the given path, resolved against cwd, when it is a config file', () => {
+    const root = createFolder({
+      '.git/HEAD': gitHead,
+      'visual-check.config.ts': content,
+      'configs/visual-check.config.mjs': content,
+    })
+
+    expect(locateConfig(root, 'configs/visual-check.config.mjs')).toBe(join(root, 'configs/visual-check.config.mjs'))
+  })
+
+  it.each([
+    ['a path with no file', 'configs/missing.ts'],
+    ['a folder', 'configs'],
+    ["a file that isn't a config", 'configs/visual-check.config.json'],
+  ])('gives nothing for %s, never searching instead', (_, path) => {
+    const root = createFolder({
+      '.git/HEAD': gitHead,
+      'visual-check.config.ts': content,
+      'configs/visual-check.config.json': '{}\n',
+    })
+
+    expect(locateConfig(root, path)).toBeUndefined()
+  })
+
+  it('gives nothing when the search finds no config', () => {
+    const root = createFolder({ '.git/HEAD': gitHead })
+
+    expect(locateConfig(root, undefined)).toBeUndefined()
   })
 })

@@ -30,6 +30,11 @@ const browserPackage: BrowserPackage = {
 const snapshot = new Uint8Array([0x89, 0x50, 0x4e, 0x47])
 
 /**
+ * What a capture of a story on a fake page gives: the snapshot, and no console message, since the page sent none.
+ */
+const captured = { snapshot, console: [] }
+
+/**
  * A fake browser the test makes exit, which can hold a story's capture until the test lets it go.
  */
 interface FakeBrowser {
@@ -103,6 +108,7 @@ function fakeBrowserOf(version: string = browserPackage.chromium): FakeBrowser {
         fake.openPages -= 1
       },
       requestHosts: () => [],
+      consoleMessages: () => [],
     }
   }
   const fake: FakeBrowser = {
@@ -198,6 +204,7 @@ function runBrowserWith(...browsers: (FakeBrowser | Promise<FakeBrowser> | Error
         colorScheme: 'light',
         maskColor: '#FF00FF',
         listHosts: false,
+        brokenImageTimeLimitMs: 5_000,
       },
       progress: () => undefined,
     },
@@ -283,7 +290,7 @@ describe('runBrowserOf', () => {
     const second = fakeBrowserOf()
     const { browser, launches } = runBrowserWith(first, second)
 
-    expect(await browser.capture(0, storyOf('a'))).toEqual({ snapshot })
+    expect(await browser.capture(0, storyOf('a'))).toEqual(captured)
 
     const releaseB = first.hold('b')
     const b = browser.capture(0, storyOf('b'))
@@ -294,7 +301,7 @@ describe('runBrowserOf', () => {
 
     releaseB()
     expect(await b).toEqual(brokenBy(exit))
-    expect(await browser.capture(0, storyOf('c'))).toEqual({ snapshot })
+    expect(await browser.capture(0, storyOf('c'))).toEqual(captured)
     expect(launches()).toBe(2)
     expect(browser.firstExit()).toEqual({ error: exit, relaunched: true })
   })
@@ -323,7 +330,7 @@ describe('runBrowserOf', () => {
     await settle()
     expect(launches()).toBe(2)
     relaunch.resolve(second)
-    expect(await rest).toEqual([{ snapshot }, { snapshot }, { snapshot }])
+    expect(await rest).toEqual([captured, captured, captured])
     expect(launches()).toBe(2)
     expect(first.captured).toEqual([])
     expect(second.captured.toSorted()).toEqual(['c', 'd', 'e'])
@@ -342,10 +349,10 @@ describe('runBrowserOf', () => {
     const exit = first.exit()
 
     await settle()
-    expect(await browser.capture(1, storyOf('b'))).toEqual({ snapshot })
+    expect(await browser.capture(1, storyOf('b'))).toEqual(captured)
     releaseA()
     expect(await a).toEqual(brokenBy(exit))
-    expect(await browser.capture(0, storyOf('c'))).toEqual({ snapshot })
+    expect(await browser.capture(0, storyOf('c'))).toEqual(captured)
     expect(launches()).toBe(2)
     expect(second.captured).toEqual(['b', 'c'])
   })
@@ -355,14 +362,14 @@ describe('runBrowserOf', () => {
     const second = fakeBrowserOf()
     const { browser, launches } = runBrowserWith(first, second)
 
-    expect(await browser.capture(0, storyOf('a'))).toEqual({ snapshot })
+    expect(await browser.capture(0, storyOf('a'))).toEqual(captured)
     expect(browser.firstExit()).toBeUndefined()
 
     const exit = first.exit()
 
     await settle()
     expect(first.openPages).toBe(1)
-    expect(await browser.capture(0, storyOf('b'))).toEqual({ snapshot })
+    expect(await browser.capture(0, storyOf('b'))).toEqual(captured)
     expect(launches()).toBe(2)
     expect(first.captured).toEqual(['a'])
     expect(second.captured).toEqual(['b'])
@@ -475,7 +482,7 @@ describe('runBrowserOf', () => {
     await settle()
     expect(pagesOpenWhenStarted).toEqual([])
     launch.resolve(first)
-    expect(await capture).toEqual({ snapshot })
+    expect(await capture).toEqual(captured)
     expect(pagesOpenWhenStarted).toEqual([0])
     expect(first.openPages).toBe(1)
   })
@@ -531,7 +538,7 @@ describe('runBrowserOf', () => {
 
     expect(await browser.readOptions(optionsRequest)).toEqual(optionsRead)
     expect(first.openPages).toBe(0)
-    expect(await browser.capture(0, storyOf('a'))).toEqual({ snapshot })
+    expect(await browser.capture(0, storyOf('a'))).toEqual(captured)
     expect(await browser.readOptions(optionsRequest)).toEqual(optionsRead)
     expect(launches()).toBe(1)
     expect(first.captured).toEqual(['a'])
@@ -557,7 +564,7 @@ describe('runBrowserOf', () => {
     expect(await browser.readOptions(optionsRequest)).toEqual(optionsRead)
     expect(launches()).toBe(2)
     expect(browser.firstExit()).toEqual({ error: exit, relaunched: true })
-    expect(await browser.capture(0, storyOf('b'))).toEqual({ snapshot })
+    expect(await browser.capture(0, storyOf('b'))).toEqual(captured)
     expect(second.captured).toEqual(['b'])
     expect(launches()).toBe(2)
   })

@@ -1,4 +1,5 @@
 import type { StoryHosts } from '../capture/capture-session.js'
+import type { ReportStoryRef, ReportWarning } from '../report/report-document.js'
 
 /**
  * The stories shown in a host's line, before the line ends the list with `, …`.
@@ -46,16 +47,30 @@ function silences(entry: string, host: string): boolean {
 }
 
 /**
- * Gives the stories of each host, once per Storybook and story, in the order the snapshots come in, each as its ID or,
- * with `labelled`, as its Storybook's name and ID. Hosts in `silenceHosts` are left out.
+ * A story that reached a host: its Storybook's name and ID, and how a warning's line names it.
+ */
+interface ReachingStory {
+  /**
+   * The story, as the report names it.
+   */
+  ref: ReportStoryRef
+  /**
+   * How the line names it: its ID, or its Storybook's name and ID.
+   */
+  label: string
+}
+
+/**
+ * Gives the stories of each host, once per Storybook and story, in the order the snapshots come in, each named by its
+ * ID or, with `labelled`, by its Storybook's name and ID. Hosts in `silenceHosts` are left out.
  */
 function storiesByHostOf(
   taken: readonly TakenHosts[],
   labelled: boolean,
   hostsOf: (hosts: StoryHosts) => string[],
   silenceHosts: readonly string[],
-): Map<string, Map<string, string>> {
-  const byHost = new Map<string, Map<string, string>>()
+): Map<string, Map<string, ReachingStory>> {
+  const byHost = new Map<string, Map<string, ReachingStory>>()
 
   for (const { storybook, storyId, hosts } of taken) {
     for (const host of hostsOf(hosts)) {
@@ -63,9 +78,12 @@ function storiesByHostOf(
         continue
       }
 
-      const stories = byHost.get(host) ?? new Map<string, string>()
+      const stories = byHost.get(host) ?? new Map<string, ReachingStory>()
 
-      stories.set(JSON.stringify([storybook, storyId]), labelled ? `${storybook} ${storyId}` : storyId)
+      stories.set(JSON.stringify([storybook, storyId]), {
+        ref: { storybook, story: storyId },
+        label: labelled ? `${storybook} ${storyId}` : storyId,
+      })
       byHost.set(host, stories)
     }
   }
@@ -74,50 +92,69 @@ function storiesByHostOf(
 }
 
 /**
- * Builds one line for each host, sorted by host name, ending each with a newline. A line gives the host, how many
- * stories reach it, the first three of them, `, …` when there are more, and what `sentenceOf` says about them.
+ * Builds one warning of `kind` for each host, sorted by host name, with every story that reached it. Its message gives
+ * the host, how many stories reach it, the first three of them, `, …` when there are more, and what `sentenceOf` says
+ * about them.
  */
-function linesOf(
-  byHost: ReadonlyMap<string, ReadonlyMap<string, string>>,
+function warningsOf(
+  kind: ReportWarning['kind'],
+  byHost: ReadonlyMap<string, ReadonlyMap<string, ReachingStory>>,
   sentenceOf: (count: number) => string,
-): string {
+): ReportWarning[] {
   return [...byHost.entries()]
     .sort(([first], [second]) => (first < second ? -1 : 1))
-    .map(([host, stories]) => {
-      const listed = [...stories.values()]
-      const shown = listed.slice(0, listedStoryCount).join(', ')
-      const more = listed.length > listedStoryCount ? ', …' : ''
-      const count = `${listed.length} ${listed.length === 1 ? 'story' : 'stories'}`
+    .map(([host, reaching]) => {
+      const stories = [...reaching.values()]
+      const shown = stories
+        .slice(0, listedStoryCount)
+        .map(({ label }) => label)
+        .join(', ')
+      const more = stories.length > listedStoryCount ? ', …' : ''
+      const count = `${stories.length} ${stories.length === 1 ? 'story' : 'stories'}`
 
-      return `${host}: ${count} (${shown}${more})${sentenceOf(listed.length)}\n`
+      return {
+        kind,
+        host,
+        stories: stories.map(({ ref }) => ref),
+        message: `${host}: ${count} (${shown}${more})${sentenceOf(stories.length)}`,
+      }
     })
-    .join('')
 }
 
 /**
- * Builds the warnings that end a finished `update`: first a line for each host the stories sent real network requests
- * to, then a line for each host whose remote content they show, each kind sorted by host name. A line counts the
- * distinct stories, a Storybook's name with a story ID, so a story's modes count once and the same ID in two Storybooks
- * counts twice. It names the first three stories in the order the snapshots come in, each by its ID, or, when the
- * snapshots come from more than one Storybook, by its Storybook's name and ID, such as `web a--a`. The hosts in
- * `silenceHosts` get no line. Each line ends with a newline. Gives an empty string when no host is left.
+ * Builds the warnings that end a finished `update`: first one for each host the stories sent real network requests
+ * to, then one for each host whose remote content they show, each kind sorted by host name. A warning lists every
+ * distinct story, a Storybook's name with a story ID, so a story's modes count once and the same ID in two Storybooks
+ * counts twice. Its message counts them and names the first three in the order the snapshots come in, each by its ID,
+ * or, when the snapshots come from more than one Storybook, by its Storybook's name and ID, such as `web a--a`. The
+ * hosts in `silenceHosts` get no warning.
  */
-export function networkWarningOf(taken: readonly TakenHosts[], silenceHosts: readonly string[]): string {
+export function networkWarningsOf(taken: readonly TakenHosts[], silenceHosts: readonly string[]): ReportWarning[] {
   const labelled = new Set(taken.map(({ storybook }) => storybook)).size > 1
   const requests = storiesByHostOf(taken, labelled, (hosts) => hosts.requests, silenceHosts)
   const remoteContent = storiesByHostOf(taken, labelled, (hosts) => hosts.remoteContent, silenceHosts)
 
-  return (
-    linesOf(
+  return [
+    ...warningsOf(
+      'real-requests',
       requests,
       (count) =>
         `. ${count === 1 ? 'This story makes' : 'These stories make'} real network requests and may be unreliable.`,
-    ) +
-    linesOf(
+    ),
+    ...warningsOf(
+      'remote-content',
       remoteContent,
       (count) =>
         ` ${count === 1 ? 'shows' : 'show'} remote content. ` +
         'A CDN can serve it differently on another machine, so CI may fail.',
-    )
-  )
+    ),
+  ]
+}
+
+/**
+ * Writes the warnings as stderr ends a finished `update` with them: each message on a line of its own, ending with a
+ * newline. Gives an empty string for none.
+ */
+export function warningsTextOf(warnings: readonly ReportWarning[]): string {
+  return warnings.map(({ message }) => `${message}\n`).join('')
 }

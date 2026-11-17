@@ -1,4 +1,5 @@
 import { parkedByStorybookSource, storybookPageScript } from '../storybook/preview-script.js'
+import { consoleMessageFunction, keptConsoleMessageCharacters, keptConsoleMessages } from './driver/driver.js'
 import { endStateFunction } from './end-state.js'
 import { type CapturePrepRequest, prepareCaptureFunction } from './prepare-capture.js'
 import { remoteContentFunction } from './remote-content.js'
@@ -7,16 +8,6 @@ import { remoteContentFunction } from './remote-content.js'
  * The non-enumerable global the page script keeps its state under, in every document of a page.
  */
 const stateGlobal = '__visualCheck'
-
-/**
- * How many console messages and errors the page keeps: the latest ones.
- */
-const keptMessages = 50
-
-/**
- * How many characters the page keeps of each console message or error.
- */
-const keptCharacters = 500
 
 /**
  * The script that runs at the start of every document of a page, before the page's own scripts, in every driver. Until
@@ -34,7 +25,10 @@ const keptCharacters = 500
  *   sketched like JSON from its own enumerable data fields, three levels deep, stopping at 500 characters: an array
  *   or typed array by index, without listing all its keys, and each string cut first. So the page's getters and
  *   `toJSON` never run and a huge array costs little. A Proxy's traps can still run: `ownKeys`,
- *   `getOwnPropertyDescriptor`, `getPrototypeOf`, and `get` for an array's `length`;
+ *   `getOwnPropertyDescriptor`, `getPrototypeOf`, and `get` for an array's `length`. In the main frame, it also sends
+ *   each one, as it's recorded, to the driver's message function as JSON, so the driver keeps them when the story
+ *   navigates away. It takes that function and deletes it from the page first, in every frame and even when it runs
+ *   again, so the page's own scripts never see it;
  * - runs the Storybook adapter's script, which watches Storybook's preview for the story wait, empties Storybook 9.1
  *   and 10's pause stylesheets, and keeps its state under a global of its own;
  * - gives `waitForAssets`, which the wait for images and fonts expression calls. It takes the images in the document,
@@ -59,15 +53,20 @@ const keptCharacters = 500
  *   `prepareCaptureFunction` says.
  *
  * It keeps the browser's own `setTimeout`, `clearTimeout` and `requestAnimationFrame`, so a story that fakes or
- * replaces timers or frames doesn't stall the wait, the end state or the remote content search. The adapter's script
- * runs first, so a failure in the rest can't keep the story wait from running and show as a page script that didn't
- * run.
+ * replaces timers or frames doesn't stall the wait, the end state or the remote content search, and its own
+ * `JSON.stringify`, so a page that replaces it can't change what is sent. It takes and hides the message function
+ * before anything else runs, so a failure anywhere still leaves the page's own scripts without it. The adapter's
+ * script runs next, so a failure in the rest can't keep the story wait from running and show as a page script that
+ * didn't run.
  */
-export const pageInitScript = `${storybookPageScript};
+export const pageInitScript = `((send) => {
+${storybookPageScript};
 (() => {
   if (Object.prototype.hasOwnProperty.call(globalThis, '${stateGlobal}')) {
     return
   }
+
+  const stringify = JSON.stringify
 
   const setTimer = globalThis.setTimeout.bind(globalThis)
   const clearTimer = globalThis.clearTimeout.bind(globalThis)
@@ -90,7 +89,7 @@ export const pageInitScript = `${storybookPageScript};
 
   const sketch = (value, depth) => {
     if (typeof value === 'string') {
-      return JSON.stringify(value.slice(0, ${keptCharacters}))
+      return stringify(value.slice(0, ${keptConsoleMessageCharacters}))
     }
     if (typeof value === 'function') {
       return '[function]'
@@ -106,14 +105,14 @@ export const pageInitScript = `${storybookPageScript};
     const count = array ? value.length : keys.length
     const parts = []
     let length = 0
-    for (let index = 0; index < count && length < ${keptCharacters}; index += 1) {
+    for (let index = 0; index < count && length < ${keptConsoleMessageCharacters}; index += 1) {
       const key = array ? String(index) : keys[index]
       const property = typeof key === 'string' ? Reflect.getOwnPropertyDescriptor(value, key) : undefined
       if (!array && (property === undefined || !property.enumerable)) {
         continue
       }
       const text = property === undefined ? 'undefined' : 'value' in property ? sketch(property.value, depth - 1) : '[getter]'
-      const part = array ? text : JSON.stringify(key) + ':' + text
+      const part = array ? text : stringify(key) + ':' + text
       parts.push(part)
       length += part.length + 1
     }
@@ -126,7 +125,7 @@ export const pageInitScript = `${storybookPageScript};
   const describe = (value) => {
     try {
       if (typeof value === 'string') {
-        return value.slice(0, ${keptCharacters})
+        return value.slice(0, ${keptConsoleMessageCharacters})
       }
       if (isError(value)) {
         return typeof value.stack === 'string' ? value.stack : String(value)
@@ -139,9 +138,13 @@ export const pageInitScript = `${storybookPageScript};
 
   const record = (kind, values) => {
     try {
-      messages.push({ kind, text: values.map(describe).join(' ').slice(0, ${keptCharacters}) })
-      if (messages.length > ${keptMessages}) {
-        messages.splice(0, messages.length - ${keptMessages})
+      const message = { kind, text: values.map(describe).join(' ').slice(0, ${keptConsoleMessageCharacters}) }
+      messages.push(message)
+      if (messages.length > ${keptConsoleMessages}) {
+        messages.splice(0, messages.length - ${keptConsoleMessages})
+      }
+      if (send !== undefined) {
+        send(stringify(message))
       }
     } catch {}
   }
@@ -319,7 +322,16 @@ export const pageInitScript = `${storybookPageScript};
   Object.defineProperty(globalThis, '${stateGlobal}', {
     value: Object.freeze({ shadowRoots, messages, waitForAssets, bringToEndState, findRemoteContent, prepareCapture }),
   })
-})()`
+})()
+})((() => {
+  try {
+    const sendMessage = globalThis['${consoleMessageFunction}']
+    delete globalThis['${consoleMessageFunction}']
+    return typeof sendMessage === 'function' && globalThis.top === globalThis ? sendMessage : undefined
+  } catch {
+    return undefined
+  }
+})())`
 
 /**
  * What the wait for images and fonts found in the page.

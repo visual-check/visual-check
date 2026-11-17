@@ -1,11 +1,22 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  closeSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
+import type { TestReport } from '../src/index.js'
 
 const binaryPath = fileURLToPath(new URL('../dist/bin.js', import.meta.url))
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }
@@ -131,6 +142,52 @@ function runAsynchronously(options: CaseOptions, ...commandLineArguments: string
 }
 
 /**
+ * Runs the built binary without blocking, with standard output and standard error both written to one file, as a
+ * terminal shows them. Writes to a file are synchronous, so the file keeps the order the binary wrote in. Resolves with
+ * its exit code and the file's text.
+ */
+function runIntoOneFile(options: CaseOptions, ...commandLineArguments: string[]) {
+  const path = join(createProject({}), 'output.txt')
+  const file = openSync(path, 'w')
+
+  return new Promise<{ status: number | null; output: string }>((resolve, reject) => {
+    const child = spawn(process.execPath, [binaryPath, ...commandLineArguments], {
+      ...spawnOptionsOf(options),
+      stdio: ['ignore', file, file],
+    })
+
+    child.on('error', reject)
+    child.on('close', (status) => {
+      closeSync(file)
+      resolve({ status, output: readFileSync(path, 'utf8') })
+    })
+  })
+}
+
+/**
+ * Runs the built binary without blocking through a shell, with standard error sent into standard output's pipe as
+ * `2>&1` does, and resolves with its exit code and what came out of the pipe, in order.
+ */
+function runThroughOnePipe(options: CaseOptions, ...commandLineArguments: string[]) {
+  return new Promise<{ status: number | null; output: string }>((resolve, reject) => {
+    const child = spawn(
+      '/bin/sh',
+      ['-c', 'exec "$0" "$@" 2>&1', process.execPath, binaryPath, ...commandLineArguments],
+      { ...spawnOptionsOf(options), stdio: ['ignore', 'pipe', 'inherit'] },
+    )
+    let output = ''
+
+    child.stdout?.setEncoding('utf8').on('data', (chunk: string) => {
+      output += chunk
+    })
+    child.on('error', reject)
+    child.on('close', (status) => {
+      resolve({ status, output })
+    })
+  })
+}
+
+/**
  * Starts the server on a free port, to be closed after the test. Returns its URL.
  */
 async function listen(server: Server): Promise<string> {
@@ -207,10 +264,11 @@ function entryOf(id: string, fields: Record<string, unknown> = {}): Record<strin
 /**
  * What a run prints on standard error once it reaches the browser, which it launches in a container to read the
  * per-story options of a Storybook with stories: the stub `docker` fails the image's pull, so the run exits 2 with the
- * pull's failure and both fixes, before printing anything on standard output.
+ * pull's failure and both fixes, then the path of the report that holds the error, before printing anything on
+ * standard output.
  */
 const pullFailure =
-  /^docker pull of \S+ for linux\/amd64 failed with exit code 1\.[^\n]*\nStart or install Docker, or set platform: 'host' in the config\.\n$/
+  /^docker pull of \S+ for linux\/amd64 failed with exit code 1\.[^\n]*\nStart or install Docker, or set platform: 'host' in the config\.\nReport: \.visual-check\/report\/report\.json\n$/
 
 afterAll(() => {
   rmSync(stubDockerDir, { recursive: true, force: true })
@@ -264,6 +322,28 @@ describe('visual-check binary', () => {
 
     expect(result.status).toBe(2)
     expect(result.stderr).toContain('Run visual-check --help to see the commands and options.')
+  })
+
+  it('exits 2 with the hint for an invalid --reporter', () => {
+    const result = run({}, 'test', '--reporter', 'nope')
+
+    expect(result.status).toBe(2)
+    expect(result.stderr).toContain("--reporter takes live, log or json. Got 'nope'.")
+    expect(result.stderr).toContain('Run visual-check --help to see the commands and options.')
+  })
+
+  it('prints the error document and writes the error report for test --reporter json with an unknown flag', () => {
+    const project = createProject({
+      'visual-check.config.mjs': "export default { storybooks: { web: { url: 'http://127.0.0.1:6006' } } }\n",
+    })
+    const result = run({ cwd: project }, 'test', '--reporter', 'json', '--bogus')
+    const reportJson = readFileSync(join(project, '.visual-check', 'report', 'report.json'), 'utf8')
+
+    expect(result.status).toBe(2)
+    expect(result.stdout).toBe(reportJson)
+    expect((JSON.parse(reportJson) as TestReport).error?.message).toMatch(/^Unknown option '--bogus'/)
+    expect(result.stderr).toMatch(/^Unknown option '--bogus'/)
+    expect(result.stderr.endsWith('Report: .visual-check/report/report.json\n')).toBe(true)
   })
 
   it('exits 2 when --all and --filter are given together', () => {
@@ -426,6 +506,39 @@ describe('visual-check binary reaching Storybooks', () => {
     expect(result.stderr).not.toContain('--storybook')
   })
 
+  it('exits 2 for a Storybook that is down, writing a report whose error names it', async () => {
+    const down = await takeUnusedUrl()
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${down}' } } }\n`,
+    })
+    const result = await runAsynchronously({ cwd: project }, 'test', '--reporter', 'json')
+    const report = JSON.parse(
+      readFileSync(join(project, '.visual-check', 'report', 'report.json'), 'utf8'),
+    ) as TestReport
+
+    expect(result.status).toBe(2)
+    expect(result.stdout).toBe(`${JSON.stringify(report)}\n`)
+    expect(result.stderr.endsWith('Report: .visual-check/report/report.json\n')).toBe(true)
+    expect(report).toEqual({
+      version: 1,
+      visualCheck: version,
+      command: 'test',
+      consistencyOnly: false,
+      exitCode: 2,
+      shard: null,
+      selection: { by: 'all', base: null, changedFiles: null, fallback: null },
+      reportDir: '.visual-check/report',
+      storybooks: [{ name: 'web', url: down }],
+      counts: { passed: 0, flaky: 0, differs: 0, broken: 0, missing: 0, orphan: 0 },
+      snapshots: [],
+      warnings: [],
+      error: {
+        message: expect.stringContaining(`Storybook web doesn't answer at ${down}/index.json (ECONNREFUSED)`),
+        storybooks: [{ name: 'web', url: down }],
+      },
+    } satisfies TestReport)
+  })
+
   it('exits 2 with both fixes when there is no docker command, before it looks at a Storybook', async () => {
     const down = await takeUnusedUrl()
     const project = createProject({
@@ -496,8 +609,77 @@ describe('visual-check binary reaching Storybooks', () => {
     const result = await runAsynchronously({ cwd: project }, 'test')
 
     expect(result.status).toBe(0)
-    expect(result.stdout).toBe(`visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed\n`)
+    expect(result.stdout).toBe(
+      `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed\nReport: .visual-check/report/report.json\n`,
+    )
     expect(result.stderr).toBe('')
+  })
+
+  it("ends the run's output with the report line, after a warning on standard error", async () => {
+    const url = await startStorybookServer({ c: entryOf('button--primary:test', { subtype: 'test' }) })
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
+      'button.stories.tsx': '',
+      'node_modules/storybook/package.json': JSON.stringify({ version: '12.0.0' }),
+    })
+    const result = await runIntoOneFile({ cwd: project }, 'test')
+
+    expect(result.status).toBe(0)
+    expect(result.output).toBe(
+      `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed\n` +
+        'Warning: Storybook web runs storybook 12.0.0, and visual-check supports 9.1 to 11. The run carries on.\n' +
+        'Report: .visual-check/report/report.json\n',
+    )
+  })
+
+  it.skipIf(process.platform === 'win32')(
+    "ends the run's output with the report line through one pipe, after a warning on standard error",
+    async () => {
+      const url = await startStorybookServer({ c: entryOf('button--primary:test', { subtype: 'test' }) })
+      const project = createProject({
+        'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
+        'button.stories.tsx': '',
+        'node_modules/storybook/package.json': JSON.stringify({ version: '12.0.0' }),
+      })
+      const result = await runThroughOnePipe({ cwd: project }, 'test')
+
+      expect(result.status).toBe(0)
+      expect(result.output).toBe(
+        `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed\n` +
+          'Warning: Storybook web runs storybook 12.0.0, and visual-check supports 9.1 to 11. The run carries on.\n' +
+          'Report: .visual-check/report/report.json\n',
+      )
+    },
+  )
+
+  it('prints exactly one JSON document on stdout for test --reporter json, the rest on stderr', async () => {
+    const url = await startStorybookServer({ c: entryOf('button--primary:test', { subtype: 'test' }) })
+    const project = createProject({
+      'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
+      'button.stories.tsx': '',
+    })
+    const result = await runAsynchronously({ cwd: project }, 'test', '--reporter', 'json')
+
+    expect(result.status).toBe(0)
+    expect(result.stdout.trimEnd().split('\n')).toHaveLength(1)
+    expect(JSON.parse(result.stdout) as TestReport).toEqual({
+      version: 1,
+      visualCheck: version,
+      command: 'test',
+      consistencyOnly: false,
+      exitCode: 0,
+      shard: null,
+      selection: { by: 'all', base: null, changedFiles: null, fallback: null },
+      reportDir: '.visual-check/report',
+      storybooks: [{ name: 'web', url }],
+      counts: { passed: 0, flaky: 0, differs: 0, broken: 0, missing: 0, orphan: 0 },
+      snapshots: [],
+      warnings: [],
+      error: null,
+    } satisfies TestReport)
+    expect(result.stderr).toBe(
+      `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed\nReport: .visual-check/report/report.json\n`,
+    )
   })
 
   it('reaches the browser to read the per-story options of every story, even when --filter selects none', async () => {

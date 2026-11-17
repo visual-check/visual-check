@@ -2,6 +2,7 @@ import { type Context, createContext, runInContext } from 'node:vm'
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest'
 import { animationClasses, fakeAnimation, restoreFinish } from '../storybook/preview-script.fixture.js'
 import { readStoryWait, storyWaitExpression } from '../storybook/preview-script.js'
+import { consoleMessageFunction } from './driver/driver.js'
 import { animationsTimedOutAnswer, FakeFrames, fakeDocument, settledAnswer } from './end-state.fixture.js'
 import { fontsTimedOutAnswer, imagesTimedOutAnswer, readyAnswer } from './page-script.fixture.js'
 import {
@@ -494,6 +495,96 @@ describe('the message record', () => {
 
     page.dispatch(Object.assign(new Event('unhandledrejection'), { reason: 'nope' }))
     expect(messages(page)).toEqual([{ kind: 'unhandledrejection', text: 'nope' }])
+  })
+})
+
+/**
+ * Builds a fake page with these globals already set, whose driver provides the message function, recording each
+ * payload, and runs the page script in it, as the main frame when `top` is `self`, else as a frame inside another. The
+ * function throws after recording when `throws` is true.
+ */
+function pageSendingMessages(
+  top: 'self' | 'other',
+  { throws = false, globals = {} }: { throws?: boolean; globals?: Record<string, unknown> } = {},
+): { page: FakePage; sent: unknown[] } {
+  const page = blankPage(globals)
+  const sent: unknown[] = []
+
+  page.run(top === 'self' ? 'globalThis.top = globalThis' : 'globalThis.top = {}')
+  page.setGlobal(consoleMessageFunction, (payload: unknown) => {
+    sent.push(payload)
+
+    if (throws) {
+      throw new Error('The binding failed.')
+    }
+  })
+  page.run(pageInitScript)
+
+  return { page, sent }
+}
+
+describe('the message function', () => {
+  it('is sent each message the main frame records, once, as JSON, in order', () => {
+    const { page, sent } = pageSendingMessages('self')
+
+    page.run("console.log('a line', 42)")
+    page.dispatch(Object.assign(new Event('unhandledrejection'), { reason: 'nope' }))
+    page.run("console.warn('x'.repeat(600))")
+    expect(sent).toEqual([
+      JSON.stringify({ kind: 'console.log', text: 'a line 42' }),
+      JSON.stringify({ kind: 'unhandledrejection', text: 'nope' }),
+      JSON.stringify({ kind: 'console.warn', text: 'x'.repeat(500) }),
+    ])
+    expect(messages(page)).toHaveLength(3)
+  })
+
+  it("is hidden from the page's own scripts", () => {
+    const { page } = pageSendingMessages('self')
+
+    expect(page.run(`typeof globalThis.${consoleMessageFunction}`)).toBe('undefined')
+    expect(page.run(`'${consoleMessageFunction}' in globalThis`)).toBe(false)
+  })
+
+  it('is sent nothing from a frame inside another, and hidden there too', () => {
+    const { page, sent } = pageSendingMessages('other')
+
+    page.run("console.log('a line')")
+    expect(sent).toEqual([])
+    expect(messages(page)).toEqual([{ kind: 'console.log', text: 'a line' }])
+    expect(page.run(`'${consoleMessageFunction}' in globalThis`)).toBe(false)
+  })
+
+  it('keeps recording and passing messages on when it throws', () => {
+    const { page, sent } = pageSendingMessages('self', { throws: true })
+
+    page.run("console.log('a line')")
+    expect(sent).toHaveLength(1)
+    expect(messages(page)).toEqual([{ kind: 'console.log', text: 'a line' }])
+    expect(page.console.log).toHaveBeenCalledWith('a line')
+  })
+
+  it("is hidden from the page's own scripts even when the Storybook adapter's script fails", () => {
+    const page = blankPage({ setTimeout: undefined })
+
+    page.setGlobal(consoleMessageFunction, () => undefined)
+    expect(() => page.run(pageInitScript)).toThrow("Cannot read properties of undefined (reading 'bind')")
+    expect(page.run(`'${consoleMessageFunction}' in globalThis`)).toBe(false)
+  })
+
+  it("is sent the message as the page script's own JSON.stringify made it, though the page replaced it", () => {
+    const { page, sent } = pageSendingMessages('self')
+
+    page.run('JSON.stringify = () => \'{"kind":"console.log","text":"forged"}\'')
+    page.run("console.log('a line')")
+    expect(sent).toEqual([JSON.stringify({ kind: 'console.log', text: 'a line' })])
+  })
+
+  it('is sent nothing more when the page script runs again in the same page', () => {
+    const { page, sent } = pageSendingMessages('self')
+
+    page.run(pageInitScript)
+    page.run("console.log('a line')")
+    expect(sent).toHaveLength(1)
   })
 })
 

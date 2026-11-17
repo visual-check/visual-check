@@ -138,6 +138,7 @@ function pageOf(fake: FakeDriver, behaviour: FakeBehaviour): Page {
       }
     },
     requestHosts: () => [],
+    consoleMessages: () => [],
   }
 }
 
