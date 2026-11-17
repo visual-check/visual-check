@@ -1,4 +1,4 @@
-import { Box, Text } from 'ink'
+import { Box, Text, useWindowSize } from 'ink'
 import { Fragment, type ReactNode } from 'react'
 import {
   ciLineOf,
@@ -13,11 +13,18 @@ import type { InitResult } from '../init/run-init.js'
 import { ColouredText } from './coloured-text.js'
 import { MessageLine } from './message-line.js'
 import { glyphs } from './theme.js'
+import { wrappedSegmentLinesOf } from './wrapped-lines.js'
 
 /**
  * How many columns a step's number takes, with the spaces around it.
  */
 const numberColumnWidth = 5
+
+/**
+ * The fewest columns a step's text needs beside the commands' column. In a terminal with less room, every command
+ * takes a line of its own, with its text under it.
+ */
+const minimumTextWidth = 20
 
 /**
  * What `Summary` takes.
@@ -72,9 +79,14 @@ interface StepRowProps {
    */
   numberLabel: string
   /**
-   * How many columns the commands take, the gap after the longest included.
+   * How many columns the commands take, the gap after the longest included, or 0 when every command takes a line of
+   * its own.
    */
   commandWidth: number
+  /**
+   * How wide the terminal is.
+   */
+  columns: number
 }
 
 /**
@@ -98,6 +110,20 @@ interface SegmentsTextProps {
 }
 
 /**
+ * What `WrappedSegments` takes.
+ */
+interface WrappedSegmentsProps {
+  /**
+   * The segments to draw, in order.
+   */
+  segments: readonly Segment[]
+  /**
+   * How many columns the lines may take.
+   */
+  width: number
+}
+
+/**
  * Draws a line of segments inside a `<Text>`: the words as they are, and each command, path or URL in the accent
  * colour.
  */
@@ -112,6 +138,20 @@ function SegmentsText({ segments }: SegmentsTextProps): ReactNode {
       </ColouredText>
     ),
   )
+}
+
+/**
+ * Draws a line of segments inside a `<Text>`, broken into lines that fit `width` columns, so Ink never wraps it itself
+ * and no line starts with the space it broke at. Each command, path or URL takes the accent colour.
+ */
+function WrappedSegments({ segments, width }: WrappedSegmentsProps): ReactNode {
+  // The lines never change, so where each one is tells it apart.
+  return Array.from(wrappedSegmentLinesOf(segments, width).entries(), ([position, line]) => (
+    <Fragment key={position}>
+      {position === 0 ? '' : '\n'}
+      <SegmentsText segments={line} />
+    </Fragment>
+  ))
 }
 
 /**
@@ -154,7 +194,7 @@ function StepNumber({ label }: StepNumberProps): ReactNode {
  * the commands start. A command too long for the column takes a line of its own, and its text starts on the next line
  * where the other rows' text starts.
  */
-function StepRow({ row, numberLabel, commandWidth }: StepRowProps): ReactNode {
+function StepRow({ row, numberLabel, commandWidth, columns }: StepRowProps): ReactNode {
   const { command } = row
 
   if (command !== undefined && !fitsCommandColumn(command, commandWidth)) {
@@ -166,12 +206,14 @@ function StepRow({ row, numberLabel, commandWidth }: StepRowProps): ReactNode {
         </Box>
         <Box marginLeft={numberColumnWidth + commandWidth}>
           <Text>
-            <SegmentsText segments={row.text} />
+            <WrappedSegments segments={row.text} width={columns - numberColumnWidth - commandWidth} />
           </Text>
         </Box>
       </Box>
     )
   }
+
+  const textColumn = numberColumnWidth + (command === undefined ? 0 : commandWidth)
 
   return (
     <Box>
@@ -182,7 +224,7 @@ function StepRow({ row, numberLabel, commandWidth }: StepRowProps): ReactNode {
         </Box>
       )}
       <Text>
-        <SegmentsText segments={row.text} />
+        <WrappedSegments segments={row.text} width={columns - textColumn} />
       </Text>
     </Box>
   )
@@ -190,10 +232,13 @@ function StepRow({ row, numberLabel, commandWidth }: StepRowProps): ReactNode {
 
 /**
  * Draws what to do next: the numbered steps, each command in a column of its own, then, dim, where options for every
- * story go and the docs page for CI. Commands, paths and URLs take the accent colour.
+ * story go and the docs page for CI. Commands, paths and URLs take the accent colour. In a terminal too narrow for the
+ * commands' column and 20 columns of text beside it, every command takes a line of its own, with its text under it.
  */
 function NextStepsView({ nextSteps }: NextStepsViewProps): ReactNode {
-  const commandWidth = commandColumnWidthOf(nextSteps.steps)
+  const { columns } = useWindowSize()
+  const columnWidth = commandColumnWidthOf(nextSteps.steps)
+  const commandWidth = numberColumnWidth + columnWidth + minimumTextWidth <= columns ? columnWidth : 0
 
   return (
     <>
@@ -204,6 +249,7 @@ function NextStepsView({ nextSteps }: NextStepsViewProps): ReactNode {
       {Array.from(nextSteps.steps.entries()).flatMap(([position, rows]) =>
         Array.from(rows.entries(), ([rowPosition, row]) => (
           <StepRow
+            columns={columns}
             commandWidth={commandWidth}
             key={`${position}-${rowPosition}`}
             numberLabel={rowPosition === 0 ? `  ${position + 1}` : ''}
@@ -214,11 +260,11 @@ function NextStepsView({ nextSteps }: NextStepsViewProps): ReactNode {
       <Box flexDirection="column" marginTop={1}>
         {nextSteps.modesFiles.length === 0 ? null : (
           <Text dimColor>
-            <SegmentsText segments={modesLineOf(nextSteps.modesFiles)} />
+            <WrappedSegments segments={modesLineOf(nextSteps.modesFiles)} width={columns} />
           </Text>
         )}
         <Text dimColor>
-          <SegmentsText segments={ciLineOf(nextSteps.ciUrl)} />
+          <WrappedSegments segments={ciLineOf(nextSteps.ciUrl)} width={columns} />
         </Text>
       </Box>
     </>

@@ -1,3 +1,19 @@
+import type { Segment } from '../init/closing-message.js'
+
+/**
+ * A character of a line of segments, with whether it belongs to a command, path or URL.
+ */
+interface SegmentCharacter {
+  /**
+   * The character.
+   */
+  character: string
+  /**
+   * Whether it belongs to a code segment.
+   */
+  code: boolean
+}
+
 /**
  * Gives how many columns text takes, counted in code points. The CLI doesn't depend on `string-width`, so a wide
  * character, such as a CJK one or an emoji, counts as one column: close enough for the text `init` shows.
@@ -63,4 +79,71 @@ export function wrappedLinesOf(text: string, width: number): string[] {
   const limit = Math.max(1, Math.floor(width))
 
   return text.split('\n').flatMap((line) => wrappedLineOf(line, limit))
+}
+
+/**
+ * Lists the characters of segments in order, each with whether it belongs to a code segment.
+ */
+function charactersOf(segments: readonly Segment[]): SegmentCharacter[] {
+  return segments.flatMap((segment): SegmentCharacter[] =>
+    typeof segment === 'string'
+      ? [...segment].map((character) => ({ character, code: false }))
+      : [...segment.code].map((character) => ({ character, code: true })),
+  )
+}
+
+/**
+ * Joins characters into segments: each run of plain characters into words, and each run of code characters into a
+ * code segment.
+ */
+function segmentsOf(characters: readonly SegmentCharacter[]): Segment[] {
+  const segments: Segment[] = []
+
+  for (const { character, code } of characters) {
+    const last = segments.at(-1)
+
+    if (code && typeof last === 'object') {
+      segments[segments.length - 1] = { code: last.code + character }
+    } else if (!code && typeof last === 'string') {
+      segments[segments.length - 1] = last + character
+    } else {
+      segments.push(code ? { code: character } : character)
+    }
+  }
+
+  return segments
+}
+
+/**
+ * Breaks a line of segments into lines at most `width` columns wide, as `wrappedLinesOf` breaks text, so a terminal
+ * never wraps them itself. Each line keeps the commands, paths and URLs on it as code segments, a piece each when one
+ * is broken across lines.
+ */
+export function wrappedSegmentLinesOf(segments: readonly Segment[], width: number): Segment[][] {
+  const characters = charactersOf(segments)
+  const lines: Segment[][] = []
+  let cursor = 0
+
+  for (const line of wrappedLinesOf(characters.map(({ character }) => character).join(''), width)) {
+    const lineCharacters: SegmentCharacter[] = []
+
+    for (const character of line) {
+      // A wrapped line leaves out the spaces and line breaks it broke at, so they are skipped.
+      while (character !== ' ' && (characters[cursor]?.character === ' ' || characters[cursor]?.character === '\n')) {
+        cursor += 1
+      }
+
+      const original = characters[cursor]
+
+      if (original?.character === character) {
+        cursor += 1
+      }
+
+      lineCharacters.push({ character, code: original?.code ?? false })
+    }
+
+    lines.push(segmentsOf(lineCharacters))
+  }
+
+  return lines
 }

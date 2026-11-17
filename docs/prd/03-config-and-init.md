@@ -140,7 +140,7 @@ Rules:
   - the running step turns the spinner and counts its time up each second, with its command and the last three lines of its output under it, dim;
   - a step that ended shows `✓`, `▲` or `✕` in the accent, caution or danger colour, and how long it took. A failed step keeps the last 15 lines of its output, and the steps after it end dim after `−`, marked skipped.
 - It ends with the steps as they ended, printed once, then a summary:
-  - **Set up:** `✓ visual-check is set up`, a dim line naming any scripts it replaced, the warnings, then the numbered next steps, each a command and what it does, the commands in a column of their own in the accent colour. Then, dim, where to set options for every story and the line pointing to the CI docs, with paths and URLs in the accent colour. The words match the plain closing message; the headings differ. It lists no files written.
+  - **Set up:** `✓ visual-check is set up`, a dim line naming any scripts it replaced, the warnings, then the numbered next steps, each a command and what it does, the commands in a column of their own in the accent colour. A command over 32 characters takes a line of its own, with its text under the other rows' text. In a terminal too narrow for the column and 20 columns of text beside it, every command takes a line of its own, with its text under it. Then, dim, where to set options for every story and the line pointing to the CI docs, with paths and URLs in the accent colour. The words match the plain closing message; the headings differ. It lists no files written.
   - **The install failed:** the line naming any scripts it replaced, then the problem after `✕`.
   - **Stopped before writing:** the warnings and hints, then why it stopped after `✕`.
 - Elsewhere it prints plain text.
@@ -194,7 +194,7 @@ It warns and still writes when:
 
 ## `init`: closing message
 
-Each step is a command and what it does, the commands in a column of their own:
+Each step is a command and what it does, the commands in a column of their own. A command over 32 characters takes a line of its own, with its text under the other rows' text:
 
 1. Start each Storybook with its command, and keep it running.
 2. `visual:update` writes the first baselines. Left out when every Storybook set up already has a baseline in its baselines folder. Shown when none was set up.

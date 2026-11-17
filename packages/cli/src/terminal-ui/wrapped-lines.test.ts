@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { wrappedLinesOf } from './wrapped-lines.js'
+import { wrappedLinesOf, wrappedSegmentLinesOf } from './wrapped-lines.js'
 
 describe('wrappedLinesOf', () => {
   it('keeps text that fits on one line', () => {
@@ -57,5 +57,49 @@ describe('wrappedLinesOf', () => {
 
   it('gives one empty line for empty text', () => {
     expect(wrappedLinesOf('', 10)).toEqual([''])
+  })
+})
+
+describe('wrappedSegmentLinesOf', () => {
+  it('keeps a line that fits as it is', () => {
+    expect(wrappedSegmentLinesOf(['Run ', { code: 'pnpm run storybook' }, ' now'], 30)).toEqual([
+      ['Run ', { code: 'pnpm run storybook' }, ' now'],
+    ])
+  })
+
+  it('breaks at the last space that fits, drops it, and starts the next line with no space', () => {
+    expect(
+      wrappedSegmentLinesOf(
+        ['Add your Storybook to ', { code: 'visual-check.config.ts' }, ', as the hints say, then start it'],
+        45,
+      ),
+    ).toEqual([
+      ['Add your Storybook to ', { code: 'visual-check.config.ts' }, ','],
+      ['as the hints say, then start it'],
+    ])
+  })
+
+  it('breaks at a space between words and a code segment', () => {
+    expect(
+      wrappedSegmentLinesOf(['To run visual-check in CI, see ', { code: 'https://x.dev/docs/ci' }, '.'], 40),
+    ).toEqual([['To run visual-check in CI, see'], [{ code: 'https://x.dev/docs/ci' }, '.']])
+  })
+
+  it('keeps each piece of a code segment broken across lines as code', () => {
+    expect(wrappedSegmentLinesOf(['see ', { code: 'abcdefghij' }], 6)).toEqual([
+      ['see'],
+      [{ code: 'abcdef' }],
+      [{ code: 'ghij' }],
+    ])
+  })
+
+  it('keeps two code segments on a line apart', () => {
+    expect(wrappedSegmentLinesOf([{ code: 'a.ts' }, ' and ', { code: 'b.ts' }], 20)).toEqual([
+      [{ code: 'a.ts' }, ' and ', { code: 'b.ts' }],
+    ])
+  })
+
+  it('gives one empty line for no segments', () => {
+    expect(wrappedSegmentLinesOf([], 20)).toEqual([[]])
   })
 })

@@ -96,28 +96,23 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
       60,
     )
 
-    // A dim line keeps the space it breaks at, since the style ends after it, which the terminal shows as nothing.
-    expect(plainFrameOf(lastFrame())).toBe(
-      [
-        '',
-        '✓ visual-check is set up',
-        '',
-        'Next',
-        '  1  pnpm storybook        Start web-app, and keep it',
-        '                           running',
-        '     pnpm storybook:docs   Start docs, and keep it running',
-        '  2  pnpm visual:update    Write the first baselines',
-        '  3  pnpm visual:check     Check the stories against the',
-        '                           baselines',
-        '  4  Commit the changes, baselines included',
-        '',
-        'To set options for every story, see ',
-        '.storybook/visual-check.ts and ',
-        'docs/.storybook/visual-check.ts.',
-        'To run visual-check in CI, see ',
-        'https://visual-check.vercel.app/docs/ci.',
-      ].join('\n'),
-    )
+    expect(plainFrameOf(lastFrame())).toBe(`
+✓ visual-check is set up
+
+Next
+  1  pnpm storybook        Start web-app, and keep it
+                           running
+     pnpm storybook:docs   Start docs, and keep it running
+  2  pnpm visual:update    Write the first baselines
+  3  pnpm visual:check     Check the stories against the
+                           baselines
+  4  Commit the changes, baselines included
+
+To set options for every story, see
+.storybook/visual-check.ts and
+docs/.storybook/visual-check.ts.
+To run visual-check in CI, see
+https://visual-check.vercel.app/docs/ci.`)
   })
 
   it('puts a command too long for the column on its own line, and its text under the other texts', async () => {
@@ -158,6 +153,89 @@ To set options for every story, see .storybook/visual-check.ts.
 To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
   })
 
+  describe('a start command of 31 characters, the default for a Storybook without a start script', () => {
+    /**
+     * The next steps of a Storybook started by `storybook dev` on its config URL's port.
+     */
+    const defaultStartSteps: NextSteps = {
+      ...nextSteps,
+      steps: [
+        [{ command: 'pnpm exec storybook dev -p 6006', text: ['Start Storybook, and keep it running'] }],
+        ...nextSteps.steps.slice(1),
+      ],
+    }
+
+    it('keeps the command in the column at 80 columns', async () => {
+      const { lastFrame } = await renderSettledAt(
+        <Summary result={{ ...resultWith(0, []), summary: { nextSteps: defaultStartSteps } }} />,
+        80,
+      )
+
+      expect(plainFrameOf(lastFrame())).toBe(`
+✓ visual-check is set up
+
+Next
+  1  pnpm exec storybook dev -p 6006   Start Storybook, and keep it running
+  2  pnpm visual:update                Write the first baselines
+  3  pnpm visual:check                 Check the stories against the baselines
+  4  Commit the changes, baselines included
+
+To set options for every story, see .storybook/visual-check.ts.
+To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
+    })
+
+    it('puts every command on a line of its own at 40 columns, too narrow for the column', async () => {
+      const { lastFrame } = await renderSettledAt(
+        <Summary result={{ ...resultWith(0, []), summary: { nextSteps: defaultStartSteps } }} />,
+        40,
+      )
+
+      expect(plainFrameOf(lastFrame())).toBe(`
+✓ visual-check is set up
+
+Next
+  1  pnpm exec storybook dev -p 6006
+     Start Storybook, and keep it
+     running
+  2  pnpm visual:update
+     Write the first baselines
+  3  pnpm visual:check
+     Check the stories against the
+     baselines
+  4  Commit the changes, baselines
+     included
+
+To set options for every story, see
+.storybook/visual-check.ts.
+To run visual-check in CI, see
+https://visual-check.vercel.app/docs/ci.`)
+    })
+
+    it('starts a wrapped line of its text with no space at 60 columns', async () => {
+      const { lastFrame } = await renderSettledAt(
+        <Summary result={{ ...resultWith(0, []), summary: { nextSteps: defaultStartSteps } }} />,
+        60,
+      )
+
+      expect(plainFrameOf(lastFrame())).toBe(`
+✓ visual-check is set up
+
+Next
+  1  pnpm exec storybook dev -p 6006   Start Storybook, and
+                                       keep it running
+  2  pnpm visual:update                Write the first
+                                       baselines
+  3  pnpm visual:check                 Check the stories
+                                       against the baselines
+  4  Commit the changes, baselines included
+
+To set options for every story, see
+.storybook/visual-check.ts.
+To run visual-check in CI, see
+https://visual-check.vercel.app/docs/ci.`)
+    })
+  })
+
   it('starts the text of a row without a command where the commands start', async () => {
     const { lastFrame } = await renderSettledAt(
       <Summary
@@ -183,26 +261,24 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
           },
         }}
       />,
-      52,
+      50,
     )
 
-    expect(plainFrameOf(lastFrame())).toBe(
-      [
-        '',
-        '✓ visual-check is set up',
-        '',
-        'Next',
-        '  1  Add your Storybook to visual-check.config.ts,',
-        '     as the hints say, then start it',
-        '  2  pnpm visual:update   Write the first baselines',
-        '  3  pnpm visual:check    Check the stories against',
-        '                          the baselines',
-        '  4  Commit the changes, baselines included',
-        '',
-        'To run visual-check in CI, see ',
-        'https://visual-check.vercel.app/docs/ci.',
-      ].join('\n'),
-    )
+    // The first line of the first step fills its 45 columns exactly, and the next one starts with no space.
+    expect(plainFrameOf(lastFrame())).toBe(`
+✓ visual-check is set up
+
+Next
+  1  Add your Storybook to visual-check.config.ts,
+     as the hints say, then start it
+  2  pnpm visual:update   Write the first
+                          baselines
+  3  pnpm visual:check    Check the stories
+                          against the baselines
+  4  Commit the changes, baselines included
+
+To run visual-check in CI, see
+https://visual-check.vercel.app/docs/ci.`)
   })
 
   it('draws the heading in bold accent, the replaced line dim, the commands in accent, and the last lines dim', async () => {
