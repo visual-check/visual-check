@@ -7,6 +7,7 @@ import {
   fallowFailureOf,
   fallowFailureWarningOf,
   findUnlistedDependencies,
+  type UnlistedDependency,
   unlistedDependenciesOf,
   unlistedDependenciesWarningOf,
 } from './unlisted-dependencies.js'
@@ -80,15 +81,28 @@ describe('unlistedDependenciesWarningOf', () => {
     )
   })
 
-  it('names several packages', () => {
-    expect(
-      unlistedDependenciesWarningOf([
-        { name: 'a', paths: ['x.js'] },
-        { name: 'b', paths: ['z.js'] },
-        { name: 'c', paths: ['w.js'] },
-      ]),
-    ).toBe(
+  /**
+   * The first `count` of the packages a, b, c, d and e, each imported in one file.
+   */
+  function packages(count: number): UnlistedDependency[] {
+    return ['a', 'b', 'c', 'd', 'e'].slice(0, count).map((name) => ({ name, paths: [`${name}.js`] }))
+  }
+
+  it('names two packages', () => {
+    expect(unlistedDependenciesWarningOf(packages(2))).toBe(
+      "Warning: package.json doesn't list a and b, which your code imports. visual-check can't tell which stories they affect.",
+    )
+  })
+
+  it('names three packages', () => {
+    expect(unlistedDependenciesWarningOf(packages(3))).toBe(
       "Warning: package.json doesn't list a, b and c, which your code imports. visual-check can't tell which stories they affect.",
+    )
+  })
+
+  it('names the first three of five packages, and counts the rest', () => {
+    expect(unlistedDependenciesWarningOf(packages(5))).toBe(
+      "Warning: package.json doesn't list a, b, c and 2 more, which your code imports. visual-check can't tell which stories they affect.",
     )
   })
 })

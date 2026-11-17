@@ -22,6 +22,10 @@ export interface SetUpStorybook {
    */
   configDir: string
   /**
+   * The absolute path of the folder that holds the Storybook's baselines: the config's `baselines`, or the default.
+   */
+  baselines: string
+  /**
    * The command that starts the Storybook.
    */
   startCommand: string
@@ -114,6 +118,12 @@ interface ClosingMessageInput {
 const commandGap = 3
 
 /**
+ * The most characters a command may have to count toward the width of the commands' column. A longer one would leave
+ * too little room for the text, so it doesn't widen the column, and takes a line of its own.
+ */
+const longestColumnCommand = 30
+
+/**
  * Returns the line that names the scripts `init` replaced in `package.json`, or `undefined` when it replaced none.
  */
 export function replacedScriptsLineOf(names: readonly string[]): string | undefined {
@@ -149,15 +159,28 @@ function textOf(segments: readonly Segment[]): string {
 }
 
 /**
- * Returns how many columns the commands of the steps take: the longest command, then a gap. A row without a command
- * starts its text where the commands start, so with no command at all, it's 0.
+ * Returns how many columns the commands of the steps take: the longest command of at most 30 characters, then a gap. A
+ * row without a command starts its text where the commands start, so with no such command at all, it's 0.
  *
  * @public
  */
 export function commandColumnWidthOf(steps: readonly (readonly NextStepRow[])[]): number {
-  const longest = Math.max(0, ...steps.flat().map(({ command }) => command?.length ?? 0))
+  const widths = steps
+    .flat()
+    .map(({ command }) => (command === undefined || command.length > longestColumnCommand ? 0 : command.length))
+  const longest = Math.max(0, ...widths)
 
   return longest === 0 ? 0 : longest + commandGap
+}
+
+/**
+ * Whether a command fits the commands' column, `width` columns wide, with the gap after it. One that doesn't takes a
+ * line of its own, and its text starts on the next line, where the text of the other rows starts.
+ *
+ * @public
+ */
+export function fitsCommandColumn(command: string, width: number): boolean {
+  return command.length + commandGap <= width
 }
 
 /**
@@ -238,17 +261,26 @@ export function nextStepsOf(input: ClosingMessageInput): NextSteps {
 
 /**
  * Returns the lines of one step as plain text: its number, then each row's command padded to `commandWidth` and its
- * text. A row without a command starts its text where the commands start. The rows after the first are indented as far
- * as the first, without a number.
+ * text. A row without a command starts its text where the commands start. A command too long for the column takes a
+ * line of its own, and its text starts on the next line where the other rows' text starts. The rows after the first
+ * are indented as far as the first, without a number.
  */
 function stepLinesOf(rows: readonly NextStepRow[], number: number, commandWidth: number): string[] {
   const numberColumn = `  ${number}. `
+  const indent = ' '.repeat(numberColumn.length)
 
-  return rows.map(({ command, text }, index) => {
-    const lead = index === 0 ? numberColumn : ' '.repeat(numberColumn.length)
-    const commandColumn = command === undefined ? '' : command.padEnd(commandWidth)
+  return rows.flatMap(({ command, text }, index) => {
+    const lead = index === 0 ? numberColumn : indent
 
-    return `${lead}${commandColumn}${textOf(text)}`
+    if (command === undefined) {
+      return [`${lead}${textOf(text)}`]
+    }
+
+    if (fitsCommandColumn(command, commandWidth)) {
+      return [`${lead}${command.padEnd(commandWidth)}${textOf(text)}`]
+    }
+
+    return [`${lead}${command}`, `${indent}${' '.repeat(commandWidth)}${textOf(text)}`]
   })
 }
 

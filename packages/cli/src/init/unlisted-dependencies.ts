@@ -182,7 +182,25 @@ export const findUnlistedDependencies: FindUnlistedDependencies = async (root) =
 }
 
 /**
- * Words the warning for unlisted dependencies, or gives `undefined` when there are none.
+ * How many unlisted packages the warning names before it counts the rest.
+ */
+const namedPackageCount = 3
+
+/**
+ * Names the packages for the warning: up to three in full, `a, b and c`, and past three the first three and how many
+ * more, `a, b, c and 2 more`.
+ */
+function packageNamesOf(names: readonly string[]): string {
+  if (names.length <= namedPackageCount) {
+    return listOf(names)
+  }
+
+  return `${names.slice(0, namedPackageCount).join(', ')} and ${names.length - namedPackageCount} more`
+}
+
+/**
+ * Words the warning for unlisted dependencies, or gives `undefined` when there are none. It names at most three
+ * packages, and counts the rest.
  */
 export function unlistedDependenciesWarningOf(unlisted: readonly UnlistedDependency[]): string | undefined {
   if (unlisted.length === 0) {
@@ -198,7 +216,7 @@ export function unlistedDependenciesWarningOf(unlisted: readonly UnlistedDepende
     )
   }
 
-  const names = listOf(unlisted.map(({ name }) => name))
+  const names = packageNamesOf(unlisted.map(({ name }) => name))
 
   return (
     `Warning: package.json doesn't list ${names}, which your code imports. ` +

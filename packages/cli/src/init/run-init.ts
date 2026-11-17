@@ -1,6 +1,7 @@
 import { dirname, join } from 'node:path'
 import { BaselineError } from '../baselines/baseline-error.js'
 import { listBaselines } from '../baselines/baseline-files.js'
+import { defaultBaselinesIn } from '../config/resolve-config.js'
 import type { ProbeDocker } from '../container/docker-probe.js'
 import {
   closingMessageTextOf,
@@ -17,14 +18,7 @@ import { addAddons, addonTitleOf, dependenciesToAddOf, installDependencies, inst
 import { InputEndedError, type Prompter } from './prompter.js'
 import { type Answers, askQuestions } from './questions.js'
 import type { RunCommand } from './run-command.js'
-import {
-  configSourceOf,
-  modesFileSource,
-  type ScriptChanges,
-  setScripts,
-  visualCheckGitignore,
-  writeIfMissing,
-} from './setup-files.js'
+import { configSourceOf, modesFileSource, setScripts, visualCheckGitignore, writeIfMissing } from './setup-files.js'
 import { runStep, type SetupProgress } from './setup-progress.js'
 import {
   type FindUnlistedDependencies,
@@ -269,12 +263,11 @@ function setupOf(
     answers,
     configPath: join(project.root, configFileName),
     configSource: configSourceOf(answers.storybooks.map(({ name, url, configDir }) => ({ name, url, configDir }))),
-    storybooks: answers.storybooks.map(({ name, configDir, startCommand }) => ({
-      name,
-      dir: project.storybooks.find((storybook) => storybook.configDir === configDir)?.packageDir ?? project.root,
-      configDir: join(project.root, configDir),
-      startCommand,
-    })),
+    storybooks: answers.storybooks.map(({ name, configDir, startCommand }) => {
+      const dir = project.storybooks.find((storybook) => storybook.configDir === configDir)?.packageDir ?? project.root
+
+      return { name, dir, configDir: join(project.root, configDir), baselines: defaultBaselinesIn(dir), startCommand }
+    }),
     notes,
   }
 }
@@ -303,20 +296,20 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
     ...addons.map(({ name }) => addonTitleOf(name)),
     checkUnlistedTitle,
   ])
-  const scriptChanges = await runStep(
+  const replacedScripts = await runStep(
     progress,
     { title: writeFilesTitle },
     () => writeSetupFiles(project, setup),
     () => 'done',
   )
-  const replacedLine = replacedScriptsLineOf(scriptChanges.replaced.map(({ name }) => name))
-  const replaced = replacedLine === undefined ? {} : { replacedLine }
+  const replacedLine = replacedScriptsLineOf(replacedScripts)
+  const replacedSummary = replacedLine === undefined ? {} : { replacedLine }
   const problem = await installDependencies({ installs, packageManager, runCommand, progress })
 
   if (problem !== undefined) {
     return {
       ...resultOf(2, replacedLine === undefined ? '' : `${replacedLine}\n`, [...setup.notes, problem]),
-      summary: replaced,
+      summary: replacedSummary,
     }
   }
 
@@ -349,21 +342,18 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
 
   return {
     ...resultOf(0, stdout, [...setup.notes, ...addonWarnings, ...fallowWarnings]),
-    summary: { ...replaced, nextSteps },
+    summary: { ...replacedSummary, nextSteps },
   }
 }
 
 /**
- * Whether the first baselines are still to be written: unless every Storybook set up has at least one in its
- * `.visual-check/baselines` folder. With none set up, a Storybook is still to be added, so they are. A config's own
- * `baselines` folder isn't read.
+ * Whether the first baselines are still to be written: unless every Storybook set up has at least one in its baselines
+ * folder, the one its config names or the default. With none set up, a Storybook is still to be added, so they are.
  *
  * @throws Any error besides a `BaselineError`, which counts as no baselines.
  */
 async function needsBaselinesOf(storybooks: readonly SetUpStorybook[]): Promise<boolean> {
-  const hasBaselines = await Promise.all(
-    storybooks.map(({ dir }) => holdsBaselines(join(dir, '.visual-check', 'baselines'))),
-  )
+  const hasBaselines = await Promise.all(storybooks.map(({ baselines }) => holdsBaselines(baselines)))
 
   return hasBaselines.length === 0 || hasBaselines.includes(false)
 }
@@ -402,10 +392,10 @@ async function dockerNotesOf(probeDocker: ProbeDocker, os: NodeJS.Platform): Pro
 
 /**
  * Writes each file that's missing: the config when there was none, each Storybook's `visual-check.ts` and
- * `.visual-check/.gitignore`, and the config folder's `.visual-check/.gitignore`. Then sets the scripts. Gives what it
- * changed in the scripts. An existing file is never touched.
+ * `.visual-check/.gitignore`, and the config folder's `.visual-check/.gitignore`. Then sets the scripts. Gives the names
+ * of the scripts it replaced. An existing file is never touched.
  */
-function writeSetupFiles(project: DetectedProject, setup: Setup): ScriptChanges {
+function writeSetupFiles(project: DetectedProject, setup: Setup): string[] {
   const { answers, configPath, configSource, storybooks } = setup
   const contents: (readonly [string, string])[] = [
     ...(configSource === undefined ? [] : [[configPath, configSource] as const]),
@@ -415,6 +405,7 @@ function writeSetupFiles(project: DetectedProject, setup: Setup): ScriptChanges 
     ]),
     [join(dirname(configPath), '.visual-check', '.gitignore'), visualCheckGitignore],
   ]
+
   for (const [path, content] of contents) {
     writeIfMissing(path, content)
   }

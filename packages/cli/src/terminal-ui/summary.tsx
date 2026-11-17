@@ -3,6 +3,7 @@ import { Fragment, type ReactNode } from 'react'
 import {
   ciLineOf,
   commandColumnWidthOf,
+  fitsCommandColumn,
   modesLineOf,
   type NextStepRow,
   type NextSteps,
@@ -77,6 +78,16 @@ interface StepRowProps {
 }
 
 /**
+ * What `StepNumber` takes.
+ */
+interface StepNumberProps {
+  /**
+   * What the number column shows: the step's number on the step's first row, nothing on the others.
+   */
+  label: string
+}
+
+/**
  * What `SegmentsText` takes.
  */
 interface SegmentsTextProps {
@@ -127,19 +138,47 @@ function ReplacedLine({ text }: ReplacedLineProps): ReactNode {
 }
 
 /**
+ * Draws the number column of a step's row.
+ */
+function StepNumber({ label }: StepNumberProps): ReactNode {
+  return (
+    <Box flexShrink={0} width={numberColumnWidth}>
+      <Text>{label}</Text>
+    </Box>
+  )
+}
+
+/**
  * Draws a row of a step: the step's number on its first row, the command in the accent colour, padded so every text
  * starts in the same column, then the text, which wraps under itself. A row without a command starts its text where
- * the commands start.
+ * the commands start. A command too long for the column takes a line of its own, and its text starts on the next line
+ * where the other rows' text starts.
  */
 function StepRow({ row, numberLabel, commandWidth }: StepRowProps): ReactNode {
+  const { command } = row
+
+  if (command !== undefined && !fitsCommandColumn(command, commandWidth)) {
+    return (
+      <Box flexDirection="column">
+        <Box>
+          <StepNumber label={numberLabel} />
+          <ColouredText colour="accent">{command}</ColouredText>
+        </Box>
+        <Box marginLeft={numberColumnWidth + commandWidth}>
+          <Text>
+            <SegmentsText segments={row.text} />
+          </Text>
+        </Box>
+      </Box>
+    )
+  }
+
   return (
     <Box>
-      <Box flexShrink={0} width={numberColumnWidth}>
-        <Text>{numberLabel}</Text>
-      </Box>
-      {row.command === undefined ? null : (
+      <StepNumber label={numberLabel} />
+      {command === undefined ? null : (
         <Box flexShrink={0} width={commandWidth}>
-          <ColouredText colour="accent">{row.command}</ColouredText>
+          <ColouredText colour="accent">{command}</ColouredText>
         </Box>
       )}
       <Text>

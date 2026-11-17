@@ -84,7 +84,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
               steps: [
                 [
                   { command: 'pnpm storybook', text: ['Start web-app, and keep it running'] },
-                  { command: 'pnpm exec storybook dev -p 6007', text: ['Start docs, and keep it running'] },
+                  { command: 'pnpm storybook:docs', text: ['Start docs, and keep it running'] },
                 ],
                 ...nextSteps.steps.slice(1),
               ],
@@ -103,14 +103,12 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
         '✓ visual-check is set up',
         '',
         'Next',
-        '  1  pnpm storybook                    Start web-app, and',
-        '                                       keep it running',
-        '     pnpm exec storybook dev -p 6007   Start docs, and keep',
-        '                                       it running',
-        '  2  pnpm visual:update                Write the first',
-        '                                       baselines',
-        '  3  pnpm visual:check                 Check the stories',
-        '                                       against the baselines',
+        '  1  pnpm storybook        Start web-app, and keep it',
+        '                           running',
+        '     pnpm storybook:docs   Start docs, and keep it running',
+        '  2  pnpm visual:update    Write the first baselines',
+        '  3  pnpm visual:check     Check the stories against the',
+        '                           baselines',
         '  4  Commit the changes, baselines included',
         '',
         'To set options for every story, see ',
@@ -120,6 +118,44 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
         'https://visual-check.vercel.app/docs/ci.',
       ].join('\n'),
     )
+  })
+
+  it('puts a command too long for the column on its own line, and its text under the other texts', async () => {
+    const { lastFrame } = await renderSettledAt(
+      <Summary
+        result={{
+          ...resultWith(0, []),
+          summary: {
+            nextSteps: {
+              ...nextSteps,
+              steps: [
+                [
+                  {
+                    command: 'pnpm exec storybook dev -p 6006 -c packages/design-system/.storybook',
+                    text: ['Start Storybook, and keep it running'],
+                  },
+                ],
+                ...nextSteps.steps.slice(1),
+              ],
+            },
+          },
+        }}
+      />,
+      80,
+    )
+
+    expect(plainFrameOf(lastFrame())).toBe(`
+✓ visual-check is set up
+
+Next
+  1  pnpm exec storybook dev -p 6006 -c packages/design-system/.storybook
+                          Start Storybook, and keep it running
+  2  pnpm visual:update   Write the first baselines
+  3  pnpm visual:check    Check the stories against the baselines
+  4  Commit the changes, baselines included
+
+To set options for every story, see .storybook/visual-check.ts.
+To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
   })
 
   it('starts the text of a row without a command where the commands start', async () => {
@@ -198,7 +234,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
       <Summary
         result={{
           ...resultWith(0, [
-            "Warning: Fallow couldn't check this project's imports: Fallow broke.\nIt could not read tsconfig.json.",
+            "Warning: Fallow couldn't check the imports: Fallow broke.\nIt could not read tsconfig.json.",
           ]),
           summary: { nextSteps: { steps: [], modesFiles: [], ciUrl: nextSteps.ciUrl } },
         }}
@@ -207,7 +243,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
 
     expect(plainFrameOf(lastFrame())).toBe(`
 ✓ visual-check is set up
-▲ Fallow couldn't check this project's imports: Fallow broke.
+▲ Fallow couldn't check the imports: Fallow broke.
   It could not read tsconfig.json.
 
 Next

@@ -120,11 +120,9 @@ describe('MessageLine', () => {
 
   it('keeps the later lines of a warning that spans lines under its text', async () => {
     const { lastFrame } = await renderSettled(
-      <MessageLine text={"Warning: Fallow couldn't check this project's imports.\nIt could not read tsconfig.json."} />,
+      <MessageLine text={"Warning: Fallow couldn't check the imports.\nIt could not read tsconfig.json."} />,
     )
 
-    expect(plainFrameOf(lastFrame())).toBe(
-      "▲ Fallow couldn't check this project's imports.\n  It could not read tsconfig.json.",
-    )
+    expect(plainFrameOf(lastFrame())).toBe("▲ Fallow couldn't check the imports.\n  It could not read tsconfig.json.")
   })
 })

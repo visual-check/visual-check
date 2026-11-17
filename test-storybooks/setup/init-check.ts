@@ -301,7 +301,7 @@ export default defineConfig({
  */
 const expectedModesFile = `import { defineVisualCheck } from '@visual-check/storybook'
 
-// To set options for every story, spread visualCheck into the parameters in preview.ts:
+// To set options for every story, spread visualCheck into the parameters in your preview file:
 //   import { visualCheck } from './visual-check'
 //   parameters: { ...visualCheck({}) },
 export const visualCheck = defineVisualCheck({

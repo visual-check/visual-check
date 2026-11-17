@@ -197,7 +197,7 @@ It warns and still writes when:
 Each step is a command and what it does, the commands in a column of their own:
 
 1. Start each Storybook with its command, and keep it running.
-2. `visual:update` writes the first baselines. Left out when every Storybook already has baselines.
+2. `visual:update` writes the first baselines. Left out when every Storybook set up already has a baseline in its baselines folder. Shown when none was set up.
 3. `visual:check` checks the stories against them.
 4. Commit the changes, baselines included.
 

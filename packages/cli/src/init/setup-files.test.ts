@@ -158,10 +158,10 @@ describe('configEntryOf', () => {
 })
 
 describe('file contents', () => {
-  it('has the modes file source, whose comment shows how to spread visualCheck into preview.ts', () => {
+  it('has the modes file source, whose comment shows how to spread visualCheck into the preview file', () => {
     expect(modesFileSource).toBe(`import { defineVisualCheck } from '@visual-check/storybook'
 
-// To set options for every story, spread visualCheck into the parameters in preview.ts:
+// To set options for every story, spread visualCheck into the parameters in your preview file:
 //   import { visualCheck } from './visual-check'
 //   parameters: { ...visualCheck({}) },
 export const visualCheck = defineVisualCheck({
@@ -182,7 +182,8 @@ describe('writeIfMissing', () => {
   it('writes into a missing nested folder', () => {
     const path = join(createFolder(), 'a', 'b', 'file.txt')
 
-    expect(writeIfMissing(path, 'content')).toBe(true)
+    writeIfMissing(path, 'content')
+
     expect(readFileSync(path, 'utf8')).toBe('content')
   })
 
@@ -192,7 +193,8 @@ describe('writeIfMissing', () => {
 
     writeFileSync(path, 'original')
 
-    expect(writeIfMissing(path, 'new')).toBe(false)
+    writeIfMissing(path, 'new')
+
     expect(readFileSync(path, 'utf8')).toBe('original')
   })
 
@@ -225,7 +227,7 @@ describe('setScripts', () => {
   it('keeps tab indentation', () => {
     const path = manifestWith('{\n\t"name": "x",\n\t"scripts": {\n\t\t"build": "tsc"\n\t}\n}\n')
 
-    expect(setScripts(path, scripts)).toEqual({ added: ['visual:check', 'visual:update'], replaced: [] })
+    expect(setScripts(path, scripts)).toEqual([])
     expect(readFileSync(path, 'utf8')).toBe(
       [
         '{',
@@ -284,13 +286,10 @@ describe('setScripts', () => {
     expect(manifest.dependencies).toEqual({ a: '1' })
   })
 
-  it('replaces a script that runs something else in its place, and gives what it ran', () => {
+  it('replaces a script that runs something else in its place, and gives its name', () => {
     const path = manifestWith('{\n  "scripts": {\n    "visual:check": "mine",\n    "build": "tsc"\n  }\n}\n')
 
-    expect(setScripts(path, scripts)).toEqual({
-      added: ['visual:update'],
-      replaced: [{ name: 'visual:check', previous: 'mine' }],
-    })
+    expect(setScripts(path, scripts)).toEqual(['visual:check'])
     expect(readFileSync(path, 'utf8')).toBe(
       [
         '{',
@@ -305,10 +304,17 @@ describe('setScripts', () => {
     )
   })
 
-  it('gives a replaced script that is not a text as JSON', () => {
+  it('replaces a script that is not a text', () => {
     const path = manifestWith('{"scripts":{"a":["x"]}}')
 
-    expect(setScripts(path, { a: 'b' })).toEqual({ added: [], replaced: [{ name: 'a', previous: '["x"]' }] })
+    expect(setScripts(path, { a: 'b' })).toEqual(['a'])
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ scripts: { a: 'b' } })
+  })
+
+  it('gives every script it replaced, in the given order', () => {
+    const path = manifestWith('{"scripts":{"visual:update":"vitest -u","visual:check":"vitest"}}')
+
+    expect(setScripts(path, scripts)).toEqual(['visual:check', 'visual:update'])
   })
 
   it('leaves the file untouched when every script is already set', () => {
@@ -318,7 +324,7 @@ describe('setScripts', () => {
 
     utimesSync(path, past, past)
 
-    expect(setScripts(path, scripts)).toEqual({ added: [], replaced: [] })
+    expect(setScripts(path, scripts)).toEqual([])
     expect(readFileSync(path, 'utf8')).toBe(text)
     expect(statSync(path).mtimeMs).toBe(past.getTime())
   })

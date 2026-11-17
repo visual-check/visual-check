@@ -3,6 +3,7 @@ import {
   ciLineOf,
   closingMessageTextOf,
   commandColumnWidthOf,
+  fitsCommandColumn,
   modesLineOf,
   nextStepsOf,
   replacedScriptsLineOf,
@@ -16,6 +17,7 @@ const webApp: SetUpStorybook = {
   name: 'web-app',
   dir: '/project',
   configDir: '/project/.storybook',
+  baselines: '/project/.visual-check/baselines',
   startCommand: 'pnpm run storybook',
 }
 
@@ -26,7 +28,8 @@ const docs: SetUpStorybook = {
   name: 'docs',
   dir: '/project/docs',
   configDir: '/project/docs/.storybook',
-  startCommand: 'pnpm exec storybook dev -p 6007',
+  baselines: '/project/docs/.visual-check/baselines',
+  startCommand: 'pnpm run storybook:docs',
 }
 
 /**
@@ -101,7 +104,7 @@ describe('nextStepsOf', () => {
 
     expect(nextSteps.steps[0]).toEqual([
       { command: 'pnpm run storybook', text: ['Start web-app, and keep it running'] },
-      { command: 'pnpm exec storybook dev -p 6007', text: ['Start docs, and keep it running'] },
+      { command: 'pnpm run storybook:docs', text: ['Start docs, and keep it running'] },
     ])
     expect(nextSteps.modesFiles).toEqual(['.storybook/visual-check.ts', 'docs/.storybook/visual-check.ts'])
   })
@@ -180,6 +183,26 @@ describe('commandColumnWidthOf', () => {
     expect(commandColumnWidthOf([[{ text: ['Commit'] }]])).toBe(0)
     expect(commandColumnWidthOf([])).toBe(0)
   })
+
+  it('counts a command of 30 characters, and leaves out a longer one', () => {
+    const thirty = 'x'.repeat(30)
+
+    expect(commandColumnWidthOf([[{ command: thirty, text: [] }]])).toBe(33)
+    expect(commandColumnWidthOf([[{ command: `${thirty}x`, text: [] }], [{ command: 'abc', text: [] }]])).toBe(6)
+    expect(commandColumnWidthOf([[{ command: `${thirty}x`, text: [] }]])).toBe(0)
+  })
+})
+
+describe('fitsCommandColumn', () => {
+  it('fits a command with three spaces after it in the column', () => {
+    expect(fitsCommandColumn('abc', 6)).toBe(true)
+    expect(fitsCommandColumn('abc', 7)).toBe(true)
+  })
+
+  it('does not fit a command that leaves less than three spaces', () => {
+    expect(fitsCommandColumn('abcd', 6)).toBe(false)
+    expect(fitsCommandColumn('abc', 0)).toBe(false)
+  })
 })
 
 describe('modesLineOf', () => {
@@ -240,11 +263,49 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
 
   it('puts each Storybook on a row of its own, indented to the commands, and names each modes file', () => {
     expect(closingMessageOf(inputOf({ storybooks: [webApp, docs] }))).toBe(`visual-check is set up. Next:
-  1. pnpm run storybook                Start web-app, and keep it running
-     pnpm exec storybook dev -p 6007   Start docs, and keep it running
-  2. pnpm run visual:update            Write the first baselines
-  3. pnpm run visual:check             Check the stories against the baselines
+  1. pnpm run storybook        Start web-app, and keep it running
+     pnpm run storybook:docs   Start docs, and keep it running
+  2. pnpm run visual:update    Write the first baselines
+  3. pnpm run visual:check     Check the stories against the baselines
   4. Commit the changes, baselines included
+
+To set options for every story, see .storybook/visual-check.ts and docs/.storybook/visual-check.ts.
+To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
+`)
+  })
+
+  it('puts a command too long for the column on its own line, and its text under the other texts', () => {
+    const designSystem = {
+      ...webApp,
+      startCommand: 'pnpm exec storybook dev -p 6006 -c packages/design-system/.storybook',
+    }
+
+    expect(closingMessageOf(inputOf({ storybooks: [designSystem] }))).toBe(`visual-check is set up. Next:
+  1. pnpm exec storybook dev -p 6006 -c packages/design-system/.storybook
+                              Start Storybook, and keep it running
+  2. pnpm run visual:update   Write the first baselines
+  3. pnpm run visual:check    Check the stories against the baselines
+  4. Commit the changes, baselines included
+
+To set options for every story, see .storybook/visual-check.ts.
+To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
+`)
+  })
+
+  it('puts a long command of a later row on its own line too, indented to the commands', () => {
+    const designSystem = {
+      ...docs,
+      startCommand: 'pnpm exec storybook dev -p 6006 -c packages/design-system/.storybook',
+    }
+
+    expect(
+      closingMessageOf(inputOf({ storybooks: [webApp, designSystem], needsBaselines: false })),
+    ).toBe(`visual-check is set up. Next:
+  1. pnpm run storybook      Start web-app, and keep it running
+     pnpm exec storybook dev -p 6006 -c packages/design-system/.storybook
+                             Start docs, and keep it running
+  2. pnpm run visual:check   Check the stories against the baselines
+  3. Commit the changes, baselines included
 
 To set options for every story, see .storybook/visual-check.ts and docs/.storybook/visual-check.ts.
 To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.

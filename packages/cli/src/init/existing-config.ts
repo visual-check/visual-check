@@ -2,7 +2,7 @@ import { dirname, join } from 'node:path'
 import { ConfigError } from '../config/config-error.js'
 import { findConfig } from '../config/find-config.js'
 import { loadConfig } from '../config/load-config.js'
-import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
+import { defaultBaselinesIn, type ResolvedConfig, type ResolvedStorybook } from '../config/resolve-config.js'
 import type { SetUpStorybook } from './closing-message.js'
 import type { DetectedProject, DetectedStorybook } from './detect-project.js'
 import { isInsideRoot, mainFileOnDiskIn, relativePathOf, takeUniqueName } from './find-storybooks.js'
@@ -27,6 +27,10 @@ interface ConfigStorybookPlace {
    * The absolute path of Storybook's config folder.
    */
   configDir: string
+  /**
+   * The absolute path of the folder that holds the Storybook's baselines.
+   */
+  baselines: string
   /**
    * The URL the config gives the Storybook outside CI, or `undefined` when the config can't be loaded.
    */
@@ -98,11 +102,11 @@ function loadedConfigOf(cwd: string, project: DetectedProject, path: string, con
   const storybooks: ConfigStorybookPlace[] = []
   const notes: string[] = []
 
-  for (const { name, dir, configDir, url } of config.storybooks) {
+  for (const { name, dir, configDir, baselines, url } of config.storybooks) {
     const leftAlone = leftAloneHintOf(cwd, project.root, path, { name, dir, configDir })
 
     if (leftAlone === undefined) {
-      storybooks.push({ name, dir, configDir, url })
+      storybooks.push({ name, dir, configDir, baselines, url })
     } else {
       notes.push(leftAlone)
     }
@@ -174,8 +178,8 @@ function missingStorybookHintOf(cwd: string, configPath: string, storybook: Dete
 }
 
 /**
- * Describes a config that can't be loaded: a warning, and the detected Storybooks with their default names in place of
- * its own.
+ * Describes a config that can't be loaded: a warning, and the detected Storybooks with their default names and
+ * baselines folders in place of its own.
  */
 function unloadableConfigOf(cwd: string, project: DetectedProject, path: string, error: ConfigError): ExistingConfig {
   return {
@@ -185,6 +189,7 @@ function unloadableConfigOf(cwd: string, project: DetectedProject, path: string,
       name: defaultName,
       dir: packageDir,
       configDir: join(project.root, configDir),
+      baselines: defaultBaselinesIn(packageDir),
       url: undefined,
     })),
     notes: [`Warning: visual-check init left ${relativePathOf(cwd, path)} alone: ${error.message}`],
@@ -200,10 +205,11 @@ export function existingStorybooksOf(
   existing: ExistingConfig,
   packageManager: PackageManager,
 ): SetUpStorybook[] {
-  return existing.storybooks.map(({ name, dir, configDir, url }) => ({
+  return existing.storybooks.map(({ name, dir, configDir, baselines, url }) => ({
     name,
     dir,
     configDir,
+    baselines,
     startCommand: detectedStartCommandOf(project, packageManager, relativePathOf(project.root, configDir), url),
   }))
 }

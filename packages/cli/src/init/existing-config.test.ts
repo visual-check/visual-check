@@ -30,11 +30,11 @@ describe('existingConfigOf', () => {
     )
   })
 
-  it('names the Storybooks by their config folder, written like a detected one, and keeps their URLs', async () => {
+  it('names the Storybooks by their config folder, written like a detected one, and keeps their URLs and baselines', async () => {
     const config =
       'export default { storybooks: { ' +
       "web: { configDir: './.storybook/', url: 'http://127.0.0.1:7000' }, " +
-      "docs: { dir: 'docs', url: 'http://127.0.0.1:6008' } } }\n"
+      "docs: { dir: 'docs', baselines: 'shots', url: 'http://127.0.0.1:6008' } } }\n"
     const root = makeProject({
       manifest: {},
       files: { '.storybook/main.ts': '', 'docs/.storybook/main.ts': '', 'visual-check.config.ts': config },
@@ -51,11 +51,18 @@ describe('existingConfigOf', () => {
       path: join(root, 'visual-check.config.ts'),
       names: { '.storybook': 'web', 'docs/.storybook': 'docs' },
       storybooks: [
-        { name: 'web', dir: root, configDir: join(root, '.storybook'), url: 'http://127.0.0.1:7000' },
+        {
+          name: 'web',
+          dir: root,
+          configDir: join(root, '.storybook'),
+          baselines: join(root, '.visual-check', 'baselines'),
+          url: 'http://127.0.0.1:7000',
+        },
         {
           name: 'docs',
           dir: join(root, 'docs'),
           configDir: join(root, 'docs', '.storybook'),
+          baselines: join(root, 'docs', 'shots'),
           url: 'http://127.0.0.1:6008',
         },
       ],
@@ -73,7 +80,15 @@ describe('existingConfigOf', () => {
     expect(await existingConfigOf(join(root, 'src'), project)).toEqual({
       path: join(root, 'visual-check.config.ts'),
       names: { '.storybook': 'web-app' },
-      storybooks: [{ name: 'web-app', dir: root, configDir: join(root, '.storybook'), url: undefined }],
+      storybooks: [
+        {
+          name: 'web-app',
+          dir: root,
+          configDir: join(root, '.storybook'),
+          baselines: join(root, '.visual-check', 'baselines'),
+          url: undefined,
+        },
+      ],
       notes: [
         "Warning: visual-check init left ../visual-check.config.ts alone: Couldn't load ../visual-check.config.ts: broken config",
       ],
@@ -93,11 +108,23 @@ describe('existingStorybooksOf', () => {
     const startScript = { script: 'storybook', subcommand: 'dev' as const, configDir: undefined, port: 6006 }
     const project = projectOf({ storybooks: [storybookOf({ startScript })] })
     const existing = configOf([
-      { name: 'web', dir: '/project', configDir: '/project/.storybook', url: 'http://127.0.0.1:7000' },
+      {
+        name: 'web',
+        dir: '/project',
+        configDir: '/project/.storybook',
+        baselines: '/project/shots',
+        url: 'http://127.0.0.1:7000',
+      },
     ])
 
     expect(existingStorybooksOf(project, existing, 'npm')).toEqual([
-      { name: 'web', dir: '/project', configDir: '/project/.storybook', startCommand: 'npm run storybook' },
+      {
+        name: 'web',
+        dir: '/project',
+        configDir: '/project/.storybook',
+        baselines: '/project/shots',
+        startCommand: 'npm run storybook',
+      },
     ])
   })
 
@@ -106,14 +133,28 @@ describe('existingStorybooksOf', () => {
     ['https://storybook.example.com', 'pnpm exec storybook dev -p 6006'],
     [undefined, 'pnpm exec storybook dev -p 6006'],
   ])('starts a Storybook without a start script on the port of %s', (url, startCommand) => {
-    const existing = configOf([{ name: 'web', dir: '/project', configDir: '/project/.storybook', url }])
+    const existing = configOf([
+      {
+        name: 'web',
+        dir: '/project',
+        configDir: '/project/.storybook',
+        baselines: '/project/.visual-check/baselines',
+        url,
+      },
+    ])
 
     expect(existingStorybooksOf(projectOf(), existing, 'pnpm')[0]?.startCommand).toBe(startCommand)
   })
 
   it('passes a config folder that is not .storybook to storybook dev', () => {
     const existing = configOf([
-      { name: 'docs', dir: '/project', configDir: '/project/docs/.storybook', url: 'http://127.0.0.1:6008' },
+      {
+        name: 'docs',
+        dir: '/project',
+        configDir: '/project/docs/.storybook',
+        baselines: '/project/.visual-check/baselines',
+        url: 'http://127.0.0.1:6008',
+      },
     ])
 
     expect(existingStorybooksOf(projectOf(), existing, 'yarn')[0]?.startCommand).toBe(
@@ -160,6 +201,7 @@ describe('init run again with a config there', () => {
       "hint: visual-check.config.ts lists no Storybook in .storybook. To add it, put this under storybooks: 'web-app': { url: 'http://127.0.0.1:6007' },\n",
     )
     expect(readText(root, 'docs/.storybook/visual-check.ts')).toBe(modesFile)
+    expect(readText(root, '.visual-check/.gitignore')).toBe(gitignore)
     expect(result.stdout).toContain('  1. pnpm run storybook:docs   Start Storybook, and keep it running\n')
     expect(result.stdout).toContain('To set options for every story, see docs/.storybook/visual-check.ts.\n')
     expect(existsSync(join(root, '.storybook/visual-check.ts'))).toBe(false)
@@ -181,7 +223,37 @@ describe('init run again with a config there', () => {
 
     expect(result.stderr).toBe('')
     expect(readText(root, '.storybook/visual-check.ts')).toBe(modesFile)
+    expect(readText(root, '.visual-check/.gitignore')).toBe(gitignore)
     expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddon))
+  })
+
+  describe('reads the baselines folder the config names, to tell whether to write the first baselines', () => {
+    /**
+     * The config of the pnpm project's one Storybook, which keeps its baselines in `shots/`.
+     */
+    const config = "export default { storybooks: { web: { baselines: 'shots', url: 'http://127.0.0.1:6006' } } }\n"
+
+    it('leaves the step out when that folder has a baseline', async () => {
+      const root = pnpmProject({ files: { 'visual-check.config.ts': config, 'shots/button--primary.png': 'png' } })
+      const result = await runInit(root, toolsOf().tools)
+
+      expect(result.stdout).toBe(`visual-check is set up. Next:
+  1. pnpm run storybook      Start Storybook, and keep it running
+  2. pnpm run visual:check   Check the stories against the baselines
+  3. Commit the changes, baselines included
+
+To set options for every story, see .storybook/visual-check.ts.
+To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
+`)
+    })
+
+    it('keeps the step when only the default folder has a baseline', async () => {
+      const root = pnpmProject({
+        files: { 'visual-check.config.ts': config, '.visual-check/baselines/button--primary.png': 'png' },
+      })
+
+      expect((await runInit(root, toolsOf().tools)).stdout).toBe(pnpmClosingMessage)
+    })
   })
 
   it("warns of a config it can't load, leaves it alone and sets up the detected Storybooks", async () => {
@@ -201,6 +273,8 @@ describe('init run again with a config there', () => {
       summary: { nextSteps: pnpmNextSteps },
     })
     expect(readText(root, 'visual-check.config.ts')).toBe(config)
+    expect(readText(root, '.storybook/visual-check.ts')).toBe(modesFile)
+    expect(readText(root, '.visual-check/.gitignore')).toBe(gitignore)
     expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddon))
   })
 
@@ -215,7 +289,7 @@ describe('init run again with a config there', () => {
     const result = await runInit(root, toolsOf().tools)
 
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain(`  1. ${command}   Start Storybook, and keep it running\n`)
+    expect(result.stdout).toContain(`  1. ${command}\n${' '.repeat(30)}Start Storybook, and keep it running\n`)
   })
 
   it('gives a left-out Storybook a name no Storybook in the config has', async () => {
@@ -251,6 +325,8 @@ describe('init run again with a config there', () => {
         `hint: visual-check.config.ts lists the Storybook shared in ${outside}, outside this project, so init left it alone.\n`,
     )
     expect(result.stdout).toBe(pnpmClosingMessage)
+    expect(readText(root, '.storybook/visual-check.ts')).toBe(modesFile)
+    expect(readText(root, '.visual-check/.gitignore')).toBe(gitignore)
     expect(existsSync(join(root, 'old'))).toBe(false)
     expect(existsSync(join(root, outside))).toBe(false)
     expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddon))
@@ -326,6 +402,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
         },
       },
     })
+    expect(readText(root, '.visual-check/.gitignore')).toBe(gitignore)
     expect(existsSync(join(root, outside))).toBe(false)
     expect(existsSync(join(root, '.storybook/visual-check.ts'))).toBe(false)
     expect(record.commands).toEqual(commandsIn(root, pnpmAdd))

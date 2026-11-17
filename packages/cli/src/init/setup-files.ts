@@ -9,11 +9,11 @@ export const visualCheckGitignore = '/*\n!/baselines/\n!/.gitignore\n'
 
 /**
  * The content of `<configDir>/visual-check.ts`: no modes, a commented example of one, and a comment that shows how to
- * spread `visualCheck` into the parameters in `preview.ts`, which sets options for every story.
+ * spread `visualCheck` into the parameters in the preview file, which sets options for every story.
  */
 export const modesFileSource = `import { defineVisualCheck } from '@visual-check/storybook'
 
-// To set options for every story, spread visualCheck into the parameters in preview.ts:
+// To set options for every story, spread visualCheck into the parameters in your preview file:
 //   import { visualCheck } from './visual-check'
 //   parameters: { ...visualCheck({}) },
 export const visualCheck = defineVisualCheck({
@@ -121,23 +121,19 @@ export function configSourceOf(storybooks: readonly ConfigStorybook[]): string {
 }
 
 /**
- * Writes `content` to `path`, creating the parent folders. Never overwrites: returns `false` when the file already
- * exists, `true` when it wrote it. Any other error is thrown.
+ * Writes `content` to `path`, creating the parent folders. Never overwrites: a file already there is left as it is.
+ * Any other error is thrown.
  */
-export function writeIfMissing(path: string, content: string): boolean {
+export function writeIfMissing(path: string, content: string): void {
   mkdirSync(dirname(path), { recursive: true })
 
   try {
     writeFileSync(path, content, { flag: 'wx' })
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-      return false
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+      throw error
     }
-
-    throw error
   }
-
-  return true
 }
 
 /**
@@ -167,40 +163,12 @@ function ownScriptsOf(manifest: Record<string, unknown>, manifestPath: string): 
 }
 
 /**
- * A script `init` replaced in `package.json`.
+ * Sets the scripts of a `package.json`: adds the missing ones and replaces the ones that run something else. Gives the
+ * names of the scripts it replaced, in the given order. The file keeps its indentation, its line endings (LF or CRLF),
+ * its key order and its trailing newline (or lack of one). When nothing changes, the file isn't written. Throws when
+ * the file isn't a JSON object or its `scripts` isn't one.
  */
-export interface ReplacedScript {
-  /**
-   * The script's name.
-   */
-  name: string
-  /**
-   * What the script ran before.
-   */
-  previous: string
-}
-
-/**
- * The scripts `init` changed in `package.json`.
- */
-export interface ScriptChanges {
-  /**
-   * The names of the scripts it added, in the given order.
-   */
-  added: string[]
-  /**
-   * The scripts it replaced, in the given order.
-   */
-  replaced: ReplacedScript[]
-}
-
-/**
- * Sets the scripts of a `package.json`: adds the missing ones and replaces the ones that run something else. Gives
- * what it changed. The file keeps its indentation, its line endings (LF or CRLF), its key order and its trailing
- * newline (or lack of one). When nothing changes, the file isn't written. Throws when the file isn't a JSON object or
- * its `scripts` isn't one.
- */
-export function setScripts(manifestPath: string, scripts: Record<string, string>): ScriptChanges {
+export function setScripts(manifestPath: string, scripts: Record<string, string>): string[] {
   const text = readFileSync(manifestPath, 'utf8')
   const manifest: unknown = JSON.parse(text)
 
@@ -209,20 +177,12 @@ export function setScripts(manifestPath: string, scripts: Record<string, string>
   }
 
   const existing = ownScriptsOf(manifest, manifestPath) ?? {}
-  const changes: ScriptChanges = { added: [], replaced: [] }
+  const changed = Object.keys(scripts).filter(
+    (name) => !Object.hasOwn(existing, name) || existing[name] !== scripts[name],
+  )
 
-  for (const [name, command] of Object.entries(scripts)) {
-    const previous = existing[name]
-
-    if (!Object.hasOwn(existing, name)) {
-      changes.added.push(name)
-    } else if (previous !== command) {
-      changes.replaced.push({ name, previous: typeof previous === 'string' ? previous : JSON.stringify(previous) })
-    }
-  }
-
-  if (changes.added.length === 0 && changes.replaced.length === 0) {
-    return changes
+  if (changed.length === 0) {
+    return []
   }
 
   manifest.scripts = { ...existing, ...scripts }
@@ -230,5 +190,5 @@ export function setScripts(manifestPath: string, scripts: Record<string, string>
 
   writeFileSync(manifestPath, text.includes('\r\n') ? json.replaceAll('\n', '\r\n') : json)
 
-  return changes
+  return changed.filter((name) => Object.hasOwn(existing, name))
 }
