@@ -289,7 +289,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
     const result = await runInit(root, toolsOf().tools)
 
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain(`  1. ${command}\n${' '.repeat(30)}Start Storybook, and keep it running\n`)
+    expect(result.stdout).toContain(`  1. ${command}   Start Storybook, and keep it running\n`)
   })
 
   it('gives a left-out Storybook a name no Storybook in the config has', async () => {

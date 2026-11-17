@@ -118,10 +118,11 @@ interface ClosingMessageInput {
 const commandGap = 3
 
 /**
- * The most characters a command may have to count toward the width of the commands' column. A longer one would leave
- * too little room for the text, so it doesn't widen the column, and takes a line of its own.
+ * The most characters a command may have to count toward the width of the commands' column, enough for the default
+ * start command `pnpm exec storybook dev -p 65535`. A longer one would leave too little room for the text, so it
+ * doesn't widen the column, and takes a line of its own.
  */
-const longestColumnCommand = 30
+const longestColumnCommand = 32
 
 /**
  * Returns the line that names the scripts `init` replaced in `package.json`, or `undefined` when it replaced none.
@@ -159,7 +160,7 @@ function textOf(segments: readonly Segment[]): string {
 }
 
 /**
- * Returns how many columns the commands of the steps take: the longest command of at most 30 characters, then a gap. A
+ * Returns how many columns the commands of the steps take: the longest command of at most 32 characters, then a gap. A
  * row without a command starts its text where the commands start, so with no such command at all, it's 0.
  *
  * @public

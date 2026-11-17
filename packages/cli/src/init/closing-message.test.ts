@@ -184,12 +184,12 @@ describe('commandColumnWidthOf', () => {
     expect(commandColumnWidthOf([])).toBe(0)
   })
 
-  it('counts a command of 30 characters, and leaves out a longer one', () => {
-    const thirty = 'x'.repeat(30)
+  it('counts a command of 32 characters, and leaves out one of 33', () => {
+    const thirtyTwo = 'x'.repeat(32)
 
-    expect(commandColumnWidthOf([[{ command: thirty, text: [] }]])).toBe(33)
-    expect(commandColumnWidthOf([[{ command: `${thirty}x`, text: [] }], [{ command: 'abc', text: [] }]])).toBe(6)
-    expect(commandColumnWidthOf([[{ command: `${thirty}x`, text: [] }]])).toBe(0)
+    expect(commandColumnWidthOf([[{ command: thirtyTwo, text: [] }]])).toBe(35)
+    expect(commandColumnWidthOf([[{ command: `${thirtyTwo}x`, text: [] }], [{ command: 'abc', text: [] }]])).toBe(6)
+    expect(commandColumnWidthOf([[{ command: `${thirtyTwo}x`, text: [] }]])).toBe(0)
   })
 })
 
