@@ -155,6 +155,29 @@ function runIntoOneFile(options: CaseOptions, ...commandLineArguments: string[])
 }
 
 /**
+ * Runs the built binary without blocking through a shell, with standard error sent into standard output's pipe as
+ * `2>&1` does, and resolves with its exit code and what came out of the pipe, in order.
+ */
+function runThroughOnePipe(options: CaseOptions, ...commandLineArguments: string[]) {
+  return new Promise<{ status: number | null; output: string }>((resolve, reject) => {
+    const child = spawn(
+      '/bin/sh',
+      ['-c', 'exec "$0" "$@" 2>&1', process.execPath, binaryPath, ...commandLineArguments],
+      { ...spawnOptionsOf(options), stdio: ['ignore', 'pipe', 'inherit'] },
+    )
+    let output = ''
+
+    child.stdout?.setEncoding('utf8').on('data', (chunk: string) => {
+      output += chunk
+    })
+    child.on('error', reject)
+    child.on('close', (status) => {
+      resolve({ status, output })
+    })
+  })
+}
+
+/**
  * Starts the server on a free port, to be closed after the test. Returns its URL.
  */
 async function listen(server: Server): Promise<string> {
@@ -561,6 +584,26 @@ describe('visual-check binary reaching Storybooks', () => {
         'Report: .visual-check/report/report.json\n',
     )
   })
+
+  it.skipIf(process.platform === 'win32')(
+    "ends the run's output with the report line through one pipe, after a warning on standard error",
+    async () => {
+      const url = await startStorybookServer({ c: entryOf('button--primary:test', { subtype: 'test' }) })
+      const project = createProject({
+        'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
+        'button.stories.tsx': '',
+        'node_modules/storybook/package.json': JSON.stringify({ version: '12.0.0' }),
+      })
+      const result = await runThroughOnePipe({ cwd: project }, 'test')
+
+      expect(result.status).toBe(0)
+      expect(result.output).toBe(
+        `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed\n` +
+          'Warning: Storybook web runs storybook 12.0.0, and visual-check supports 9.1 to 11. The run carries on.\n' +
+          'Report: .visual-check/report/report.json\n',
+      )
+    },
+  )
 
   it('prints exactly one JSON document on stdout for test --reporter json, the rest on stderr', async () => {
     const url = await startStorybookServer({ c: entryOf('button--primary:test', { subtype: 'test' }) })
