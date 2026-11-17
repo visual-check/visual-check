@@ -30,6 +30,8 @@ export const minimumText = `${minimumVersion.major}.${minimumVersion.minor}`
  * Compares a version's major.minor with the supported range, from the minimum release line to the newest supported
  * major. A prerelease counts as its release line. A version that isn't `<major>.<minor>.<patch>` with an optional
  * `-prerelease` and `+build` is `unknown`, and so is one with major 0: Storybook's canary builds are `0.0.0-pr-...`.
+ *
+ * @public
  */
 export function classifyStorybookVersion(version: string): VersionStanding {
   const match = /^(\d+)\.(\d+)\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.exec(version)
@@ -72,6 +74,8 @@ function readVersionOf(path: string): string | undefined {
  * global folders, such as the ones `NODE_PATH` names. Returns `undefined` when there's no install, or the nearest one
  * has no readable version; a farther install is never read instead. Yarn Plug'n'Play has no `node_modules`, so the
  * check is skipped there.
+ *
+ * @public
  */
 export function readInstalledStorybookVersion(dir: string): string | undefined {
   let folder = dir

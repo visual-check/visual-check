@@ -14,7 +14,8 @@
     "lint": "turbo run lint:biome lint:fallow",
     "lint:biome": "biome check .",
     "lint:fallow": "fallow --fail-on-issues --format compact",
-    "test": "turbo run test"
+    "test": "turbo run test",
+    "try-local": "node test-storybooks/setup/try-local.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.7",

@@ -1,7 +1,4 @@
-/**
- * The address of visual-check's docs site, which hints link to.
- */
-const docsBaseUrl = 'https://visual-check.vercel.app'
+import { docsUrlOf } from '../docs-site/docs-url.js'
 
 /**
  * Names the hosts in order: `a.com`, `a.com and b.com`, or `a.com, b.com and c.com`.
@@ -36,7 +33,7 @@ function hostMaskOf(host: string): string {
 /**
  * The docs page about remote content.
  */
-const remoteContentDocsUrl = `${docsBaseUrl}/docs/remote-content`
+const remoteContentDocsUrl = docsUrlOf('remote-content')
 
 /**
  * Gives the hint for a snapshot that differs only inside remote content from `hosts`: the hosts, why a CDN can make it

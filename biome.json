@@ -64,6 +64,34 @@
       }
     },
     {
+      "includes": ["packages/cli/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "pixelmatch": "Only packages/cli/src/visual-diff/ compares images, through pixelmatch.",
+                  "sharp": "Only packages/cli/src/visual-diff/ decodes and encodes images, through sharp.",
+                  "yauzl": "Only packages/cli/src/browser-download/ unzips, through yauzl.",
+                  "ink": "Only packages/cli/src/terminal-ui/ draws the terminal UI, through Ink and React.",
+                  "ink-testing-library": "Only packages/cli/src/terminal-ui/ draws the terminal UI, through Ink and React.",
+                  "react": "Only packages/cli/src/terminal-ui/ draws the terminal UI, through Ink and React."
+                },
+                "patterns": [
+                  {
+                    "group": ["ink/**", "ink-testing-library/**", "react/**"],
+                    "message": "Only packages/cli/src/terminal-ui/ draws the terminal UI, through Ink and React."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["packages/cli/src/browser-download/**"],
       "linter": {
         "rules": {
@@ -73,7 +101,35 @@
               "options": {
                 "paths": {
                   "pixelmatch": "Only packages/cli/src/visual-diff/ compares images, through pixelmatch.",
-                  "sharp": "Only packages/cli/src/visual-diff/ decodes and encodes images, through sharp."
+                  "sharp": "Only packages/cli/src/visual-diff/ decodes and encodes images, through sharp.",
+                  "ink": "Only packages/cli/src/terminal-ui/ draws the terminal UI, through Ink and React.",
+                  "ink-testing-library": "Only packages/cli/src/terminal-ui/ draws the terminal UI, through Ink and React.",
+                  "react": "Only packages/cli/src/terminal-ui/ draws the terminal UI, through Ink and React."
+                },
+                "patterns": [
+                  {
+                    "group": ["ink/**", "ink-testing-library/**", "react/**"],
+                    "message": "Only packages/cli/src/terminal-ui/ draws the terminal UI, through Ink and React."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/cli/src/terminal-ui/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "pixelmatch": "Only packages/cli/src/visual-diff/ compares images, through pixelmatch.",
+                  "sharp": "Only packages/cli/src/visual-diff/ decodes and encodes images, through sharp.",
+                  "yauzl": "Only packages/cli/src/browser-download/ unzips, through yauzl."
                 }
               }
             }
@@ -89,7 +145,18 @@
             "noRestrictedImports": {
               "level": "error",
               "options": {
-                "paths": { "yauzl": "Only packages/cli/src/browser-download/ unzips, through yauzl." }
+                "paths": {
+                  "yauzl": "Only packages/cli/src/browser-download/ unzips, through yauzl.",
+                  "ink": "Only packages/cli/src/terminal-ui/ draws the terminal UI, through Ink and React.",
+                  "ink-testing-library": "Only packages/cli/src/terminal-ui/ draws the terminal UI, through Ink and React.",
+                  "react": "Only packages/cli/src/terminal-ui/ draws the terminal UI, through Ink and React."
+                },
+                "patterns": [
+                  {
+                    "group": ["ink/**", "ink-testing-library/**", "react/**"],
+                    "message": "Only packages/cli/src/terminal-ui/ draws the terminal UI, through Ink and React."
+                  }
+                ]
               }
             }
           }

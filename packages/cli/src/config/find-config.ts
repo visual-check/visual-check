@@ -14,6 +14,8 @@ const configFileNames = [
 /**
  * Whether a path is a file, or a link to one. A folder, a missing path or one that can't be read, such as a link that
  * loops, isn't.
+ *
+ * @public
  */
 export function isFile(path: string): boolean {
   try {
@@ -28,6 +30,8 @@ export function isFile(path: string): boolean {
  * `configFileNames` that is a file in `startDirectory`, then in each parent. The search stops after the folder that
  * holds `.git` (a folder, or a file in a worktree or a submodule), or at the filesystem root. Returns `undefined` when
  * it finds none.
+ *
+ * @public
  */
 export function findConfig(startDirectory: string): string | undefined {
   const found = configFileNames.map((name) => join(startDirectory, name)).find((path) => isFile(path))

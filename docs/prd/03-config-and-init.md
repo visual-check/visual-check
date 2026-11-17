@@ -122,7 +122,7 @@ Rules for the keys:
 
 1. **Which Storybooks to include.** A checklist with all ticked, shown only when there's more than one.
 2. **For each Storybook:** its name (the package name without its scope, or the folder name), its URL, and its start command when none was found.
-3. **Script names,** `visual:test` and `visual:update` by default.
+3. **Script names,** `visual:check` and `visual:update` by default. A name another script has replaces that script, unless it starts a Storybook. A script that already runs `visual-check test` or `update` is reused, and when the default name is taken by the other script or by a script that starts Storybook, the suggestion is `visual:test` or `visual:update-baselines`.
 4. **"Install the agent skill?"**, yes by default.
 5. **"Add the Storybook addon?"** A checklist of the chosen Storybooks on 10, all ticked, or one item when there's only one. It's shown only when at least one is on 10. Storybook 9 and 11 entries are skipped with a note.
 
@@ -132,22 +132,37 @@ Rules:
 - It never writes `platform: 'host'`.
 - `init --yes` takes every default, the addon included.
 
+## `init`: terminal UI
+
+- In a terminal (stdin and stdout are TTYs, and `CI` is unset, empty, `0` or `false`), `init` runs an Ink UI, which it loads only then. It shows the brand header, then each question with a hint. Arrows choose, and an answered question collapses to one line.
+- After the questions it lists the setup steps under a progress bar of the steps that have ended, with the time taken:
+  - a step not started yet is dim after `○`;
+  - the running step turns the spinner and counts its time up each second, with its command and the last three lines of its output under it, dim;
+  - a step that ended shows `✓`, `▲` or `✕` in the accent, caution or danger colour, and how long it took. A failed step keeps the last 15 lines of its output, and the steps after it end dim after `−`, marked skipped.
+- It ends with the steps as they ended, printed once, then a summary:
+  - **Set up:** `✓ visual-check is set up`, a dim line naming any scripts it replaced, the warnings, then the numbered next steps, each a command and what it does, the commands in a column of their own in the accent colour. A command over 32 characters takes a line of its own, with its text under the other rows' text. In a terminal too narrow for the column and 20 columns of text beside it, every command takes a line of its own, with its text under it. Then, dim, where to set options for every story and the line pointing to the CI docs, with paths and URLs in the accent colour. The words match the plain closing message; the headings differ. It lists no files written.
+  - **The install failed:** the line naming any scripts it replaced, then the problem after `✕`.
+  - **Stopped before writing:** the warnings and hints, then why it stopped after `✕`.
+- Elsewhere it prints plain text.
+- The package manager question is a list.
+- Ctrl+C or Ctrl+D during a question stops `init` with exit code 2. It writes nothing.
+
 ## `init`: what it writes
 
 - **The config** at the workspace root, holding only what differs from the defaults.
 - **For each Storybook:**
-  - `<configDir>/visual-check.ts`, which exports `visualCheck = defineVisualCheck({ modes: {} })` and carries a commented example of a `mobile` mode at 375×667, scale 2, with touch;
+  - `<configDir>/visual-check.ts`, which exports `visualCheck = defineVisualCheck({ modes: {} })` and carries a commented example of a `mobile` mode at 375×667, scale 2, with touch, and a comment that shows how to spread `visualCheck` into the parameters in `preview`, which sets options for every story;
   - `<dir>/.visual-check/.gitignore`.
 - **The root `.visual-check/.gitignore`.**
 - **Dependencies,** as [Packages](01-packages.md) lists them. Under Rush it prints the install steps instead.
 - **The addon:** for each ticked Storybook it runs `storybook add @visual-check/storybook-addon@<cli version>` in that Storybook's package. If that fails, it warns, prints the command and carries on.
-- **The two npm scripts.**
+- **The two npm scripts.** The summary names the scripts it replaced, not what they ran.
 - **The agent skill** ([Agent skill](16-agent-skill.md)).
 
 What it never does:
 
 - edit `preview.*`, and it edits `main.*` only through `storybook add`;
-- edit existing scripts, `turbo.json`, `nx.json` or the root `.gitignore`;
+- edit other scripts, `turbo.json`, `nx.json` or the root `.gitignore`;
 - pull the image, need a running Storybook or capture anything.
 
 Run again, `init`:
@@ -164,7 +179,7 @@ It exits 2 and writes nothing when:
 - no Storybook is found;
 - a Storybook is below 9.1;
 - the project uses Deno;
-- there's no TTY and no `--yes`.
+- there's no terminal and no `--yes`.
 
 It warns and still writes when:
 
@@ -179,12 +194,14 @@ It warns and still writes when:
 
 ## `init`: closing message
 
-1. Start each Storybook with its command.
-2. Run `visual:update` to write baselines. The first run downloads the browser image.
-3. Run `visual:test`. It should pass. If a story fails, ask your agent to run visual-check, or see the docs.
-4. Commit the config, `.visual-check/baselines/`, `.agents/skills/visual-check/` and the `.claude/skills/visual-check` link.
+Each step is a command and what it does, the commands in a column of their own. A command over 32 characters takes a line of its own, with its text under the other rows' text:
 
-Then it prints the line to add to `preview` and a docs link for CI. It says nothing about remote content.
+1. Start each Storybook with its command, and keep it running.
+2. `visual:update` writes the first baselines. Left out when every Storybook set up already has a baseline in its baselines folder. Shown when none was set up.
+3. `visual:check` checks the stories against them.
+4. Commit the changes, baselines included.
+
+Then a line pointing to each `visual-check.ts` for options for every story (its comment shows how to spread it into `preview`), and a docs link for CI. Before the closing message, a line names any scripts `init` replaced. It lists no files written and says nothing about remote content.
 
 ## Sources
 

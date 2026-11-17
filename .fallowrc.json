@@ -5,11 +5,19 @@
     "test-storybooks/storybook-10-react/visual-check.config.ts",
     "test-storybooks/storybook-11-react/visual-check.config.ts"
   ],
-  "ignorePatterns": ["test-storybooks/storybook-10-react/static/**"],
+  "ignorePatterns": ["test-storybooks/storybook-10-react/static/**", "test-storybooks/setup/fixtures/**"],
   "workspaces": {
     "settings": {
       "test-storybooks/storybook-9-react": { "ignoreDependencies": ["@visual-check/storybook"] },
-      "test-storybooks/storybook-11-react": { "ignoreDependencies": ["@visual-check/storybook"] }
+      "test-storybooks/storybook-11-react": { "ignoreDependencies": ["@visual-check/storybook"] },
+      "test-storybooks/setup": {
+        "ignoreDependencies": [
+          "@visual-check/chromium",
+          "@visual-check/cli",
+          "@visual-check/storybook",
+          "@visual-check/storybook-addon"
+        ]
+      }
     }
   },
   "duplicates": {
@@ -31,10 +39,13 @@
       { "name": "cli/browser-download", "patterns": ["packages/cli/src/browser-download/**"] },
       { "name": "cli/commands", "patterns": ["packages/cli/src/commands/**"] },
       { "name": "cli/config", "patterns": ["packages/cli/src/config/**"] },
+      { "name": "cli/docs-site", "patterns": ["packages/cli/src/docs-site/**"] },
+      { "name": "cli/init", "patterns": ["packages/cli/src/init/**"] },
       { "name": "cli/report", "patterns": ["packages/cli/src/report/**"] },
       { "name": "cli/sharding", "patterns": ["packages/cli/src/sharding/**"] },
       { "name": "cli/storybook", "patterns": ["packages/cli/src/storybook/**"] },
       { "name": "cli/system-error", "patterns": ["packages/cli/src/system-error/**"] },
+      { "name": "cli/terminal-ui", "patterns": ["packages/cli/src/terminal-ui/**"] },
       { "name": "cli/visual-diff", "patterns": ["packages/cli/src/visual-diff/**"] },
       { "name": "storybook/per-story-options", "patterns": ["packages/storybook/src/per-story-options/**"] },
       { "name": "repo-checks/workspace", "patterns": ["packages/repo-checks/src/workspace/**"] },
@@ -64,17 +75,26 @@
           "cli/capture/driver/cdp",
           "cli/config",
           "cli/container",
+          "cli/docs-site",
+          "cli/init",
           "cli/report",
           "cli/sharding",
           "cli/storybook",
+          "cli/terminal-ui",
           "cli/visual-diff"
         ]
       },
       { "from": "cli/config", "allow": [] },
+      { "from": "cli/docs-site", "allow": [] },
+      {
+        "from": "cli/init",
+        "allow": ["cli/baselines", "cli/config", "cli/container", "cli/docs-site", "cli/storybook"]
+      },
       { "from": "cli/report", "allow": ["cli/system-error"] },
       { "from": "cli/sharding", "allow": ["cli/baselines", "cli/storybook"] },
       { "from": "cli/storybook", "allow": [] },
       { "from": "cli/system-error", "allow": [] },
+      { "from": "cli/terminal-ui", "allow": ["cli/init"] },
       { "from": "cli/visual-diff", "allow": ["cli/config"] },
       { "from": "storybook/per-story-options", "allow": [] },
       { "from": "repo-checks/workspace", "allow": [] },
@@ -106,6 +126,7 @@
         "test-storybooks/storybook-10-react/visual-check.config.ts",
         "test-storybooks/storybook-11-react/.storybook/main.ts",
         "test-storybooks/storybook-11-react/visual-check.config.ts",
+        "test-storybooks/setup/*.ts",
         "packages/*/test/**/*.test.ts"
       ]
     }

@@ -104,6 +104,39 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
+  # init on a tiny pnpm Storybook, with the packages packed and served from a local registry: `init --yes`, install,
+  # one `update` without `CI` and one `test`, then a second `init` that changes nothing.
+  setup:
+    name: Setup (pnpm)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Create a docker-container builder
+        run: docker buildx create --driver docker-container --use
+      - name: Build the browser image
+        run: packages/chromium/image/build.sh amd64 --output type=docker,name=visual-check-chromium:ci
+      - name: Setup check
+        env:
+          TEST_STORYBOOK_IMAGE: visual-check-chromium:ci
+        run: pnpm turbo run init-check --filter @visual-check/test-setup -- --package-manager pnpm
+      - name: Upload the Setup check's output
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: init-check-output-${{ github.job }}
+          path: test-storybooks/setup/init-check-output/
+          if-no-files-found: ignore
+          retention-days: 3
+
   # The committed baselines are written on amd64. This runs them on the arm64 image, where the default tolerance
   # absorbs the differences. On failure, the end-to-end output holds `test`'s report with the images that differ.
   arm64-image:
@@ -137,8 +170,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
-  # Apple Silicon runners have no Docker. Later tickets add `init`, affected stories and starting and stopping
-  # Storybook to this job.
+  # Apple Silicon runners have no Docker. Later tickets add affected stories and starting and stopping Storybook to
+  # this job.
   macos-no-docker:
     name: macOS without Docker
     runs-on: macos-15
@@ -160,6 +193,8 @@ jobs:
         run: pnpm turbo run test:unit --filter @visual-check/cli -- src/baselines
       - name: No-Docker error and one host capture
         run: pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --host --no-docker
+      - name: init without Docker
+        run: pnpm turbo run init-check --filter @visual-check/test-setup -- --package-manager pnpm --init-only
 
   # One host capture where Chromium's sandbox can't start, so visual-check relaunches the browser without it. The
   # check downloads the headless shell into a cache this job names, so a later step can run it.

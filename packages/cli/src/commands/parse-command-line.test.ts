@@ -38,7 +38,19 @@ describe('parseCommandLine', () => {
   })
 
   it('parses init', () => {
-    expect(parseCommandLine(['init'])).toEqual({ command: 'init' })
+    expect(parseCommandLine(['init'])).toEqual({ command: 'init', options: { yes: false } })
+  })
+
+  it('parses init --yes', () => {
+    expect(parseCommandLine(['init', '--yes'])).toEqual({ command: 'init', options: { yes: true } })
+  })
+
+  it.each(['test', 'update'])('rejects --yes for %s', (command) => {
+    expect(usageErrorOf(command, '--yes').message).toBe('--yes applies only to init.')
+  })
+
+  it('lets --help win over --yes', () => {
+    expect(parseCommandLine(['test', '--yes', '--help'])).toEqual({ command: 'help' })
   })
 
   it('parses --help alone, with a command and with other flags', () => {

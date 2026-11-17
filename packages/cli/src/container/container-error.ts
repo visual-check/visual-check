@@ -34,3 +34,23 @@ export class ContainerError extends Error {
     this.fix = fix
   }
 }
+
+/**
+ * There is no `docker` command on PATH. It is a `ContainerError` with the `docker` fix, in its own class so `init` can
+ * tell a Docker that isn't installed from one that is stopped, and say how to find it from inside WSL.
+ *
+ * @public
+ */
+export class DockerMissingError extends ContainerError {
+  /**
+   * The class's name, so a stack trace or a log line reads `DockerMissingError`.
+   */
+  override name = 'DockerMissingError'
+
+  /**
+   * Builds the error from its message. The fix is always `docker`.
+   */
+  constructor(message: string) {
+    super(message, 'docker')
+  }
+}

@@ -43,14 +43,14 @@ Done when `pnpm lint:fallow`, `pnpm lint:biome` and `pnpm test` pass.
 
 ## Outside systems
 
-- Each outside system is reached through one **adapter** module, which returns visual-check's own types: Storybook, Chromium over CDP, Docker, the Chrome for Testing download and yauzl, git and Fallow's graph, sharp and pixelmatch, GitHub.
-- The change that adds an adapter bans its package everywhere else with Biome `noRestrictedImports`, plus an override that allows it in the adapter's folder. An override's options replace the root list rather than merging with it. So each adapter's override lists every other banned package, and adding an adapter updates every existing adapter override.
+- Each outside system is reached through one **adapter** module, which returns visual-check's own types: Storybook, Chromium over CDP, Docker, the Chrome for Testing download and yauzl, git and Fallow's graph, sharp and pixelmatch, Ink and React, GitHub.
+- The change that adds an adapter bans its package everywhere else with Biome `noRestrictedImports`, plus an override that allows it in the adapter's folder. An override's options replace the root list rather than merging with it. So each adapter's override lists every other banned package, and adding an adapter updates every existing adapter override. When other workspaces use the library, scope the ban to one package with an override, as `packages/cli/**` does for Ink and React.
 - Put a **seam** (an interface that adapters satisfy) between a module and its adapters once two adapters exist or are planned. The driver interface is one, because the capture engine spec plans more browsers behind it. One adapter needs no seam.
 
 ## Tests
 
-- Unit tests sit beside the code as `<file>.test.ts`. TypeScript fixture builders sit beside the test that uses them. A `<module>/fixtures/` folder holds data files only (JSON, images), because a `.ts` file there would be a submodule.
-- A TypeScript fixture builder is named `<name>.fixture.ts`, and builds leave it out.
+- Unit tests sit beside the code as `<file>.test.ts`, or `<file>.test.tsx` for a component. TypeScript fixture builders sit beside the test that uses them. A `<module>/fixtures/` folder holds data files only (JSON, images), because a `.ts` file there would be a submodule.
+- A TypeScript fixture builder is named `<name>.fixture.ts`, or `<name>.fixture.tsx` when it holds JSX, and builds leave it out.
 - Tests of an entry or of the built package live in `<package>/test/` as `*.test.ts`.
 
 ## `@visual-check/cli`, as it grows
@@ -62,6 +62,9 @@ packages/cli/src/
   bin.ts                entry
   index.ts              entry: the public config API
   commands/             init, test, update
+  init/                 what init detects, asks, writes and installs; adapter: git ls-files and Fallow's check
+  terminal-ui/          adapter: Ink and React: init's questions, steps and summary
+  docs-site/            the docs site's address, which every docs link starts with
   config/
   storybook/            adapter: index.json, story URLs, the preview script and the test path
   capture/

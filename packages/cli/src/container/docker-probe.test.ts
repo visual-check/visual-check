@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { ContainerError } from './container-error.js'
+import { ContainerError, DockerMissingError } from './container-error.js'
 import { probeDocker } from './docker-probe.js'
 import { type FakeDocker, installFakeDocker, removeDockerFromPath } from './fake-docker.fixture.js'
 
@@ -52,6 +52,7 @@ describe('probeDocker', () => {
 
     expect(error.message).toBe("visual-check runs the browser in Docker, and there's no docker command on PATH.")
     expect(error.fix).toBe('docker')
+    expect(error).toBeInstanceOf(DockerMissingError)
   })
 
   it("names the daemon and the first line docker wrote when it can't be reached", async () => {

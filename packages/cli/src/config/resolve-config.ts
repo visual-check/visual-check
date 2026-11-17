@@ -165,6 +165,16 @@ const defaultConfigDir = '.storybook'
 const defaultBaselines = '.visual-check/baselines'
 
 /**
+ * Returns the absolute folder that holds the baselines of a Storybook whose config sets no `baselines`: the default
+ * folder in its `dir`.
+ *
+ * @public
+ */
+export function defaultBaselinesIn(dir: string): string {
+  return resolve(dir, defaultBaselines)
+}
+
+/**
  * A Storybook whose URL may be missing for the current environment.
  */
 type PendingStorybook = Omit<ResolvedStorybook, 'url'> & { url: string | undefined }
@@ -198,7 +208,7 @@ function resolveStorybook(name: string, settings: StorybookSettings, options: Re
     name,
     dir,
     configDir: resolve(dir, settings.configDir ?? defaultConfigDir),
-    baselines: resolve(dir, settings.baselines ?? defaultBaselines),
+    baselines: settings.baselines === undefined ? defaultBaselinesIn(dir) : resolve(dir, settings.baselines),
     url: pickSide(settings.url, options.ci),
   }
 }

@@ -16,6 +16,12 @@ import { ContainerError } from '../container/container-error.js'
 import { type DockerHost, type ProbeDocker, probeDocker } from '../container/docker-probe.js'
 import { isInsideContainer } from '../container/inside-container.js'
 import { knownContainerIdOf } from '../container/own-container.js'
+import { type ListFiles, listProjectFiles } from '../init/find-storybooks.js'
+import { defaultsPrompter } from '../init/prompter.js'
+import { createRunCommand, type RunCommand } from '../init/run-command.js'
+import { type InitResult, type InitTools, runInit } from '../init/run-init.js'
+import { plainSetupProgress, type SetupProgress } from '../init/setup-progress.js'
+import { type FindUnlistedDependencies, findUnlistedDependencies } from '../init/unlisted-dependencies.js'
 import { clearReport, ReportError, reportFolderOf, writeReportJson } from '../report/report-folder.js'
 import type { Story } from '../storybook/read-stories.js'
 import { type BrowserPlace, browserPlaceOf } from './browser-route.js'
@@ -53,6 +59,9 @@ Options for test and update:
   --shard <k>/<n>     Run one shard's share of the stories files (test only)
   --reporter <name>   Live or log for people, json for the report's JSON document on stdout
 
+Options for init:
+  --yes               Take every default
+
 Other options:
   --help     Show this help
   --version  Show the version
@@ -89,8 +98,8 @@ export interface RunCliOptions {
   machine?: BrowserHost
   /**
    * The OS the CLI runs on, which decides between host networking and the proxy, whether `update` warns about baseline
-   * paths too long for Windows, and with `arch` picks the headless shell `platform: 'host'` downloads.
-   * `process.platform` by default. A test gives its own.
+   * paths too long for Windows, with `arch` picks the headless shell `platform: 'host'` downloads, and whether `init`'s
+   * Docker warning adds the WSL sentence. `process.platform` by default. A test gives its own.
    */
   os?: NodeJS.Platform
   /**
@@ -109,7 +118,24 @@ export interface RunCliOptions {
    */
   recaptureDelayMs?: number
   /**
-   * Writes progress as it happens, such as an image pull's or a download's. Progress is dropped when it isn't given.
+   * Whether `init` runs in a terminal: by default, when standard input and standard output are TTYs and `CI` is unset,
+   * empty, `0` or `false`. There, with no `prompter` given, `init` draws its terminal UI, which it loads only then.
+   * Elsewhere it prints plain text, and without `--yes` it stops, since it has nowhere to ask. A test gives its answer.
+   */
+  interactive?: boolean
+  /**
+   * Asks `init`'s questions and shows its notes. By default, in a terminal the terminal UI, which also shows the setup
+   * steps and the end of the run; elsewhere a prompter that takes every default and collects the notes, which `init`
+   * reaches only with `--yes`. A test gives a scripted one.
+   */
+  prompter?: InitTools['prompter']
+  /**
+   * The Node version `init` checks, such as `22.23.1`. `process.versions.node` by default. A test gives its own.
+   */
+  nodeVersion?: string
+  /**
+   * Writes progress as it happens, such as an image pull's, a download's, or the commands `init` runs and their output
+   * when it prints plain text. `init`'s terminal UI shows its own. Progress is dropped when it isn't given.
    */
   progress?: (text: string) => void
   /**
@@ -123,8 +149,8 @@ export interface RunCliOptions {
   /**
    * Asks Docker what its engine has, before a run whose browser runs in visual-check's container reaches a Storybook.
    * It also tells whether the engine is Docker Desktop's, which decides the browser's route to a Storybook. Inside
-   * visual-check's image and on the host no Docker is used, so it isn't asked. By default it runs `docker info`. A test
-   * gives a fake.
+   * visual-check's image and on the host no Docker is used, so it isn't asked. `init` asks it once, to warn when Docker
+   * can't run the browser. By default it runs `docker info`. A test gives a fake.
    */
   probeDocker?: ProbeDocker
   /**
@@ -132,16 +158,31 @@ export interface RunCliOptions {
    * `/proc/self/mountinfo` and asks `docker inspect`. A test gives a fake.
    */
   findKnownContainer?: () => Promise<string | undefined>
+  /**
+   * Lists the files of a project, where `init` looks for Storybooks. By default it runs `git ls-files`. A test gives a
+   * fake.
+   */
+  listFiles?: ListFiles
+  /**
+   * Runs the package manager and `storybook add` for `init`. By default it spawns the command and writes its output to
+   * `progress`. A test gives a fake.
+   */
+  runCommand?: RunCommand
+  /**
+   * Asks Fallow for the packages a project imports and doesn't list, which `init` warns about. By default it runs
+   * Fallow. A test gives a fake.
+   */
+  findUnlistedDependencies?: FindUnlistedDependencies
 }
 
 /**
  * Runs the CLI with the given arguments, environment and folder, and returns what it prints on each stream. Only
- * progress is written as it happens, through `options.progress`; `update` also writes and deletes baselines, and
- * `test` writes the report folder. Problems with the command line, the config, the run's setup or the browser exit
- * with code 2. A usage error of a `test` command line, even one whose flags fail to parse, writes its error report
- * beside the config the run would load. Once a `test` or `update` has loaded its config, an error that is a bug exits
- * 2 too, with its stack trace on stderr, as an error report for `test` and an error document with `--reporter json`.
- * Other errors are thrown.
+ * progress is written as it happens, through `options.progress`; `update` also writes and deletes baselines, `test`
+ * writes the report folder, and `init` writes the setup files and runs the package manager. Problems with the command
+ * line, the config, the run's setup or the browser exit with code 2. A usage error of a `test` command line, even one
+ * whose flags fail to parse, writes its error report beside the config the run would load. Once a `test` or `update`
+ * has loaded its config, an error that is a bug exits 2 too, with its stack trace on stderr, as an error report for
+ * `test` and an error document with `--reporter json`. Other errors are thrown.
  *
  * @public
  */
@@ -158,16 +199,16 @@ export async function runCli(
       case 'help':
         return { exitCode: 0, stdout: helpText, stderr: '' }
       case 'version':
-        return { exitCode: 0, stdout: `${readVersion()}\n`, stderr: '' }
+        return { exitCode: 0, stdout: `${readCliManifest().version}\n`, stderr: '' }
       case 'init':
-        return failure("visual-check init isn't available yet. Write visual-check.config.ts by hand for now.")
+        return await runInitCommand(commandLine.options.yes, environment, cwd, options)
       case 'test':
       case 'update':
         return await runTestOrUpdate(commandLine.command, commandLine.options, environment, cwd, options)
     }
   } catch (error) {
     if (error instanceof UsageError) {
-      return await usageFailureOf(error, cwd, readVersion())
+      return await usageFailureOf(error, cwd, readCliManifest().version)
     }
 
     throw error
@@ -230,10 +271,10 @@ async function runTestOrUpdate(
   }
 
   if (command === 'update') {
-    return stoppedUpdateOf(outcome.stopped, { version: readVersion(), options })
+    return stoppedUpdateOf(outcome.stopped, { version: readCliManifest().version, options })
   }
 
-  return await stoppedTestOf(outcome.stopped, { version: readVersion(), cwd, options })
+  return await stoppedTestOf(outcome.stopped, { version: readCliManifest().version, cwd, options })
 }
 
 /**
@@ -414,7 +455,7 @@ async function snapshotsOutcomeOf(
   checked: CheckedRun,
 ): Promise<RunOutcome> {
   const { command, options } = context
-  const version = readVersion()
+  const version = readCliManifest().version
   const result = await runSnapshots({
     command,
     version,
@@ -684,19 +725,125 @@ function loadConfigOptionsOf(options: RunOptions, ci: boolean, cwd: string): Loa
 }
 
 /**
- * Reads the version from the package's `package.json`.
+ * What the CLI's own `package.json` says that a run needs.
  */
-function readVersion(): string {
-  const manifest = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
-    version: string
-  }
-
-  return manifest.version
+interface CliManifest {
+  /**
+   * The CLI's version.
+   */
+  version: string
+  /**
+   * The range of `@visual-check/chromium` the CLI takes as a peer.
+   */
+  browserRange: string
 }
 
 /**
- * Builds the result for a problem: the message on standard error, exit code 2.
+ * Reads the version and the browser package's peer range from the CLI's `package.json`.
  */
-function failure(message: string): CliResult {
-  return { exitCode: 2, stdout: '', stderr: `${message}\n` }
+function readCliManifest(): CliManifest {
+  const manifest = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
+    version: string
+    peerDependencies: { '@visual-check/chromium': string }
+  }
+
+  return { version: manifest.version, browserRange: manifest.peerDependencies['@visual-check/chromium'] }
+}
+
+/**
+ * How `init` talks to the person: whether it runs in a terminal, what asks the questions, and what shows the steps.
+ */
+type InitIo = Pick<InitTools, 'interactive' | 'prompter' | 'progress'>
+
+/**
+ * Runs `init`. In a terminal, unless the caller gives a prompter, it loads the terminal UI, which asks the questions,
+ * shows the steps and the end of the run, so the result carries only the exit code. Elsewhere it runs with the
+ * caller's prompter, else the one that takes every default, and plain progress, and the result carries the text,
+ * without the messages and the summary only the terminal UI shows.
+ *
+ * @throws Any error `runInit` throws, after the terminal UI has stopped drawing.
+ */
+async function runInitCommand(
+  yes: boolean,
+  environment: Record<string, string | undefined>,
+  cwd: string,
+  cliOptions: RunCliOptions,
+): Promise<CliResult> {
+  const interactive = cliOptions.interactive ?? isTerminal(environment)
+
+  if (!interactive || cliOptions.prompter !== undefined) {
+    const prompter = cliOptions.prompter ?? defaultsPrompter()
+    const progress = plainSetupProgress(cliOptions.progress ?? (() => undefined))
+
+    const { exitCode, stdout, stderr } = await runInit(
+      cwd,
+      initToolsOf(yes, { interactive, prompter, progress }, cliOptions),
+    )
+
+    return { exitCode, stdout, stderr }
+  }
+
+  // Loaded only here, so `test` and `update` never load React and Ink.
+  const { startInitView } = await import('../terminal-ui/init-view.js')
+  const view = startInitView({
+    version: readCliManifest().version,
+    yes,
+    environment,
+    stdin: process.stdin,
+    stdout: process.stdout,
+  })
+  let result: InitResult
+
+  try {
+    result = await runInit(cwd, initToolsOf(yes, { interactive, prompter: view, progress: view.progress }, cliOptions))
+  } catch (error) {
+    await view.finish({ exitCode: 2, stdout: '', stderr: '', messages: [] })
+
+    throw error
+  }
+
+  await view.finish(result)
+
+  return { exitCode: result.exitCode, stdout: '', stderr: '' }
+}
+
+/**
+ * Whether the CLI runs in a terminal a person answers in: standard input and standard output are TTYs, and the `CI`
+ * environment variable doesn't say this is a CI run.
+ */
+function isTerminal(environment: Record<string, string | undefined>): boolean {
+  return process.stdin.isTTY === true && process.stdout.isTTY === true && !isCi(environment)
+}
+
+/**
+ * Gives `init` what it runs with: how it talks to the person, then what the CLI's caller gives, else the defaults.
+ */
+function initToolsOf(yes: boolean, io: InitIo, cliOptions: RunCliOptions): InitTools {
+  const { version, browserRange } = readCliManifest()
+
+  return {
+    yes,
+    ...io,
+    nodeVersion: cliOptions.nodeVersion ?? process.versions.node,
+    os: cliOptions.os ?? process.platform,
+    cliVersion: version,
+    browserRange,
+    ...initAdaptersOf(cliOptions, io.progress),
+  }
+}
+
+/**
+ * Gives the tools `init` reaches outside the process with: the caller's, else the ones that run Docker, git, the
+ * package manager and Fallow.
+ */
+function initAdaptersOf(
+  cliOptions: RunCliOptions,
+  progress: SetupProgress,
+): Pick<InitTools, 'probeDocker' | 'listFiles' | 'runCommand' | 'findUnlistedDependencies'> {
+  return {
+    probeDocker: cliOptions.probeDocker ?? probeDocker,
+    listFiles: cliOptions.listFiles ?? listProjectFiles,
+    runCommand: cliOptions.runCommand ?? createRunCommand((text) => progress.output(text)),
+    findUnlistedDependencies: cliOptions.findUnlistedDependencies ?? findUnlistedDependencies,
+  }
 }

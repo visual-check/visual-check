@@ -567,13 +567,24 @@ export interface FakeBrowserOptions {
 }
 
 /**
+ * The options only `init` reads, which a `test` or `update` run never uses.
+ */
+type InitOnlyOption =
+  | 'interactive'
+  | 'prompter'
+  | 'nodeVersion'
+  | 'listFiles'
+  | 'runCommand'
+  | 'findUnlistedDependencies'
+
+/**
  * Builds options whose every launch writes pull progress and gives a fresh fake driver of the given version, answering
  * each story as `stories` says and the options read as `read` says. Returns them with what the fake browsers saw.
  */
 export function fakeBrowser(
   stories: Record<string, FakeStory> = {},
   { version: driverVersion = browserPackage.chromium, read = {} }: FakeBrowserOptions = {},
-): { options: Required<RunCliOptions>; record: FakeBrowserRecord; progress: string[] } {
+): { options: Required<Omit<RunCliOptions, InitOnlyOption>>; record: FakeBrowserRecord; progress: string[] } {
   const record = newRecord()
   const progress: string[] = []
   const gates: StoryGates = new Map()
