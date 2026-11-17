@@ -4,6 +4,7 @@ import type { BrokenReason, BrokenStory } from '../capture/capture-session.js'
 import type { ConsoleMessage } from '../capture/driver/driver.js'
 import type { Tolerance } from '../config/define-config.js'
 import type { ResolvedStorybook } from '../config/resolve-config.js'
+import { displayPathOf } from '../report/display-path.js'
 import type {
   ReportBrokenDetails,
   ReportBrokenReason,
@@ -21,7 +22,6 @@ import type {
 } from '../report/report-document.js'
 import type { PlannedSnapshot } from './plan-snapshots.js'
 import { remoteContentHintMessageOf } from './remote-content-hint.js'
-import { displayPathOf } from './run-output.js'
 import type { ReportedComparison, SnapshotResult, SnapshotStatus } from './snapshot-result.js'
 
 /**

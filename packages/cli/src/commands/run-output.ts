@@ -1,4 +1,5 @@
-import { join, relative, sep } from 'node:path'
+import { join } from 'node:path'
+import { displayPathOf } from '../report/display-path.js'
 import { type Report, reportJsonOf } from '../report/report-document.js'
 import type { Reporter } from '../reporter/reporter-choice.js'
 import type { PlannedSnapshot } from './plan-snapshots.js'
@@ -19,13 +20,6 @@ const marks: Record<SnapshotStatus, string> = {
   differs: failMark,
   missing: failMark,
   broken: '!',
-}
-
-/**
- * Writes a path relative to `folder`, such as the folder the CLI runs in or the config's, with `/` on every OS.
- */
-export function displayPathOf(folder: string, path: string): string {
-  return relative(folder, path).split(sep).join('/')
 }
 
 /**
@@ -90,14 +84,6 @@ export function runOutputOf(
   }
 
   return { ...streams, reportLine: reporter === 'json' ? { stream: 'stderr', text: reportLine.text } : reportLine }
-}
-
-/**
- * Builds a counts line, such as `2 written · 1 kept`: each label with its count, in the order given, leaving out zero
- * counts except the first.
- */
-export function countsLineOf(counts: readonly (readonly [label: string, count: number])[]): string {
-  return counts.flatMap(([label, count], index) => (index === 0 || count > 0 ? [`${count} ${label}`] : [])).join(' · ')
 }
 
 /**

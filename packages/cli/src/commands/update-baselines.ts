@@ -2,10 +2,11 @@ import { BaselineError } from '../baselines/baseline-error.js'
 import { deleteOrphans, readBaseline } from '../baselines/baseline-files.js'
 import { runWorkerPool } from '../capture/worker-pool.js'
 import type { ResolvedStorybook } from '../config/resolve-config.js'
+import { displayPathOf } from '../report/display-path.js'
+import { countsLineOf } from '../reporter/counts-line.js'
 import type { VisualDiff } from '../visual-diff/visual-diff.js'
 import { checkConsistency, type StorybookBaselines } from './consistency-check.js'
 import type { PlannedSnapshot } from './plan-snapshots.js'
-import { countsLineOf, displayPathOf } from './run-output.js'
 
 /**
  * What `update` takes and deletes.

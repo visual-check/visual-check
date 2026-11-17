@@ -93,7 +93,7 @@
         "allow": ["cli/baselines", "cli/config", "cli/container", "cli/docs-site", "cli/storybook"]
       },
       { "from": "cli/report", "allow": ["cli/system-error"] },
-      { "from": "cli/reporter", "allow": [] },
+      { "from": "cli/reporter", "allow": ["cli/report"] },
       { "from": "cli/sharding", "allow": ["cli/baselines", "cli/storybook"] },
       { "from": "cli/storybook", "allow": [] },
       { "from": "cli/system-error", "allow": [] },

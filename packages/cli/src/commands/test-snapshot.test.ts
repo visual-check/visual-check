@@ -239,7 +239,6 @@ describe('testSnapshot', () => {
     const result = await testSnapshot(item, captureStoryOf(captures), tools)
 
     expect(result).toMatchObject({ status: 'differs', hintHosts: ['cdn.test'] })
-    expect(result.hint?.[0]).toContain('cdn.test')
   })
 
   it("leaves a broken story's image of its page as its snapshot, with its broken story and console", async () => {

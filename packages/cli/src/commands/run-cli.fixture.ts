@@ -75,7 +75,8 @@ export const noMarker: RunCliOptions = { imageMarkerPath: absentMarkerPath }
 /**
  * The options every run gets: a Docker probe and a machine that both have 4 CPUs and 16 GiB, an engine that isn't
  * Docker Desktop's, Linux on x64, and no container around the run, so no test runs the real `docker` or reads the
- * machine it runs on. `update` captures a page again at once, so no test waits a second for it.
+ * machine it runs on. `update` captures a page again at once, so no test waits a second for it. The clock stands
+ * still, so every `test`'s counts end with ` · 0 ms`.
  */
 export const hostOptions = {
   probeDocker: async () => ({ cpus: 4, memoryBytes: 16 * 2 ** 30, desktop: false }),
@@ -86,6 +87,7 @@ export const hostOptions = {
   arch: 'x64',
   findKnownContainer: async () => undefined,
   recaptureDelayMs: 0,
+  now: () => 0,
 } satisfies RunCliOptions
 
 /**
@@ -647,6 +649,55 @@ export function orphanLineOf(storybook: string, stem: string, folder = '.visual-
   const detail = `orphan: no story calls for ${folder}/${stem}.png; run visual-check update to delete it`
 
   return `✗ ${storybook}  ${stem}  ${detail}`
+}
+
+/**
+ * Builds the heading of `test`'s failures block, which counts them.
+ */
+export function failuresHeadingOf(count: number): string {
+  return `── ${count} ${count === 1 ? 'failure' : 'failures'} ──`
+}
+
+/**
+ * Builds the lines of a failure in `test`'s failures block: its name, such as `web  a  dark`, then each detail line,
+ * such as `differs: …` or `diff: …`, indented by two spaces.
+ */
+export function failureOf(name: string, ...details: string[]): string[] {
+  return [name, ...details.map((detail) => `  ${detail}`)]
+}
+
+/**
+ * Builds the lines of an orphan in `test`'s failures block, by its Storybook, its file name without `.png` and its
+ * folder, relative to the project, `.visual-check/baselines` when not given.
+ */
+export function orphanFailureOf(storybook: string, stem: string, folder = '.visual-check/baselines'): string[] {
+  return failureOf(
+    `${storybook}  ${stem}`,
+    `orphan: no story calls for ${folder}/${stem}.png; run visual-check update to delete it`,
+  )
+}
+
+/**
+ * Builds the lines of a missing baseline in `test`'s failures block.
+ */
+export function missingFailureOf(storybook: string, id: string): string[] {
+  return failureOf(`${storybook}  ${id}`, 'missing: no baseline yet; run visual-check update to write it')
+}
+
+/**
+ * Builds the line of a differing snapshot's visual diff in `test`'s failures block, by its Storybook and its
+ * baseline's stem, in the report folder beside a config in the folder the CLI runs in.
+ */
+export function diffLineOf(storybook: string, stem: string): string {
+  return `diff: .visual-check/report/images/${storybook}/${stem}.diff.png`
+}
+
+/**
+ * Builds `test`'s counts line, which ends with how long the run took: always `0 ms` with the standing clock of
+ * {@link hostOptions}.
+ */
+export function countsOf(text: string): string {
+  return `${text} · 0 ms`
 }
 
 /**

@@ -785,7 +785,8 @@ describe('runCli test report on exit 2', () => {
         const json = await runCli(['test', '--reporter', 'json'], {}, project, fakeBrowser().options)
 
         expect(result.exitCode).toBe(2)
-        expect(result.stdout).toContain('1 passed')
+        // No end block, since the run stops with exit 2 and the report it would be built from isn't written.
+        expect(withoutTimes(result.stdout)).toBe(printed(headerOf('test', 1), '✓ web  a  N ms'))
         expect(result.reportLine).toBeUndefined()
         expect(result.stderr).toBe(`${problem}\n`)
         expect(json).toEqual({

@@ -138,6 +138,10 @@ Both `log` and `live` end with the same block:
 3. The counts, for example `248 passed (2 flaky) · 1 differs · 1 broken · 3m 12s`.
 4. `Report: .visual-check/report/report.json`.
 
+- A failure is its name line, `web  button--primary  dark`, then lines indented two spaces: `differs: <message>`, `broken: <message>`, `missing: no baseline yet; …` or `orphan: no story calls for <path>; …`, then `diff: <path>`, one `hint: <message>` per hint, and a broken story's last 5 `console error:` and `console warn:` messages, each by its first line. Failures follow the report's order. Paths are relative to the folder the CLI runs in.
+- Durations read `142 ms` under a second, `12.3s` under a minute, then `3m 12s`.
+- `test --consistency` and a CI `test` stopped by its consistency check print the consistency output instead, with no block. A run that exits 2 gets none either.
+
 `update` ends with its own block, which has no report line ([Baselines and update](10-baselines-and-update.md)).
 
 ## Hints and warnings

@@ -7,6 +7,7 @@ import { headlessShellPathsOf } from '../browser-download/install-headless-shell
 import { BrowserExitedError, BrowserLaunchError } from '../capture/driver/driver.js'
 import type { ResolvedConfig } from '../config/resolve-config.js'
 import { ContainerError } from '../container/container-error.js'
+import { displayPathOf } from '../report/display-path.js'
 import { ReportError } from '../report/report-folder.js'
 import { VisualDiffError } from '../visual-diff/visual-diff.js'
 import type { BrowserPlace } from './browser-route.js'
@@ -14,7 +15,6 @@ import { dockerProblemOf } from './docker-problem.js'
 import { missingLibraryOf } from './missing-library.js'
 import { platformProblemOf } from './platform-problem.js'
 import type { FirstBrowserExit } from './run-browser.js'
-import { displayPathOf } from './run-output.js'
 import { SnapshotDecodeError } from './snapshot-result.js'
 
 /**

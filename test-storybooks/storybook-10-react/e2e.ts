@@ -2966,9 +2966,10 @@ function committedBaselineProblems(path: string, keptIn: string): string[] {
 /**
  * With the remote content story's mask `remote` dropped, `test` on that story against the committed baselines exits 1:
  * the story differs, since its snapshot shows the remote content its baseline has masked, and on its one retry every
- * differing pixel lies inside that content. So the story's line is followed by the hint, each line indented two
- * spaces: that it differs only inside remote content from `localhost` on the server's port, the mask line for that
- * host, and the docs page. The story differing also shows that the script reached the options-reading page.
+ * differing pixel lies inside that content. So its line is followed by the end block's failures, where its failure
+ * holds the hint on one line indented two spaces: that it differs only inside remote content from `localhost` on the
+ * server's port, the mask for that host, and the docs page. The story differing also shows that the script reached
+ * the options-reading page.
  */
 async function checkRemoteContentHint(): Promise<string[]> {
   const { storyId, filter, script } = unmaskedRemoteContent
@@ -2981,11 +2982,10 @@ async function checkRemoteContentHint(): Promise<string[]> {
 
       return [
         ...expectedRunProblems('test', run, { [storyId]: 'differs' }),
-        ...linesAfterProblems(run, storyId, [
-          `  hint: Differs only inside remote content from ${host}. A CDN can serve different bytes to different ` +
-            'machines. Mask it by host:',
-          `    { host: '${host}' }`,
-          `  See ${remoteContentDocs}`,
+        ...linesAfterProblems(run, storyId, ['── 1 failure ──']),
+        ...stdoutSaysProblems(run, [
+          `\n  hint: Differs only inside remote content from ${host}. A CDN can serve different bytes to different ` +
+            `machines. Mask it by host: { host: '${host}' }. See ${remoteContentDocs}\n`,
         ]),
       ]
     }),
@@ -3859,7 +3859,7 @@ if (setupProblems.length > 0) {
       run: () => checkUpdateStability(updateStability.changedAfterCapture),
     },
     {
-      name: `remote content hint: with ${unmaskedRemoteContent.storyId}'s host mask dropped, test exits 1, it differs, and its line is followed by the hint naming localhost on the server's port, its mask line and the docs page`,
+      name: `remote content hint: with ${unmaskedRemoteContent.storyId}'s host mask dropped, test exits 1, it differs, and its failure in the end block holds the hint naming localhost on the server's port, its mask and the docs page`,
       run: checkRemoteContentHint,
     },
     {

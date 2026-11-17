@@ -3,7 +3,6 @@ import type { BrokenStory, RemoteContentBox, StoryCapture } from '../capture/cap
 import { writeReportImages } from '../report/report-folder.js'
 import type { ImageRegion, VisualDiff, VisualDiffResult } from '../visual-diff/visual-diff.js'
 import type { SnapshotToCapture } from './plan-snapshots.js'
-import { remoteContentHintOf } from './remote-content-hint.js'
 import {
   brokenResultOf,
   type CaptureStory,
@@ -207,7 +206,7 @@ function remoteHostsOf(retry: Attempt | undefined): string[] | undefined {
  * that passes makes the snapshot pass, flaky. A retry that comes back broken stops the retries. When no retry passes,
  * the snapshot differs with its first capture's message, and the report keeps that capture's images. When both the
  * first capture and the last retry differ by pixels, and every differing pixel of the last retry lies inside its remote
- * content, give or take the device scale factor rounded up, the result carries a hint that names those hosts. A broken
+ * content, give or take the device scale factor rounded up, the result names those hosts, for a hint. A broken
  * first capture isn't retried. The first capture asks for an image of the story's page should it break; retries don't,
  * since a broken retry keeps the first capture's images. A broken first capture that came with an image of its page
  * leaves it in the report folder as its snapshot. It asks for a capture only once it has read the baseline. A pass's
@@ -283,7 +282,7 @@ export async function testSnapshot(
       attempts,
       completingMs: capture.completingMs,
       ...listed,
-      ...(hosts === undefined ? {} : { hint: remoteContentHintOf(hosts), hintHosts: hosts }),
+      ...(hosts === undefined ? {} : { hintHosts: hosts }),
     }
   }
 

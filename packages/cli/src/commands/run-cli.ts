@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { availableParallelism, totalmem } from 'node:os'
+import { dirname } from 'node:path'
 import { checkBrowserPackage } from '../browser/browser-package.js'
 import { runImageOf } from '../browser/browser-version.js'
 import { chromeForTestingPlatformOf } from '../browser/chrome-for-testing-platform.js'
@@ -23,7 +24,8 @@ import { type InitResult, type InitTools, runInit } from '../init/run-init.js'
 import { plainSetupProgress, type SetupProgress } from '../init/setup-progress.js'
 import { type FindUnlistedDependencies, findUnlistedDependencies } from '../init/unlisted-dependencies.js'
 import { clearReport, ReportError, reportFolderOf, writeReportJson } from '../report/report-folder.js'
-import { type Reporter, reporterOf } from '../reporter/reporter-choice.js'
+import { testEndLinesOf } from '../reporter/end-block.js'
+import { reporterOf } from '../reporter/reporter-choice.js'
 import type { Story } from '../storybook/read-stories.js'
 import { type BrowserPlace, browserPlaceOf } from './browser-route.js'
 import { checkStorybooks } from './check-storybooks.js'
@@ -140,6 +142,10 @@ export interface RunCliOptions {
    */
   nodeVersion?: string
   /**
+   * Tells the time in ms, which a run's elapsed time counts with. `performance.now` by default. A test gives its own.
+   */
+  now?: () => number
+  /**
    * Writes progress as it happens, such as an image pull's, a download's, or the commands `init` runs and their output
    * when it prints plain text. `init`'s terminal UI shows its own. Progress is dropped when it isn't given.
    */
@@ -245,12 +251,14 @@ export async function runCli(
  * Right after the config loads, `test` clears the report folder, `.visual-check/report` beside the config file; one it
  * can't clear exits 2. Every `test` that exits 0 or 1, `test --consistency`, a CI stop and each shard included, then
  * writes `report.json` there and gives the report's path, relative to the folder the CLI runs in, as the report line
- * for stdout. A `test` that exits 2 with its config found, or named by the config error, replaces the folder with a
- * `report.json` holding only the error, naming the Storybooks where nothing answers, and gives the report line for
- * stderr; with no config found, or when the report folder itself is what failed, nothing is written. With
- * `--reporter json`, stdout then holds the error document alone. `update` never touches the report folder. With
- * `--reporter json`, its stdout holds its own document alone, the error document when it exits 2. Whatever the
- * command and exit code, `--reporter json` moves the human lines to stderr, before what the run prints there. An
+ * for stdout. Each of them that captured, so neither `test --consistency` nor a CI stop, ends stdout with its end
+ * block, built from the report: its failures, its flaky snapshots, and its counts with how long the run took, counted
+ * from the start of the run by `now`. A `test` that exits 2 with its config found, or named by the config error,
+ * replaces the folder with a `report.json` holding only the error, naming the Storybooks where nothing answers, and
+ * gives the report line for stderr; with no config found, or when the report folder itself is what failed, nothing is
+ * written. With `--reporter json`, stdout then holds the error document alone. `update` never touches the report
+ * folder. With `--reporter json`, its stdout holds its own document alone, the error document when it exits 2. Whatever
+ * the command and exit code, `--reporter json` moves the human lines to stderr, before what the run prints there. An
  * error that is a bug, once the config loads, ends the run as a problem would, with its stack trace and its message.
  *
  * @throws {Error} Any error besides the problems that stop the run with exit 2, before the config loads.
@@ -262,6 +270,9 @@ async function runTestOrUpdate(
   cwd: string,
   cliOptions: RunCliOptions,
 ): Promise<CliResult> {
+  const now = cliOptions.now ?? (() => performance.now())
+  const startedAt = now()
+  const elapsedMs = (): number => now() - startedAt
   const ci = isCi(environment)
   const options: RunOptions = {
     ...parsed,
@@ -274,7 +285,7 @@ async function runTestOrUpdate(
             'Run it on your machine and commit the baselines, or unset CI.\n',
           { configPath: undefined, storybooks: [] },
         )
-      : await runOutcomeOf({ command, options, environment, cwd, cliOptions, ci })
+      : await runOutcomeOf({ command, options, environment, cwd, cliOptions, ci, elapsedMs })
 
   if ('finished' in outcome) {
     return outcome.finished
@@ -321,6 +332,10 @@ interface RunContext {
    * Whether the `CI` environment variable says the run is in CI.
    */
   ci: boolean
+  /**
+   * Gives how long the run has taken so far, in ms.
+   */
+  elapsedMs: () => number
 }
 
 /**
@@ -524,9 +539,9 @@ async function snapshotsOutcomeOf(
 
   return await withTestReport(
     { exitCode: result.exitCode, ...output },
-    context.cwd,
+    context,
     { ...facts, consistencyOnly: options.consistency, shard: options.shard },
-    options.reporter,
+    result.checkedOnly,
   )
 }
 
@@ -559,17 +574,20 @@ async function clearReportProblemOf(
 }
 
 /**
- * Writes the report of a `test` that exits 0 or 1, then gives the report's path as the report line for stdout. With
- * `--reporter json` stdout holds the report's JSON document alone, the human lines move to stderr, and the report
- * line is for stderr. When the report can't be written, the run stops with exit 2 with what went wrong after its
- * stderr, and no error report is written. An error that is a bug stops it too, after what it printed.
+ * Writes the report of a `test` that exits 0 or 1, then, unless the run stopped after its consistency check, ends
+ * stdout with the end block built from the report: the failures, the flaky snapshots, and the counts with how long the
+ * run took. It gives the report's path as the report line for stdout. With `--reporter json` stdout holds the report's
+ * JSON document alone, the human lines, the end block included, move to stderr, and the report line is for stderr.
+ * When the report can't be written, the run stops with exit 2 with what went wrong after its stderr, and no error
+ * report is written. An error that is a bug stops it too, after what it printed.
  */
 async function withTestReport(
   result: CliResult,
-  cwd: string,
+  context: RunContext,
   facts: TestReportFacts,
-  reporter: Reporter | undefined,
+  checkedOnly: boolean,
 ): Promise<RunOutcome> {
+  const { cwd } = context
   const folder = reportFolderOf(facts.configPath)
 
   try {
@@ -577,10 +595,15 @@ async function withTestReport(
 
     await writeReportJson(folder, report)
 
+    const endLines = checkedOnly
+      ? []
+      : testEndLinesOf(report, { cwd, configFolder: dirname(facts.configPath), elapsedMs: context.elapsedMs() })
+    const output = { stdout: `${result.stdout}${endLines.map((line) => `${line}\n`).join('')}`, stderr: result.stderr }
+
     return {
       finished: {
         ...result,
-        ...runOutputOf(result, report, reporter, { stream: 'stdout', text: reportLineOf(cwd, folder) }),
+        ...runOutputOf(output, report, context.options.reporter, { stream: 'stdout', text: reportLineOf(cwd, folder) }),
       },
     }
   } catch (error) {

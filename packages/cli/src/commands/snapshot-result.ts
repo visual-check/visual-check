@@ -30,10 +30,9 @@ export type ReportedComparison = Pick<
 
 /**
  * One snapshot's status, the text its line ends with, how many captures it took and, for a captured snapshot, how long
- * Storybook's `completing` render step took and, for `update`, the hosts its story reaches. A snapshot that differs
- * can carry a hint, printed under its line. It also carries what the report lists of it: the comparison that
- * differed, why it broke, the hosts its hint names, the console messages and the images of the listed capture, and why
- * `update` wrote it.
+ * Storybook's `completing` render step took and, for `update`, the hosts its story reaches. It also carries what the
+ * report lists of it: the comparison that differed, why it broke, the hosts a hint names, the console messages and the
+ * images of the listed capture, and why `update` wrote it.
  */
 export interface SnapshotResult {
   /**
@@ -66,11 +65,6 @@ export interface SnapshotResult {
    * second load within tolerance of the baseline the first load differed from.
    */
   flaky?: boolean
-  /**
-   * What the person can do about a snapshot that differs, such as masking the remote content it differs inside, as
-   * lines with no indentation.
-   */
-  hint?: string[]
   /**
    * How the first capture differed from the baseline: for `test`, of a snapshot that differs or passed only on a
    * retry; for `update`, of a baseline written because it differed.

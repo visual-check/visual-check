@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { BrokenStory } from '../capture/capture-session.js'
 import type { ResolvedStorybook } from '../config/resolve-config.js'
 import type { ConsistencyCheck } from './consistency-check.js'
-import { consistencyOutputOf, orphanLabelOf, orphanLinesOf } from './consistency-output.js'
+import { consistencyOutputOf, orphanLinesOf } from './consistency-output.js'
 import type { PlannedSnapshot } from './plan-snapshots.js'
 import { brokenResultOf, missingResultOf } from './snapshot-result.js'
 
@@ -98,12 +98,6 @@ const missingDetail = 'missing: no baseline yet; run visual-check update to writ
 function printed(...lines: string[]): string {
   return lines.map((line) => `${line}\n`).join('')
 }
-
-describe('orphanLabelOf', () => {
-  it('says orphan for 1 and orphans otherwise', () => {
-    expect([0, 1, 2].map(orphanLabelOf)).toEqual(['orphans', 'orphan', 'orphans'])
-  })
-})
 
 describe('orphanLinesOf', () => {
   it('gives a line for each orphan, Storybooks in the order given, with its stem and its path from the cwd', () => {

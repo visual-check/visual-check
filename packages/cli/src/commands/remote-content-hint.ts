@@ -36,20 +36,8 @@ function hostMaskOf(host: string): string {
 const remoteContentDocsUrl = docsUrlOf('remote-content')
 
 /**
- * Gives the hint for a snapshot that differs only inside remote content from `hosts`: the hosts, why a CDN can make it
- * differ, one host mask line per host in order, and the docs page, as lines with no indentation.
- */
-export function remoteContentHintOf(hosts: readonly string[]): string[] {
-  return [
-    `hint: ${remoteContentCauseOf(hosts)} Mask it by host:`,
-    ...hosts.map((host) => `  ${hostMaskOf(host)}`),
-    `See ${remoteContentDocsUrl}`,
-  ]
-}
-
-/**
- * Gives the same hint as {@link remoteContentHintOf} in one line, for the report: the hosts, why a CDN can make it
- * differ, the host masks in order and the docs page.
+ * Gives the hint for a snapshot that differs only inside remote content from `hosts`, in one line, for the report and
+ * `test`'s end block: the hosts, why a CDN can make it differ, the host masks in order and the docs page.
  */
 export function remoteContentHintMessageOf(hosts: readonly string[]): string {
   const masks = hosts.map(hostMaskOf).join(', ')

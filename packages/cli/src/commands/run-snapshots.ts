@@ -12,12 +12,11 @@ import { testPathWarningOf } from '../storybook/test-path.js'
 import { createVisualDiff } from '../visual-diff/visual-diff.js'
 import type { BrowserPlace } from './browser-route.js'
 import { hasOrphans, type StorybookBaselines } from './consistency-check.js'
-import { orphanLabelOf, orphanLinesOf } from './consistency-output.js'
 import type { LaunchBrowser } from './launch-browser.js'
 import { networkWarningsOf, warningsTextOf } from './network-warning.js'
 import { type PlannedSnapshot, planSnapshots } from './plan-snapshots.js'
 import { type RunBrowser, runBrowserOf } from './run-browser.js'
-import { countsLineOf, snapshotCountOf, snapshotLineOf, snapshotNameOf } from './run-output.js'
+import { snapshotCountOf, snapshotLineOf, snapshotNameOf } from './run-output.js'
 import type { RunFindings } from './run-report.js'
 import { type ShardShare, shardHeaderPartOf, shardNotesOf, shardShareOf } from './shard-share.js'
 import type { CaptureStory, SnapshotResult, SnapshotStatus } from './snapshot-result.js'
@@ -142,9 +141,9 @@ interface SnapshotRunEnd {
    */
   exitCode: number
   /**
-   * The header, a shard's notes, one line per snapshot, for `test` a line per orphan and its flaky snapshots, and the
-   * counts, then for `update` the path of each baseline written and each orphan deleted and its flaky snapshots. For a
-   * CI `test` whose consistency check found anything, the consistency output, then a line that says why it captured
+   * The header, a shard's notes and one line per snapshot, then for `update` its counts, the path of each baseline
+   * written and each orphan deleted and its flaky snapshots. `test`'s end block is built from its report. For a CI
+   * `test` whose consistency check found anything, the consistency output, then a line that says why it captured
    * nothing. For `test --consistency`, the consistency output alone.
    */
   stdout: string
@@ -161,6 +160,11 @@ interface SnapshotRunEnd {
    * the check found.
    */
   findings: RunFindings
+  /**
+   * Whether the run stopped after its consistency check without capturing: `test --consistency`, or a CI `test` whose
+   * check found anything. Its stdout is the consistency output, and it gets no end block.
+   */
+  checkedOnly: boolean
 }
 
 /**
@@ -199,11 +203,6 @@ interface SnapshotRunStop {
 type SnapshotRunResult = SnapshotRunEnd | SnapshotRunStop
 
 /**
- * The statuses `test`'s counts line names, in order.
- */
-const testCountedStatuses: readonly SnapshotStatus[] = ['passed', 'differs', 'broken', 'missing']
-
-/**
  * Per command, the statuses that make the run exit 1.
  */
 const failingStatuses: Record<SnapshotRun['command'], readonly SnapshotStatus[]> = {
@@ -212,12 +211,9 @@ const failingStatuses: Record<SnapshotRun['command'], readonly SnapshotStatus[]>
 }
 
 /**
- * Per command, the heading its flaky snapshots are listed under.
+ * The heading `update`'s flaky snapshots are listed under.
  */
-const flakyHeadings: Record<SnapshotRun['command'], string> = {
-  test: 'Flaky snapshots, which passed on a retry:',
-  update: 'Flaky snapshots, whose loads disagreed:',
-}
+const updateFlakyHeading = 'Flaky snapshots, whose loads disagreed:'
 
 /**
  * The snapshots a run takes, and what became of each so far.
@@ -323,38 +319,12 @@ function longPathWarningsOf(run: SnapshotRun, snapshots: PlannedSnapshots): stri
 }
 
 /**
- * Labels a counted status of `test`: the passed count says how many of its snapshots are flaky, when any is.
+ * Builds the lines that end a finished `update`'s output: the counts of written, deleted and kept baselines and broken
+ * snapshots, then the path of each baseline written, in the snapshots' order, and of each orphan deleted, then the
+ * flaky snapshots under its heading, when there are any.
  */
-function testCountLabelOf(status: SnapshotStatus, flaky: number): string {
-  return status === 'passed' && flaky > 0 ? `${status} (${flaky} flaky)` : status
-}
-
-/**
- * Builds the lines that end a finished run's output: for `test`, a line for each orphan in `baselines`, then the flaky
- * snapshots under its heading, when there are any, then the counts line, each counted status with its count and then
- * the orphans', leaving out zero counts except the first, the passed count saying how many are flaky; for `update`, the
- * counts of written, deleted and kept baselines and broken snapshots, then the path of each baseline written, in the
- * snapshots' order, and of each orphan deleted, then the flaky snapshots under its heading, when there are any.
- */
-function endLinesOf(
-  run: SnapshotRun,
-  snapshots: PlannedSnapshots,
-  baselines: readonly StorybookBaselines[],
-  deleted: readonly DeletedBaseline[],
-): string[] {
+function updateEndOf(run: SnapshotRun, snapshots: PlannedSnapshots, deleted: readonly DeletedBaseline[]): string[] {
   const statuses = snapshots.results.flatMap((result) => (result === undefined ? [] : [result.status]))
-
-  if (run.command === 'test') {
-    const flaky = snapshots.results.filter((result) => result?.flaky === true).length
-    const orphanLines = orphanLinesOf(run.cwd, baselines)
-    const counts = [
-      ...testCountedStatuses.map((status) => [testCountLabelOf(status, flaky), countOf(statuses, status)] as const),
-      [orphanLabelOf(orphanLines.length), orphanLines.length] as const,
-    ]
-
-    return [...orphanLines, ...flakyLinesOf('test', snapshots), countsLineOf(counts)]
-  }
-
   const summary = {
     written: writtenPathsOf(snapshots),
     deleted: deleted.map(({ path }) => path),
@@ -362,7 +332,7 @@ function endLinesOf(
     broken: countOf(statuses, 'broken'),
   }
 
-  return [...updateEndLinesOf(run.cwd, summary), ...flakyLinesOf('update', snapshots)]
+  return [...updateEndLinesOf(run.cwd, summary), ...updateFlakyLinesOf(snapshots)]
 }
 
 /**
@@ -449,31 +419,24 @@ function plannedSnapshotsOf(run: SnapshotRun, share: RunShare | undefined, items
 }
 
 /**
- * Gives the line of each snapshot that has finished, in the snapshots' order: its mark, name and detail, followed by
- * the lines of its hint, when it has one, each indented by two spaces.
+ * Gives the line of each snapshot that has finished, in the snapshots' order: its mark, name and detail.
  */
 function linesOf({ items, results }: PlannedSnapshots): string[] {
   return items.flatMap((item, index) => {
     const result = results[index]
 
-    if (result === undefined) {
-      return []
-    }
-
-    const hintLines = result.hint?.map((line) => `  ${line}`) ?? []
-
-    return [snapshotLineOf(item, result), ...hintLines]
+    return result === undefined ? [] : [snapshotLineOf(item, result)]
   })
 }
 
 /**
- * Lists the flaky snapshots by name under the command's heading, in the snapshots' order, each indented by two spaces.
+ * Lists `update`'s flaky snapshots by name under their heading, in the snapshots' order, each indented by two spaces.
  * Gives no line when none is flaky.
  */
-function flakyLinesOf(command: SnapshotRun['command'], { items, results }: PlannedSnapshots): string[] {
+function updateFlakyLinesOf({ items, results }: PlannedSnapshots): string[] {
   const names = items.flatMap((item, index) => (results[index]?.flaky === true ? [`  ${snapshotNameOf(item)}`] : []))
 
-  return names.length === 0 ? [] : [flakyHeadings[command], ...names]
+  return names.length === 0 ? [] : [updateFlakyHeading, ...names]
 }
 
 /**
@@ -511,19 +474,18 @@ async function takeSnapshots(
  * Reads every Storybook's per-story options before any capture, then takes the snapshots of every selected story that
  * isn't disabled with a pool of `workers` that share one browser: its default capture, then one snapshot per mode it
  * lists, each at its own viewport and with its mode's globals in the story's URL. It prints one line per snapshot after
- * the header, which counts them, then the counts; a mode's line names the mode after the story ID. The lines follow
- * config order, then `index.json` order, then the story's default capture and its modes in order, whatever order the
- * captures finish in. Each snapshot has its own baseline, `<story-id>.png` for the default capture and
- * `<story-id>.<mode>.png` for a mode, a key over 240 bytes shortened to its first 223 bytes, `-` and 16 hex characters
- * of its SHA-256. `test` compares each snapshot with its baseline by the story's tolerance, at the viewport's device
- * scale factor, and never captures a missing baseline. It writes the baseline, snapshot and visual diff of each
- * snapshot whose first capture differs to the report folder, `.visual-check/report` beside the config file, which
- * `runCli` has cleared. A snapshot that differs is captured again, up to the config's `retries` more times; one that
- * passes on a retry passes, flaky, and its line ends with `· flaky`. One that still differs by pixels on its first
- * capture and its last retry, with every differing pixel of the last retry inside its remote content, give or take the
- * device scale factor rounded up, gets a hint under its line: the hosts, a mask line for each and the docs page. The
- * hint never changes the exit code. After the lines, `test` lists the flaky snapshots by name under a heading, when
- * there are any, and its counts say how many passes are flaky. A flaky snapshot never fails the run.
+ * the header, which counts them; a mode's line names the mode after the story ID. The lines follow config order, then
+ * `index.json` order, then the story's default capture and its modes in order, whatever order the captures finish in.
+ * Each snapshot has its own baseline, `<story-id>.png` for the default capture and `<story-id>.<mode>.png` for a mode,
+ * a key over 240 bytes shortened to its first 223 bytes, `-` and 16 hex characters of its SHA-256. `test` compares each
+ * snapshot with its baseline by the story's tolerance, at the viewport's device scale factor, and never captures a
+ * missing baseline. It writes the baseline, snapshot and visual diff of each snapshot whose first capture differs to
+ * the report folder, `.visual-check/report` beside the config file, which `runCli` has cleared. A snapshot that differs
+ * is captured again, up to the config's `retries` more times; one that passes on a retry passes, flaky, and its line
+ * ends with `· flaky`. One that still differs by pixels on its first capture and its last retry, with every differing
+ * pixel of the last retry inside its remote content, give or take the device scale factor rounded up, gets a hint that
+ * names those hosts, which the report lists. The hint never changes the exit code. A flaky snapshot never fails the
+ * run. `test`'s end block, with its failures, flaky snapshots and counts, is built by `runCli` from its report.
  *
  * Every `test` but a shard's runs the consistency check once the snapshots are planned, and `test --consistency` runs
  * only that check: `test-plan.ts` has the rules.
@@ -633,7 +595,7 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
     const taking = await takingOf(run, tools, plan.snapshots)
 
     if ('stopped' in taking) {
-      return { ...taking.stopped, stderr: exitNoticeOf(browser.firstExit()) }
+      return { ...taking.stopped, stderr: exitNoticeOf(browser.firstExit()), checkedOnly: true }
     }
 
     baselines = taking.baselines
@@ -668,12 +630,17 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
 
   return {
     exitCode: exitCodeOf(run.command, snapshots, baselines),
-    stdout: printedOf(snapshots, [...linesOf(snapshots), ...endLinesOf(run, snapshots, baselines, deleted)]),
+    // test's end block is built by runCli from its report.
+    stdout: printedOf(snapshots, [
+      ...linesOf(snapshots),
+      ...(run.command === 'update' ? updateEndOf(run, snapshots, deleted) : []),
+    ]),
     stderr:
       exitNoticeOf(browser.firstExit()) +
       testPathWarningsOf(run.selections, snapshots.items, snapshots.results) +
       longPathWarningsOf(run, snapshots) +
       warningsTextOf(warnings),
     findings: { items: snapshots.items, results: snapshots.results, baselines, deleted, warnings },
+    checkedOnly: false,
   }
 }

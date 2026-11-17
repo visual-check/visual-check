@@ -188,6 +188,13 @@ function runThroughOnePipe(options: CaseOptions, ...commandLineArguments: string
 }
 
 /**
+ * Replaces the elapsed time a `test`'s counts line ends with by ` · N`, since it varies from run to run.
+ */
+function withoutElapsed(text: string): string {
+  return text.replace(/ · (\d+ ms|\d+\.\d+s|\d+m \d+s)$/gm, ' · N')
+}
+
+/**
  * Starts the server on a free port, to be closed after the test. Returns its URL.
  */
 async function listen(server: Server): Promise<string> {
@@ -609,8 +616,8 @@ describe('visual-check binary reaching Storybooks', () => {
     const result = await runAsynchronously({ cwd: project }, 'test')
 
     expect(result.status).toBe(0)
-    expect(result.stdout).toBe(
-      `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed\nReport: .visual-check/report/report.json\n`,
+    expect(withoutElapsed(result.stdout)).toBe(
+      `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed · N\nReport: .visual-check/report/report.json\n`,
     )
     expect(result.stderr).toBe('')
   })
@@ -625,8 +632,8 @@ describe('visual-check binary reaching Storybooks', () => {
     const result = await runIntoOneFile({ cwd: project }, 'test')
 
     expect(result.status).toBe(0)
-    expect(result.output).toBe(
-      `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed\n` +
+    expect(withoutElapsed(result.output)).toBe(
+      `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed · N\n` +
         'Warning: Storybook web runs storybook 12.0.0, and visual-check supports 9.1 to 11. The run carries on.\n' +
         'Report: .visual-check/report/report.json\n',
     )
@@ -644,8 +651,8 @@ describe('visual-check binary reaching Storybooks', () => {
       const result = await runThroughOnePipe({ cwd: project }, 'test')
 
       expect(result.status).toBe(0)
-      expect(result.output).toBe(
-        `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed\n` +
+      expect(withoutElapsed(result.output)).toBe(
+        `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed · N\n` +
           'Warning: Storybook web runs storybook 12.0.0, and visual-check supports 9.1 to 11. The run carries on.\n' +
           'Report: .visual-check/report/report.json\n',
       )
@@ -677,8 +684,8 @@ describe('visual-check binary reaching Storybooks', () => {
       warnings: [],
       error: null,
     } satisfies TestReport)
-    expect(result.stderr).toBe(
-      `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed\nReport: .visual-check/report/report.json\n`,
+    expect(withoutElapsed(result.stderr)).toBe(
+      `visual-check ${version} · test · 0 snapshots · 4 workers\n0 passed · N\nReport: .visual-check/report/report.json\n`,
     )
   })
 
