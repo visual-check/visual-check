@@ -187,9 +187,9 @@ export function stoppedUpdateOf(stop: RunStop, update: StoppedUpdate): StoppedOu
 }
 
 /**
- * Ends a run whose command line has a usage error: the message and the hint on stderr, exit code 2. For `test`, once
- * its flags parsed, the report folder beside the config the run would load is replaced with a report holding the
- * error, as `stoppedTestOf` says. For `update`, once its flags parsed, it ends as `stoppedUpdateOf` says.
+ * Ends a run whose command line has a usage error: the message and the hint on stderr, exit code 2. For an error that
+ * names its `test` run, the report folder beside the config the run would load is replaced with a report holding the
+ * error, as `stoppedTestOf` says. For one that names its `update` run, it ends as `stoppedUpdateOf` says.
  *
  * @throws {Error} Any error besides a `ReportError` while writing the report.
  *

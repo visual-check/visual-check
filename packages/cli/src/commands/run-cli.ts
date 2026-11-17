@@ -138,7 +138,7 @@ export interface RunCliOptions {
  * Runs the CLI with the given arguments, environment and folder, and returns what it prints on each stream. Only
  * progress is written as it happens, through `options.progress`; `update` also writes and deletes baselines, and
  * `test` writes the report folder. Problems with the command line, the config, the run's setup or the browser exit
- * with code 2. A usage error of `test` whose flags parsed, or that asks for `--reporter json`, writes its error report
+ * with code 2. A usage error of a `test` command line, even one whose flags fail to parse, writes its error report
  * beside the config the run would load. Once a `test` or `update` has loaded its config, an error that is a bug exits
  * 2 too, with its stack trace on stderr, as an error report for `test` and an error document with `--reporter json`.
  * Other errors are thrown.

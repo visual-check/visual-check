@@ -368,19 +368,28 @@ describe('parseCommandLine usage errors of a run', () => {
   })
 
   it.each([
-    ['test', ['test', '--reporter', 'json', '--bogus'], 'test', undefined],
-    ['update', ['update', '--bogus', '--reporter=json', '--config', 'c.mjs'], 'update', 'c.mjs'],
-    ['test with a flag missing its value', ['test', '--reporter', 'json', '--config'], 'test', undefined],
+    ['an unknown flag', ['test', '--bogus'], 'test', undefined, undefined],
+    ['json and an unknown flag', ['test', '--reporter', 'json', '--bogus'], 'test', undefined, 'json'],
+    ['log and an unknown flag', ['test', '--bogus', '--reporter', 'log'], 'test', undefined, 'log'],
+    ['an unknown reporter and flag', ['test', '--bogus', '--reporter', 'nope'], 'test', undefined, undefined],
+    [
+      'a config and an unknown flag',
+      ['update', '--bogus', '--reporter=json', '--config', 'c.mjs'],
+      'update',
+      'c.mjs',
+      'json',
+    ],
+    ['a flag missing its value', ['test', '--reporter', 'json', '--config'], 'test', undefined, 'json'],
+    ['a flag whose value is another flag', ['test', '--filter', '--reporter', 'json'], 'test', undefined, 'json'],
+    ['a config whose value is another flag', ['test', '--config', '--reporter=log'], 'test', undefined, 'log'],
   ] as const)(
-    'names the json run of a %s command line that fails to parse, as far as its flags tell',
-    (_, commandLineArguments, command, config) => {
-      expect(usageErrorOf(...commandLineArguments).run).toEqual({ command, config, reporter: 'json' })
+    'names the run of a command line with %s that fails to parse, as far as its flags tell',
+    (_, commandLineArguments, command, config, reporter) => {
+      expect(usageErrorOf(...commandLineArguments).run).toEqual({ command, config, reporter })
     },
   )
 
   it.each([
-    ['an unknown flag', ['test', '--nope']],
-    ['an unknown flag with another reporter', ['test', '--nope', '--reporter', 'log']],
     ['an unknown flag with no command', ['--nope', '--reporter', 'json']],
     ['an unknown flag of init', ['init', '--nope', '--reporter', 'json']],
     ['an unknown command', ['tset', '--all']],

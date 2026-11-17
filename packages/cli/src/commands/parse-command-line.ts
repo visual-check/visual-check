@@ -14,8 +14,8 @@ export class UsageError extends Error {
 
   /**
    * The `test` or `update` run the command line asks for, with what its `--config` and `--reporter` flags give, when
-   * the flags parsed and the error is in their values or how they combine, or when they fail to parse and ask for
-   * `--reporter json`. `undefined` for anything else, such as an unknown flag or command.
+   * the error is in the flags' values or how they combine, or as far as a loose parse tells when they fail to parse.
+   * `undefined` for anything else, such as an unknown command or no command.
    */
   readonly run: UsageErrorRun | undefined
 
@@ -181,24 +181,37 @@ function parseCommandLineArguments(commandLineArguments: string[]) {
 }
 
 /**
- * Gives the `test` or `update` run of a command line that fails to parse, as far as a loose parse tells, when it asks
- * for `--reporter json`: such a run still prints its error document. `undefined` for anything else.
+ * The flags that take a value, as a command line writes them.
  */
-function jsonRunOf(commandLineArguments: string[]): UsageErrorRun | undefined {
+const valueFlags = new Set(flagsWithValue.map((flag) => `--${flag}`))
+
+/**
+ * Gives the `test` or `update` run of a command line that fails to parse, as far as a loose parse tells, so a `test`
+ * still replaces its report and a run with `--reporter json` still prints its error document. A flag that takes a
+ * value counts as missing its value when the next argument is a flag. `undefined` for any other command line.
+ */
+function looseRunOf(commandLineArguments: string[]): UsageErrorRun | undefined {
   const { values, positionals } = parseArgs({
-    args: commandLineArguments,
+    args: commandLineArguments.map((argument, index) =>
+      valueFlags.has(argument) && commandLineArguments[index + 1]?.startsWith('-') ? `${argument}=` : argument,
+    ),
     options: flagOptions,
     strict: false,
     allowPositionals: true,
   })
   const [command] = positionals
+  const { config, reporter } = values
 
-  if ((command !== 'test' && command !== 'update') || values.reporter !== 'json') {
+  if (command !== 'test' && command !== 'update') {
     return undefined
   }
 
   // A loose parse gives `true` to a flag missing its value.
-  return { command, config: typeof values.config === 'string' ? values.config : undefined, reporter: 'json' }
+  return {
+    command,
+    config: typeof config === 'string' && config !== '' ? config : undefined,
+    reporter: typeof reporter === 'string' && isReporter(reporter) ? reporter : undefined,
+  }
 }
 
 /**
@@ -364,8 +377,8 @@ function reporterFlagOf(reporter: string | undefined): Reporter | undefined {
  * regular expression, a `--workers` that isn't a whole number of 1 or more, `--consistency` on `update` or with `--all`
  * or `--filter`, a `--reporter` that isn't `live`, `log` or `json`, and a `--shard` that isn't `k/n` with 1 ≤ k ≤ n,
  * or is on `update` or with `--consistency`. Once the flags parse, an error of a `test` or `update` command line names
- * its run; before, only when it asks for `--reporter json`. `--help` anywhere before a `--` separator wins, so it
- * never throws.
+ * its run; one whose flags fail to parse names it as far as a loose parse tells. `--help` anywhere before a `--`
+ * separator wins, so it never throws.
  */
 export function parseCommandLine(commandLineArguments: string[]): CommandLine {
   if (asksForHelp(commandLineArguments)) {
@@ -377,7 +390,7 @@ export function parseCommandLine(commandLineArguments: string[]): CommandLine {
   try {
     parsed = parseCommandLineArguments(commandLineArguments)
   } catch (error) {
-    throw new UsageError(messageOf(error), jsonRunOf(commandLineArguments))
+    throw new UsageError(messageOf(error), looseRunOf(commandLineArguments))
   }
 
   const { values, positionals } = parsed

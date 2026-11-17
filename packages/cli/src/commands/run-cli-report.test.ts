@@ -598,12 +598,31 @@ describe('runCli test report on exit 2', () => {
     expect(existsSync(reportFolderIn(project))).toBe(false)
   })
 
-  it('writes nothing for an unknown flag, which stays plain text', async () => {
+  it('replaces a stale report with the error report of an unknown flag, which stays plain text', async () => {
     const { project } = await createRun(['a'])
+
+    writeStaleReport(project)
+
     const result = await runCli(['test', '--nope'], {}, project)
 
-    expect(result).toEqual({ exitCode: 2, stdout: '', stderr: `${unknownFlagMessage}\n${usageHint}` })
-    expect(existsSync(reportFolderIn(project))).toBe(false)
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr: `${unknownFlagMessage}\n${usageHint}`,
+      reportLine: reportOnStderr,
+    })
+    expect(readdirSync(reportFolderIn(project))).toEqual(['report.json'])
+    expect(readReport(project)).toEqual(errorReportOf({ message: unknownFlagMessage, storybooks: [] }))
+  })
+
+  it('reads --reporter json after a flag missing its value, printing the error document', async () => {
+    const { project } = await createRun(['a'])
+    const result = await runCli(['test', '--filter', '--reporter', 'json'], {}, project)
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stdout).toBe(readFileSync(join(reportFolderIn(project), 'report.json'), 'utf8'))
+    expect(readReport(project).error?.message).toMatch(/^Option '--filter' argument is ambiguous\./)
+    expect(result.reportLine).toEqual(reportOnStderr)
   })
 
   it('replaces the report with the error report of an unknown flag with --reporter json, printing its document', async () => {
