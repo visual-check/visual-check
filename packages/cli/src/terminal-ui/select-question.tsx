@@ -1,27 +1,10 @@
 import { Box, type Key, Text } from 'ink'
 import type { ReactNode } from 'react'
+import type { Choice } from '../init/prompter.js'
 import { ColouredText } from './coloured-text.js'
 import { type QuestionProps, useLatestState, useQuestionInput } from './question.js'
 import { QuestionHeader } from './question-header.js'
 import { glyphs } from './theme.js'
-
-/**
- * One answer a select question offers.
- */
-interface Choice<T extends string> {
-  /**
-   * What the question answers with when this choice is picked.
-   */
-  value: T
-  /**
-   * What the person sees.
-   */
-  label: string
-  /**
-   * A few words after the label that help pick it.
-   */
-  hint?: string | undefined
-}
 
 /**
  * What `SelectQuestion` takes. `defaultValue` is the value of the choice highlighted at the start.

@@ -16,9 +16,9 @@ import { type DockerHost, type ProbeDocker, probeDocker } from '../container/doc
 import { isInsideContainer } from '../container/inside-container.js'
 import { knownContainerIdOf } from '../container/own-container.js'
 import { type ListFiles, listProjectFiles } from '../init/find-storybooks.js'
-import { createTerminalPrompter, defaultsPrompter } from '../init/prompter.js'
+import { defaultsPrompter } from '../init/prompter.js'
 import { createRunCommand, type RunCommand } from '../init/run-command.js'
-import { type InitTools, runInit } from '../init/run-init.js'
+import { type InitResult, type InitTools, runInit } from '../init/run-init.js'
 import { plainSetupProgress, type SetupProgress } from '../init/setup-progress.js'
 import { type FindUnlistedDependencies, findUnlistedDependencies } from '../init/unlisted-dependencies.js'
 import { type BrowserPlace, browserPlaceOf } from './browser-route.js'
@@ -118,14 +118,15 @@ export interface RunCliOptions {
    */
   recaptureDelayMs?: number
   /**
-   * Whether there's a terminal for `init` to ask its questions in. By default, whether standard input is a TTY. A test
-   * gives its answer.
+   * Whether `init` runs in a terminal: by default, when standard input and standard output are TTYs and `CI` is unset,
+   * empty, `0` or `false`. There, with no `prompter` given, `init` draws its terminal UI, which it loads only then.
+   * Elsewhere it prints plain text, and without `--yes` it stops, since it has nowhere to ask. A test gives its answer.
    */
   interactive?: boolean
   /**
-   * Asks `init`'s questions and shows its notes. By default, with `--yes` a prompter that takes every default and
-   * collects the notes, and otherwise one that writes to standard error and reads the answers from standard input,
-   * from its first question on. A test gives a scripted one.
+   * Asks `init`'s questions and shows its notes. By default, in a terminal the terminal UI, which also shows the setup
+   * steps and the end of the run; elsewhere a prompter that takes every default and collects the notes, which `init`
+   * reaches only with `--yes`. A test gives a scripted one.
    */
   prompter?: InitTools['prompter']
   /**
@@ -133,8 +134,8 @@ export interface RunCliOptions {
    */
   nodeVersion?: string
   /**
-   * Writes progress as it happens, such as an image pull's, a download's, or the commands `init` runs and their output.
-   * Progress is dropped when it isn't given.
+   * Writes progress as it happens, such as an image pull's, a download's, or the commands `init` runs and their output
+   * when it prints plain text. `init`'s terminal UI shows its own. Progress is dropped when it isn't given.
    */
   progress?: (text: string) => void
   /**
@@ -197,7 +198,7 @@ export async function runCli(
       case 'version':
         return { exitCode: 0, stdout: `${readCliManifest().version}\n`, stderr: '' }
       case 'init':
-        return await runInit(cwd, initToolsOf(commandLine.options.yes, options))
+        return await runInitCommand(commandLine.options.yes, environment, cwd, options)
       case 'test':
       case 'update':
         return await runTestOrUpdate(commandLine.command, commandLine.options, environment, cwd, options)
@@ -462,39 +463,79 @@ function readCliManifest(): CliManifest {
 }
 
 /**
- * Gives `init` what it runs with: what the CLI's caller gives, else the defaults.
+ * How `init` talks to the person: whether it runs in a terminal, what asks the questions, and what shows the steps.
  */
-function initToolsOf(yes: boolean, cliOptions: RunCliOptions): InitTools {
-  const progress = plainSetupProgress(cliOptions.progress ?? (() => undefined))
+type InitIo = Pick<InitTools, 'interactive' | 'prompter' | 'progress'>
+
+/**
+ * Runs `init`. In a terminal, unless the caller gives a prompter, it loads the terminal UI, which asks the questions,
+ * shows the steps and the end of the run, so the result carries only the exit code. Elsewhere it runs with the
+ * caller's prompter, else the one that takes every default, and plain progress, and the result carries the text.
+ *
+ * @throws Any error `runInit` throws, after the terminal UI has stopped drawing.
+ */
+async function runInitCommand(
+  yes: boolean,
+  environment: Record<string, string | undefined>,
+  cwd: string,
+  cliOptions: RunCliOptions,
+): Promise<CliResult> {
+  const interactive = cliOptions.interactive ?? isTerminal(environment)
+
+  if (!interactive || cliOptions.prompter !== undefined) {
+    const prompter = cliOptions.prompter ?? defaultsPrompter()
+    const progress = plainSetupProgress(cliOptions.progress ?? (() => undefined))
+
+    return await runInit(cwd, initToolsOf(yes, { interactive, prompter, progress }, cliOptions))
+  }
+
+  // Loaded only here, so `test` and `update` never load React and Ink.
+  const { startInitView } = await import('../terminal-ui/init-view.js')
+  const view = startInitView({
+    version: readCliManifest().version,
+    yes,
+    environment,
+    stdin: process.stdin,
+    stdout: process.stdout,
+  })
+  let result: InitResult
+
+  try {
+    result = await runInit(cwd, initToolsOf(yes, { interactive, prompter: view, progress: view.progress }, cliOptions))
+  } catch (error) {
+    await view.finish({ exitCode: 2, stdout: '', stderr: '' })
+
+    throw error
+  }
+
+  await view.finish(result)
+
+  return { exitCode: result.exitCode, stdout: '', stderr: '' }
+}
+
+/**
+ * Whether the CLI runs in a terminal a person answers in: standard input and standard output are TTYs, and the `CI`
+ * environment variable doesn't say this is a CI run.
+ */
+function isTerminal(environment: Record<string, string | undefined>): boolean {
+  return process.stdin.isTTY === true && process.stdout.isTTY === true && !isCi(environment)
+}
+
+/**
+ * Gives `init` what it runs with: how it talks to the person, then what the CLI's caller gives, else the defaults.
+ */
+function initToolsOf(yes: boolean, io: InitIo, cliOptions: RunCliOptions): InitTools {
   const { version, browserRange } = readCliManifest()
 
   return {
     yes,
-    ...promptingOf(yes, cliOptions),
+    ...io,
     nodeVersion: cliOptions.nodeVersion ?? process.versions.node,
     os: cliOptions.os ?? process.platform,
     cliVersion: version,
     browserRange,
-    ...initAdaptersOf(cliOptions, progress),
-    progress,
+    ...initAdaptersOf(cliOptions, io.progress),
   }
-}
-
-/**
- * Gives whether there's a terminal for `init` to ask in, and the prompter that asks: the caller's, else the default.
- */
-function promptingOf(yes: boolean, cliOptions: RunCliOptions): Pick<InitTools, 'interactive' | 'prompter'> {
-  const interactive = cliOptions.interactive ?? process.stdin.isTTY === true
-
-  return { interactive, prompter: cliOptions.prompter ?? defaultPrompterOf(yes) }
-}
-
-/**
- * Makes `init`'s default prompter: with `--yes` one that takes every default, else one that asks on standard error and
- * reads standard input, which it starts reading only at its first question.
- */
-function defaultPrompterOf(yes: boolean): InitTools['prompter'] {
-  return yes ? defaultsPrompter() : createTerminalPrompter(process.stdin, process.stderr)
 }
 
 /**

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { projectOf, storybookOf } from './detected-project.fixture.js'
 import { type PromptRecord, scriptedPrompter } from './prompter.fixture.js'
 import { defaultsPrompter } from './prompter.js'
@@ -27,6 +27,19 @@ async function ask(
 }
 
 /**
+ * The hints of the questions, by what each asks about.
+ */
+const hints = {
+  packageManager: "Nothing in package.json or a lockfile names one. init installs visual-check's packages with it.",
+  name: 'What the config and the report call this Storybook.',
+  url: 'Where visual-check opens this Storybook, locally and in CI. Use 127.0.0.1, not localhost.',
+  startCommand: 'No script starts this Storybook, so the next steps use this command.',
+  testScript: 'Runs visual-check test, which compares each story with its baseline.',
+  updateScript: 'Runs visual-check update, which writes the baselines.',
+  addon: 'Checks and updates the open story from inside Storybook. Added through storybook add.',
+}
+
+/**
  * Lists the messages of the records of one kind.
  */
 function messagesOf(records: PromptRecord[], kind: PromptRecord['kind']): string[] {
@@ -40,12 +53,27 @@ describe('askQuestions', () => {
     })
 
     expect(records).toEqual([
-      { kind: 'text', message: 'Name of the Storybook in .storybook', defaultValue: 'project' },
-      { kind: 'text', message: 'URL of project', defaultValue: 'http://127.0.0.1:6006' },
-      { kind: 'text', message: 'Command that starts project', defaultValue: 'pnpm exec storybook dev -p 6006' },
-      { kind: 'text', message: 'Name of the script that runs visual-check test', defaultValue: 'visual:check' },
-      { kind: 'text', message: 'Name of the script that runs visual-check update', defaultValue: 'visual:update' },
-      { kind: 'confirm', message: 'Add the Storybook addon to project?', defaultValue: true },
+      { kind: 'text', message: 'Name of the Storybook in .storybook', defaultValue: 'project', hint: hints.name },
+      { kind: 'text', message: 'URL of project', defaultValue: 'http://127.0.0.1:6006', hint: hints.url },
+      {
+        kind: 'text',
+        message: 'Command that starts project',
+        defaultValue: 'pnpm exec storybook dev -p 6006',
+        hint: hints.startCommand,
+      },
+      {
+        kind: 'text',
+        message: 'Name of the script that runs visual-check test',
+        defaultValue: 'visual:check',
+        hint: hints.testScript,
+      },
+      {
+        kind: 'text',
+        message: 'Name of the script that runs visual-check update',
+        defaultValue: 'visual:update',
+        hint: hints.updateScript,
+      },
+      { kind: 'confirm', message: 'Add the Storybook addon to project?', defaultValue: true, hint: hints.addon },
     ])
     expect(answers).toEqual({
       packageManager: 'pnpm',
@@ -143,7 +171,12 @@ describe('askQuestions', () => {
     })
 
     expect(records.map(({ message }) => message)).not.toContain('Command that starts project')
-    expect(records[1]).toEqual({ kind: 'text', message: 'URL of project', defaultValue: 'http://127.0.0.1:6100' })
+    expect(records[1]).toEqual({
+      kind: 'text',
+      message: 'URL of project',
+      defaultValue: 'http://127.0.0.1:6100',
+      hint: hints.url,
+    })
     expect(answers.storybooks[0]?.startCommand).toBe('pnpm run storybook')
     expect(warnings).toEqual([])
   })
@@ -157,7 +190,12 @@ describe('askQuestions', () => {
     expect(messagesOf(records, 'note')).toEqual([
       "hint: The sb script sets no port. Add -p 6006 to it, so Storybook always starts on the port in project's URL.",
     ])
-    expect(records[2]).toEqual({ kind: 'text', message: 'URL of project', defaultValue: 'http://127.0.0.1:6006' })
+    expect(records[2]).toEqual({
+      kind: 'text',
+      message: 'URL of project',
+      defaultValue: 'http://127.0.0.1:6006',
+      hint: hints.url,
+    })
     expect(warnings).toEqual([])
   })
 
@@ -203,27 +241,45 @@ describe('askQuestions', () => {
     ])
   })
 
-  it('asks for the package manager only when nothing shows one, and the commands follow it', async () => {
-    const { answers, records } = await ask(['', '', '', '', '', '', false], {
-      project: { packageManager: undefined },
+  it('asks for the package manager from a list only when nothing shows one, and the commands follow it', async () => {
+    const choices = vi.fn()
+    const prompter = scriptedPrompter(['', '', '', '', '', '', false])
+    const { answers } = await askQuestions({
+      project: projectOf({ packageManager: undefined }),
+      prompter: {
+        ...prompter,
+        select(message, options) {
+          choices(options.choices)
+
+          return prompter.select(message, options)
+        },
+      },
     })
 
-    expect(records[0]).toEqual({
-      kind: 'text',
-      message: 'Package manager (npm, pnpm, yarn or bun)',
+    expect(prompter.records[0]).toEqual({
+      kind: 'select',
+      message: 'Package manager',
       defaultValue: 'npm',
+      hint: hints.packageManager,
     })
+    expect(choices).toHaveBeenCalledWith([
+      { value: 'npm', label: 'npm' },
+      { value: 'pnpm', label: 'pnpm' },
+      { value: 'yarn', label: 'yarn', hint: 'Yarn 1, or 2 and later' },
+      { value: 'bun', label: 'bun', hint: 'works, but untested' },
+    ])
     expect(answers.packageManager).toBe('npm')
     expect(answers.storybooks[0]?.startCommand).toBe('npx storybook dev -p 6006')
   })
 
-  it('asks again after a package manager it does not know', async () => {
-    const { answers, records } = await ask(['pip', 'yarn', '', '', '', '', '', false], {
+  it('takes the package manager picked from the list', async () => {
+    const { answers, records } = await ask(['yarn', '', '', '', '', '', false], {
       project: { packageManager: undefined },
     })
 
-    expect(messagesOf(records, 'invalid')).toEqual(['Pick npm, pnpm, yarn or bun.'])
+    expect(messagesOf(records, 'select')).toEqual(['Package manager'])
     expect(answers.packageManager).toBe('yarn')
+    expect(answers.storybooks[0]?.startCommand).toBe('yarn storybook dev -p 6006')
   })
 
   it('runs the start script with the package manager answered', async () => {
@@ -251,7 +307,7 @@ describe('askQuestions', () => {
     expect(answers.scripts.test).toEqual({ name: 'visual:check', add: true })
   })
 
-  it('takes a name another script has, so that script is replaced', async () => {
+  it('takes a name another script has, so that script is replaced, and says so in the hint', async () => {
     const manifest = { scripts: { 'visual:check': 'vitest', 'visual:update': 'vitest -u' } }
     const { answers, records, warnings } = await ask(['', '', '', '', '', false], { project: { manifest } })
 
@@ -259,8 +315,94 @@ describe('askQuestions', () => {
       test: { name: 'visual:check', add: true },
       update: { name: 'visual:update', add: true },
     })
+    expect(records.filter(({ message }) => message.startsWith('Name of the script')).map(({ hint }) => hint)).toEqual([
+      `${hints.testScript} package.json's visual:check runs vitest now; init replaces it.`,
+      `${hints.updateScript} package.json's visual:update runs vitest -u now; init replaces it.`,
+    ])
     expect(messagesOf(records, 'invalid')).toEqual([])
     expect(warnings).toEqual([])
+  })
+
+  it('suggests visual:update-baselines for the update script when the test script has visual:update', async () => {
+    const manifest = { scripts: { 'visual:update': 'visual-check test' } }
+    const { answers, records } = await ask(['', '', '', '', false], { project: { manifest } })
+
+    expect(records.find(({ message }) => message.endsWith('visual-check update'))).toEqual({
+      kind: 'text',
+      message: 'Name of the script that runs visual-check update',
+      defaultValue: 'visual:update-baselines',
+      hint: hints.updateScript,
+    })
+    expect(answers.scripts).toEqual({
+      test: { name: 'visual:update', add: false },
+      update: { name: 'visual:update-baselines', add: true },
+    })
+  })
+
+  it('suggests visual:test for the test script when the update script is called visual:check', async () => {
+    const manifest = { scripts: { 'visual:check': 'visual-check update' } }
+    const { answers, records } = await ask(['', '', '', '', false], { project: { manifest } })
+
+    expect(records.filter(({ message }) => message.startsWith('Name of the script'))).toEqual([
+      {
+        kind: 'text',
+        message: 'Name of the script that runs visual-check test',
+        defaultValue: 'visual:test',
+        hint: hints.testScript,
+      },
+    ])
+    expect(answers.scripts).toEqual({
+      test: { name: 'visual:test', add: true },
+      update: { name: 'visual:check', add: false },
+    })
+  })
+
+  it('asks again when the test script has the name of the update script it reuses', async () => {
+    const manifest = { scripts: { 'visual:check': 'visual-check update' } }
+    const { answers, records } = await ask(['', '', '', 'visual:check', 'vt', false], { project: { manifest } })
+
+    expect(messagesOf(records, 'invalid')).toEqual(['The test and update scripts need different names.'])
+    expect(answers.scripts.test).toEqual({ name: 'vt', add: true })
+  })
+
+  it.each([
+    [
+      { 'visual:update': 'visual-check test' },
+      { test: { name: 'visual:update', add: false }, update: { name: 'visual:update-baselines', add: true } },
+    ],
+    [
+      { 'visual:check': 'visual-check update' },
+      { test: { name: 'visual:test', add: true }, update: { name: 'visual:check', add: false } },
+    ],
+  ])('never gives one script the name of the other with the defaults prompter, for %j', async (scripts, expected) => {
+    const { answers } = await askQuestions({
+      project: projectOf({ manifest: { scripts } }),
+      prompter: defaultsPrompter(),
+    })
+
+    expect(answers.scripts).toEqual(expected)
+  })
+
+  it('says what a script with the suggested name runs, even another visual-check command', async () => {
+    const { records } = await ask(['', '', '', '', '', false], {
+      project: { manifest: { scripts: { 'visual:check': 'visual-check init --yes' } } },
+    })
+
+    expect(records.find(({ message }) => message.endsWith('visual-check test'))?.hint).toBe(
+      `${hints.testScript} package.json's visual:check runs visual-check init --yes now; init replaces it.`,
+    )
+  })
+
+  it('says nothing of replacing a script with the default name that starts Storybook', async () => {
+    const startScript = { script: 'visual:check', subcommand: 'dev' as const, configDir: undefined, port: 6006 }
+    const { records } = await ask(['', '', 'vt', '', false], {
+      project: {
+        manifest: { scripts: { 'visual:check': 'storybook dev -p 6006' } },
+        storybooks: [storybookOf({ startScript })],
+      },
+    })
+
+    expect(records.find(({ message }) => message.endsWith('visual-check test'))?.hint).toBe(hints.testScript)
   })
 
   it('asks again after a script name that starts Storybook or has a space', async () => {

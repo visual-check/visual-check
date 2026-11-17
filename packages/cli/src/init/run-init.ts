@@ -49,10 +49,10 @@ export interface InitTools {
    */
   browserRange: string
   /**
-   * Asks the questions and shows the notes that come before and between them: the terminal's prompter, or with
-   * `--yes` the defaults prompter. A prompter that collects its notes in `notes`, as the defaults prompter does, has
-   * them printed on stderr, in order, before the warnings the answers call for. The terminal's prompter shows them as
-   * they come, and has no `notes`. `runInit` closes it.
+   * Asks the questions and shows the notes that come before and between them: the terminal UI, or with `--yes` outside
+   * a terminal the defaults prompter. A prompter that collects its notes in `notes`, as the defaults prompter does, has
+   * them printed on stderr, in order, before the warnings the answers call for. The terminal UI shows them as they
+   * come, and has no `notes`.
    */
   prompter: Prompter & { notes?: readonly string[] }
   /**
@@ -79,8 +79,10 @@ export interface InitTools {
 
 /**
  * What `init` produced: the exit code and the text for each output stream.
+ *
+ * @public
  */
-interface InitResult {
+export interface InitResult {
   /**
    * The process exit code.
    */
@@ -140,34 +142,29 @@ const checkUnlistedTitle = 'Check for unlisted dependencies'
  * Sets up visual-check in the project around `cwd`. It detects the project and runs the checks that stop it, before it
  * writes or runs anything. Then it notes the Storybook versions, Docker and a config that's already there, asks its
  * questions, writes the files that are missing and the scripts, adds the dependencies and the addon, and asks Fallow
- * for unlisted dependencies. A check that fails, input that ends before every answer is in, or a failed install, exits
- * 2. It closes the prompter when done.
+ * for unlisted dependencies. A check that fails, a question the person gives up on, or a failed install, exits 2.
  *
  * @throws Any error besides the ones it words, such as a `package.json` it can't write.
  *
  * @public
  */
 export async function runInit(cwd: string, tools: InitTools): Promise<InitResult> {
-  try {
-    const { nodeVersion, yes, interactive } = tools
-    const project = await detectProject(cwd, tools.listFiles)
-    const problems = blockingProblemsOf({ cwd, nodeVersion, project, yes, interactive })
+  const { nodeVersion, yes, interactive } = tools
+  const project = await detectProject(cwd, tools.listFiles)
+  const problems = blockingProblemsOf({ cwd, nodeVersion, project, yes, interactive })
 
-    if (project === undefined || problems.length > 0) {
-      return failureOf(problems)
-    }
-
-    const setup = await settleSetup(cwd, project, tools)
-
-    return 'exitCode' in setup ? setup : await applySetup(cwd, project, setup, tools)
-  } finally {
-    tools.prompter.close()
+  if (project === undefined || problems.length > 0) {
+    return failureOf(problems)
   }
+
+  const setup = await settleSetup(cwd, project, tools)
+
+  return 'exitCode' in setup ? setup : await applySetup(cwd, project, setup, tools)
 }
 
 /**
  * Settles what to set up: shows what's known before the questions, then asks them. Gives the result to exit with
- * instead when the input ends before every answer is in: the notes collected so far, then why it stopped.
+ * instead when the person gives up on a question: the notes collected so far, then why it stopped.
  */
 async function settleSetup(cwd: string, project: DetectedProject, tools: InitTools): Promise<Setup | InitResult> {
   const { prompter } = tools

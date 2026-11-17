@@ -5,9 +5,9 @@ import type { Prompter } from './prompter.js'
  */
 export interface PromptRecord {
   /**
-   * What happened: a text question, a yes or no question, a validation message, or a note.
+   * What happened: a text question, a yes or no question, a select question, a validation message, or a note.
    */
-  kind: 'text' | 'confirm' | 'invalid' | 'note'
+  kind: 'text' | 'confirm' | 'select' | 'invalid' | 'note'
   /**
    * The question, the validation message or the note.
    */
@@ -16,14 +16,21 @@ export interface PromptRecord {
    * The default of a question. `undefined` for a validation message or a note.
    */
   defaultValue?: string | boolean
+  /**
+   * The hint of a question that has one.
+   */
+  hint?: string
 }
 
 /**
- * Builds a prompter that answers in order: a string for a text question, where `''` takes the default, and a boolean
- * for a yes or no question. A text is validated like the terminal prompter does, and a failed answer takes up the next
- * one. It records every question, validation message and note in `records`, and `unused()` lists the answers left.
+ * Builds a prompter that answers in order: a string for a text or select question, where `''` takes the default, and
+ * a boolean for a yes or no question. A text is validated like the terminal UI does, and a failed answer takes up the
+ * next one. A select answer must be the value of one of its choices. It records every question, validation message
+ * and note in `records`, and `unused()` lists the answers left.
  *
  * @throws When it runs out of answers, or an answer is of the wrong kind.
+ *
+ * @public
  */
 export function scriptedPrompter(answers: readonly (string | boolean)[]): Prompter & {
   records: PromptRecord[]
@@ -46,20 +53,28 @@ export function scriptedPrompter(answers: readonly (string | boolean)[]): Prompt
     return answer
   }
 
+  /**
+   * Takes the next answer, which must be a string.
+   */
+  function takeString(message: string): string {
+    const answer = take(message)
+
+    if (typeof answer !== 'string') {
+      throw new Error(`"${message}" takes a string, and the answer is ${answer}.`)
+    }
+
+    return answer
+  }
+
   return {
     records,
     unused: () => answers.slice(next),
-    text(message, { defaultValue, validate }) {
-      records.push({ kind: 'text', message, defaultValue })
+    text(message, { defaultValue, hint, validate }) {
+      records.push({ kind: 'text', message, defaultValue, ...(hint === undefined ? {} : { hint }) })
 
       for (;;) {
-        const answer = take(message)
-
-        if (typeof answer !== 'string') {
-          throw new Error(`"${message}" is a text question, and the answer is ${answer}.`)
-        }
-
-        const value = answer.trim() === '' ? defaultValue : answer.trim()
+        const answer = takeString(message).trim()
+        const value = answer === '' ? defaultValue : answer
         const problem = validate?.(value)
 
         if (problem === undefined) {
@@ -69,8 +84,8 @@ export function scriptedPrompter(answers: readonly (string | boolean)[]): Prompt
         records.push({ kind: 'invalid', message: problem })
       }
     },
-    confirm(message, defaultValue) {
-      records.push({ kind: 'confirm', message, defaultValue })
+    confirm(message, { defaultValue, hint }) {
+      records.push({ kind: 'confirm', message, defaultValue, ...(hint === undefined ? {} : { hint }) })
 
       const answer = take(message)
 
@@ -80,11 +95,20 @@ export function scriptedPrompter(answers: readonly (string | boolean)[]): Prompt
 
       return Promise.resolve(answer)
     },
+    select(message, { choices, defaultValue, hint }) {
+      records.push({ kind: 'select', message, defaultValue, ...(hint === undefined ? {} : { hint }) })
+
+      const answer = takeString(message)
+      const chosen = choices.find(({ value }) => value === (answer === '' ? defaultValue : answer))
+
+      if (chosen === undefined) {
+        throw new Error(`"${message}" offers no choice "${answer}".`)
+      }
+
+      return Promise.resolve(chosen.value)
+    },
     note(text) {
       records.push({ kind: 'note', message: text })
-    },
-    close() {
-      // Nothing was opened.
     },
   }
 }

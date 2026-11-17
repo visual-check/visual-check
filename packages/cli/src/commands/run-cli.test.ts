@@ -18,7 +18,7 @@ import { createRequire } from 'node:module'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { afterAll, afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BrowserDownloadError } from '../browser-download/browser-download-error.js'
 import {
   BrowserExitedError,
@@ -29,6 +29,9 @@ import {
 } from '../capture/driver/driver.js'
 import { answerEvaluate } from '../capture/fake-driver.fixture.js'
 import { ContainerError } from '../container/container-error.js'
+import { pnpmClosingMessage, pnpmWrittenLines } from '../init/init-tools.fixture.js'
+import { scriptedPrompter } from '../init/prompter.fixture.js'
+import type { InitResult } from '../init/run-init.js'
 import { answerOptionsReadExpression, optionsReadAnswer } from '../storybook/options-read.fixture.js'
 import type { StoriesFile } from '../storybook/options-read.js'
 import { finishedAnswer } from '../storybook/preview-script.fixture.js'
@@ -37,9 +40,38 @@ import type { ContainerRoute } from './browser-route.js'
 import type { BrowserLaunch, LaunchBrowser } from './launch-browser.js'
 import { type RunCliOptions, runCli } from './run-cli.js'
 
-const { version } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
+const { version, peerDependencies } = JSON.parse(
+  readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
+) as {
   version: string
+  peerDependencies: Record<string, string>
 }
+
+/**
+ * The range of the browser package the CLI takes.
+ */
+const browserRange = peerDependencies['@visual-check/chromium']
+
+/**
+ * The command that adds visual-check's packages to the `init` project, under pnpm.
+ */
+const pnpmAddLine = [
+  'pnpm add --save-dev',
+  `@visual-check/cli@${version}`,
+  `@visual-check/chromium@${browserRange}`,
+  `@visual-check/storybook@${version}`,
+].join(' ')
+
+/**
+ * The terminal UI's module as `init` loads it in a terminal: a stand-in, so no test draws in the real terminal.
+ */
+const initViewModule = vi.hoisted(() => ({ startInitView: vi.fn() }))
+
+vi.mock('../terminal-ui/init-view.js', () => initViewModule)
+
+beforeEach(() => {
+  initViewModule.startInitView.mockReset()
+})
 
 /**
  * The workspace's browser package: its version and its `chromium.json`.
@@ -713,6 +745,72 @@ function firstLineOf(text: string): string | undefined {
 }
 
 /**
+ * Makes standard input and standard output say they are TTYs, as in a terminal. Gives the function that puts back what
+ * they said before.
+ */
+function pretendTerminal(): () => void {
+  const streams = [process.stdin, process.stdout]
+  const before = streams.map((stream) => Object.getOwnPropertyDescriptor(stream, 'isTTY'))
+
+  for (const stream of streams) {
+    Object.defineProperty(stream, 'isTTY', { value: true, configurable: true, writable: true })
+  }
+
+  return () => {
+    streams.forEach((stream, index) => {
+      const descriptor = before[index]
+
+      if (descriptor === undefined) {
+        Reflect.deleteProperty(stream, 'isTTY')
+      } else {
+        Object.defineProperty(stream, 'isTTY', descriptor)
+      }
+    })
+  }
+}
+
+/**
+ * Makes a pnpm project with one Storybook 10, whose `storybook` script starts it on port 6006.
+ */
+function createInitProject(): string {
+  return createProject({
+    'package.json': JSON.stringify({
+      name: 'web-app',
+      packageManager: 'pnpm@9.12.3',
+      scripts: { storybook: 'storybook dev -p 6006' },
+    }),
+    '.storybook/main.ts': '',
+    'node_modules/storybook/package.json': JSON.stringify({ version: '10.6.7' }),
+  })
+}
+
+/**
+ * The fakes `init` reaches outside the process with: Node 22 on Linux, a running Docker, no git files, commands that
+ * succeed and a Fallow that finds nothing.
+ */
+function initFakes(): RunCliOptions {
+  return {
+    os: 'linux',
+    nodeVersion: '22.23.1',
+    probeDocker: hostOptions.probeDocker,
+    listFiles: async () => [],
+    runCommand: async () => 0,
+    findUnlistedDependencies: async () => [],
+  }
+}
+
+/**
+ * Makes a stand-in for the terminal UI that answers with `answers`, records the steps and the end of the run.
+ */
+function fakeInitView(answers: (string | boolean)[]) {
+  return {
+    ...scriptedPrompter(answers),
+    progress: { plan: vi.fn(), start: vi.fn(), output: vi.fn(), end: vi.fn() },
+    finish: vi.fn<(result: InitResult) => Promise<void>>(async () => undefined),
+  }
+}
+
+/**
  * The hint every usage error ends with.
  */
 const usageHint = 'Run visual-check --help to see the commands and options.\n'
@@ -915,47 +1013,85 @@ Other options:
   })
 
   it('sets up the project for init --yes with the CLI version and the browser range', async () => {
-    const { peerDependencies } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
-      peerDependencies: Record<string, string>
-    }
-    const project = createProject({
-      'package.json': JSON.stringify({
-        name: 'web-app',
-        packageManager: 'pnpm@9.12.3',
-        scripts: { storybook: 'storybook dev -p 6006' },
-      }),
-      '.storybook/main.ts': '',
-      'node_modules/storybook/package.json': JSON.stringify({ version: '10.6.7' }),
-    })
     const commands: string[] = []
     const written: string[] = []
-    const result = await runCli(['init', '--yes'], {}, project, {
+    const result = await runCli(['init', '--yes'], {}, createInitProject(), {
+      ...initFakes(),
+      interactive: false,
       progress: (text) => written.push(text),
-      os: 'linux',
-      nodeVersion: '22.23.1',
-      probeDocker: hostOptions.probeDocker,
-      listFiles: async () => [],
       runCommand: async (command, args) => {
         commands.push([command, ...args].join(' '))
 
         return 0
       },
-      findUnlistedDependencies: async () => [],
     })
-    const chromiumRange = peerDependencies['@visual-check/chromium']
+    const addonLine = `pnpm exec storybook add @visual-check/storybook-addon@${version} --yes`
 
-    expect(result.exitCode).toBe(0)
-    expect(result.stderr).toBe('')
-    expect(written).toEqual([
-      `Running pnpm add --save-dev @visual-check/cli@${version} @visual-check/chromium@${chromiumRange} @visual-check/storybook@${version}\n`,
-      `Running pnpm exec storybook add @visual-check/storybook-addon@${version} --yes\n`,
-    ])
-    expect(firstLineOf(result.stdout)).toBe('Wrote visual-check.config.ts')
-    expect(result.stdout).toContain('visual-check is set up. Next:\n')
-    expect(commands).toEqual([
-      `pnpm add --save-dev @visual-check/cli@${version} @visual-check/chromium@${peerDependencies['@visual-check/chromium']} @visual-check/storybook@${version}`,
-      `pnpm exec storybook add @visual-check/storybook-addon@${version} --yes`,
-    ])
+    expect(result).toEqual({ exitCode: 0, stdout: `${pnpmWrittenLines}\n${pnpmClosingMessage}`, stderr: '' })
+    expect(written).toEqual([`Running ${pnpmAddLine}\n`, `Running ${addonLine}\n`])
+    expect(commands).toEqual([pnpmAddLine, addonLine])
+    expect(initViewModule.startInitView).not.toHaveBeenCalled()
+  })
+
+  it('stops before asking anything outside a terminal without --yes, and loads no terminal UI', async () => {
+    const project = createInitProject()
+    const result = await runCli(['init'], {}, project, { ...initFakes(), interactive: false })
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr:
+        "visual-check init asks questions, and there's no terminal to ask them in. " +
+        'Run it in a terminal, or pass --yes to take every default.\n',
+    })
+    expect(initViewModule.startInitView).not.toHaveBeenCalled()
+  })
+
+  it('runs init through the terminal UI in a terminal, which shows the end of the run', async () => {
+    const project = createInitProject()
+    const view = fakeInitView(['', '', '', '', true])
+    const environment = { TERM: 'xterm' }
+
+    initViewModule.startInitView.mockReturnValue(view)
+
+    const result = await runCli(['init'], environment, project, { ...initFakes(), interactive: true })
+
+    expect(result).toEqual({ exitCode: 0, stdout: '', stderr: '' })
+    expect(initViewModule.startInitView).toHaveBeenCalledExactlyOnceWith({
+      version,
+      yes: false,
+      environment,
+      stdin: process.stdin,
+      stdout: process.stdout,
+    })
+    expect(view.unused()).toEqual([])
+    expect(view.progress.start).toHaveBeenCalledWith(
+      'Install @visual-check/cli, @visual-check/chromium and @visual-check/storybook',
+      pnpmAddLine,
+    )
+    expect(view.finish).toHaveBeenCalledExactlyOnceWith({
+      exitCode: 0,
+      stdout: `${pnpmWrittenLines}\n${pnpmClosingMessage}`,
+      stderr: '',
+    })
+  })
+
+  it('stops the terminal UI before it rethrows what init throws, and passes --yes on', async () => {
+    const project = createInitProject()
+    const view = fakeInitView([])
+    const error = new Error('The Docker probe broke.')
+
+    initViewModule.startInitView.mockReturnValue(view)
+
+    await expect(
+      runCli(['init', '--yes'], {}, project, {
+        ...initFakes(),
+        interactive: true,
+        probeDocker: () => Promise.reject(error),
+      }),
+    ).rejects.toBe(error)
+    expect(initViewModule.startInitView).toHaveBeenCalledWith(expect.objectContaining({ yes: true }))
+    expect(view.finish).toHaveBeenCalledExactlyOnceWith({ exitCode: 2, stdout: '', stderr: '' })
   })
 
   it('exits 2 for update in CI before looking at the config', async () => {
@@ -1232,6 +1368,44 @@ function withoutTimes(text: string): string {
 function storyIdsOf(urls: readonly string[]): string[] {
   return urls.flatMap((url) => new URL(url).searchParams.get('id') ?? [])
 }
+
+describe('runCli init in a terminal', () => {
+  /**
+   * Puts back what standard input and output said about being TTYs.
+   */
+  let restoreStreams: () => void = () => undefined
+
+  beforeEach(() => {
+    restoreStreams = pretendTerminal()
+  })
+
+  afterEach(() => {
+    restoreStreams()
+  })
+
+  it.each(['false', 'FALSE', '0', ''])('draws the terminal UI with CI=%j, which is no CI run', async (ci) => {
+    const view = fakeInitView(['', '', '', '', true])
+
+    initViewModule.startInitView.mockReturnValue(view)
+
+    const result = await runCli(['init'], { CI: ci }, createInitProject(), initFakes())
+
+    expect(result).toEqual({ exitCode: 0, stdout: '', stderr: '' })
+    expect(initViewModule.startInitView).toHaveBeenCalledOnce()
+    expect(view.unused()).toEqual([])
+  })
+
+  it('prints plain text with CI=true, so it stops without --yes and loads no terminal UI', async () => {
+    const result = await runCli(['init'], { CI: 'true' }, createInitProject(), initFakes())
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stderr).toBe(
+      "visual-check init asks questions, and there's no terminal to ask them in. " +
+        'Run it in a terminal, or pass --yes to take every default.\n',
+    )
+    expect(initViewModule.startInitView).not.toHaveBeenCalled()
+  })
+})
 
 describe('runCli test', () => {
   it('reports a .png nothing calls for as an orphan without decoding it, captures the rest, and exits 1', async () => {

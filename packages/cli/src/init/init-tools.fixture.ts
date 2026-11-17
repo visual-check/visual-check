@@ -67,6 +67,8 @@ export const gitignore = '/*\n!/baselines/\n!/.gitignore\n'
 
 /**
  * The closing message for the one Storybook of the pnpm project.
+ *
+ * @public
  */
 export const pnpmClosingMessage = [
   'visual-check is set up. Next:',
@@ -86,6 +88,8 @@ export const pnpmClosingMessage = [
 
 /**
  * What `init` prints on stdout for the files it writes in the pnpm project.
+ *
+ * @public
  */
 export const pnpmWrittenLines = `Wrote visual-check.config.ts
 Wrote .storybook/visual-check.ts

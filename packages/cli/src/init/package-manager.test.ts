@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   addDevDependenciesCommandOf,
   commandLineOf,
-  isPackageManager,
   listsDependency,
   lockfileNames,
   packageManagerOf,
@@ -128,16 +127,6 @@ describe('scriptsOf', () => {
 
   it.each([undefined, null, 'x', ['a'], 3])('gives none for scripts that are %j', (scripts) => {
     expect(scriptsOf({ scripts })).toEqual({})
-  })
-})
-
-describe('isPackageManager', () => {
-  it.each(['npm', 'pnpm', 'yarn', 'bun'])('knows %s', (name) => {
-    expect(isPackageManager(name)).toBe(true)
-  })
-
-  it.each(['pip', 'NPM', '', undefined, 3])('does not know %j', (value) => {
-    expect(isPackageManager(value)).toBe(false)
   })
 })
 

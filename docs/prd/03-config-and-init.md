@@ -132,6 +132,13 @@ Rules:
 - It never writes `platform: 'host'`.
 - `init --yes` takes every default, the addon included.
 
+## `init`: terminal UI
+
+- In a terminal (stdin and stdout are TTYs, and `CI` is unset, empty, `0` or `false`), `init` runs an Ink UI, which it loads only then. It shows the brand header, then each question with a hint. Arrows choose, and an answered question collapses to one line.
+- Elsewhere it prints plain text.
+- The package manager question is a list.
+- Ctrl+C or Ctrl+D during a question stops `init` with exit code 2. It writes nothing.
+
 ## `init`: what it writes
 
 - **The config** at the workspace root, holding only what differs from the defaults.
@@ -164,7 +171,7 @@ It exits 2 and writes nothing when:
 - no Storybook is found;
 - a Storybook is below 9.1;
 - the project uses Deno;
-- there's no TTY and no `--yes`.
+- there's no terminal and no `--yes`.
 
 It warns and still writes when:
 

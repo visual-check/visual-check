@@ -2,14 +2,13 @@ import { findStorybookUrlProblem, serveStorybookFix } from '../config/find-story
 import type { DetectedProject, DetectedStorybook } from './detect-project.js'
 import {
   commandLineOf,
-  isPackageManager,
   listsDependency,
   type PackageManager,
   runScriptCommandOf,
   scriptsOf,
   storybookCommandOf,
 } from './package-manager.js'
-import type { Prompter } from './prompter.js'
+import type { Choice, Prompter } from './prompter.js'
 import { defaultConfigDir, storybookCallsOf } from './storybook-scripts.js'
 
 /**
@@ -125,6 +124,16 @@ interface QuestionInput {
 const defaultPackageManager: PackageManager = 'npm'
 
 /**
+ * The package managers the package manager question offers, in order.
+ */
+const packageManagerChoices: readonly [Choice<PackageManager>, ...Choice<PackageManager>[]] = [
+  { value: 'npm', label: 'npm' },
+  { value: 'pnpm', label: 'pnpm' },
+  { value: 'yarn', label: 'yarn', hint: 'Yarn 1, or 2 and later' },
+  { value: 'bun', label: 'bun', hint: 'works, but untested' },
+]
+
+/**
  * The port Storybook starts on when nothing sets another.
  */
 export const defaultStorybookPort = 6006
@@ -133,6 +142,20 @@ export const defaultStorybookPort = 6006
  * The script names `init` suggests, by the visual-check command each runs.
  */
 const defaultScriptNames = { test: 'visual:check', update: 'visual:update' } as const
+
+/**
+ * The script names `init` suggests instead, by the visual-check command each runs, when the other script already has
+ * the default one.
+ */
+const otherScriptNames = { test: 'visual:test', update: 'visual:update-baselines' } as const
+
+/**
+ * The hint of the question that names each script, by the visual-check command the script runs.
+ */
+const scriptHints = {
+  test: 'Runs visual-check test, which compares each story with its baseline.',
+  update: 'Runs visual-check update, which writes the baselines.',
+} as const
 
 /**
  * The name of the addon package.
@@ -164,20 +187,18 @@ export async function askQuestions({
 }
 
 /**
- * Returns the detected package manager, or asks for one when nothing shows it.
+ * Returns the detected package manager, or asks for one from a list when nothing shows it.
  */
-async function askPackageManager(project: DetectedProject, prompter: Prompter): Promise<PackageManager> {
+function askPackageManager(project: DetectedProject, prompter: Prompter): Promise<PackageManager> {
   if (project.packageManager !== undefined) {
-    return project.packageManager
+    return Promise.resolve(project.packageManager)
   }
 
-  const answer = await prompter.text('Package manager (npm, pnpm, yarn or bun)', {
+  return prompter.select('Package manager', {
+    choices: packageManagerChoices,
     defaultValue: defaultPackageManager,
-    validate: (value) => (isPackageManager(value) ? undefined : 'Pick npm, pnpm, yarn or bun.'),
+    hint: "Nothing in package.json or a lockfile names one. init installs visual-check's packages with it.",
   })
-
-  // The validation accepts only a known name, so the fallback is never taken.
-  return isPackageManager(answer) ? answer : defaultPackageManager
 }
 
 /**
@@ -244,6 +265,7 @@ function startPortOf(storybook: DetectedStorybook, startCommand: string): number
 function askName(storybook: DetectedStorybook, takenNames: readonly string[], prompter: Prompter): Promise<string> {
   return prompter.text(`Name of the Storybook in ${storybook.configDir}`, {
     defaultValue: storybook.defaultName,
+    hint: 'What the config and the report call this Storybook.',
     validate(value) {
       if (!/^[a-z0-9-]+$/.test(value)) {
         return 'A Storybook name takes lowercase letters, digits and -.'
@@ -270,6 +292,7 @@ function askUrl(storybook: DetectedStorybook, name: string, prompter: Prompter):
 
   return prompter.text(`URL of ${name}`, {
     defaultValue: `http://127.0.0.1:${startScript?.port ?? defaultStorybookPort}`,
+    hint: 'Where visual-check opens this Storybook, locally and in CI. Use 127.0.0.1, not localhost.',
     validate(value) {
       switch (findStorybookUrlProblem(value)) {
         case 'not-http':
@@ -319,43 +342,52 @@ async function askStartCommand(
 
   return prompter.text(`Command that starts ${name}`, {
     defaultValue: commandLineOf(command),
+    hint: 'No script starts this Storybook, so the next steps use this command.',
   })
 }
 
 /**
- * Asks for the names of the scripts that run `visual-check test` and `visual-check update`.
+ * Settles the scripts that run `visual-check test` and `visual-check update`. A script that already runs one is reused.
+ * The person names each other one, and its name never takes the other script's.
  */
 async function askScripts(project: DetectedProject, prompter: Prompter): Promise<Answers['scripts']> {
   const scripts = scriptsOf(project.manifest)
   const startScripts = project.storybooks.flatMap(({ startScript }) =>
     startScript === undefined ? [] : [startScript.script],
   )
-  const test = await askScript('test', scripts, startScripts, undefined, prompter)
-  const update = await askScript('update', scripts, startScripts, test.name, prompter)
+  const reusedTest = reusedScriptOf(scripts, 'test')
+  const reusedUpdate = reusedScriptOf(scripts, 'update')
+  const test = reusedTest ?? (await askScript('test', scripts, startScripts, reusedUpdate?.name, prompter))
+  const update = reusedUpdate ?? (await askScript('update', scripts, startScripts, test.name, prompter))
 
   return { test, update }
 }
 
 /**
- * Settles the script that runs one kind of visual-check command: an existing script that already runs it, or a name
- * the person gives. A script that already has that name is replaced, unless it starts a Storybook.
+ * Finds the script that already runs one kind of visual-check command, to reuse it. `undefined` when none does.
+ */
+function reusedScriptOf(scripts: Record<string, string>, kind: 'test' | 'update'): ScriptAnswer | undefined {
+  const existing = Object.entries(scripts).find(([, value]) => runsVisualCheck(value, kind))
+
+  return existing === undefined ? undefined : { name: existing[0], add: false }
+}
+
+/**
+ * Asks for the name of the script that runs one kind of visual-check command. A script that already has that name is
+ * replaced, unless it starts a Storybook. The name can't be `otherName`, the other script's, which the suggested name
+ * avoids too.
  */
 async function askScript(
   kind: 'test' | 'update',
   scripts: Record<string, string>,
   startScripts: readonly string[],
-  testName: string | undefined,
+  otherName: string | undefined,
   prompter: Prompter,
 ): Promise<ScriptAnswer> {
-  const runs = new RegExp(`(?:^|[\\s/;&|])visual-check\\s+${kind}(?=\\s|$)`)
-  const existing = Object.entries(scripts).find(([, value]) => runs.test(value))
-
-  if (existing !== undefined) {
-    return { name: existing[0], add: false }
-  }
-
+  const defaultName = defaultScriptNameOf(kind, otherName)
   const name = await prompter.text(`Name of the script that runs visual-check ${kind}`, {
-    defaultValue: defaultScriptNames[kind],
+    defaultValue: defaultName,
+    hint: scriptHintOf(kind, defaultName, scripts, startScripts),
     validate(value) {
       if (/\s/.test(value)) {
         return "A script name can't hold spaces."
@@ -365,11 +397,48 @@ async function askScript(
         return `The ${value} script starts Storybook. Pick another name.`
       }
 
-      return value === testName ? 'The test and update scripts need different names.' : undefined
+      return value === otherName ? 'The test and update scripts need different names.' : undefined
     },
   })
 
   return { name, add: true }
+}
+
+/**
+ * Whether a script runs the `kind` command of visual-check.
+ */
+function runsVisualCheck(script: string, kind: 'test' | 'update'): boolean {
+  return new RegExp(`(?:^|[\\s/;&|])visual-check\\s+${kind}(?=\\s|$)`).test(script)
+}
+
+/**
+ * Returns the name the question for a script suggests: the kind's default, unless the other script already has it.
+ * Then the test script gets `visual:test` and the update script `visual:update-baselines`, so taking the default, as
+ * `--yes` does, never replaces the other script.
+ */
+function defaultScriptNameOf(kind: 'test' | 'update', otherName: string | undefined): string {
+  const name = defaultScriptNames[kind]
+
+  return name === otherName ? otherScriptNames[kind] : name
+}
+
+/**
+ * Returns the hint of the question that names a script. When another script already has the suggested `name`, keeping
+ * that name replaces it, unless it starts a Storybook, so the hint says what that script runs now.
+ */
+function scriptHintOf(
+  kind: 'test' | 'update',
+  name: string,
+  scripts: Record<string, string>,
+  startScripts: readonly string[],
+): string {
+  const current = scripts[name]
+
+  if (current === undefined || startScripts.includes(name)) {
+    return scriptHints[kind]
+  }
+
+  return `${scriptHints[kind]} package.json's ${name} runs ${current} now; init replaces it.`
 }
 
 /**
@@ -406,6 +475,16 @@ function namedStorybooksOf(
 }
 
 /**
+ * Asks whether to add the addon to one Storybook. Yes by default.
+ */
+function askAddon(name: string, prompter: Prompter): Promise<boolean> {
+  return prompter.confirm(`Add the Storybook addon to ${name}?`, {
+    defaultValue: true,
+    hint: 'Checks and updates the open story from inside Storybook. Added through storybook add.',
+  })
+}
+
+/**
  * Asks, for each Storybook 10 that doesn't list the addon, whether to add it. Gives the ones the person said yes to.
  */
 async function askAddons(
@@ -422,7 +501,7 @@ async function askAddons(
       majorOf(version) === addonStorybookMajor &&
       !listsDependency(project.manifest, addonPackage)
 
-    if (wanted && (await prompter.confirm(`Add the Storybook addon to ${name}?`, true))) {
+    if (wanted && (await askAddon(name, prompter))) {
       addons.push({ configDir, name })
     }
   }

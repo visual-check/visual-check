@@ -2,6 +2,7 @@ import { Box, Text } from 'ink'
 import type { ReactNode } from 'react'
 import { ColouredText } from './coloured-text.js'
 import { glyphs } from './theme.js'
+import { WrappedText } from './wrapped-text.js'
 
 /**
  * What a note that is a warning starts with.
@@ -12,6 +13,11 @@ const warningPrefix = 'Warning: '
  * What a note that is a hint starts with.
  */
 const hintPrefix = 'hint: '
+
+/**
+ * How far a note's text starts after its glyph: the glyph and a space.
+ */
+const glyphIndent = 2
 
 /**
  * What `NoteLine` takes.
@@ -53,13 +59,16 @@ function GlyphNote({ glyph, children }: GlyphNoteProps): ReactNode {
 
 /**
  * A line of text that `init` shows between its questions. A warning takes `▲` and the caution colour, a hint takes
- * `·` and is dim, and any other note is plain.
+ * `·` and is dim, and any other note is plain. A long note wraps to the terminal's width: a warning or a hint under
+ * its own first letter, not under the glyph.
  */
 export function NoteLine({ text }: NoteLineProps): ReactNode {
   if (text.startsWith(warningPrefix)) {
     return (
       <GlyphNote glyph={<ColouredText colour="caution">{glyphs.caution}</ColouredText>}>
-        <ColouredText colour="caution">{text.slice(warningPrefix.length)}</ColouredText>
+        <ColouredText colour="caution">
+          <WrappedText indent={glyphIndent} text={text.slice(warningPrefix.length)} />
+        </ColouredText>
       </GlyphNote>
     )
   }
@@ -67,10 +76,16 @@ export function NoteLine({ text }: NoteLineProps): ReactNode {
   if (text.startsWith(hintPrefix)) {
     return (
       <GlyphNote glyph={<Text dimColor>{glyphs.hint}</Text>}>
-        <Text dimColor>{text.slice(hintPrefix.length)}</Text>
+        <Text dimColor>
+          <WrappedText indent={glyphIndent} text={text.slice(hintPrefix.length)} />
+        </Text>
       </GlyphNote>
     )
   }
 
-  return <Text>{text}</Text>
+  return (
+    <Text>
+      <WrappedText indent={0} text={text} />
+    </Text>
+  )
 }

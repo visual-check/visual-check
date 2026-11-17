@@ -1,6 +1,6 @@
 import { existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { ContainerError, DockerMissingError } from '../container/container-error.js'
 import {
   browserRange,
@@ -105,15 +105,6 @@ describe('runInit', () => {
     expect(record.progress).toEqual(fullProgressOf('done', 'done'))
     expect(record.probes).toBe(1)
     expect(record.fallowRoots).toEqual([root])
-  })
-
-  it('closes the prompter', async () => {
-    const prompter = defaultsPrompter()
-    const close = vi.spyOn(prompter, 'close')
-
-    await runInit(pnpmProject(), toolsOf({ prompter }).tools)
-
-    expect(close).toHaveBeenCalledOnce()
   })
 
   it('shows the paths relative to a subfolder it runs in', async () => {
@@ -478,11 +469,10 @@ describe('runInit', () => {
     expect(JSON.parse(readText(root, 'package.json')).scripts['visual:check']).toBe('visual-check test')
   })
 
-  it('exits 2 when the input ends before every answer is in, after the warnings so far, and writes nothing', async () => {
+  it('exits 2 when a question is given up on, after the warnings so far, and writes nothing', async () => {
     const root = pnpmProject()
     const before = snapshotFiles(root)
     const prompter = { ...defaultsPrompter(), text: () => Promise.reject(new InputEndedError()) }
-    const close = vi.spyOn(prompter, 'close')
     const error = new ContainerError("Docker's daemon isn't running.")
     const { tools, record } = toolsOf({ yes: false, interactive: true, prompter }, { dockerError: error })
 
@@ -491,15 +481,14 @@ describe('runInit', () => {
       stdout: '',
       stderr:
         `Warning: Docker's daemon isn't running. ${dockerFix}\n` +
-        'visual-check init needs an answer, and the input ended.\n',
+        'visual-check init stopped before every answer was in. It wrote nothing.\n',
     })
     expect(snapshotFiles(root)).toEqual(before)
     expect(record.commands).toEqual([])
     expect(record.fallowRoots).toEqual([])
-    expect(close).toHaveBeenCalledOnce()
   })
 
-  it('exits 2 with only the message when the input ends under a prompter that showed its notes as they came', async () => {
+  it('exits 2 with only the message when a question is given up on under a prompter that showed its notes', async () => {
     const root = pnpmProject()
     const before = snapshotFiles(root)
     const scripted = scriptedPrompter([])
@@ -510,7 +499,7 @@ describe('runInit', () => {
     expect(await runInit(root, tools)).toEqual({
       exitCode: 2,
       stdout: '',
-      stderr: 'visual-check init needs an answer, and the input ended.\n',
+      stderr: 'visual-check init stopped before every answer was in. It wrote nothing.\n',
     })
     expect(scripted.records).toEqual([
       { kind: 'note', message: `Warning: Docker's daemon isn't running. ${dockerFix}` },
@@ -543,9 +532,10 @@ describe('runInit', () => {
       await runInit(root, tools)
 
       expect(prompter.records[0]).toEqual({
-        kind: 'text',
-        message: 'Package manager (npm, pnpm, yarn or bun)',
+        kind: 'select',
+        message: 'Package manager',
         defaultValue: 'npm',
+        hint: "Nothing in package.json or a lockfile names one. init installs visual-check's packages with it.",
       })
       expect(prompter.unused()).toEqual([])
       expect(record.commands).toEqual(

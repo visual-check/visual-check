@@ -90,13 +90,6 @@ export function scriptsOf(manifest: Manifest): Record<string, string> {
 const packageManagerNames: readonly PackageManager[] = ['npm', 'pnpm', 'yarn', 'bun']
 
 /**
- * Returns whether `value` is the name of a package manager `init` knows.
- */
-export function isPackageManager(value: unknown): value is PackageManager {
-  return packageManagerNames.some((known) => known === value)
-}
-
-/**
  * The lockfiles that show a package manager, in the order `init` tries them.
  */
 const lockfileOwners: readonly (readonly [string, PackageManager])[] = [

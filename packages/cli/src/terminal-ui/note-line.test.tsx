@@ -1,7 +1,6 @@
-import { Box } from 'ink'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { NoteLine } from './note-line.js'
-import { cleanupSettled, plainFrameOf, renderSettled } from './terminal.fixture.js'
+import { cleanupSettled, plainFrameOf, renderSettled, renderSettledAt } from './terminal.fixture.js'
 import { ThemeContext } from './theme.js'
 
 vi.hoisted(() => {
@@ -52,24 +51,30 @@ describe('NoteLine', () => {
     expect(lastFrame()).toBe('warning: a hint: b')
   })
 
-  // Ink wraps without trimming, so a wrapped line keeps the space it broke at.
-  it('wraps a long warning under its text, not under the glyph', async () => {
-    const { lastFrame } = await renderSettled(
-      <Box width={20}>
-        <NoteLine text="Warning: the Storybook config folder is missing." />
-      </Box>,
+  it('wraps a long warning to a narrow terminal under its text, without spaces at the breaks', async () => {
+    const { lastFrame } = await renderSettledAt(
+      <NoteLine text="Warning: the Storybook config folder is missing, so init skips it." />,
+      40,
     )
 
-    expect(plainFrameOf(lastFrame())).toBe('▲ the Storybook \n  config folder is \n  missing.')
+    expect(plainFrameOf(lastFrame())).toBe('▲ the Storybook config folder is\n  missing, so init skips it.')
   })
 
-  it('wraps a long hint under its text, not under the glyph', async () => {
-    const { lastFrame } = await renderSettled(
-      <Box width={22}>
-        <NoteLine text="hint: pass --yes to take every default." />
-      </Box>,
+  it('wraps a long hint to a narrow terminal under its text, not under the glyph', async () => {
+    const { lastFrame } = await renderSettledAt(
+      <NoteLine text="hint: pass --yes to take every default, and init asks nothing." />,
+      40,
     )
 
-    expect(plainFrameOf(lastFrame())).toBe('· pass --yes to take \n  every default.')
+    expect(plainFrameOf(lastFrame())).toBe('· pass --yes to take every default, and\n  init asks nothing.')
+  })
+
+  it('wraps a long plain note to a narrow terminal, without spaces at the breaks', async () => {
+    const { lastFrame } = await renderSettledAt(
+      <NoteLine text="Found 2 Storybooks, in .storybook and in docs/.storybook." />,
+      40,
+    )
+
+    expect(plainFrameOf(lastFrame())).toBe('Found 2 Storybooks, in .storybook and in\ndocs/.storybook.')
   })
 })
