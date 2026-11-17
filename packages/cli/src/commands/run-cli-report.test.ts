@@ -380,11 +380,11 @@ describe('runCli test report after the consistency check', () => {
     expect(result.reportLine).toEqual(reportOnStderr)
   })
 
-  it.each(['live', 'log'])('prints the same with --reporter %s as with no flag', async (reporter) => {
+  it('prints the same with --reporter log as with no flag and no terminal', async () => {
     const plain = await createRun(['a'], { a: defaultRunSnapshot })
     const flagged = await createRun(['a'], { a: defaultRunSnapshot })
     const expected = await runCli(['test'], {}, plain.project, fakeBrowser().options)
-    const result = await runCli(['test', '--reporter', reporter], {}, flagged.project, fakeBrowser().options)
+    const result = await runCli(['test', '--reporter', 'log'], {}, flagged.project, fakeBrowser().options)
 
     expect(result).toEqual(expected)
   })

@@ -154,9 +154,10 @@ export interface RunCliOptions {
    */
   progress?: (text: string) => void
   /**
-   * Writes what a `test` or `update` run's reporter prints as it happens: the header, a shard's notes and each
-   * snapshot's line as it finishes, on stdout, or on stderr with `--reporter json`. When it isn't given, that text is
-   * kept, and the result's text for each stream starts with it. A test leaves it out.
+   * Writes what a `test` or `update` run's `log` or `json` reporter prints as it happens: the header, a shard's notes
+   * and each snapshot's line as it finishes, on stdout, or on stderr with `--reporter json`. The `live` reporter draws
+   * on stdout itself, until the run's snapshots are taken. When it isn't given, that text is kept, and the result's
+   * text for each stream starts with it. A test leaves it out.
    */
   write?: (stream: 'stdout' | 'stderr', text: string) => void
   /**
@@ -199,12 +200,13 @@ export interface RunCliOptions {
 /**
  * Runs the CLI with the given arguments, environment and folder, and returns what it prints on each stream. Progress is
  * written as it happens, through `options.progress`, and so are a `test` or `update` run's header and snapshot lines,
- * through `options.write`; the result holds the rest, which comes after them. `update` also writes and deletes
- * baselines, `test` writes the report folder, and `init` writes the setup files and runs the package manager. Problems
- * with the command line, the config, the run's setup or the browser exit with code 2. A usage error of a `test` command
- * line, even one whose flags fail to parse, writes its error report beside the config the run would load. Once a `test`
- * or `update` has loaded its config, an error that is a bug exits 2 too, with its stack trace on stderr, as an error
- * report for `test` and an error document with `--reporter json`. Other errors are thrown.
+ * through `options.write`, or drawn on stdout by the `live` reporter; the result holds the rest, which comes after
+ * them. `update` also writes and deletes baselines, `test` writes the report folder, and `init` writes the setup files
+ * and runs the package manager. Problems with the command line, the config, the run's setup or the browser exit with
+ * code 2. A usage error of a `test` command line, even one whose flags fail to parse, writes its error report beside
+ * the config the run would load. Once a `test` or `update` has loaded its config, an error that is a bug exits 2 too,
+ * with its stack trace on stderr, as an error report for `test` and an error document with `--reporter json`. Other
+ * errors are thrown.
  *
  * @public
  */
@@ -590,11 +592,18 @@ async function snapshotsOutcomeOf(
 }
 
 /**
- * Starts the reporter that shows the run's progress stream as it happens. For now every reporter writes the `log`
- * lines through the run's `write`: on stdout, or on stderr with `--reporter json`, whose stdout holds its document
- * alone.
+ * Starts the reporter that shows the run's progress stream as it happens. `live` draws it on stdout in the terminal
+ * UI, which it loads only then. `log` and `json` write the `log` lines through the run's `write`: on stdout, or on
+ * stderr with `--reporter json`, whose stdout holds its document alone.
  */
 async function runReporterOf(context: RunContext): Promise<RunReporter> {
+  if (context.options.reporter === 'live') {
+    // Loaded only here, so log and json never load React and Ink.
+    const { startLiveView } = await import('../terminal-ui/live-view.js')
+
+    return startLiveView({ environment: context.environment, stdout: process.stdout, elapsedMs: context.elapsedMs })
+  }
+
   const stream = context.options.reporter === 'json' ? 'stderr' : 'stdout'
 
   return logReporterOf((text) => context.write(stream, text))
@@ -871,7 +880,7 @@ async function runInitCommand(
     return { exitCode, stdout, stderr }
   }
 
-  // Loaded only here, so `test` and `update` never load React and Ink.
+  // Loaded only here, so `test` and `update` never load init's view.
   const { startInitView } = await import('../terminal-ui/init-view.js')
   const view = startInitView({
     version: readCliManifest().version,

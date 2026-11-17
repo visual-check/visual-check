@@ -97,7 +97,7 @@
       { "from": "cli/sharding", "allow": ["cli/baselines", "cli/storybook"] },
       { "from": "cli/storybook", "allow": [] },
       { "from": "cli/system-error", "allow": [] },
-      { "from": "cli/terminal-ui", "allow": ["cli/init"] },
+      { "from": "cli/terminal-ui", "allow": ["cli/init", "cli/reporter"] },
       { "from": "cli/visual-diff", "allow": ["cli/config"] },
       { "from": "storybook/per-story-options", "allow": [] },
       { "from": "repo-checks/workspace", "allow": [] },
