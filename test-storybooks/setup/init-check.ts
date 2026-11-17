@@ -33,13 +33,20 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs'
-import { createServer } from 'node:http'
-import { type AddressInfo, connect } from 'node:net'
+import { connect } from 'node:net'
 import { constants, tmpdir } from 'node:os'
 import { basename, dirname, join, relative } from 'node:path'
 import type { Readable } from 'node:stream'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
+import {
+  configWithImage,
+  type PackedManifest,
+  packedPackages,
+  type Registry,
+  startRegistry,
+  type Tarball,
+} from './local-packages.ts'
 
 /**
  * A started command, with its standard output and standard error piped.
@@ -132,75 +139,6 @@ interface StartedCommand {
    * Resolves with the run once the command has ended and its output is read.
    */
   finished: Promise<CommandRun>
-}
-
-/**
- * The fields of a packed `package.json` the check reads.
- */
-interface PackedManifest {
-  /**
-   * The package's name, such as `@visual-check/cli`.
-   */
-  name: string
-  /**
-   * The package's version.
-   */
-  version: string
-  /**
-   * The peer dependencies, with the range of each.
-   */
-  peerDependencies?: Record<string, string>
-}
-
-/**
- * A packed package.
- */
-interface Tarball {
-  /**
-   * The `package.json` inside the tarball, as the package manager wrote it when packing: every field, though only some
-   * are typed.
-   */
-  manifest: PackedManifest
-  /**
-   * The tarball's path.
-   */
-  path: string
-}
-
-/**
- * The local registry that serves the packed packages.
- */
-interface Registry {
-  /**
-   * Its address, such as `http://127.0.0.1:50123`, with no trailing slash.
-   */
-  url: string
-  /**
-   * Each request it answered with anything but 200, as `<method> <url>: <status>`, in order.
-   */
-  unexpectedRequests: string[]
-  /**
-   * Stops it.
-   */
-  stop: () => Promise<void>
-}
-
-/**
- * What the registry answers for one request.
- */
-interface RegistryAnswer {
-  /**
-   * The HTTP status.
-   */
-  status: number
-  /**
-   * The answer's `content-type`.
-   */
-  contentType: string
-  /**
-   * The answer's body.
-   */
-  body: string | Buffer
 }
 
 /**
@@ -307,11 +245,6 @@ const repoRoot = join(packageDir, '..', '..')
 const outputDir = join(packageDir, 'init-check-output')
 
 /**
- * The folders under `packages/` of the packages a project installs, which the check packs.
- */
-const packedPackages = ['cli', 'chromium', 'storybook', 'storybook-addon']
-
-/**
  * A file each package's build writes, so the check can tell the packages are built before it packs them.
  */
 const builtFiles = [
@@ -364,11 +297,6 @@ export default defineConfig({
 `
 
 /**
- * How the config ends: the end of the `storybooks` block, then of the config. The image goes in between.
- */
-const configEnd = '\n  },\n})\n'
-
-/**
  * The `visual-check.ts` `init` writes in the config folder.
  */
 const expectedModesFile = `import { defineVisualCheck } from '@visual-check/storybook'
@@ -414,16 +342,6 @@ const noDockerTexts = ["there's no docker command on PATH", "platform: 'host'"]
  * The browser image `update` and `test` run in, until the browser package names a published one.
  */
 const image = process.env.TEST_STORYBOOK_IMAGE
-
-/**
- * What the registry answers for a request it has nothing for.
- */
-const notFoundAnswer: RegistryAnswer = { status: 404, contentType: 'application/json', body: '{"error":"Not found"}' }
-
-/**
- * What the registry answers for a URL it can't decode.
- */
-const malformedAnswer: RegistryAnswer = { status: 400, contentType: 'application/json', body: '{"error":"Bad URL"}' }
 
 /**
  * Gives an error's message, or the thrown value as text when it isn't an `Error`.
@@ -729,101 +647,6 @@ function cliTarballOf(check: Check): Tarball {
 }
 
 /**
- * Gives a tarball's `integrity` and `shasum`, as a registry lists them for each version.
- */
-function checksumsOf(bytes: Buffer): { integrity: string; shasum: string } {
-  return {
-    integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}`,
-    shasum: createHash('sha1').update(bytes).digest('hex'),
-  }
-}
-
-/**
- * Gives what the registry answers for each request, keyed `<method> <path>`: for `GET /<name>`, the package's
- * document, which lists its one version with its tarball's URL under `url`; for `GET` on that URL's path, the tarball.
- */
-function registryAnswersOf(tarballs: readonly Tarball[], url: string): Map<string, RegistryAnswer> {
-  const answers = new Map<string, RegistryAnswer>()
-
-  for (const { manifest, path } of tarballs) {
-    const { name, version } = manifest
-    const bytes = readFileSync(path)
-    const tarballPath = `/${name}/-/${basename(path)}`
-    const dist = { tarball: `${url}${tarballPath}`, ...checksumsOf(bytes) }
-    const document = { name, 'dist-tags': { latest: version }, versions: { [version]: { ...manifest, dist } } }
-
-    answers.set(`GET /${name}`, { status: 200, contentType: 'application/json', body: JSON.stringify(document) })
-    answers.set(`GET ${tarballPath}`, { status: 200, contentType: 'application/octet-stream', body: bytes })
-  }
-
-  return answers
-}
-
-/**
- * Gives a request URL's path with its escapes decoded, or `undefined` when it can't be decoded.
- */
-function decodedPathOf(url: string): string | undefined {
-  try {
-    return decodeURIComponent(new URL(url, 'http://127.0.0.1').pathname)
-  } catch {
-    return undefined
-  }
-}
-
-/**
- * Gives the registry's answer for a request: the one for its method and decoded path, 404 when there's none, and 400
- * when its URL can't be decoded.
- */
-function registryAnswerOf(
-  answers: ReadonlyMap<string, RegistryAnswer>,
-  method: string | undefined,
-  url: string | undefined,
-): RegistryAnswer {
-  const pathname = decodedPathOf(url ?? '/')
-
-  if (pathname === undefined) {
-    return malformedAnswer
-  }
-
-  return answers.get(`${method} ${pathname}`) ?? notFoundAnswer
-}
-
-/**
- * Serves the packed packages on a free port of 127.0.0.1, as a registry does: `GET /<name>` gives the package's
- * document, and `GET` on a tarball's URL gives the tarball. A package manager asks for a scoped name with its `/`
- * encoded, as `/@visual-check%2fcli`. Every other request gets 404, or 400 when its URL can't be decoded, and is
- * recorded.
- */
-async function startRegistry(tarballs: readonly Tarball[]): Promise<Registry> {
-  const unexpectedRequests: string[] = []
-  let answers = new Map<string, RegistryAnswer>()
-  const server = createServer((request, response) => {
-    const answer = registryAnswerOf(answers, request.method, request.url)
-
-    if (answer.status !== 200) {
-      unexpectedRequests.push(`${request.method} ${request.url}: ${answer.status}`)
-    }
-
-    response.writeHead(answer.status, { 'content-type': answer.contentType }).end(answer.body)
-  })
-
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
-
-  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
-
-  answers = registryAnswersOf(tarballs, url)
-
-  return {
-    url,
-    unexpectedRequests,
-    stop: async () => {
-      server.closeAllConnections()
-      await new Promise((resolve) => server.close(resolve))
-    },
-  }
-}
-
-/**
  * Starts the registry for the packed packages.
  */
 async function serveTarballs(check: Check): Promise<string[]> {
@@ -1061,10 +884,9 @@ async function installAfterInit(check: Check): Promise<string[]> {
 async function addImage(check: Check): Promise<string[]> {
   const path = join(check.project, 'visual-check.config.ts')
   const config = readFileSync(path, 'utf8')
-  const quotedImage = `'${(image ?? '').replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`
-  const withImage = config.replace(configEnd, `\n  },\n  image: ${quotedImage},\n})\n`)
+  const withImage = configWithImage(config, image ?? '')
 
-  if (withImage === config) {
+  if (withImage === undefined) {
     return [
       `visual-check.config.ts doesn't end as init writes it, so the image has no place: ${JSON.stringify(config)}`,
     ]

@@ -34,3 +34,25 @@ Turbo builds the packages first. Port 6106 must be free: the Storybook step fail
 
 - `--package-manager <name>`: the fixture in `fixtures/<name>` and the package manager that sets it up. It's required, and only `pnpm` has a fixture so far.
 - `--init-only`: stops after step 4, and needs no `TEST_STORYBOOK_IMAGE`. It's for a machine without Docker, such as CI's macOS job: `init`'s only warning must be that there's no docker command, naming `platform: 'host'`, so where there's a `docker` command, step 4 fails.
+
+## Trying a local build in another project
+
+`try-local.ts` sets up one of your own projects with this checkout's packages, for a manual test before they're on npm. It builds and packs the packages of the checkout it runs from, a worktree included, with its uncommitted changes. It serves them the way the check does, and runs `init` through `pnpm dlx` in the project. The registry is named for the `@visual-check` scope through the environment, so the project's `.npmrc` doesn't change. Then it adds the browser image to the config.
+
+```sh
+pnpm try-local ~/code/my-app                # init asks its questions
+pnpm try-local ~/code/my-app --yes          # init takes every default
+pnpm try-local ~/code/my-app --image visual-check-chromium:arm64
+```
+
+- The project must be in a git repo with nothing uncommitted. A relative path is taken from where you run `pnpm`.
+- `--image` defaults to `visual-check-chromium:ci`. When Docker has no such image, the script prints the command that builds it.
+- `init`'s installs reach the registry through `npm_config_@visual-check:registry`, which pnpm, npm and Yarn 1 read. Yarn 4 and Bun don't, so they can't install the packages.
+
+When you're done, bring the project back:
+
+```sh
+pnpm try-local --restore ~/code/my-app
+```
+
+It resets the project's repo to the commit it was on, with `git reset --hard` and `git clean -fd`, and removes every `.visual-check/` folder's untracked files. Then it installs again with the package manager of the nearest lockfile. Anything else you changed in that repo since the try is dropped too. It refuses when the repo moved to another commit.
