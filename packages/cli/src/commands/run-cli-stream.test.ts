@@ -44,7 +44,7 @@ describe('runCli streaming the progress', () => {
     const gates: StoryGates = new Map()
     const openHold = holdGate(gates, 'hold')
     const { write, writes } = recordingWrite()
-    const result = await runCli(['test'], {}, project, {
+    const result = await runCli(['test', '--all'], {}, project, {
       ...hostOptions,
       imageMarkerPath: absentMarkerPath,
       launchBrowser: async (launch) => {
@@ -76,7 +76,7 @@ describe('runCli streaming the progress', () => {
     const gates: StoryGates = new Map()
     const openHold = holdGate(gates, 'hold')
     const { write, writes } = recordingWrite()
-    const result = await runCli(['test'], {}, project, {
+    const result = await runCli(['test', '--all'], {}, project, {
       ...hostOptions,
       imageMarkerPath: absentMarkerPath,
       launchBrowser: async (launch) => {
@@ -110,7 +110,10 @@ describe('runCli streaming the progress', () => {
   it('writes the header and the lines on stderr with --reporter json, so stdout holds the document alone', async () => {
     const { project } = await createRun(['a'], { a: defaultRunSnapshot })
     const { write, writes } = recordingWrite()
-    const result = await runCli(['test', '--reporter', 'json'], {}, project, { ...fakeBrowser().options, write })
+    const result = await runCli(['test', '--all', '--reporter', 'json'], {}, project, {
+      ...fakeBrowser().options,
+      write,
+    })
 
     expect(writes).toEqual([
       ['stderr', `${headerOf('test', 1)}\n`],
@@ -125,7 +128,7 @@ describe('runCli streaming the progress', () => {
   it("writes update's lines as they finish and gives its end lines", async () => {
     const { project } = await createRun(['a'])
     const { write, writes } = recordingWrite()
-    const result = await runCli(['update'], {}, project, { ...fakeBrowser().options, write })
+    const result = await runCli(['update', '--all'], {}, project, { ...fakeBrowser().options, write })
 
     expect(writes).toEqual([
       ['stdout', `${headerOf('update', 1)}\n`],

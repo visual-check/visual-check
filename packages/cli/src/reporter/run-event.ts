@@ -18,7 +18,7 @@ interface PlannedEvent {
    */
   header: string
   /**
-   * The notes printed after the header, each without a newline: a shard's, else none.
+   * The notes printed after the header, each without a newline: that no story is affected, or a shard's, else none.
    */
   notes: string[]
   /**

@@ -1,0 +1,22 @@
+{
+  "files": {
+    ".storybook/main.ts": "export default { stories: ['../src/**/*.stories.ts'] }\n",
+    ".storybook/preview.ts": "import { token } from '../src/tokens.js'\n\nexport default { token }\n",
+    "src/tokens.ts": "export const token = 1\n",
+    "src/re-export-all.ts": "export * from './tokens.js'\n",
+    "src/re-export-named.ts": "export { token } from './re-export-all.js'\n",
+    "src/ignored.ts": "export const ignored = 2\n",
+    "src/button.ts": "import { ignored } from './ignored.js'\nimport { token } from './re-export-named.js'\n\nexport const Button = token + ignored\n",
+    "src/cycle-a.ts": "import { b } from './cycle-b.js'\n\nexport const a = () => b\n",
+    "src/cycle-b.ts": "import { a } from './cycle-a.js'\n\nexport const b = () => a\nexport const shared = 3\n",
+    "src/nested/deep/deep.ts": "import { shared } from '../../cycle-b.js'\n\nexport const deep = shared\n",
+    "src/with space/ünïcode file.ts": "import { deep } from '../nested/deep/deep.js'\n\nexport const spaced = deep\n",
+    "src/q\"uote.ts": "export const quoted = 4\n",
+    "src/button.stories.ts": "import { Button } from './button.js'\nimport { spaced } from './with space/ünïcode file.js'\nimport { quoted } from './q\"uote.js'\n\nexport default { component: Button, args: { spaced, quoted } }\nexport const Primary = {}\n",
+    "src/orphan.ts": "export const orphan = 5\n"
+  },
+  "withoutQuotedNames": {
+    "src/q\"uote.ts": null,
+    "src/button.stories.ts": "import { Button } from './button.js'\nimport { spaced } from './with space/ünïcode file.js'\nconst quoted = 4\n\nexport default { component: Button, args: { spaced, quoted } }\nexport const Primary = {}\n"
+  }
+}

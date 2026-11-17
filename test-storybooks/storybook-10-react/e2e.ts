@@ -18,6 +18,14 @@
 // selection. `--no-docker`, which needs `--host` and no docker on the PATH, adds a case: with the default platform,
 // `test` exits 2 with the no-Docker error.
 //
+// With `--affected`, which needs `--host` and goes without `--no-docker`, it runs the affected stories cases in place
+// of the host cases: `test` with no selection flag and `--base HEAD`, so the changed files are what the working tree
+// changed, which a checkout of one commit can tell too. They change a stories file or a helper of this package's
+// stories while the CLI runs, and put back its exact bytes after, also on SIGINT or SIGTERM. The working tree's own
+// changes must affect no story. Their server lists every story, and their baselines folder holds a baseline for every
+// snapshot, so the consistency check finds nothing and `test` captures the selected stories alone. They share the
+// cache as the host cases do, but it needn't start empty.
+//
 // With `--arm64` it runs one case, with TEST_STORYBOOK_IMAGE naming an arm64 build of the browser image: `test` with
 // the platform `linux/arm64` and the default tolerance gives the expected outcomes against the committed baselines,
 // which are written on amd64. It makes the committed baselines case's checks, on a server that leaves out the stories
@@ -39,7 +47,7 @@ import {
 import { createServer, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
-import { basename, delimiter, extname, join, relative, resolve as resolvePath, sep } from 'node:path'
+import { basename, delimiter, dirname, extname, join, relative, resolve as resolvePath, sep } from 'node:path'
 import type { Readable } from 'node:stream'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { isDeepStrictEqual } from 'node:util'
@@ -114,6 +122,12 @@ const onHost = process.argv.includes('--host')
 const withoutDocker = process.argv.includes('--no-docker')
 
 /**
+ * Whether the check on the machine itself runs the affected stories cases in place of the host cases, as the
+ * `--affected` argument says.
+ */
+const affectedOnly = process.argv.includes('--affected')
+
+/**
  * Whether the check runs the committed baselines on the arm64 browser image, as the `--arm64` argument says.
  */
 const onArm64Image = process.argv.includes('--arm64')
@@ -146,6 +160,26 @@ const chromeForTestingPlatforms: Record<string, string> = {
  * reuse.
  */
 const hostStoryId = 'card--default'
+
+/**
+ * The helper the affected stories case changes, beside the stories files, and a story of each stories file that
+ * imports it, the only ones that do.
+ */
+const affectedHelper = {
+  name: 'mocking-worker.ts',
+  importedBy: ['network--mocked-fetch', 'remote-content--every-kind'],
+}
+
+/**
+ * The line the affected stories cases add to the end of the file they change, a comment, so the build is the same.
+ */
+const affectedChangeLine = '// visual-check e2e: a change for the affected stories cases\n'
+
+/**
+ * The hint every note about an empty affected selection ends with. It mirrors the CLI's hint
+ * (`packages/cli/src/commands/run-selection.ts`), which the e2e can't import.
+ */
+const affectedAllHint = 'Run with --all to cover every story.'
 
 /**
  * What the CLI says when there's no docker command: the problem, then the fix that names `platform: 'host'`.
@@ -1164,14 +1198,16 @@ function findPackageNameProblems(packageName: string | undefined): string[] {
 }
 
 /**
- * Lists what is wrong with the arguments: `--inside-image`, `--host` and `--arm64` are separate modes, and
- * `--no-docker` needs `--host`.
+ * Lists what is wrong with the arguments: `--inside-image`, `--host` and `--arm64` are separate modes, `--no-docker`
+ * needs `--host`, and `--affected` needs `--host` and goes without `--no-docker`.
  */
 function findArgumentProblems(): string[] {
   const modeCount = [insideImage, onHost, onArm64Image].filter(Boolean).length
   const conflicts: [boolean, string][] = [
     [modeCount > 1, '--inside-image, --host and --arm64 are separate modes: give one of them.'],
     [withoutDocker && !onHost, '--no-docker only runs with --host.'],
+    [affectedOnly && !onHost, '--affected only runs with --host.'],
+    [affectedOnly && withoutDocker, '--affected runs in place of the host cases, so it goes without --no-docker.'],
   ]
 
   return conflicts.filter(([conflicting]) => conflicting).map(([, problem]) => problem)
@@ -3507,6 +3543,268 @@ async function runHostCases(): Promise<boolean> {
 }
 
 /**
+ * Runs git in this package's folder and gives its standard output. With optional locks off, its `git status` leaves the
+ * index as it is, as the CLI's does.
+ *
+ * @throws {Error} When git fails or can't start.
+ */
+function git(args: string[]): string {
+  const result = spawnSync('git', args, {
+    cwd: packageDir,
+    encoding: 'utf8',
+    env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
+  })
+
+  if (result.status !== 0) {
+    throw new Error(`git ${args[0]} failed: ${String(result.error ?? result.stderr.trim())}`)
+  }
+
+  return result.stdout
+}
+
+/**
+ * Gives the SHA of `HEAD`, the base of a run with `--base HEAD`.
+ */
+function headSha(): string {
+  return git(['rev-parse', 'HEAD']).trim()
+}
+
+/**
+ * Counts the files changed since `HEAD`, as the CLI counts them with `--base HEAD`: what the index and the working tree
+ * changed, a rename as both its paths, and the untracked files that aren't gitignored.
+ */
+function changedFileCount(): number {
+  return git(['status', '--porcelain=v1', '-z', '--no-renames', '--untracked-files=all'])
+    .split('\0')
+    .filter((entry) => entry !== '').length
+}
+
+/**
+ * Gives the stories file, its `importPath`, of a story the static build's `index.json` lists.
+ *
+ * @throws {Error} When `index.json` doesn't list the story.
+ */
+function storiesFileOf(storiesFiles: ReadonlyMap<string, string>, storyId: string): string {
+  const storiesFile = storiesFiles.get(storyId)
+
+  if (storiesFile === undefined) {
+    throw new Error(`storybook-static/index.json lists no ${storyId}`)
+  }
+
+  return storiesFile
+}
+
+/**
+ * Gives the keys of the expected snapshots of the stories of these stories files, by their `importPath`.
+ */
+function keysOfStoriesFiles(expected: Outcomes, storiesFiles: ReadonlyMap<string, string>, files: string[]): string[] {
+  return Object.keys(expected).filter((key) => {
+    const [storyId = ''] = key.split('.')
+
+    return files.includes(storiesFiles.get(storyId) ?? '')
+  })
+}
+
+/**
+ * Writes a baseline for every expected snapshot into the baselines folder of the host config in `folder`: the
+ * committed one where there is one, else the host story's, so the consistency check finds no baseline missing and no
+ * orphan, and `test` captures the selected stories alone.
+ */
+function writeEveryBaseline(folder: string, expected: Outcomes): void {
+  const baselines = join(folder, 'baselines')
+
+  mkdirSync(baselines, { recursive: true })
+
+  for (const key of Object.keys(expected)) {
+    const committed = join(committedBaselines, `${key}.png`)
+
+    cpSync(
+      isFile(committed) ? committed : join(committedBaselines, `${hostStoryId}.png`),
+      join(baselines, `${key}.png`),
+    )
+  }
+}
+
+/**
+ * Adds the change line to the end of a file, hands over to `use`, and puts back the file's exact bytes however `use`
+ * ends, and on SIGINT or SIGTERM before it does, which then ends the check by that signal.
+ */
+async function withChangedFile<T>(path: string, use: () => Promise<T>): Promise<T> {
+  const original = readFileSync(path)
+
+  /**
+   * Puts back the file's bytes, then ends the check by the signal, which no longer has this listener.
+   */
+  const restoreAndStop = (signal: NodeJS.Signals): void => {
+    writeFileSync(path, original)
+    process.kill(process.pid, signal)
+  }
+
+  process.once('SIGINT', restoreAndStop)
+  process.once('SIGTERM', restoreAndStop)
+
+  try {
+    writeFileSync(path, Buffer.concat([original, Buffer.from(affectedChangeLine)]))
+
+    return await use()
+  } finally {
+    process.off('SIGINT', restoreAndStop)
+    process.off('SIGTERM', restoreAndStop)
+    writeFileSync(path, original)
+  }
+}
+
+/**
+ * Runs `test` with no selection flag and `--base HEAD`, with the host config, so it covers the stories the working
+ * tree's changes affect.
+ */
+async function testAffected(host: HostRun): Promise<CliRun> {
+  return await runCli(['test', '--base', 'HEAD', '--config', host.config], host.environment)
+}
+
+/**
+ * Lists how the snapshots a run has lines for differ from these keys: each one it has none for, and each other one it
+ * has.
+ */
+function selectedKeysProblems(run: CliRun, keys: string[]): string[] {
+  const lines = Object.keys(run.outcomes)
+
+  return [
+    ...keys.filter((key) => !lines.includes(key)).map((key) => `test has no line for ${key}`),
+    ...lines.filter((key) => !keys.includes(key)).map((key) => `test has a line for ${key}, which isn't affected`),
+  ]
+}
+
+/**
+ * Gives the problem when a report's `selection` isn't the affected stories' from this base with this many changed
+ * files and no fallback, or none.
+ */
+function affectedSelectionProblems(report: TestReport, base: string, changedFiles: number): string[] {
+  const selection = { by: 'affected', base, changedFiles, fallback: null }
+
+  return isDeepStrictEqual(report.selection, selection)
+    ? []
+    : [`selection is ${JSON.stringify(report.selection)}, expected ${JSON.stringify(selection)}`]
+}
+
+/**
+ * The note `test` prints after its header when no story is affected and this many files changed since the base. It
+ * mirrors the CLI's notes (`packages/cli/src/commands/run-selection.ts`), which the e2e can't import.
+ */
+function noAffectedStoryNoteOf(base: string, changedFiles: number): string {
+  if (changedFiles === 0) {
+    return `No files changed since ${base.slice(0, 7)}, so no story is affected. ${affectedAllHint}`
+  }
+
+  if (changedFiles === 1) {
+    return `The changed file affects no story. ${affectedAllHint}`
+  }
+
+  return `None of the ${changedFiles} changed files affects a story. ${affectedAllHint}`
+}
+
+/**
+ * Gives the problem when the line after a run's header isn't this one, or none.
+ */
+function noteProblems(run: CliRun, note: string): string[] {
+  const line = run.stdout.split('\n')[1]
+
+  return line === note ? [] : [`the line after test's header is "${line ?? ''}", expected "${note}"`]
+}
+
+/**
+ * With the working tree as it is, `test --base HEAD` exits 0 with no snapshot line, the note after its header says no
+ * story is affected and counts the files git says changed, and its report selects by the affected stories from
+ * `HEAD`, with that count and no fallback.
+ */
+async function checkNoChange(host: HostRun, folder: string): Promise<string[]> {
+  const base = headSha()
+  const changedFiles = changedFileCount()
+  const run = await testAffected(host)
+
+  return [
+    ...exitCodeProblems('test', run, 0),
+    ...selectedKeysProblems(run, []),
+    ...noteProblems(run, noAffectedStoryNoteOf(base, changedFiles)),
+    ...reportLineProblems(run, folder),
+    ...reportProblems(folder, (report) => affectedSelectionProblems(report, base, changedFiles)),
+  ]
+}
+
+/**
+ * With the change line added to the file at `path`, `test --base HEAD` has a line for each expected snapshot of these
+ * stories files and no other, its header counts them, it exits with the code their outcomes give, and its report
+ * selects by the affected stories from `HEAD`, with the files git says changed and no fallback.
+ */
+async function checkChangedFile(host: HostRun, folder: string, path: string, keys: string[]): Promise<string[]> {
+  return await withChangedFile(path, async () => {
+    const base = headSha()
+    const changedFiles = changedFileCount()
+    const run = await testAffected(host)
+
+    return [
+      ...exitCodeProblems('test', run, exitCodeOf(run.outcomes)),
+      ...selectedKeysProblems(run, keys),
+      ...headerCountProblems(run, keys.length),
+      ...reportLineProblems(run, folder),
+      ...reportProblems(folder, (report) => affectedSelectionProblems(report, base, changedFiles)),
+    ]
+  })
+}
+
+/**
+ * The affected stories cases, in order: no change, then the host story's stories file changed, then the helper that
+ * only some stories files import changed.
+ */
+function affectedCases(host: HostRun, folder: string, expected: Outcomes): Case[] {
+  const storiesFiles = readStoriesFiles()
+
+  return [
+    {
+      name: 'no change: test --base HEAD exits 0 capturing nothing, its note says no story is affected and counts the files git says changed, its report selects by the affected stories from HEAD with that count and no fallback',
+      run: () => checkNoChange(host, folder),
+    },
+    {
+      name: `stories file changed: with a line added to ${hostStoryId}'s stories file, test --base HEAD captures that file's stories alone, its report counts the files git says changed`,
+      run: async () => {
+        const storiesFile = storiesFileOf(storiesFiles, hostStoryId)
+        const keys = keysOfStoriesFiles(expected, storiesFiles, [storiesFile])
+
+        return await checkChangedFile(host, folder, resolvePath(packageDir, storiesFile), keys)
+      },
+    },
+    {
+      name: `helper changed: with a line added to ${affectedHelper.name}, test --base HEAD captures the stories of the ${affectedHelper.importedBy.length} stories files that import it alone, its report counts the files git says changed`,
+      run: async () => {
+        const importers = affectedHelper.importedBy.map((storyId) => storiesFileOf(storiesFiles, storyId))
+        const keys = keysOfStoriesFiles(expected, storiesFiles, importers)
+        const helperFolder = dirname(resolvePath(packageDir, storiesFileOf(storiesFiles, hostStoryId)))
+
+        return await checkChangedFile(host, folder, join(helperFolder, affectedHelper.name), keys)
+      },
+    },
+  ]
+}
+
+/**
+ * Runs the affected stories cases and resolves with whether all of them passed. They share one server, whose
+ * `index.json` lists every story but the stories of the file that fails to load, and a temporary folder, which holds
+ * their config, a baseline for every expected snapshot and their report, and their cache when the caller doesn't name
+ * one.
+ */
+async function runAffectedCases(expected: Outcomes): Promise<boolean> {
+  return await withStorybookServer({}, (server) =>
+    withTemporaryFolder((folder) => {
+      const host = hostRunOf(folder, server.url)
+
+      writeEveryBaseline(folder, expected)
+
+      return runCases(affectedCases(host, folder, expected))
+    }),
+  )
+}
+
+/**
  * Killing the CLI while it captures leaves no container of its own behind. The server holds the story pages, so the
  * run is still capturing when the kill comes. Containers that were there before the run don't count.
  */
@@ -3788,6 +4086,8 @@ const setupProblems = findSetupProblems()
 if (setupProblems.length > 0) {
   console.error(setupProblems.join('\n'))
   process.exitCode = 1
+} else if (affectedOnly) {
+  process.exitCode = (await runAffectedCases(withoutLoadFails(readExpectedOutcomes()))) ? 0 : 1
 } else if (onHost) {
   process.exitCode = (await runHostCases()) ? 0 : 1
 } else if (onArm64Image) {

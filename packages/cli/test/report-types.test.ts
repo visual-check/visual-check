@@ -5,6 +5,7 @@ import type {
   ReportConsoleLevel,
   ReportDiffReason,
   ReportPixels,
+  ReportSelection,
   TestReport,
   TestReportCounts,
   TestReportEntry,
@@ -84,6 +85,16 @@ describe('the report types exported from the package entry', () => {
     expectTypeOf<keyof UpdateReportCounts>().toEqualTypeOf<'written' | 'deleted' | 'kept' | 'broken' | 'flaky'>()
     expectTypeOf<TestReport['counts']>().toEqualTypeOf<TestReportCounts>()
     expectTypeOf<UpdateReport['counts']>().toEqualTypeOf<UpdateReportCounts>()
+  })
+
+  it('says how the stories were picked, with the base, the count of changed files and why it fell back', () => {
+    expectTypeOf<ReportSelection>().toEqualTypeOf<{
+      by: 'affected' | 'all' | 'filter'
+      base: string | null
+      changedFiles: number | null
+      fallback: string | null
+    }>()
+    expectTypeOf<TestReport['selection']>().toEqualTypeOf<ReportSelection>()
   })
 
   it('writes the budget as a count or a percentage', () => {

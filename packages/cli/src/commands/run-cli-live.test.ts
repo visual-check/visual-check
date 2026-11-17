@@ -19,9 +19,9 @@ afterAll(removeMarkerFolder)
 
 describe('runCli loading the live view', () => {
   it.each([
-    ['log, with no terminal', ['test'], {}, false],
-    ['--reporter log, with a terminal', ['test', '--reporter', 'log'], {}, true],
-    ['--reporter json, with a terminal', ['test', '--reporter', 'json'], {}, true],
+    ['log, with no terminal', ['test', '--all'], {}, false],
+    ['--reporter log, with a terminal', ['test', '--all', '--reporter', 'log'], {}, true],
+    ['--reporter json, with a terminal', ['test', '--all', '--reporter', 'json'], {}, true],
     ['log, with CI set and a terminal', ['test'], { CI: 'true' }, true],
   ])('never loads it under %s', async (_name, commandLine, environment, tty) => {
     const { project } = await createRun(['a'], { a: defaultRunSnapshot })

@@ -170,8 +170,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
-  # Apple Silicon runners have no Docker. Later tickets add affected stories and starting and stopping Storybook to
-  # this job.
+  # Apple Silicon runners have no Docker. A later ticket adds starting and stopping Storybook to this job.
   macos-no-docker:
     name: macOS without Docker
     runs-on: macos-15
@@ -191,8 +190,18 @@ jobs:
       # The baseline files' unit tests, on APFS.
       - name: Baseline files
         run: pnpm turbo run test:unit --filter @visual-check/cli -- src/baselines
+      # The host check downloads the headless shell into a cache this job names, which must start empty, and the
+      # affected stories check reuses it.
       - name: No-Docker error and one host capture
+        env:
+          VISUAL_CHECK_CACHE_DIR: ${{ runner.temp }}/visual-check-cache
         run: pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --host --no-docker
+      # The check runs the CLI without `CI`, so `test` with no selection flag covers the affected stories. The checkout
+      # holds one commit, so each run measures the changed files from `--base HEAD`.
+      - name: Affected stories
+        env:
+          VISUAL_CHECK_CACHE_DIR: ${{ runner.temp }}/visual-check-cache
+        run: pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --host --affected
       - name: init without Docker
         run: pnpm turbo run init-check --filter @visual-check/test-setup -- --package-manager pnpm --init-only
 

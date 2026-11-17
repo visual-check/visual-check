@@ -216,7 +216,19 @@ The cache is `VISUAL_CHECK_CACHE_DIR` when set, which must name an empty or miss
 pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --host --no-docker
 ```
 
-CI's "Ubuntu host" job runs `--host` where Chromium's sandbox can't start, so the CLI relaunches without it. "macOS without Docker" runs `--host --no-docker`.
+`--affected`, with `--host` and without `--no-docker`, runs three affected stories cases in place of the host cases. Each runs `test --base HEAD` with `CI` unset, so `test` covers the stories the working tree's changes affect, and a checkout of one commit works too. The working tree's own changes must affect no story. Their baselines folder holds a baseline for every expected snapshot, so the consistency check finds nothing:
+
+- With no change, `test` captures nothing, and its note says no story is affected.
+- With a stories file changed, `test` captures only that file's stories.
+- With a helper changed, `test` captures only the stories of the stories files that import it.
+
+The last two add a line to a tracked file while the CLI runs, and put back its exact bytes after, also on Ctrl+C. They share the cache as the host cases do, but it needn't start empty.
+
+```sh
+pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --host --affected
+```
+
+CI's "Ubuntu host" job runs `--host` where Chromium's sandbox can't start, so the CLI relaunches without it. "macOS without Docker" runs `--host --no-docker`, then `--host --affected` with the same cache.
 
 ## Running it on the arm64 image
 

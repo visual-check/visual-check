@@ -361,7 +361,7 @@ describe('visual-check binary', () => {
     const result = run({}, 'test', '--all', '--filter', 'x')
 
     expect(result.status).toBe(2)
-    expect(result.stderr).toContain("--all and --filter can't be used together")
+    expect(result.stderr).toContain("--all, --affected and --filter can't be used together")
   })
 
   it('exits 2 for update when CI is set, before reaching any Storybook', async () => {
@@ -402,7 +402,7 @@ describe('visual-check binary', () => {
     const project = createProject({
       'visual-check.config.mjs': "export default { storybooks: { web: { url: 'http://127.0.0.1:6006' } }, nope: 1 }\n",
     })
-    const result = run({ cwd: project }, 'test')
+    const result = run({ cwd: project }, 'test', '--all')
 
     expect(result.status).toBe(2)
     expect(result.stderr).toContain('nope: unknown key')
@@ -410,7 +410,7 @@ describe('visual-check binary', () => {
 
   it('exits 2 and points to init when no config is found', () => {
     const project = createProject({})
-    const result = run({ cwd: project }, 'test')
+    const result = run({ cwd: project }, 'test', '--all')
 
     expect(result.status).toBe(2)
     expect(result.stderr).toContain('No visual-check.config.ts')
@@ -422,7 +422,7 @@ describe('visual-check binary', () => {
       'visual-check.config.mjs':
         "export default { storybooks: { web: { url: { local: 'http://127.0.0.1:6006', ci: 'https://user:hunter2@example.com' } } } }\n",
     })
-    const result = run({ cwd: project }, 'test')
+    const result = run({ cwd: project }, 'test', '--all')
 
     expect(result.status).toBe(2)
     expect(result.stderr).toContain(
@@ -509,7 +509,7 @@ describe('visual-check binary reaching Storybooks', () => {
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${down}' } } }\n`,
     })
     const started = Date.now()
-    const result = await runAsynchronously({ cwd: project }, 'test')
+    const result = await runAsynchronously({ cwd: project }, 'test', '--all')
 
     expect(result.status).toBe(2)
     expect(Date.now() - started).toBeLessThan(2_000)
@@ -522,7 +522,7 @@ describe('visual-check binary reaching Storybooks', () => {
     const project = createProject({
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${down}' } } }\n`,
     })
-    const result = await runAsynchronously({ cwd: project }, 'test', '--reporter', 'json')
+    const result = await runAsynchronously({ cwd: project }, 'test', '--all', '--reporter', 'json')
     const report = JSON.parse(
       readFileSync(join(project, '.visual-check', 'report', 'report.json'), 'utf8'),
     ) as TestReport
@@ -555,7 +555,7 @@ describe('visual-check binary reaching Storybooks', () => {
     const project = createProject({
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${down}' } } }\n`,
     })
-    const result = await runAsynchronously({ cwd: project, docker: 'none' }, 'test')
+    const result = await runAsynchronously({ cwd: project, docker: 'none' }, 'test', '--all')
 
     expect(result.status).toBe(2)
     expect(result.stdout).toBe('')
@@ -573,7 +573,7 @@ describe('visual-check binary reaching Storybooks', () => {
       'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${url}' }, docs: { dir: 'docs', url: '${down}' } } }\n`,
       'web/button.stories.tsx': '',
     })
-    const result = await runAsynchronously({ cwd: project }, 'test')
+    const result = await runAsynchronously({ cwd: project }, 'test', '--all')
 
     expect(result.status).toBe(2)
     expect(result.stderr).toContain(`Storybook docs doesn't answer at ${down}/index.json`)
@@ -590,7 +590,7 @@ describe('visual-check binary reaching Storybooks', () => {
     const project = createProject({
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
     })
-    const result = await runAsynchronously({ cwd: project }, 'test')
+    const result = await runAsynchronously({ cwd: project }, 'test', '--all')
 
     expect(result.status).toBe(2)
     expect(result.stderr).toContain(`Storybook web asks for a login at ${url}/index.json (HTTP 401 Unauthorized).`)
@@ -602,7 +602,7 @@ describe('visual-check binary reaching Storybooks', () => {
     const project = createProject({
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
     })
-    const result = await runAsynchronously({ cwd: project }, 'test')
+    const result = await runAsynchronously({ cwd: project }, 'test', '--all')
 
     expect(result.status).toBe(2)
     expect(result.stderr).toContain("lists stories files that aren't on disk: button.stories.tsx")
@@ -617,7 +617,7 @@ describe('visual-check binary reaching Storybooks', () => {
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
       'button.stories.tsx': '',
     })
-    const result = await runAsynchronously({ cwd: project }, 'test')
+    const result = await runAsynchronously({ cwd: project }, 'test', '--all')
 
     expect(result.status).toBe(0)
     expect(withoutElapsed(result.stdout)).toBe(
@@ -633,7 +633,7 @@ describe('visual-check binary reaching Storybooks', () => {
       'button.stories.tsx': '',
     })
     const summary = join(project, 'summary.md')
-    const result = await runAsynchronously({ cwd: project, env: { GITHUB_STEP_SUMMARY: summary } }, 'test')
+    const result = await runAsynchronously({ cwd: project, env: { GITHUB_STEP_SUMMARY: summary } }, 'test', '--all')
 
     expect(result.status).toBe(0)
     expect(readFileSync(summary, 'utf8')).toBe(`### visual-check ${version} · test\n\n0 passed\n`)
@@ -648,7 +648,7 @@ describe('visual-check binary reaching Storybooks', () => {
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${down}' } } }\n`,
     })
     const summary = join(project, 'summary.md')
-    const result = await runAsynchronously({ cwd: project, env: { GITHUB_STEP_SUMMARY: summary } }, 'test')
+    const result = await runAsynchronously({ cwd: project, env: { GITHUB_STEP_SUMMARY: summary } }, 'test', '--all')
 
     expect(result.status).toBe(2)
     expect(readFileSync(summary, 'utf8')).toMatch(
@@ -664,7 +664,7 @@ describe('visual-check binary reaching Storybooks', () => {
       'button.stories.tsx': '',
       'node_modules/storybook/package.json': JSON.stringify({ version: '12.0.0' }),
     })
-    const result = await runIntoOneFile({ cwd: project }, 'test')
+    const result = await runIntoOneFile({ cwd: project }, 'test', '--all')
 
     expect(result.status).toBe(0)
     expect(withoutElapsed(result.output)).toBe(
@@ -683,7 +683,7 @@ describe('visual-check binary reaching Storybooks', () => {
         'button.stories.tsx': '',
         'node_modules/storybook/package.json': JSON.stringify({ version: '12.0.0' }),
       })
-      const result = await runThroughOnePipe({ cwd: project }, 'test')
+      const result = await runThroughOnePipe({ cwd: project }, 'test', '--all')
 
       expect(result.status).toBe(0)
       expect(withoutElapsed(result.output)).toBe(
@@ -700,7 +700,7 @@ describe('visual-check binary reaching Storybooks', () => {
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
       'button.stories.tsx': '',
     })
-    const result = await runAsynchronously({ cwd: project }, 'test', '--reporter', 'json')
+    const result = await runAsynchronously({ cwd: project }, 'test', '--all', '--reporter', 'json')
 
     expect(result.status).toBe(0)
     expect(result.stdout.trimEnd().split('\n')).toHaveLength(1)
@@ -730,7 +730,7 @@ describe('visual-check binary reaching Storybooks', () => {
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
       'button.stories.tsx': '',
     })
-    const result = await runIntoOneFile({ cwd: project }, 'test', '--reporter', 'json')
+    const result = await runIntoOneFile({ cwd: project }, 'test', '--all', '--reporter', 'json')
     const [header, document = '', ...rest] = withoutElapsed(result.output).split('\n')
 
     expect(result.status).toBe(0)
@@ -759,7 +759,7 @@ describe('visual-check binary reaching Storybooks', () => {
       'visual-check.config.mjs': `export default { storybooks: { web: { dir: 'web', url: '${down}' }, docs: { dir: 'docs', url: '${down}' } } }\n`,
       'web/button.stories.tsx': '',
     })
-    const result = await runAsynchronously({ cwd: project }, 'test', '--storybook', 'web', '--url', url)
+    const result = await runAsynchronously({ cwd: project }, 'test', '--all', '--storybook', 'web', '--url', url)
 
     expect(result.status).toBe(2)
     expect(result.stdout).toBe('')
@@ -772,7 +772,7 @@ describe('visual-check binary reaching Storybooks', () => {
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
       'node_modules/storybook/package.json': JSON.stringify({ version: '9.0.0' }),
     })
-    const result = await runAsynchronously({ cwd: project }, 'test')
+    const result = await runAsynchronously({ cwd: project }, 'test', '--all')
 
     expect(result.status).toBe(2)
     expect(result.stderr).toContain('Storybook web runs storybook 9.0.0, and visual-check needs 9.1 or later.')
@@ -787,7 +787,7 @@ describe('visual-check binary reaching Storybooks', () => {
       'button.stories.tsx': '',
       'node_modules/storybook/package.json': JSON.stringify({ version: '12.0.0' }),
     })
-    const result = await runAsynchronously({ cwd: project }, 'test')
+    const result = await runAsynchronously({ cwd: project }, 'test', '--all')
     const warning =
       'Warning: Storybook web runs storybook 12.0.0, and visual-check supports 9.1 to 11. The run carries on.\n'
 
@@ -803,7 +803,7 @@ describe('visual-check binary reaching Storybooks', () => {
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
       'button.stories.tsx': '',
     })
-    const result = await runAsynchronously({ cwd: project }, 'test')
+    const result = await runAsynchronously({ cwd: project }, 'test', '--all')
 
     expect(result.status).toBe(2)
     expect(result.stderr).toMatch(pullFailure)

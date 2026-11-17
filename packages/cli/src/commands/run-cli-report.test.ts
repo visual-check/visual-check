@@ -80,7 +80,7 @@ describe('runCli test report', () => {
 
     writeStaleReport(project)
 
-    const result = await runCli(['test'], {}, project, fakeBrowser().options)
+    const result = await runCli(['test', '--all'], {}, project, fakeBrowser().options)
 
     expect(result.exitCode).toBe(0)
     expect(result.reportLine).toEqual(reportOnStdout)
@@ -104,7 +104,7 @@ describe('runCli test report', () => {
 
   it('lists a snapshot that differs by pixels, with its images', async () => {
     const { project } = await createRun(['a', 'b'], { a: defaultRunSnapshot, b: defaultRunSnapshot }, 'retries: 0')
-    const result = await runCli(['test'], {}, project, fakeBrowser({ b: { snapshot: otherSnapshot } }).options)
+    const result = await runCli(['test', '--all'], {}, project, fakeBrowser({ b: { snapshot: otherSnapshot } }).options)
     const report = readReport(project)
     const entry = onlyEntryOf(report)
 
@@ -144,7 +144,7 @@ describe('runCli test report', () => {
   it('lists a size difference with both sizes', async () => {
     const taller = new Uint8Array(await greyPng(10, 12, 0))
     const { project } = await createRun(['a'], { a: defaultRunSnapshot }, 'retries: 0')
-    const result = await runCli(['test'], {}, project, fakeBrowser({ a: { snapshot: taller } }).options)
+    const result = await runCli(['test', '--all'], {}, project, fakeBrowser({ a: { snapshot: taller } }).options)
     const entry = onlyEntryOf(readReport(project))
 
     expect(result.exitCode).toBe(1)
@@ -158,7 +158,7 @@ describe('runCli test report', () => {
 
   it('lists a missing baseline with no image and no attempt', async () => {
     const { project } = await createRun(['a'])
-    const result = await runCli(['test'], {}, project, fakeBrowser().options)
+    const result = await runCli(['test', '--all'], {}, project, fakeBrowser().options)
 
     expect(result.exitCode).toBe(1)
     expect(onlyEntryOf(readReport(project))).toMatchObject({
@@ -173,7 +173,7 @@ describe('runCli test report', () => {
 
   it('lists an orphan with its baseline copied into the report', async () => {
     const { project } = await createRun(['a'], { a: defaultRunSnapshot, gone: otherSnapshot })
-    const result = await runCli(['test'], {}, project, fakeBrowser().options)
+    const result = await runCli(['test', '--all'], {}, project, fakeBrowser().options)
     const report = readReport(project)
     const entry = onlyEntryOf(report)
 
@@ -193,7 +193,7 @@ describe('runCli test report', () => {
   it("lists a flaky pass with its first attempt's images", async () => {
     const { project } = await createRun(['a'], { a: defaultRunSnapshot })
     const result = await runCli(
-      ['test'],
+      ['test', '--all'],
       {},
       project,
       fakeBrowser({ a: { captures: [{ snapshot: otherSnapshot }, {}] } }).options,
@@ -210,7 +210,7 @@ describe('runCli test report', () => {
   it('lists a broken story with the image of its page, its details and its console', async () => {
     const { project } = await createRun(['a'], { a: defaultRunSnapshot })
     const story = { broken: true, consoleMessages: [{ kind: 'console.error' as const, text: 'boom' }] }
-    const result = await runCli(['test'], {}, project, fakeBrowser({ a: story }).options)
+    const result = await runCli(['test', '--all'], {}, project, fakeBrowser({ a: story }).options)
     const entry = onlyEntryOf(readReport(project))
 
     expect(result.exitCode).toBe(1)
@@ -231,7 +231,7 @@ describe('runCli test report', () => {
       {},
       { read: { options: { a: { modes: { dark: { globals: { theme: 'dark' } } } } } } },
     )
-    const result = await runCli(['test'], {}, project, options)
+    const result = await runCli(['test', '--all'], {}, project, options)
 
     expect(result.exitCode).toBe(1)
     expect(onlyEntryOf(readReport(project))).toMatchObject({
@@ -273,7 +273,7 @@ describe('runCli test report', () => {
       'packages/web/button.stories.tsx': '',
       'packages/web/.visual-check/baselines/a.png': defaultRunSnapshot,
     })
-    const result = await runCli(['test'], {}, join(project, 'packages', 'web'), fakeBrowser().options)
+    const result = await runCli(['test', '--all'], {}, join(project, 'packages', 'web'), fakeBrowser().options)
 
     expect(result.exitCode).toBe(0)
     expect(result.reportLine).toEqual({ stream: 'stdout', text: 'Report: ../../.visual-check/report/report.json' })
@@ -283,7 +283,7 @@ describe('runCli test report', () => {
   it('leaves the report folder untouched in update', async () => {
     const { project } = await createRun(['a'])
     const image = writeStaleReport(project)
-    const result = await runCli(['update'], {}, project, fakeBrowser().options)
+    const result = await runCli(['update', '--all'], {}, project, fakeBrowser().options)
 
     expect(result.exitCode).toBe(0)
     expect(result.reportLine).toBeUndefined()
@@ -345,8 +345,8 @@ describe('runCli test report after the consistency check', () => {
     installStorybook(plainRun.project, '12.0.0')
     installStorybook(project, '12.0.0')
 
-    const plain = await runCli(['test'], {}, plainRun.project, fakeBrowser(bDiffers).options)
-    const json = await runCli(['test', '--reporter', 'json'], {}, project, fakeBrowser(bDiffers).options)
+    const plain = await runCli(['test', '--all'], {}, plainRun.project, fakeBrowser(bDiffers).options)
+    const json = await runCli(['test', '--all', '--reporter', 'json'], {}, project, fakeBrowser(bDiffers).options)
 
     expect(plain.stderr).toMatch(/^Warning: Storybook web runs storybook 12\.0\.0/)
     expect(json.exitCode).toBe(1)
@@ -357,7 +357,7 @@ describe('runCli test report after the consistency check', () => {
   it('prints only the report document on stdout with --reporter json, the rest on stderr', async () => {
     const { project } = await createRun(['a', 'b'], { a: defaultRunSnapshot, b: defaultRunSnapshot }, 'retries: 0')
     const browser = fakeBrowser({ b: { snapshot: otherSnapshot } })
-    const result = await runCli(['test', '--reporter', 'json'], {}, project, browser.options)
+    const result = await runCli(['test', '--all', '--reporter', 'json'], {}, project, browser.options)
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout.endsWith('\n')).toBe(true)
@@ -370,7 +370,7 @@ describe('runCli test report after the consistency check', () => {
 
   it('prints the JSON document alone on stdout with --reporter json even in a TTY', async () => {
     const { project } = await createRun(['a'], { a: defaultRunSnapshot })
-    const result = await runCli(['test', '--reporter', 'json'], {}, project, {
+    const result = await runCli(['test', '--all', '--reporter', 'json'], {}, project, {
       ...fakeBrowser().options,
       tty: true,
     })
@@ -383,8 +383,8 @@ describe('runCli test report after the consistency check', () => {
   it('prints the same with --reporter log as with no flag and no terminal', async () => {
     const plain = await createRun(['a'], { a: defaultRunSnapshot })
     const flagged = await createRun(['a'], { a: defaultRunSnapshot })
-    const expected = await runCli(['test'], {}, plain.project, fakeBrowser().options)
-    const result = await runCli(['test', '--reporter', 'log'], {}, flagged.project, fakeBrowser().options)
+    const expected = await runCli(['test', '--all'], {}, plain.project, fakeBrowser().options)
+    const result = await runCli(['test', '--all', '--reporter', 'log'], {}, flagged.project, fakeBrowser().options)
 
     expect(result).toEqual(expected)
   })
@@ -478,7 +478,7 @@ describe('runCli test report on exit 2', () => {
 
     writeStaleReport(project)
 
-    const result = await runCli(['test'], {}, project, buggyBrowserOptions())
+    const result = await runCli(['test', '--all'], {}, project, buggyBrowserOptions())
 
     expect(result).toEqual({
       exitCode: 2,
@@ -501,7 +501,7 @@ describe('runCli test report on exit 2', () => {
 
     installStorybook(project, '12.0.0')
 
-    const result = await runCli(['test'], {}, project, buggyRelaunchOptions({ b: { browserExits: true } }))
+    const result = await runCli(['test', '--all'], {}, project, buggyRelaunchOptions({ b: { browserExits: true } }))
 
     expect(result.exitCode).toBe(2)
     expect(withoutTimes(result.stdout)).toMatch(new RegExp(`^${headerOf('test', 3, 1)}\n✓ web  a  N ms\n`))
@@ -513,7 +513,7 @@ describe('runCli test report on exit 2', () => {
 
   it('prints the error document of an error that is a bug with --reporter json', async () => {
     const { project } = await createRun(['a'])
-    const result = await runCli(['test', '--reporter', 'json'], {}, project, buggyBrowserOptions())
+    const result = await runCli(['test', '--all', '--reporter', 'json'], {}, project, buggyBrowserOptions())
 
     expect(result.exitCode).toBe(2)
     expect(result.stdout).toBe(readFileSync(join(reportFolderIn(project), 'report.json'), 'utf8'))
@@ -523,7 +523,7 @@ describe('runCli test report on exit 2', () => {
 
   it("prints update's error document of an error that is a bug with --reporter json, writing no report", async () => {
     const { project } = await createRun(['a'])
-    const result = await runCli(['update', '--reporter', 'json'], {}, project, buggyBrowserOptions())
+    const result = await runCli(['update', '--all', '--reporter', 'json'], {}, project, buggyBrowserOptions())
 
     expect(result.exitCode).toBe(2)
     expect(JSON.parse(result.stdout)).toMatchObject({
@@ -541,7 +541,7 @@ describe('runCli test report on exit 2', () => {
 
     writeStaleReport(project)
 
-    const result = await runCli(['test'], {}, project, fakeBrowser().options)
+    const result = await runCli(['test', '--all'], {}, project, fakeBrowser().options)
     const message = result.stderr.slice(0, -1)
 
     expect(message).toMatch(/^visual-check\.config\.mjs is invalid:\n {2}- colour: unknown key\./)
@@ -553,7 +553,7 @@ describe('runCli test report on exit 2', () => {
   it('writes the usage error of a test beside the config the search finds, without the hint', async () => {
     const { project } = await createRun(['a'])
     const result = await runCli(['test', '--all', '--filter', 'a'], {}, project, fakeBrowser().options)
-    const message = "--all and --filter can't be used together. Pick one."
+    const message = "--all, --affected and --filter can't be used together. Pick one."
 
     expect(result).toEqual({ exitCode: 2, stdout: '', stderr: `${message}\n${usageHint}`, reportLine: reportOnStderr })
     expect(readReport(project)).toEqual(errorReportOf({ message, storybooks: [] }))
@@ -581,7 +581,7 @@ describe('runCli test report on exit 2', () => {
     const project = createProject({
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
     })
-    const result = await runCli(['test'], {}, project, fakeBrowser().options)
+    const result = await runCli(['test', '--all'], {}, project, fakeBrowser().options)
     const report = readReport(project)
 
     expect(result.exitCode).toBe(2)
@@ -600,7 +600,7 @@ describe('runCli test report on exit 2', () => {
       a: { browserExits: true },
       b: { captures: [{ snapshot: otherSnapshot }, { browserExits: true }] },
     })
-    const result = await runCli(['test'], {}, project, options)
+    const result = await runCli(['test', '--all'], {}, project, options)
     const report = readReport(project)
 
     expect(result.exitCode).toBe(2)
@@ -614,7 +614,7 @@ describe('runCli test report on exit 2', () => {
 
   it("holds the error of a baseline that can't be decoded, and no results", async () => {
     const { project } = await createRun(['a'], { a: new TextEncoder().encode('not a PNG file') })
-    const result = await runCli(['test'], {}, project, fakeBrowser().options)
+    const result = await runCli(['test', '--all'], {}, project, fakeBrowser().options)
 
     expect(result.exitCode).toBe(2)
     expect(readReport(project).error).toEqual({
@@ -629,8 +629,8 @@ describe('runCli test report on exit 2', () => {
     const plainRun = await createRun(['a', 'b'], { a: defaultRunSnapshot, b: defaultRunSnapshot }, 'workers: 1')
     const { project } = await createRun(['a', 'b'], { a: defaultRunSnapshot, b: defaultRunSnapshot }, 'workers: 1')
     const browserExits = { a: { browserExits: true }, b: { browserExits: true } }
-    const plain = await runCli(['test'], {}, plainRun.project, fakeBrowser(browserExits).options)
-    const result = await runCli(['test', '--reporter', 'json'], {}, project, fakeBrowser(browserExits).options)
+    const plain = await runCli(['test', '--all'], {}, plainRun.project, fakeBrowser(browserExits).options)
+    const result = await runCli(['test', '--all', '--reporter', 'json'], {}, project, fakeBrowser(browserExits).options)
 
     expect(plain.stdout).toContain('! web  a  broken: The browser exited')
     expect(result.exitCode).toBe(2)
@@ -642,7 +642,7 @@ describe('runCli test report on exit 2', () => {
 
   it('writes nothing when no config is found, and prints the error document with no report folder for json', async () => {
     const project = createProject({})
-    const result = await runCli(['test', '--reporter', 'json'], {}, project, fakeBrowser().options)
+    const result = await runCli(['test', '--all', '--reporter', 'json'], {}, project, fakeBrowser().options)
     const message =
       'No visual-check.config.ts (or .mts, .js, .mjs) found in the current folder or its parents. ' +
       'Run visual-check init to create one.'
@@ -710,7 +710,7 @@ describe('runCli test report on exit 2', () => {
   it('leaves the report folder untouched when update exits 2', async () => {
     const { project } = await createRun(['a'], {}, "colour: 'red'")
     const image = writeStaleReport(project)
-    const result = await runCli(['update'], {}, project, fakeBrowser().options)
+    const result = await runCli(['update', '--all'], {}, project, fakeBrowser().options)
 
     expect(result.exitCode).toBe(2)
     expect(result.reportLine).toBeUndefined()
@@ -729,7 +729,7 @@ describe('runCli test report on exit 2', () => {
       chmodSync(visualCheckFolder, 0o555)
 
       try {
-        const result = await runCli(['test', '--reporter', 'json'], {}, project, browser.options)
+        const result = await runCli(['test', '--all', '--reporter', 'json'], {}, project, browser.options)
 
         expect(result).toEqual({
           exitCode: 2,
@@ -754,7 +754,7 @@ describe('runCli test report on exit 2', () => {
       chmodSync(visualCheckFolder, 0o555)
 
       try {
-        const result = await runCli(['test', '--reporter', 'json'], {}, project, fakeBrowser().options)
+        const result = await runCli(['test', '--all', '--reporter', 'json'], {}, project, fakeBrowser().options)
         const message = result.stderr.slice(0, -`\n${problem}\n`.length)
 
         expect(message).toMatch(/^visual-check\.config\.mjs is invalid:\n/)
@@ -781,8 +781,8 @@ describe('runCli test report on exit 2', () => {
       chmodSync(visualCheckFolder, 0o555)
 
       try {
-        const result = await runCli(['test'], {}, project, fakeBrowser().options)
-        const json = await runCli(['test', '--reporter', 'json'], {}, project, fakeBrowser().options)
+        const result = await runCli(['test', '--all'], {}, project, fakeBrowser().options)
+        const json = await runCli(['test', '--all', '--reporter', 'json'], {}, project, fakeBrowser().options)
 
         expect(result.exitCode).toBe(2)
         // No end block, since the run stops with exit 2 and the report it would be built from isn't written.
@@ -812,7 +812,7 @@ describe('runCli test report on exit 2', () => {
       chmodSync(orphan, 0o000)
 
       try {
-        const result = await runCli(['test'], {}, project, fakeBrowser().options)
+        const result = await runCli(['test', '--all'], {}, project, fakeBrowser().options)
 
         expect(result.exitCode).toBe(2)
         expect(result.stderr).toBe(
@@ -867,7 +867,7 @@ describe('runCli update --reporter json', () => {
       b: { snapshot: otherSnapshot },
       c: { captures: [{ snapshot: otherSnapshot }, {}] },
     })
-    const result = await runCli(['update', '--reporter', 'json'], {}, project, options)
+    const result = await runCli(['update', '--all', '--reporter', 'json'], {}, project, options)
     const report = JSON.parse(result.stdout) as UpdateReport
     const warnings =
       'api.test: 1 story (a). This story makes real network requests and may be unreliable.\n' +
@@ -943,7 +943,7 @@ describe('runCli update --reporter json', () => {
       a: { snapshotLater: greySnapshot },
       b: { captures: [{}, { snapshot: otherSnapshot }, { snapshot: greySnapshot }] },
     })
-    const result = await runCli(['update', '--reporter', 'json'], {}, project, options)
+    const result = await runCli(['update', '--all', '--reporter', 'json'], {}, project, options)
     const report = JSON.parse(result.stdout) as UpdateReport
 
     expect(result.exitCode).toBe(1)
@@ -966,8 +966,8 @@ describe('runCli update --reporter json', () => {
     const plainRun = await createRun(['a'], { gone: defaultRunSnapshot })
     const { project } = await createRun(['a'], { gone: defaultRunSnapshot })
     const requests = { a: { requestHosts: ['api.test'] } }
-    const plain = await runCli(['update'], {}, plainRun.project, fakeBrowser(requests).options)
-    const result = await runCli(['update', '--reporter', 'json'], {}, project, fakeBrowser(requests).options)
+    const plain = await runCli(['update', '--all'], {}, plainRun.project, fakeBrowser(requests).options)
+    const result = await runCli(['update', '--all', '--reporter', 'json'], {}, project, fakeBrowser(requests).options)
 
     expect(plain.stderr).toMatch(/^api\.test: 1 story \(a\)/)
     expect(result.exitCode).toBe(0)
@@ -977,8 +977,8 @@ describe('runCli update --reporter json', () => {
   it('prints the same with --reporter log as with no flag', async () => {
     const plain = await createRun(['a'], { gone: defaultRunSnapshot })
     const flagged = await createRun(['a'], { gone: defaultRunSnapshot })
-    const expected = await runCli(['update'], {}, plain.project, fakeBrowser().options)
-    const result = await runCli(['update', '--reporter', 'log'], {}, flagged.project, fakeBrowser().options)
+    const expected = await runCli(['update', '--all'], {}, plain.project, fakeBrowser().options)
+    const result = await runCli(['update', '--all', '--reporter', 'log'], {}, flagged.project, fakeBrowser().options)
 
     expect(result).toEqual(expected)
   })
@@ -1017,7 +1017,7 @@ describe('runCli update --reporter json', () => {
     const project = createProject({
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
     })
-    const result = await runCli(['update', '--reporter', 'json'], {}, project, fakeBrowser().options)
+    const result = await runCli(['update', '--all', '--reporter', 'json'], {}, project, fakeBrowser().options)
     const report = JSON.parse(result.stdout) as UpdateReport
 
     expect(result.exitCode).toBe(2)
@@ -1058,7 +1058,7 @@ describe('runCli update --reporter json', () => {
     writeStaleReport(project)
 
     const before = filesIn(reportFolderIn(project))
-    const result = await runCli(['update', '--reporter', 'json'], {}, project, fakeBrowser().options)
+    const result = await runCli(['update', '--all', '--reporter', 'json'], {}, project, fakeBrowser().options)
 
     expect(result.exitCode).toBe(2)
     expect(JSON.parse(result.stdout)).toMatchObject({

@@ -35,7 +35,7 @@ import {
 /**
  * The stories a run covers in one Storybook, in the order they are taken and printed.
  */
-interface StorybookSelection {
+export interface StorybookSelection {
   /**
    * The Storybook.
    */
@@ -101,6 +101,11 @@ interface SnapshotRun {
    */
   selections: StorybookSelection[]
   /**
+   * The notes about the selection, printed after the header: that no story is affected, with a hint at `--all`, or
+   * none.
+   */
+  selectionNotes: string[]
+  /**
    * The folder the CLI runs in. Printed paths are relative to it.
    */
   cwd: string
@@ -132,7 +137,7 @@ interface SnapshotRun {
    */
   progress: (text: string) => void
   /**
-   * Takes the run's progress stream as it happens: the planned snapshots with the header and a shard's notes, then
+   * Takes the run's progress stream as it happens: the planned snapshots with the header and the notes, then
    * each snapshot's start and its line once it finishes.
    */
   events: (event: RunEvent) => void
@@ -227,7 +232,7 @@ interface PlannedSnapshots {
    */
   header: string
   /**
-   * The notes printed after the header, before any snapshot line: a shard's, else none.
+   * The notes printed after the header, before any snapshot line: the selection's or a shard's, else none.
    */
   notes: string[]
   /**
@@ -410,12 +415,13 @@ function testPathWarningsOf(
 }
 
 /**
- * Gives the planned snapshots with the header that counts them, a shard's notes, and no result yet.
+ * Gives the planned snapshots with the header that counts them, the selection's notes and a shard's, and no result
+ * yet.
  */
 function plannedSnapshotsOf(run: SnapshotRun, share: RunShare | undefined, items: PlannedSnapshot[]): PlannedSnapshots {
   return {
     header: headerOf(run, share, items.length),
-    notes: shardNotesOf(share, items.length),
+    notes: [...run.selectionNotes, ...shardNotesOf(share, items.length)],
     items,
     results: items.map(() => undefined),
   }
@@ -464,10 +470,10 @@ async function takeSnapshots(
  * Reads every Storybook's per-story options before any capture, then takes the snapshots of every selected story that
  * isn't disabled with a pool of `workers` that share one browser: its default capture, then one snapshot per mode it
  * lists, each at its own viewport and with its mode's globals in the story's URL. Through `events` it emits the
- * planned snapshots with the header, which counts them, then each snapshot's start as a worker picks it up and its line
- * once it finishes, so the lines come in the order the captures finish. A mode's line names the mode after the story
- * ID. The snapshots are planned in config order, then `index.json` order, then each story's default capture and its
- * modes in order.
+ * planned snapshots with the header, which counts them, and the selection's notes, then each snapshot's start as a
+ * worker picks it up and its line once it finishes, so the lines come in the order the captures finish. A mode's line
+ * names the mode after the story ID. The snapshots are planned in config order, then `index.json` order, then each
+ * story's default capture and its modes in order.
  * Each snapshot has its own baseline, `<story-id>.png` for the default capture and `<story-id>.<mode>.png` for a mode,
  * a key over 240 bytes shortened to its first 223 bytes, `-` and 16 hex characters of its SHA-256. `test` compares each
  * snapshot with its baseline by the story's tolerance, at the viewport's device scale factor, and never captures a

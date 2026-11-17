@@ -6,6 +6,7 @@ import { parseCommandLine, UsageError } from './parse-command-line.js'
  */
 const defaultOptions = {
   selection: { kind: 'default' },
+  baseRef: undefined,
   storybook: undefined,
   url: undefined,
   config: undefined,
@@ -83,7 +84,7 @@ describe('parseCommandLine', () => {
     expect(usageErrorOf('test', '--', '--help').message).toBe("Unexpected argument '--help'.")
   })
 
-  it.each(['filter', 'storybook', 'url', 'config', 'shard', 'reporter'])('rejects an empty --%s', (flag) => {
+  it.each(['filter', 'base', 'storybook', 'url', 'config', 'shard', 'reporter'])('rejects an empty --%s', (flag) => {
     expect(usageErrorOf('test', `--${flag}=`).message).toBe(`--${flag} needs a value.`)
     expect(usageErrorOf('test', `--${flag}`, '').message).toBe(`--${flag} needs a value.`)
   })
@@ -102,6 +103,8 @@ describe('parseCommandLine', () => {
 
   it.each([
     ['--all', ['--all']],
+    ['--affected', ['--affected']],
+    ['--base', ['--base', 'main']],
     ['--filter', ['--filter', 'x']],
     ['--storybook', ['--storybook', 'web']],
     ['--url', ['--url', 'http://127.0.0.1:6006']],
@@ -173,9 +176,27 @@ describe('parseCommandLine', () => {
     expect(usageErrorOf('init', '--url', 'nope').message).toBe("--url doesn't apply to init.")
   })
 
-  it('rejects --all with --filter', () => {
-    expect(usageErrorOf('test', '--all', '--filter', 'x').message).toBe(
-      "--all and --filter can't be used together. Pick one.",
+  it.each([
+    ['--all', '--filter', 'x'],
+    ['--all', '--affected'],
+    ['--affected', '--filter', 'x'],
+    ['--all', '--affected', '--filter', 'x'],
+  ])('rejects %s with another selection flag', (...selectionFlags) => {
+    for (const command of ['test', 'update']) {
+      expect(usageErrorOf(command, ...selectionFlags).message).toBe(
+        "--all, --affected and --filter can't be used together. Pick one.",
+      )
+    }
+  })
+
+  it.each([
+    ['--all', '--affected', '--base', 'main'],
+    ['--shard', '2/4', '--affected', '--all'],
+    ['--consistency', '--all', '--affected'],
+    ['--consistency', '--shard', '2/4', '--affected', '--filter', 'x'],
+  ])('reports two selection flags before any other clash, for test %s', (...flags) => {
+    expect(usageErrorOf('test', ...flags).message).toBe(
+      "--all, --affected and --filter can't be used together. Pick one.",
     )
   })
 
@@ -201,6 +222,45 @@ describe('parseCommandLine', () => {
       command: 'update',
       options: { ...defaultOptions, selection: { kind: 'all' } },
     })
+  })
+
+  it.each(['test', 'update'] as const)('carries --affected for %s', (command) => {
+    expect(parseCommandLine([command, '--affected'])).toEqual({
+      command,
+      options: { ...defaultOptions, selection: { kind: 'affected' } },
+    })
+  })
+
+  it.each([
+    [['--base', 'origin/develop'], { kind: 'default' }],
+    [['--affected', '--base', 'origin/develop'], { kind: 'affected' }],
+  ] as const)('carries --base with %j', (flags, selection) => {
+    for (const command of ['test', 'update'] as const) {
+      expect(parseCommandLine([command, ...flags])).toEqual({
+        command,
+        options: { ...defaultOptions, selection, baseRef: 'origin/develop' },
+      })
+    }
+  })
+
+  it.each([
+    ['all', ['--all']],
+    ['filter', ['--filter', 'x']],
+  ])('rejects --base with --%s', (flag, flagArguments) => {
+    for (const command of ['test', 'update']) {
+      expect(usageErrorOf(command, '--base', 'main', ...flagArguments).message).toBe(
+        `--base applies only to affected stories, so it takes no --${flag}.`,
+      )
+    }
+  })
+
+  it.each([
+    ['consistency', ['--consistency']],
+    ['shard', ['--shard', '2/4']],
+  ])('rejects --base with --%s for test', (flag, flagArguments) => {
+    expect(usageErrorOf('test', '--base', 'main', ...flagArguments).message).toBe(
+      `--base applies only to affected stories, so it takes no --${flag}.`,
+    )
   })
 
   it('carries --storybook, --url and --config', () => {
@@ -265,9 +325,9 @@ describe('parseCommandLine --consistency', () => {
     })
   })
 
-  it.each([['--all'], ['--filter', 'x']])('rejects --consistency with %s', (...selectionFlags) => {
+  it.each([['--all'], ['--affected'], ['--filter', 'x']])('rejects --consistency with %s', (...selectionFlags) => {
     expect(usageErrorOf('test', '--consistency', ...selectionFlags).message).toBe(
-      '--consistency covers every story, so it takes no --all or --filter. Use --storybook to narrow it.',
+      '--consistency covers every story, so it takes no --all, --affected or --filter. Use --storybook to narrow it.',
     )
   })
 
@@ -315,6 +375,12 @@ describe('parseCommandLine --shard', () => {
   ])('rejects --shard %j, naming the value', (value) => {
     expect(usageErrorOf('test', `--shard=${value}`).message).toBe(
       `--shard takes k/n, two whole numbers with 1 ≤ k ≤ n, such as 2/4. Got '${value}'.`,
+    )
+  })
+
+  it('rejects --shard with --affected', () => {
+    expect(usageErrorOf('test', '--shard', '2/4', '--affected').message).toBe(
+      '--shard takes its share of every story, so it takes no --affected: the affected stories differ between machines.',
     )
   })
 

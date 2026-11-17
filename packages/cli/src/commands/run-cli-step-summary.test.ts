@@ -72,7 +72,10 @@ describe('runCli writing the GitHub step summary', () => {
     ['live', [], true],
   ] as const)('writes the summary of a test under the %s reporter', async (reporter, flags, tty) => {
     const { project, options, summary } = await differingRun()
-    const result = await runCli(['test', ...flags], { GITHUB_STEP_SUMMARY: summary }, project, { ...options, tty })
+    const result = await runCli(['test', '--all', ...flags], { GITHUB_STEP_SUMMARY: summary }, project, {
+      ...options,
+      tty,
+    })
 
     expect(result.exitCode).toBe(1)
     expect(readFileSync(summary, 'utf8')).toBe(differingSummary)
@@ -83,7 +86,7 @@ describe('runCli writing the GitHub step summary', () => {
   it('reads a relative path from the folder the CLI runs in', async () => {
     const { project, options, summary } = await differingRun()
 
-    await runCli(['test'], { GITHUB_STEP_SUMMARY: 'summary.md' }, project, options)
+    await runCli(['test', '--all'], { GITHUB_STEP_SUMMARY: 'summary.md' }, project, options)
 
     expect(readFileSync(summary, 'utf8')).toBe(differingSummary)
   })
@@ -94,7 +97,7 @@ describe('runCli writing the GitHub step summary', () => {
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
     })
     const summary = join(project, 'summary.md')
-    const result = await runCli(['test'], { GITHUB_STEP_SUMMARY: summary }, project, fakeBrowser().options)
+    const result = await runCli(['test', '--all'], { GITHUB_STEP_SUMMARY: summary }, project, fakeBrowser().options)
     const text = readFileSync(summary, 'utf8')
 
     expect(result.exitCode).toBe(2)
@@ -138,7 +141,7 @@ describe('runCli writing the GitHub step summary', () => {
   it('writes the counts of an update that finishes', async () => {
     const { project } = await createRun(['a'])
     const summary = join(project, 'summary.md')
-    const result = await runCli(['update'], { GITHUB_STEP_SUMMARY: summary }, project, fakeBrowser().options)
+    const result = await runCli(['update', '--all'], { GITHUB_STEP_SUMMARY: summary }, project, fakeBrowser().options)
 
     expect(result.exitCode).toBe(0)
     expect(readFileSync(summary, 'utf8')).toBe(`### visual-check ${version} · update\n\n1 written\n`)
@@ -176,7 +179,7 @@ describe('runCli writing the GitHub step summary', () => {
 
   it("adds a warning to stderr and keeps the exit code when the summary can't be written", async () => {
     const { project, options } = await differingRun()
-    const result = await runCli(['test'], { GITHUB_STEP_SUMMARY: project }, project, options)
+    const result = await runCli(['test', '--all'], { GITHUB_STEP_SUMMARY: project }, project, options)
 
     expect(result.exitCode).toBe(1)
     expect(result.reportLine).toEqual(reportOnStdout)
