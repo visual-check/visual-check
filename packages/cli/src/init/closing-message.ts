@@ -249,6 +249,15 @@ export function previewIntroOf(file: string): Segment[] {
 }
 
 /**
+ * Returns the line that points to the docs page about running visual-check in CI.
+ *
+ * @public
+ */
+export function ciLineOf(url: string): Segment[] {
+  return ['To run visual-check in CI, see ', { code: url }, '.']
+}
+
+/**
  * Returns what the closing message tells: the four steps to a first passing run, how to set options for every story in
  * each config folder's preview file, and the docs page that tells how to run visual-check in CI. Commands, paths and
  * URLs are code segments. It says nothing about remote content.
@@ -292,7 +301,7 @@ export function closingMessageTextOf({ steps, previews, ciUrl }: NextSteps): str
     ...steps.map((step, index) => `  ${index + 1}. ${textOf(step)}`),
     ...previews.flatMap(({ file, lines }) => ['', textOf(previewIntroOf(file)), ...lines.map((line) => `  ${line}`)]),
     '',
-    `To run visual-check in CI, see ${ciUrl}.`,
+    textOf(ciLineOf(ciUrl)),
     '',
   ].join('\n')
 }

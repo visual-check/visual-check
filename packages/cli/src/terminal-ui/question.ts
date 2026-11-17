@@ -58,6 +58,11 @@ interface LatestState<T> {
 }
 
 /**
+ * What ends a line in a chunk of input.
+ */
+const lineBreak = /\r\n|\r|\n/
+
+/**
  * Whether a key press gives up on the question: Ctrl+C or Ctrl+D.
  */
 export function isCancelKey(input: string, key: Key): boolean {
@@ -65,8 +70,30 @@ export function isCancelKey(input: string, key: Key): boolean {
 }
 
 /**
+ * Splits a chunk of input into the key presses it holds: the text between its line breaks, as typed, and Enter for each
+ * line break. Ink hands on text and the line breaks in it as one chunk when they arrive together, as when Enter follows
+ * typing at once, and would drop the Enter. A chunk without a line break is one key press, as it came.
+ */
+export function keyPressesOf(input: string, key: Key): [string, Key][] {
+  const lines = input.split(lineBreak)
+
+  if (lines.length === 1) {
+    return [[input, key]]
+  }
+
+  const enter: Key = { ...key, return: true }
+
+  return lines.flatMap((text, index): [string, Key][] => [
+    ...(text === '' ? [] : [[text, key] as [string, Key]]),
+    ...(index < lines.length - 1 ? [['', enter] as [string, Key]] : []),
+  ])
+}
+
+/**
  * Hands a question's key presses to `handler`, after the keys every question shares: Ctrl+C and Ctrl+D call
- * `onCancel`, and other keys pressed with Ctrl or Meta do nothing unless `options.modifiedKeys` lets them through.
+ * `onCancel`, and other keys pressed with Ctrl or Meta do nothing unless `options.modifiedKeys` lets them through. A
+ * chunk of input that holds line breaks reaches `handler` as its text and an Enter for each break. A bracketed paste
+ * arrives through Ink's paste events instead, whole.
  */
 export function useQuestionInput(
   onCancel: () => void,
@@ -77,7 +104,9 @@ export function useQuestionInput(
     if (isCancelKey(input, key)) {
       onCancel()
     } else if (options.modifiedKeys === true || !(key.ctrl || key.meta)) {
-      handler(input, key)
+      for (const [typed, pressed] of keyPressesOf(input, key)) {
+        handler(typed, pressed)
+      }
     }
   })
 }

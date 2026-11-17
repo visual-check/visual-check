@@ -112,12 +112,20 @@ describe('TextQuestion', () => {
     expect(onSubmit).toHaveBeenCalledWith('mystories')
   })
 
-  it('takes text that arrives in one chunk, without its newlines', async () => {
+  it('answers with the text that arrives in one chunk with the Enter after it', async () => {
     const { stdin, onSubmit } = await renderQuestion()
 
-    await press(stdin, 'my\nstories', keys.enter)
+    await press(stdin, 'ab\r')
 
-    expect(onSubmit).toHaveBeenCalledWith('mystories')
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith('ab')
+  })
+
+  it('takes a line break in a chunk of text that is not a bracketed paste as Enter', async () => {
+    const { stdin, onSubmit } = await renderQuestion()
+
+    await press(stdin, 'my\nstories')
+
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith('my')
   })
 
   it('clears on Ctrl+U, so the default shows again', async () => {

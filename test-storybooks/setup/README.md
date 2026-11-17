@@ -45,6 +45,7 @@ pnpm try-local ~/code/my-app --yes          # init takes every default
 pnpm try-local ~/code/my-app --image visual-check-chromium:arm64
 ```
 
+- `init` runs in your terminal, so it shows its terminal UI there: the questions, the setup steps and the summary.
 - The project must be in a git repo with nothing uncommitted. A relative path is taken from where you run `pnpm`.
 - `--image` defaults to `visual-check-chromium:ci`. When Docker has no such image, the script prints the command that builds it.
 - `init`'s installs reach the registry through `npm_config_@visual-check:registry`, which pnpm, npm and Yarn 1 read. Yarn 4 and Bun don't, so they can't install the packages.
@@ -56,3 +57,5 @@ pnpm try-local --restore ~/code/my-app
 ```
 
 It resets the project's repo to the commit it was on, with `git reset --hard` and `git clean -fd`, and removes every `.visual-check/` folder's untracked files. Then it installs again with the package manager of the nearest lockfile. Anything else you changed in that repo since the try is dropped too. It refuses when the repo moved to another commit.
+
+The try writes its record before `init` runs, so after you stop `init` with Ctrl+C, run `--restore` all the same. Until you do, another try in that project is refused.

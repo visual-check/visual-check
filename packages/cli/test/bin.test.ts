@@ -369,7 +369,7 @@ describe('visual-check binary', () => {
     expect(configResult.stdout + configResult.stderr).not.toContain('hunter2')
   })
 
-  it('exits 2 for init without --yes when standard input is no terminal, and writes nothing', () => {
+  it('exits 2 for init without --yes when stdin or stdout is no TTY, or CI is set, and writes nothing', () => {
     const project = createProject({
       'package.json': '{ "name": "web-app" }\n',
       '.storybook/main.ts': 'export default {}\n',

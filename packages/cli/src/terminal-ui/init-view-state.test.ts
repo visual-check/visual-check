@@ -225,10 +225,34 @@ describe('finishRun', () => {
     })
   })
 
+  it('shows the steps that never started after a failed one as skipped', () => {
+    const planned = planSteps(initial, ['Write', 'Install', 'Check'], 1000)
+    const failed = endStep(startStep(planned, 'Write', undefined, 1000), 'failed', 1500)
+    const [line] = finishRun(failed, stopped).lines.slice(1)
+
+    expect(line).toEqual({
+      id: 4,
+      kind: 'steps',
+      steps: [
+        { id: 1, title: 'Write', state: 'failed', output: emptyOutputTail, startedAt: 1000, endedAt: 1500 },
+        { id: 2, title: 'Install', state: 'skipped', output: emptyOutputTail },
+        { id: 3, title: 'Check', state: 'skipped', output: emptyOutputTail },
+      ],
+      startedAt: 1000,
+    })
+  })
+
+  it('leaves the steps that never started pending when none failed', () => {
+    const planned = planSteps(initial, ['Write', 'Install'], 1000)
+    const [line] = finishRun(planned, stopped).lines.slice(1)
+
+    expect(line).toEqual({ id: 3, kind: 'steps', steps: planned.steps, startedAt: 1000 })
+  })
+
   it('moves the steps, as they ended, into the lines before the result', () => {
     const ended = endStep(
       startStep(planSteps(initial, ['Write', 'Install'], 1000), 'Write', undefined, 1000),
-      'failed',
+      'done',
       1500,
     )
     const state = finishRun(ended, stopped)

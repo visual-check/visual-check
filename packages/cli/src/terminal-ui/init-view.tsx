@@ -131,12 +131,24 @@ export function startInitView(options: InitViewOptions): InitView {
     }
 
     return new Promise((resolve, reject) => {
+      // One chunk of input can hold two Enters, and the question sees both before it goes, so only the first counts.
+      let settled = false
       const question = questionOf({
         onSubmit(value) {
+          if (settled) {
+            return
+          }
+
+          settled = true
           store.update((state) => settleQuestion(state, { kind: 'answered', message, answer: answerOf(value) }))
           resolve(value)
         },
         onCancel() {
+          if (settled) {
+            return
+          }
+
+          settled = true
           store.update((state) => settleQuestion(state))
           reject(new InputEndedError())
         },

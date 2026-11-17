@@ -122,7 +122,7 @@ Rules for the keys:
 
 1. **Which Storybooks to include.** A checklist with all ticked, shown only when there's more than one.
 2. **For each Storybook:** its name (the package name without its scope, or the folder name), its URL, and its start command when none was found.
-3. **Script names,** `visual:check` and `visual:update` by default. A name another script has replaces that script, unless it starts a Storybook.
+3. **Script names,** `visual:check` and `visual:update` by default. A name another script has replaces that script, unless it starts a Storybook. A script that already runs `visual-check test` or `update` is reused, and when the default name is taken by the other script or by a script that starts Storybook, the suggestion is `visual:test` or `visual:update-baselines`.
 4. **"Install the agent skill?"**, yes by default.
 5. **"Add the Storybook addon?"** A checklist of the chosen Storybooks on 10, all ticked, or one item when there's only one. It's shown only when at least one is on 10. Storybook 9 and 11 entries are skipped with a note.
 
@@ -138,9 +138,9 @@ Rules:
 - After the questions it lists the setup steps under a progress bar of the steps that have ended, with the time taken:
   - a step not started yet is dim after `○`;
   - the running step turns the spinner and counts its time up each second, with its command and the last three lines of its output under it, dim;
-  - a step that ended shows `✓`, `▲` or `✕` in the accent, caution or danger colour, and how long it took. A failed step keeps the last 15 lines of its output.
+  - a step that ended shows `✓`, `▲` or `✕` in the accent, caution or danger colour, and how long it took. A failed step keeps the last 15 lines of its output, and the steps after it end dim after `−`, marked skipped.
 - It ends with the steps as they ended, printed once, then a summary:
-  - **Set up:** `✓ visual-check is set up`, each file written and each script change, the warnings, then the four next steps, numbered, with commands, paths and URLs in the accent colour. Then each preview file's snippet in a box, and the CI docs link. The words match the plain closing message.
+  - **Set up:** `✓ visual-check is set up`, each file written and each script change, the warnings, then the four next steps, numbered, with commands, paths and URLs in the accent colour. Then each preview file's snippet in a box, and the line pointing to the CI docs. The steps', previews' and CI line's words match the plain closing message; the headings differ.
   - **The install failed:** the files written, then the problem after `✕`.
   - **Stopped before writing:** the warnings and hints, then why it stopped after `✕`.
 - Elsewhere it prints plain text.

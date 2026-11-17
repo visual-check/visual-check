@@ -104,7 +104,7 @@ To set options for every story, spread visualCheck into the parameters in docs/.
 │ parameters: { ...visualCheck({}) },          │
 ╰──────────────────────────────────────────────╯
 
-CI  https://visual-check.vercel.app/docs/ci`)
+To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
   })
 
   it('keeps its layout at 80 columns: a long step wraps under its own text', async () => {
@@ -142,7 +142,7 @@ To set options for every story, spread visualCheck into the parameters in
 │ parameters: { ...visualCheck({}) },          │
 ╰──────────────────────────────────────────────╯
 
-CI  https://visual-check.vercel.app/docs/ci`)
+To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
   })
 
   it('draws the heading in bold accent, the checks, commands, paths and URLs in accent, and the boxes dim', async () => {
@@ -173,7 +173,7 @@ CI  https://visual-check.vercel.app/docs/ci`)
         "\u001b[2m│\u001b[22m import { visualCheck } from './visual-check' \u001b[2m│\u001b[22m\n" +
         '\u001b[2m│\u001b[22m parameters: { ...visualCheck({}) },          \u001b[2m│\u001b[22m\n' +
         '\u001b[2m╰──────────────────────────────────────────────╯\u001b[22m\n' +
-        '\nCI  \u001b[36mhttps://visual-check.vercel.app/docs/ci\u001b[39m',
+        '\nTo run visual-check in CI, see \u001b[36mhttps://visual-check.vercel.app/docs/ci\u001b[39m.',
     )
   })
 
@@ -199,7 +199,8 @@ Next
      baselines. The first run downloads the
      browser image.
 
-CI  https://visual-check.vercel.app/docs/ci`)
+To run visual-check in CI, see
+https://visual-check.vercel.app/docs/ci.`)
   })
 
   it('shows a warning that spans lines under its triangle, its later lines included', async () => {
@@ -224,7 +225,7 @@ CI  https://visual-check.vercel.app/docs/ci`)
 
 Next
 
-CI  https://visual-check.vercel.app/docs/ci`)
+To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
   })
 
   it('sums up a run whose install failed: what it wrote, then the warnings and the problem', async () => {

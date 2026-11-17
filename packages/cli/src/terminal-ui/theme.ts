@@ -57,6 +57,10 @@ export const glyphs = {
    */
   pending: '○',
   /**
+   * Never started, because a step before it failed. The neutral glyph.
+   */
+  skipped: '−',
+  /**
    * Where the answer goes.
    */
   pointer: '›',

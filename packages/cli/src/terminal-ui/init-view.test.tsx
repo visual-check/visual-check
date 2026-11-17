@@ -181,6 +181,34 @@ describe('startInitView', () => {
     )
   })
 
+  it('answers with the text and the Enter typed in one chunk', async () => {
+    const { view, stdin, frame } = await startView()
+    const { answer } = await asking(() => view.text('Name', { defaultValue: 'web' }))
+
+    await typeInto(stdin, 'docs\r')
+
+    await expect(answer).resolves.toBe('docs')
+    expect(frame()).toBe(`${header}✓ Name docs\n`)
+  })
+
+  it('answers once for two Enters in one chunk, and the next question still waits', async () => {
+    const { view, stdin, frame } = await startView()
+    const { answer: first } = await asking(() => view.text('First', { defaultValue: 'a' }))
+
+    await typeInto(stdin, '\r\r')
+
+    await expect(first).resolves.toBe('a')
+    expect(frame()).toBe(`${header}✓ First a\n`)
+
+    const { answer: second } = await asking(() => view.text('Second', { defaultValue: 'b' }))
+
+    expect(frame()).toBe(`${header}✓ First a\n? Second\n› b (default)`)
+
+    await typeInto(stdin, keys.enter)
+
+    await expect(second).resolves.toBe('b')
+  })
+
   it('shows what is wrong with an answer until the next edit', async () => {
     const { view, stdin, frame } = await startView()
     const { answer } = await asking(() =>
@@ -340,11 +368,11 @@ describe('startInitView', () => {
     expect(frame()).toBe(header)
   })
 
-  it('prints the steps as they ended, then the summary, once each, when it finishes', async () => {
+  it('prints the steps as they ended, the ones after a failure skipped, then the summary, once each', async () => {
     const { view, stdout } = await startView()
 
     await act(async () => {
-      view.progress.plan(['Write the files', 'Install'])
+      view.progress.plan(['Write the files', 'Install', 'Check'])
       view.progress.start('Write the files')
       view.progress.end('done')
       view.progress.start('Install', 'pnpm add x')
@@ -360,8 +388,8 @@ describe('startInitView', () => {
     })
 
     expect(plainFrameOf(stdout.lastFrame())).toBe(
-      `${header}\n━━━━━━━━━━━━━━━━━━━━ 2/2 · 0.0s\n✓ Write the files 0.0s\n✕ Install 0.0s\n  │ ERR_PNPM_FETCH_404\n` +
-        '\n  ✓ visual-check.config.ts\n✕ pnpm add x failed with exit code 1.\n',
+      `${header}\n━━━━━━━━━━━━━─────── 2/3 · 0.0s\n✓ Write the files 0.0s\n✕ Install 0.0s\n  │ ERR_PNPM_FETCH_404\n` +
+        '− Check skipped\n\n  ✓ visual-check.config.ts\n✕ pnpm add x failed with exit code 1.\n',
     )
   })
 
@@ -540,7 +568,7 @@ To set options for every story, spread visualCheck into the parameters in .story
 │ parameters: { ...visualCheck({}) },          │
 ╰──────────────────────────────────────────────╯
 
-CI  https://visual-check.vercel.app/docs/ci
+To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
 `)
   })
 })

@@ -374,8 +374,8 @@ function reusedScriptOf(scripts: Record<string, string>, kind: 'test' | 'update'
 
 /**
  * Asks for the name of the script that runs one kind of visual-check command. A script that already has that name is
- * replaced, unless it starts a Storybook. The name can't be `otherName`, the other script's, which the suggested name
- * avoids too.
+ * replaced. The name can't be `otherName`, the other script's, nor a script that starts a Storybook, which the
+ * suggested name avoids too.
  */
 async function askScript(
   kind: 'test' | 'update',
@@ -384,10 +384,10 @@ async function askScript(
   otherName: string | undefined,
   prompter: Prompter,
 ): Promise<ScriptAnswer> {
-  const defaultName = defaultScriptNameOf(kind, otherName)
+  const defaultName = defaultScriptNameOf(kind, otherName, startScripts)
   const name = await prompter.text(`Name of the script that runs visual-check ${kind}`, {
     defaultValue: defaultName,
-    hint: scriptHintOf(kind, defaultName, scripts, startScripts),
+    hint: scriptHintOf(kind, defaultName, scripts),
     validate(value) {
       if (/\s/.test(value)) {
         return "A script name can't hold spaces."
@@ -412,29 +412,29 @@ function runsVisualCheck(script: string, kind: 'test' | 'update'): boolean {
 }
 
 /**
- * Returns the name the question for a script suggests: the kind's default, unless the other script already has it.
- * Then the test script gets `visual:test` and the update script `visual:update-baselines`, so taking the default, as
- * `--yes` does, never replaces the other script.
+ * Returns the name the question for a script suggests: the kind's default, unless the other script already has it or a
+ * script with that name starts a Storybook. Then the test script gets `visual:test` and the update script
+ * `visual:update-baselines`, so taking the default, as `--yes` does, never replaces the other script or a start script,
+ * and passes the question's checks.
  */
-function defaultScriptNameOf(kind: 'test' | 'update', otherName: string | undefined): string {
+function defaultScriptNameOf(
+  kind: 'test' | 'update',
+  otherName: string | undefined,
+  startScripts: readonly string[],
+): string {
   const name = defaultScriptNames[kind]
 
-  return name === otherName ? otherScriptNames[kind] : name
+  return name === otherName || startScripts.includes(name) ? otherScriptNames[kind] : name
 }
 
 /**
  * Returns the hint of the question that names a script. When another script already has the suggested `name`, keeping
- * that name replaces it, unless it starts a Storybook, so the hint says what that script runs now.
+ * that name replaces it, so the hint says what that script runs now. The suggested name never starts a Storybook.
  */
-function scriptHintOf(
-  kind: 'test' | 'update',
-  name: string,
-  scripts: Record<string, string>,
-  startScripts: readonly string[],
-): string {
+function scriptHintOf(kind: 'test' | 'update', name: string, scripts: Record<string, string>): string {
   const current = scripts[name]
 
-  if (current === undefined || startScripts.includes(name)) {
+  if (current === undefined) {
     return scriptHints[kind]
   }
 

@@ -208,13 +208,20 @@ function StepRow({ glyph, title, duration }: StepRowProps): ReactNode {
 }
 
 /**
- * Draws one step. A pending one is dim after `○`. A running one turns the spinner before its title and counts its
- * duration, with its command and the last three lines of its output under it. One that ended takes its outcome's glyph
- * and colour and how long it took, and one that failed keeps the last 15 lines of its output.
+ * Draws one step. A pending one is dim after `○`, and a skipped one dim after `−`, with the word skipped. A running one
+ * turns the spinner before its title and counts its duration, with its command and the last three lines of its output
+ * under it. One that ended takes its outcome's glyph and colour and how long it took, and one that failed keeps the last
+ * 15 lines of its output.
  */
 function StepLine({ step, now }: StepLineProps): ReactNode {
   if (step.state === 'pending') {
     return <StepRow glyph={<Text dimColor>{glyphs.pending}</Text>} title={<Text dimColor>{step.title}</Text>} />
+  }
+
+  if (step.state === 'skipped') {
+    return (
+      <StepRow glyph={<Text dimColor>{glyphs.skipped}</Text>} title={<Text dimColor>{`${step.title} skipped`}</Text>} />
+    )
   }
 
   const duration = durationOf((step.endedAt ?? now) - (step.startedAt ?? now))
@@ -256,7 +263,7 @@ function StepLine({ step, now }: StepLineProps): ReactNode {
 export function StepList({ steps, startedAt, clock }: StepListProps): ReactNode {
   const running = steps.some((step) => step.state === 'running')
   const now = useNow(clock, running)
-  const ended = steps.filter((step) => step.state !== 'pending' && step.state !== 'running').length
+  const ended = steps.filter((step) => Object.hasOwn(endedLooks, step.state)).length
 
   return (
     <Box flexDirection="column" marginTop={1}>

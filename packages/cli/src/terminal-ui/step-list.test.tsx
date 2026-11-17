@@ -243,6 +243,20 @@ describe('StepList', () => {
     )
   })
 
+  it('draws a skipped step dim after a minus, with the word skipped, and leaves it out of the bar', async () => {
+    const steps = [
+      stepOf(1, 'Install', { state: 'failed', startedAt: 10_000, endedAt: 10_400 }),
+      stepOf(2, 'Check', { state: 'skipped' }),
+    ]
+    const { lastFrame } = await renderSettled(<StepList clock={() => 20_000} startedAt={plannedAt} steps={steps} />)
+
+    expect(lastFrame()).toBe(
+      '\n\u001b[36m━━━━━━━━━━\u001b[39m\u001b[2m──────────\u001b[22m 1/2\u001b[2m · 0.4s\u001b[22m\n' +
+        '\u001b[31m✕\u001b[39m \u001b[31mInstall\u001b[39m\u001b[2m 0.4s\u001b[22m\n' +
+        '\u001b[2m−\u001b[22m \u001b[2mCheck skipped\u001b[22m',
+    )
+  })
+
   it('draws no colour when the theme has colour off', async () => {
     const { lastFrame } = await renderSettled(
       <ThemeContext value={{ colour: false }}>

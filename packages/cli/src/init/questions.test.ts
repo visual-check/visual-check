@@ -393,17 +393,42 @@ describe('askQuestions', () => {
     )
   })
 
-  it('says nothing of replacing a script with the default name that starts Storybook', async () => {
+  it('suggests visual:test when the script named visual:check starts Storybook, and says nothing of replacing it', async () => {
     const startScript = { script: 'visual:check', subcommand: 'dev' as const, configDir: undefined, port: 6006 }
-    const { records } = await ask(['', '', 'vt', '', false], {
+    const { answers, records } = await ask(['', '', '', '', false], {
       project: {
         manifest: { scripts: { 'visual:check': 'storybook dev -p 6006' } },
         storybooks: [storybookOf({ startScript })],
       },
     })
+    const testQuestion = records.find(({ message }) => message.endsWith('visual-check test'))
 
-    expect(records.find(({ message }) => message.endsWith('visual-check test'))?.hint).toBe(hints.testScript)
+    expect(testQuestion?.defaultValue).toBe('visual:test')
+    expect(testQuestion?.hint).toBe(hints.testScript)
+    expect(answers.scripts.test).toEqual({ name: 'visual:test', add: true })
   })
+
+  it.each([
+    ['visual:check', { test: { name: 'visual:test', add: true }, update: { name: 'visual:update', add: true } }],
+    [
+      'visual:update',
+      { test: { name: 'visual:check', add: true }, update: { name: 'visual:update-baselines', add: true } },
+    ],
+  ])(
+    'never takes the name of a script that starts Storybook with the defaults prompter: %s',
+    async (script, expected) => {
+      const startScript = { script, subcommand: 'dev' as const, configDir: undefined, port: 6006 }
+      const { answers } = await askQuestions({
+        project: projectOf({
+          manifest: { scripts: { [script]: 'storybook dev -p 6006' } },
+          storybooks: [storybookOf({ startScript })],
+        }),
+        prompter: defaultsPrompter(),
+      })
+
+      expect(answers.scripts).toEqual(expected)
+    },
+  )
 
   it('asks again after a script name that starts Storybook or has a space', async () => {
     const startScript = { script: 'storybook', subcommand: 'dev' as const, configDir: undefined, port: 6006 }

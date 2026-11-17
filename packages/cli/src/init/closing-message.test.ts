@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  ciLineOf,
   closingMessageTextOf,
   nextStepsOf,
   previewIntroOf,
@@ -343,6 +344,16 @@ describe('writtenListOf', () => {
       files: [],
       scripts: [],
     })
+  })
+})
+
+describe('ciLineOf', () => {
+  it('points to the CI docs page, with its URL as code', () => {
+    expect(ciLineOf('https://visual-check.vercel.app/docs/ci')).toEqual([
+      'To run visual-check in CI, see ',
+      { code: 'https://visual-check.vercel.app/docs/ci' },
+      '.',
+    ])
   })
 })
 

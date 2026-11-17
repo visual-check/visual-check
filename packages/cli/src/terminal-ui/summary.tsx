@@ -1,6 +1,6 @@
 import { Box, Text } from 'ink'
 import { Fragment, type ReactNode } from 'react'
-import { type NextSteps, previewIntroOf, type Segment, type WrittenList } from '../init/closing-message.js'
+import { ciLineOf, type NextSteps, previewIntroOf, type Segment, type WrittenList } from '../init/closing-message.js'
 import type { InitResult } from '../init/run-init.js'
 import { ColouredText } from './coloured-text.js'
 import { MessageLine } from './message-line.js'
@@ -128,8 +128,7 @@ function NextStepsView({ nextSteps }: NextStepsViewProps): ReactNode {
       ))}
       <Box marginTop={1}>
         <Text>
-          {'CI  '}
-          <ColouredText colour="accent">{nextSteps.ciUrl}</ColouredText>
+          <SegmentsText segments={ciLineOf(nextSteps.ciUrl)} />
         </Text>
       </Box>
     </>

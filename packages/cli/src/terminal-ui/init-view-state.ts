@@ -4,9 +4,10 @@ import type { StepOutcome } from '../init/setup-progress.js'
 import { emptyOutputTail, type OutputTail, outputTailOf } from './output-tail.js'
 
 /**
- * Where a setup step is: not started yet, running, or ended as it ended.
+ * Where a setup step is: not started yet, running, ended as it ended, or skipped, when the run finished after a step
+ * before it failed.
  */
-type StepState = 'pending' | 'running' | StepOutcome
+type StepState = 'pending' | 'running' | StepOutcome | 'skipped'
 
 /**
  * A setup step, as the step list draws it.
@@ -339,11 +340,23 @@ export function endStep(state: ViewState, outcome: StepOutcome, now: number): Vi
 }
 
 /**
+ * Gives the steps as the run left them. After a step failed, no step starts, so the ones still pending are skipped.
+ */
+function finishedStepsOf(steps: readonly SetupStep[]): readonly SetupStep[] {
+  if (!steps.some((step) => step.state === 'failed')) {
+    return steps
+  }
+
+  return steps.map((step) => (step.state === 'pending' ? { ...step, state: 'skipped' } : step))
+}
+
+/**
  * Ends the run: drops the question, and moves the steps, as they ended, and then the result into the lines, so each is
- * shown once and never drawn again.
+ * shown once and never drawn again. After a failed step, the steps that never started show as skipped.
  */
 export function finishRun(state: ViewState, result: InitResult): ViewState {
-  const { steps, plannedAt } = state
+  const { plannedAt } = state
+  const steps = finishedStepsOf(state.steps)
   const stepLines: ShownLine[] = plannedAt === undefined ? [] : [{ kind: 'steps', steps, startedAt: plannedAt }]
 
   return {
