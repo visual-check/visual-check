@@ -135,6 +135,14 @@ Rules:
 ## `init`: terminal UI
 
 - In a terminal (stdin and stdout are TTYs, and `CI` is unset, empty, `0` or `false`), `init` runs an Ink UI, which it loads only then. It shows the brand header, then each question with a hint. Arrows choose, and an answered question collapses to one line.
+- After the questions it lists the setup steps under a progress bar of the steps that have ended, with the time taken:
+  - a step not started yet is dim after `○`;
+  - the running step turns the spinner and counts its time up each second, with its command and the last three lines of its output under it, dim;
+  - a step that ended shows `✓`, `▲` or `✕` in the accent, caution or danger colour, and how long it took. A failed step keeps the last 15 lines of its output.
+- It ends with the steps as they ended, printed once, then a summary:
+  - **Set up:** `✓ visual-check is set up`, each file written and each script change, the warnings, then the four next steps, numbered, with commands, paths and URLs in the accent colour. Then each preview file's snippet in a box, and the CI docs link. The words match the plain closing message.
+  - **The install failed:** the files written, then the problem after `✕`.
+  - **Stopped before writing:** the warnings and hints, then why it stopped after `✕`.
 - Elsewhere it prints plain text.
 - The package manager question is a list.
 - Ctrl+C or Ctrl+D during a question stops `init` with exit code 2. It writes nothing.

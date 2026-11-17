@@ -21,9 +21,9 @@ export interface OutputTail {
 export const emptyOutputTail: OutputTail = { lines: [], unfinished: '' }
 
 /**
- * The most lines of a command's output the init view shows.
+ * The most finished lines of a command's output a tail keeps: as many as the init view shows of a step that failed.
  */
-const shownLineCount = 5
+const keptLineCount = 15
 
 /**
  * What ends a line of output: a line feed, after a carriage return on Windows.
@@ -59,18 +59,18 @@ export function outputTailOf(tail: OutputTail, chunk: string): OutputTail {
   const pendingReturn = unfinished.endsWith('\r') ? '\r' : ''
 
   return {
-    lines: [...tail.lines, ...finished].slice(-shownLineCount),
+    lines: [...tail.lines, ...finished].slice(-keptLineCount),
     unfinished: `${shownTextOf(unfinished)}${pendingReturn}`,
   }
 }
 
 /**
- * Gives the lines of a tail to show: the last five that hold more than spaces, the unfinished one included, without
- * ANSI escapes.
+ * Gives the lines of a tail to show: the last `count` that hold more than spaces, the unfinished one included, without
+ * ANSI escapes. A tail keeps 15 finished lines, so a larger count shows no more.
  */
-export function shownLinesOf(tail: OutputTail): string[] {
+export function shownLinesOf(tail: OutputTail, count: number): string[] {
   const unfinished = stripVTControlCharacters(shownTextOf(tail.unfinished))
   const lines = hasText(unfinished) ? [...tail.lines, unfinished] : tail.lines
 
-  return lines.slice(-shownLineCount)
+  return lines.slice(-count)
 }

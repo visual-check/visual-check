@@ -30,6 +30,26 @@ interface NoteLineProps {
 }
 
 /**
+ * What `ProblemLine` takes.
+ */
+interface ProblemLineProps {
+  /**
+   * The problem, its lines kept.
+   */
+  text: string
+}
+
+/**
+ * What `MessageLine` takes.
+ */
+interface MessageLineProps {
+  /**
+   * The message, its lines kept.
+   */
+  text: string
+}
+
+/**
  * What `GlyphNote` takes.
  */
 interface GlyphNoteProps {
@@ -88,4 +108,30 @@ export function NoteLine({ text }: NoteLineProps): ReactNode {
       <WrappedText indent={0} text={text} />
     </Text>
   )
+}
+
+/**
+ * A problem that stopped `init`, after `✕`, all in the danger colour. A long one wraps to the terminal's width under
+ * its own first letter, not under the glyph, and so does each line after its first.
+ */
+function ProblemLine({ text }: ProblemLineProps): ReactNode {
+  return (
+    <GlyphNote glyph={<ColouredText colour="danger">{glyphs.failed}</ColouredText>}>
+      <ColouredText colour="danger">
+        <WrappedText indent={glyphIndent} text={text} />
+      </ColouredText>
+    </GlyphNote>
+  )
+}
+
+/**
+ * One of the messages a run of `init` ends with: a warning or a hint as a note, and anything else as a problem that
+ * stopped it. A message that spans lines stays one note or problem.
+ */
+export function MessageLine({ text }: MessageLineProps): ReactNode {
+  if (text.startsWith(warningPrefix) || text.startsWith(hintPrefix)) {
+    return <NoteLine text={text} />
+  }
+
+  return <ProblemLine text={text} />
 }

@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import type { NextSteps, WrittenList } from './closing-message.js'
 import { listProjectFiles } from './find-storybooks.js'
 import { defaultsPrompter } from './prompter.js'
 import type { RunCommand } from './run-command.js'
@@ -27,6 +28,8 @@ export const browserRange = cliManifest.peerDependencies['@visual-check/chromium
 
 /**
  * The dependencies `init` adds to a project that lists none of them, under pnpm.
+ *
+ * @public
  */
 export const pnpmAdd = {
   command: 'pnpm',
@@ -85,6 +88,51 @@ export const pnpmClosingMessage = [
   'To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.',
   '',
 ].join('\n')
+
+/**
+ * What the one Storybook of the pnpm project is told to do next: the closing message as data.
+ *
+ * @public
+ */
+export const pnpmNextSteps: NextSteps = {
+  steps: [
+    ['Start Storybook with ', { code: 'pnpm run storybook' }, '.'],
+    ['Run ', { code: 'pnpm run visual:update' }, ' to write baselines. The first run downloads the browser image.'],
+    [
+      'Run ',
+      { code: 'pnpm run visual:check' },
+      '. It should pass. If a story fails, see ',
+      { code: 'https://visual-check.vercel.app/docs/broken-stories' },
+      '.',
+    ],
+    [
+      'Commit ',
+      { code: 'visual-check.config.ts' },
+      ', ',
+      { code: '.storybook/visual-check.ts' },
+      ' and ',
+      { code: '.visual-check/' },
+      '.',
+    ],
+  ],
+  previews: [
+    {
+      file: '.storybook/preview.ts',
+      lines: ["import { visualCheck } from './visual-check'", 'parameters: { ...visualCheck({}) },'],
+    },
+  ],
+  ciUrl: 'https://visual-check.vercel.app/docs/ci',
+}
+
+/**
+ * What `init` writes in the pnpm project when it holds none of it yet, worded for the person.
+ *
+ * @public
+ */
+export const pnpmWrittenList: WrittenList = {
+  files: ['visual-check.config.ts', '.storybook/visual-check.ts', '.visual-check/.gitignore'],
+  scripts: ['Added the scripts visual:check and visual:update to package.json.'],
+}
 
 /**
  * What `init` prints on stdout for the files it writes in the pnpm project.
@@ -225,6 +273,8 @@ export function recordingProgress(): { progress: SetupProgress; calls: ProgressC
  * Builds the tools of a run: `--yes`, no terminal, Node 22 on Linux, the real git file list, the defaults prompter, and
  * fakes for Docker, the commands and Fallow, behaving as `behaviour` says. `overrides` replaces any of them. Gives the
  * tools with what the fakes see.
+ *
+ * @public
  */
 export function toolsOf(
   overrides: Partial<InitTools> = {},

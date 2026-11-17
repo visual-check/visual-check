@@ -1,13 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { recordingProgress } from './init-tools.fixture.js'
-import {
-  addAddons,
-  addonTitleOf,
-  dependenciesToAddOf,
-  installDependencies,
-  installTitleOf,
-  packageNameOf,
-} from './install.js'
+import { addAddons, addonTitleOf, dependenciesToAddOf, installDependencies } from './install.js'
 import type { RunCommand } from './run-command.js'
 import { plainSetupProgress } from './setup-progress.js'
 
@@ -112,32 +105,6 @@ describe('dependenciesToAddOf', () => {
  */
 const silentProgress = plainSetupProgress(() => undefined)
 
-describe('packageNameOf', () => {
-  it('drops the version of a scoped name and keeps its leading @', () => {
-    expect(packageNameOf('@visual-check/cli@0.0.0')).toBe('@visual-check/cli')
-    expect(packageNameOf('@visual-check/chromium@^157.0.0')).toBe('@visual-check/chromium')
-  })
-
-  it('drops the version of an unscoped name', () => {
-    expect(packageNameOf('left-pad@1.3.0')).toBe('left-pad')
-  })
-
-  it('keeps a name that has no version', () => {
-    expect(packageNameOf('@visual-check/cli')).toBe('@visual-check/cli')
-    expect(packageNameOf('left-pad')).toBe('left-pad')
-  })
-})
-
-describe('installTitleOf', () => {
-  it('names the packages without their versions', () => {
-    expect(installTitleOf(['@visual-check/storybook@0.0.0'])).toBe('Install @visual-check/storybook')
-    expect(installTitleOf(['@visual-check/cli@0.0.0', '@visual-check/chromium@^157.0.0'])).toBe(
-      'Install @visual-check/cli and @visual-check/chromium',
-    )
-    expect(installTitleOf(['a@1', 'b@2', 'c@3'])).toBe('Install a, b and c')
-  })
-})
-
 describe('addonTitleOf', () => {
   it('names the Storybook', () => {
     expect(addonTitleOf('docs')).toBe('Add the Storybook addon to docs')
@@ -159,11 +126,11 @@ describe('installDependencies', () => {
     expect(progressCalls).toEqual([
       [
         'start',
-        'Install @visual-check/cli and @visual-check/chromium',
+        "Install visual-check's packages",
         'pnpm add --save-dev @visual-check/cli@0.0.0 @visual-check/chromium@^157.0.0',
       ],
       ['end', 'done'],
-      ['start', 'Install @visual-check/storybook', 'pnpm add --save-dev @visual-check/storybook@0.0.0'],
+      ['start', "Install visual-check's packages", 'pnpm add --save-dev @visual-check/storybook@0.0.0'],
       ['end', 'done'],
     ])
     expect(calls).toEqual([
@@ -188,7 +155,7 @@ describe('installDependencies', () => {
     expect(progressCalls).toEqual([
       [
         'start',
-        'Install @visual-check/cli and @visual-check/chromium',
+        "Install visual-check's packages",
         'npm install --save-dev @visual-check/cli@0.0.0 @visual-check/chromium@^157.0.0',
       ],
       ['end', 'failed'],

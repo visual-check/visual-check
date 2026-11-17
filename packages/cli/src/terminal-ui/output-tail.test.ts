@@ -36,8 +36,13 @@ describe('outputTailOf', () => {
     expect(tailOf('one\n\n   \n\ttwo\n')).toEqual({ lines: ['one', '\ttwo'], unfinished: '' })
   })
 
-  it('keeps only the last five finished lines', () => {
-    expect(tailOf('1\n2\n3\n', '4\n5\n6\n7\n')).toEqual({ lines: ['3', '4', '5', '6', '7'], unfinished: '' })
+  it('keeps only the last fifteen finished lines', () => {
+    const numbers = Array.from({ length: 17 }, (_, index) => `${index + 1}`)
+
+    expect(tailOf(`${numbers.slice(0, 3).join('\n')}\n`, `${numbers.slice(3).join('\n')}\n`)).toEqual({
+      lines: numbers.slice(2),
+      unfinished: '',
+    })
   })
 
   it('strips ANSI escapes from a finished line, even one split across chunks', () => {
@@ -47,22 +52,22 @@ describe('outputTailOf', () => {
 
 describe('shownLinesOf', () => {
   it('shows nothing for an empty tail', () => {
-    expect(shownLinesOf(emptyOutputTail)).toEqual([])
+    expect(shownLinesOf(emptyOutputTail, 3)).toEqual([])
   })
 
   it('shows the last drawing of the unfinished line, before a carriage return that draws nothing yet', () => {
-    expect(shownLinesOf({ lines: [], unfinished: '50%\r' })).toEqual(['50%'])
+    expect(shownLinesOf({ lines: [], unfinished: '50%\r' }, 3)).toEqual(['50%'])
   })
 
   it('shows the finished lines, then the unfinished one without its ANSI escapes', () => {
-    expect(shownLinesOf({ lines: ['one'], unfinished: '\u001b[1mtwo' })).toEqual(['one', 'two'])
+    expect(shownLinesOf({ lines: ['one'], unfinished: '\u001b[1mtwo' }, 3)).toEqual(['one', 'two'])
   })
 
   it('leaves out an unfinished line that holds only spaces or escapes', () => {
-    expect(shownLinesOf({ lines: ['one'], unfinished: ' \u001b[0m' })).toEqual(['one'])
+    expect(shownLinesOf({ lines: ['one'], unfinished: ' \u001b[0m' }, 3)).toEqual(['one'])
   })
 
-  it('shows at most five lines, the unfinished one last', () => {
-    expect(shownLinesOf({ lines: ['1', '2', '3', '4', '5'], unfinished: '6' })).toEqual(['2', '3', '4', '5', '6'])
+  it('shows at most `count` lines, the unfinished one last', () => {
+    expect(shownLinesOf({ lines: ['1', '2', '3', '4', '5'], unfinished: '6' }, 3)).toEqual(['4', '5', '6'])
   })
 })

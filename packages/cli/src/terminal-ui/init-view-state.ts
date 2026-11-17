@@ -1,9 +1,50 @@
 import type { Choice } from '../init/prompter.js'
 import type { InitResult } from '../init/run-init.js'
+import type { StepOutcome } from '../init/setup-progress.js'
 import { emptyOutputTail, type OutputTail, outputTailOf } from './output-tail.js'
 
 /**
- * A line the init view shows above the active question, which never changes once shown.
+ * Where a setup step is: not started yet, running, or ended as it ended.
+ */
+type StepState = 'pending' | 'running' | StepOutcome
+
+/**
+ * A setup step, as the step list draws it.
+ */
+export interface SetupStep {
+  /**
+   * The step's key, unique within the view.
+   */
+  id: number
+  /**
+   * What the step does, such as `Write the files and scripts`.
+   */
+  title: string
+  /**
+   * Where the step is.
+   */
+  state: StepState
+  /**
+   * The end of its command's output.
+   */
+  output: OutputTail
+  /**
+   * The command line it runs, as shown, when it runs one.
+   */
+  command?: string
+  /**
+   * When it started, in milliseconds since the epoch.
+   */
+  startedAt?: number
+  /**
+   * When it ended, in milliseconds since the epoch.
+   */
+  endedAt?: number
+}
+
+/**
+ * A line, or a block of them, the init view shows above the active question and the steps, which never changes once
+ * shown.
  */
 export type ShownLine =
   | {
@@ -42,33 +83,27 @@ export type ShownLine =
     }
   | {
       /**
-       * A setup step's command, starting.
+       * The setup steps as they ended.
        */
-      kind: 'command'
+      kind: 'steps'
       /**
-       * The command line.
+       * The steps, in the order of the plan.
        */
-      command: string
+      steps: readonly SetupStep[]
+      /**
+       * When the plan was given, in milliseconds since the epoch.
+       */
+      startedAt: number
     }
   | {
       /**
-       * The result's stdout, plain.
+       * The end of the run: what it wrote and what to do next, or why it stopped.
        */
-      kind: 'printed'
+      kind: 'summary'
       /**
-       * The text, its lines kept.
+       * What the run gave.
        */
-      text: string
-    }
-  | {
-      /**
-       * A line of the result's stderr that is neither a warning nor a hint: why `init` stopped.
-       */
-      kind: 'failed'
-      /**
-       * The line.
-       */
-      text: string
+      result: InitResult
     }
 
 /**
@@ -161,11 +196,16 @@ export interface ViewState {
    */
   question: ActiveQuestion | undefined
   /**
-   * The end of the running step's command's output.
+   * The setup steps, in the order of the plan, while they run. None before the plan, nor once the run is finished, when
+   * they are among the lines.
    */
-  output: OutputTail
+  steps: readonly SetupStep[]
   /**
-   * The key the next line or question takes.
+   * When the plan was given, in milliseconds since the epoch, while the steps run.
+   */
+  plannedAt: number | undefined
+  /**
+   * The key the next line, question or step takes.
    */
   nextId: number
 }
@@ -189,15 +229,16 @@ export interface ViewStore {
 }
 
 /**
- * What the result's stderr lines that are notes start with.
- */
-const notePrefixes = ['Warning: ', 'hint: ']
-
-/**
  * The state the view starts in: the header, and nothing else.
  */
 export function initialViewState(version: string): ViewState {
-  return { lines: [{ id: 0, kind: 'header', version }], question: undefined, output: emptyOutputTail, nextId: 1 }
+  return {
+    lines: [{ id: 0, kind: 'header', version }],
+    question: undefined,
+    steps: [],
+    plannedAt: undefined,
+    nextId: 1,
+  }
 }
 
 /**
@@ -237,41 +278,80 @@ export function settleQuestion(state: ViewState, line?: ShownLine): ViewState {
 }
 
 /**
- * Starts a setup step: shows its command, when it runs one, and drops the output of the step before.
+ * Lists the setup steps that are coming, each pending, with the next keys, and starts the clock on them at `now`.
  */
-export function startStep(state: ViewState, command: string | undefined): ViewState {
-  return { ...withLines(state, command === undefined ? [] : [{ kind: 'command', command }]), output: emptyOutputTail }
+export function planSteps(state: ViewState, titles: readonly string[], now: number): ViewState {
+  return {
+    ...state,
+    steps: titles.map((title, index) => ({
+      id: state.nextId + index,
+      title,
+      state: 'pending',
+      output: emptyOutputTail,
+    })),
+    plannedAt: now,
+    nextId: state.nextId + titles.length,
+  }
 }
 
 /**
- * Adds a chunk of the running step's command's output.
+ * Changes the step at `index` with `change`, or nothing when `index` is -1.
+ */
+function withStep(state: ViewState, index: number, change: (step: SetupStep) => SetupStep): ViewState {
+  if (index === -1) {
+    return state
+  }
+
+  return { ...state, steps: state.steps.map((step, at) => (at === index ? change(step) : step)) }
+}
+
+/**
+ * Gives where the running step is in the list, or -1 when none runs.
+ */
+function runningIndexOf(state: ViewState): number {
+  return state.steps.findIndex((step) => step.state === 'running')
+}
+
+/**
+ * Starts the next pending step at `now`, under `title`, with the command it runs, if any. Steps start in the order of
+ * the plan, so it goes by position, not by title. Without a plan, or with every step started, nothing changes.
+ */
+export function startStep(state: ViewState, title: string, command: string | undefined, now: number): ViewState {
+  return withStep(
+    state,
+    state.steps.findIndex((step) => step.state === 'pending'),
+    (step) => ({ ...step, title, state: 'running', startedAt: now, ...(command === undefined ? {} : { command }) }),
+  )
+}
+
+/**
+ * Adds a chunk of the running step's command's output to its tail. With no step running, nothing changes.
  */
 export function addOutput(state: ViewState, chunk: string): ViewState {
-  return { ...state, output: outputTailOf(state.output, chunk) }
+  return withStep(state, runningIndexOf(state), (step) => ({ ...step, output: outputTailOf(step.output, chunk) }))
 }
 
 /**
- * Gives the lines that show the end of a run: the stdout as it is, then each stderr line, a warning or a hint as a
- * note and anything else as a failure.
+ * Ends the running step at `now` with its outcome. With no step running, nothing changes.
  */
-export function resultLinesOf({ stdout, stderr }: InitResult): ShownLine[] {
-  const printed: ShownLine[] = stdout === '' ? [] : [{ kind: 'printed', text: stdout.replace(/\n$/, '') }]
-  const stderrLines = stderr === '' ? [] : stderr.replace(/\n$/, '').split('\n')
-
-  return [
-    ...printed,
-    ...stderrLines.map(
-      (text): ShownLine =>
-        notePrefixes.some((prefix) => text.startsWith(prefix)) ? { kind: 'note', text } : { kind: 'failed', text },
-    ),
-  ]
+export function endStep(state: ViewState, outcome: StepOutcome, now: number): ViewState {
+  return withStep(state, runningIndexOf(state), (step) => ({ ...step, state: outcome, endedAt: now }))
 }
 
 /**
- * Ends the run: shows its result, and drops the question and the output.
+ * Ends the run: drops the question, and moves the steps, as they ended, and then the result into the lines, so each is
+ * shown once and never drawn again.
  */
 export function finishRun(state: ViewState, result: InitResult): ViewState {
-  return { ...withLines(state, resultLinesOf(result)), question: undefined, output: emptyOutputTail }
+  const { steps, plannedAt } = state
+  const stepLines: ShownLine[] = plannedAt === undefined ? [] : [{ kind: 'steps', steps, startedAt: plannedAt }]
+
+  return {
+    ...withLines(state, [...stepLines, { kind: 'summary', result }]),
+    question: undefined,
+    steps: [],
+    plannedAt: undefined,
+  }
 }
 
 /**

@@ -12,13 +12,15 @@ import {
   pnpmAdd,
   pnpmAddon,
   pnpmClosingMessage,
+  pnpmNextSteps,
   pnpmWrittenLines,
+  pnpmWrittenList,
   toolsOf,
 } from './init-tools.fixture.js'
 import { makeProject, pnpmProject, readText, removeProjects, snapshotFiles } from './project.fixture.js'
 import { scriptedPrompter } from './prompter.fixture.js'
 import { defaultsPrompter, InputEndedError } from './prompter.js'
-import { runInit } from './run-init.js'
+import { type InitResult, runInit } from './run-init.js'
 
 /**
  * The config `init` writes for the one Storybook of the pnpm project.
@@ -40,7 +42,7 @@ const dockerFix = "Start or install Docker before you run visual-check update, o
 /**
  * The title of the install step of the pnpm project.
  */
-const installTitle = 'Install @visual-check/cli, @visual-check/chromium and @visual-check/storybook'
+const installTitle = "Install visual-check's packages"
 
 /**
  * The plan call of the pnpm project.
@@ -82,6 +84,18 @@ function fullProgressOf(addon: 'done' | 'warned', check: 'done' | 'warned'): Pro
   ]
 }
 
+/**
+ * The summary of a run that sets up the pnpm project from scratch.
+ */
+const pnpmSummary: InitResult['summary'] = { written: pnpmWrittenList, nextSteps: pnpmNextSteps }
+
+/**
+ * The stderr that holds `messages`: each, then a line break.
+ */
+function stderrOf(messages: readonly string[]): string {
+  return messages.map((message) => `${message}\n`).join('')
+}
+
 afterEach(() => {
   removeProjects()
 })
@@ -92,7 +106,13 @@ describe('runInit', () => {
     const { tools, record } = toolsOf()
     const result = await runInit(root, tools)
 
-    expect(result).toEqual({ exitCode: 0, stdout: `${pnpmWrittenLines}\n${pnpmClosingMessage}`, stderr: '' })
+    expect(result).toEqual({
+      exitCode: 0,
+      stdout: `${pnpmWrittenLines}\n${pnpmClosingMessage}`,
+      stderr: '',
+      messages: [],
+      summary: pnpmSummary,
+    })
     expect(readText(root, 'visual-check.config.ts')).toBe(webAppConfig)
     expect(readText(root, '.storybook/visual-check.ts')).toBe(modesFile)
     expect(readText(root, '.visual-check/.gitignore')).toBe(gitignore)
@@ -125,66 +145,74 @@ describe('runInit', () => {
         name: 'Node below 22',
         project: () => pnpmProject(),
         tools: { nodeVersion: '20.18.0' },
-        stderr:
-          'visual-check needs Node 22 or later, and this is Node 20.18.0. Upgrade Node, then run visual-check init again.\n',
+        messages: [
+          'visual-check needs Node 22 or later, and this is Node 20.18.0. Upgrade Node, then run visual-check init again.',
+        ],
       },
       {
         name: 'a package.json that is not an object',
         project: () => makeProject({ manifest: '[]\n', files: { '.storybook/main.ts': '' } }),
         tools: {},
-        stderr:
-          "visual-check init can't read package.json: the file must hold a JSON object. Fix it, then run visual-check init again.\n",
+        messages: [
+          "visual-check init can't read package.json: the file must hold a JSON object. Fix it, then run visual-check init again.",
+        ],
       },
       {
         name: 'Deno',
         project: () => pnpmProject({ files: { 'deno.json': '{}\n' } }),
         tools: {},
-        stderr:
-          "visual-check doesn't support Deno, and this project has deno.json. Run visual-check init in a Node project.\n",
+        messages: [
+          "visual-check doesn't support Deno, and this project has deno.json. Run visual-check init in a Node project.",
+        ],
       },
       {
         name: 'no terminal without --yes',
         project: () => pnpmProject(),
         tools: { yes: false, interactive: false },
-        stderr:
-          "visual-check init asks questions, and there's no terminal to ask them in. Run it in a terminal, or pass --yes to take every default.\n",
+        messages: [
+          "visual-check init asks questions, and there's no terminal to ask them in. Run it in a terminal, or pass --yes to take every default.",
+        ],
       },
       {
         name: 'no Storybook',
         project: () => makeProject({ manifest: { name: 'web-app' }, storybookVersion: '10.6.7' }),
         tools: {},
-        stderr:
-          'visual-check init found no Storybook: git lists no .storybook/main file (.ts, .js, .mjs, .cjs, .mts or .cts), and no script in package.json passes -c to storybook. Add Storybook, then run visual-check init again.\n',
+        messages: [
+          'visual-check init found no Storybook: git lists no .storybook/main file (.ts, .js, .mjs, .cjs, .mts or .cts), and no script in package.json passes -c to storybook. Add Storybook, then run visual-check init again.',
+        ],
       },
       {
         name: 'storybook 9.0.0',
         project: () => pnpmProject({ storybookVersion: '9.0.0' }),
         tools: {},
-        stderr:
-          'The Storybook in .storybook runs storybook 9.0.0, and visual-check needs 9.1 or later. Upgrade storybook, then run visual-check init again.\n',
+        messages: [
+          'The Storybook in .storybook runs storybook 9.0.0, and visual-check needs 9.1 or later. Upgrade storybook, then run visual-check init again.',
+        ],
       },
       {
         name: 'no package.json',
         project: () => makeProject({ files: { '.storybook/main.ts': '' } }),
         tools: {},
-        stderr:
-          "visual-check init found no package.json in the current folder or its parents. Run it in your project's folder.\n",
+        messages: [
+          "visual-check init found no package.json in the current folder or its parents. Run it in your project's folder.",
+        ],
       },
       {
         name: 'no package.json with Node below 22',
         project: () => makeProject({ files: { '.storybook/main.ts': '' } }),
         tools: { nodeVersion: '20.18.0' },
-        stderr:
-          'visual-check needs Node 22 or later, and this is Node 20.18.0. Upgrade Node, then run visual-check init again.\n' +
-          "visual-check init found no package.json in the current folder or its parents. Run it in your project's folder.\n",
+        messages: [
+          'visual-check needs Node 22 or later, and this is Node 20.18.0. Upgrade Node, then run visual-check init again.',
+          "visual-check init found no package.json in the current folder or its parents. Run it in your project's folder.",
+        ],
       },
-    ])('$name', async ({ project, tools: overrides, stderr }) => {
+    ])('$name', async ({ project, tools: overrides, messages }) => {
       const root = project()
       const before = snapshotFiles(root)
       const prompter = scriptedPrompter([])
       const { tools, record } = toolsOf({ ...overrides, prompter })
 
-      expect(await runInit(root, tools)).toEqual({ exitCode: 2, stdout: '', stderr })
+      expect(await runInit(root, tools)).toEqual({ exitCode: 2, stdout: '', stderr: stderrOf(messages), messages })
       expect(snapshotFiles(root)).toEqual(before)
       expect(record).toEqual({ commands: [], progress: [], probes: 0, fallowRoots: [] })
       expect(prompter.records).toEqual([])
@@ -242,7 +270,7 @@ describe('runInit', () => {
           "visual-check runs the browser in Docker, and there's no docker command on PATH.",
         ),
         os: 'linux' as const,
-        stderr: `Warning: visual-check runs the browser in Docker, and there's no docker command on PATH. ${dockerFix}\n`,
+        warning: `Warning: visual-check runs the browser in Docker, and there's no docker command on PATH. ${dockerFix}`,
       },
       {
         name: 'Docker missing on Windows',
@@ -250,26 +278,32 @@ describe('runInit', () => {
           "visual-check runs the browser in Docker, and there's no docker command on PATH.",
         ),
         os: 'win32' as const,
-        stderr: `Warning: visual-check runs the browser in Docker, and there's no docker command on PATH. ${dockerFix} If Docker runs inside WSL, run visual-check from inside WSL too.\n`,
+        warning: `Warning: visual-check runs the browser in Docker, and there's no docker command on PATH. ${dockerFix} If Docker runs inside WSL, run visual-check from inside WSL too.`,
       },
       {
         name: "Docker's daemon down",
         error: new ContainerError("Docker's daemon isn't running, or visual-check can't reach its socket: refused."),
         os: 'linux' as const,
-        stderr: `Warning: Docker's daemon isn't running, or visual-check can't reach its socket: refused. ${dockerFix}\n`,
+        warning: `Warning: Docker's daemon isn't running, or visual-check can't reach its socket: refused. ${dockerFix}`,
       },
       {
         name: 'Docker on Windows containers',
         error: new ContainerError('Docker runs Windows containers. Switch it to Linux containers.', 'linux-containers'),
         os: 'win32' as const,
-        stderr: 'Warning: Docker runs Windows containers. Switch it to Linux containers.\n',
+        warning: 'Warning: Docker runs Windows containers. Switch it to Linux containers.',
       },
-    ])('warns of $name', async ({ error, os, stderr }) => {
+    ])('warns of $name', async ({ error, os, warning }) => {
       const root = pnpmProject()
       const { tools, record } = toolsOf({ os }, { dockerError: error })
       const result = await runInit(root, tools)
 
-      expect(result).toEqual({ exitCode: 0, stdout: `${pnpmWrittenLines}\n${pnpmClosingMessage}`, stderr })
+      expect(result).toEqual({
+        exitCode: 0,
+        stdout: `${pnpmWrittenLines}\n${pnpmClosingMessage}`,
+        stderr: `${warning}\n`,
+        messages: [warning],
+        summary: pnpmSummary,
+      })
       expect(record.probes).toBe(1)
       expectWritten(root, result.stdout)
     })
@@ -325,6 +359,19 @@ describe('runInit', () => {
       expect(result.stderr).toBe("Warning: Fallow couldn't check this project's imports: Fallow broke.\n")
       expectWritten(root, result.stdout)
       expect(record.progress).toEqual(fullProgressOf('done', 'warned'))
+    })
+
+    it('keeps a warning that spans lines as one message', async () => {
+      const root = pnpmProject()
+      const warning =
+        "Warning: Fallow couldn't check this project's imports: Fallow broke.\nIt could not read tsconfig.json."
+      const result = await runInit(
+        root,
+        toolsOf({}, { fallow: new Error('Fallow broke.\nIt could not read tsconfig.json.') }).tools,
+      )
+
+      expect(result.messages).toEqual([warning])
+      expect(result.stderr).toBe(`${warning}\n`)
     })
 
     it('hints at adding a port when the start script sets none, and uses 6006', async () => {
@@ -397,7 +444,13 @@ describe('runInit', () => {
     const second = await runInit(root, tools)
 
     expect(first.exitCode).toBe(0)
-    expect(second).toEqual({ exitCode: 0, stdout: pnpmClosingMessage, stderr: '' })
+    expect(second).toEqual({
+      exitCode: 0,
+      stdout: pnpmClosingMessage,
+      stderr: '',
+      messages: [],
+      summary: { written: { files: [], scripts: [] }, nextSteps: pnpmNextSteps },
+    })
     expect(snapshotFiles(root)).toEqual(before)
     expect(record.commands).toEqual([])
     expect(record.fallowRoots).toEqual([root])
@@ -416,6 +469,8 @@ describe('runInit', () => {
       exitCode: 0,
       stdout: `${pnpmWrittenLines}\n${pnpmClosingMessage}`,
       stderr: '',
+      messages: [],
+      summary: pnpmSummary,
     })
     expect(existsSync(join(root, '.git'))).toBe(false)
     expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddon))
@@ -435,6 +490,8 @@ describe('runInit', () => {
       exitCode: 0,
       stdout: `${pnpmWrittenLines}\n${pnpmClosingMessage}`,
       stderr: `${hint}\n`,
+      messages: [hint],
+      summary: pnpmSummary,
     })
     expect(yes.record.commands).toEqual(commandsIn(root, pnpmAdd))
 
@@ -469,20 +526,19 @@ describe('runInit', () => {
     expect(JSON.parse(readText(root, 'package.json')).scripts['visual:check']).toBe('visual-check test')
   })
 
-  it('exits 2 when a question is given up on, after the warnings so far, and writes nothing', async () => {
+  it('exits 2 when a question is given up on, after the warnings so far, and writes nothing nor sums up', async () => {
     const root = pnpmProject()
     const before = snapshotFiles(root)
     const prompter = { ...defaultsPrompter(), text: () => Promise.reject(new InputEndedError()) }
     const error = new ContainerError("Docker's daemon isn't running.")
     const { tools, record } = toolsOf({ yes: false, interactive: true, prompter }, { dockerError: error })
 
-    expect(await runInit(root, tools)).toEqual({
-      exitCode: 2,
-      stdout: '',
-      stderr:
-        `Warning: Docker's daemon isn't running. ${dockerFix}\n` +
-        'visual-check init stopped before every answer was in. It wrote nothing.\n',
-    })
+    const messages = [
+      `Warning: Docker's daemon isn't running. ${dockerFix}`,
+      'visual-check init stopped before every answer was in. It wrote nothing.',
+    ]
+
+    expect(await runInit(root, tools)).toEqual({ exitCode: 2, stdout: '', stderr: stderrOf(messages), messages })
     expect(snapshotFiles(root)).toEqual(before)
     expect(record.commands).toEqual([])
     expect(record.fallowRoots).toEqual([])
@@ -500,6 +556,7 @@ describe('runInit', () => {
       exitCode: 2,
       stdout: '',
       stderr: 'visual-check init stopped before every answer was in. It wrote nothing.\n',
+      messages: ['visual-check init stopped before every answer was in. It wrote nothing.'],
     })
     expect(scripted.records).toEqual([
       { kind: 'note', message: `Warning: Docker's daemon isn't running. ${dockerFix}` },
@@ -548,14 +605,18 @@ describe('runInit', () => {
     })
   })
 
-  it('exits 2 when the install fails, keeps the files and adds no addon', async () => {
+  it('exits 2 when the install fails, keeps the files and adds no addon, with a summary of what it wrote', async () => {
     const root = pnpmProject()
     const { tools, record } = toolsOf({}, { exitCodes: [1] })
+
+    const problem = `pnpm add --save-dev @visual-check/cli@${cliVersion} @visual-check/chromium@${browserRange} @visual-check/storybook@${cliVersion} failed with exit code 1. Run it yourself, then run visual-check init again.`
 
     expect(await runInit(root, tools)).toEqual({
       exitCode: 2,
       stdout: pnpmWrittenLines,
-      stderr: `pnpm add --save-dev @visual-check/cli@${cliVersion} @visual-check/chromium@${browserRange} @visual-check/storybook@${cliVersion} failed with exit code 1. Run it yourself, then run visual-check init again.\n`,
+      stderr: `${problem}\n`,
+      messages: [problem],
+      summary: { written: pnpmWrittenList },
     })
     expect(record.commands).toEqual(commandsIn(root, pnpmAdd))
     expect(record.fallowRoots).toEqual([])

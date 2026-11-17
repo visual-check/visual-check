@@ -1,15 +1,14 @@
-import { Box, Static, Text } from 'ink'
+import { Box, Static } from 'ink'
 import { type ReactNode, useSyncExternalStore } from 'react'
 import { AnsweredLine } from './answered-line.js'
 import { BrandHeader } from './brand-header.js'
-import { ColouredText } from './coloured-text.js'
 import { ConfirmQuestion } from './confirm-question.js'
 import type { ActiveQuestion, ShownLine, ViewStore } from './init-view-state.js'
-import { NoteLine } from './note-line.js'
-import { shownLinesOf } from './output-tail.js'
+import { NoteLine } from './message-line.js'
 import { SelectQuestion } from './select-question.js'
+import { StepList } from './step-list.js'
+import { Summary } from './summary.js'
 import { TextQuestion } from './text-question.js'
-import { glyphs } from './theme.js'
 
 /**
  * What `StaticLine` takes.
@@ -19,6 +18,10 @@ interface StaticLineProps {
    * The line to draw.
    */
   line: ShownLine
+  /**
+   * Tells the time now, in milliseconds since the epoch.
+   */
+  clock: () => number
 }
 
 /**
@@ -39,12 +42,16 @@ interface InitScreenProps {
    * Holds what to draw.
    */
   store: ViewStore
+  /**
+   * Tells the time now, in milliseconds since the epoch, which the steps' durations count with.
+   */
+  clock: () => number
 }
 
 /**
  * Draws one line that never changes again.
  */
-function StaticLine({ line }: StaticLineProps): ReactNode {
+function StaticLine({ line, clock }: StaticLineProps): ReactNode {
   switch (line.kind) {
     case 'header':
       return (
@@ -56,12 +63,10 @@ function StaticLine({ line }: StaticLineProps): ReactNode {
       return <NoteLine text={line.text} />
     case 'answered':
       return <AnsweredLine answer={line.answer} message={line.message} />
-    case 'command':
-      return <Text dimColor>{`Running ${line.command}`}</Text>
-    case 'printed':
-      return <Text>{line.text}</Text>
-    case 'failed':
-      return <ColouredText colour="danger">{`${glyphs.failed} ${line.text}`}</ColouredText>
+    case 'steps':
+      return <StepList clock={clock} startedAt={line.startedAt} steps={line.steps} />
+    case 'summary':
+      return <Summary result={line.result} />
   }
 }
 
@@ -108,26 +113,17 @@ function QuestionView({ question }: QuestionViewProps): ReactNode {
 }
 
 /**
- * Draws the init view: the lines that never change again, then the question waiting for its answer, then the end of
- * the running command's output, dim and indented. Each output line is cut at the terminal's edge rather than wrapped,
- * so the output keeps its height while it changes.
+ * Draws the init view: the lines that never change again, then the question waiting for its answer, then the setup
+ * steps once they are planned. Once the run is finished, the steps as they ended and its summary are among the lines.
  */
-export function InitScreen({ store }: InitScreenProps): ReactNode {
-  const { lines, question, output } = useSyncExternalStore(store.subscribe, store.get)
-  const outputLines = shownLinesOf(output)
+export function InitScreen({ store, clock }: InitScreenProps): ReactNode {
+  const { lines, question, steps, plannedAt } = useSyncExternalStore(store.subscribe, store.get)
 
   return (
     <>
-      <Static items={lines}>{(line) => <StaticLine key={line.id} line={line} />}</Static>
+      <Static items={lines}>{(line) => <StaticLine clock={clock} key={line.id} line={line} />}</Static>
       {question === undefined ? null : <QuestionView key={question.id} question={question} />}
-      {outputLines.length === 0 ? null : (
-        <Box marginLeft={2}>
-          {/* Ink cuts each line of the text on its own. */}
-          <Text dimColor wrap="truncate-end">
-            {outputLines.join('\n')}
-          </Text>
-        </Box>
-      )}
+      {plannedAt === undefined ? null : <StepList clock={clock} startedAt={plannedAt} steps={steps} />}
     </>
   )
 }

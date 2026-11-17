@@ -1,16 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { InitResult } from '../init/run-init.js'
 import {
   addNote,
   addOutput,
   askQuestion,
   createViewStore,
+  endStep,
   finishRun,
   initialViewState,
   type NewQuestion,
-  resultLinesOf,
+  planSteps,
   settleQuestion,
   startStep,
-  type ViewState,
 } from './init-view-state.js'
 import { emptyOutputTail } from './output-tail.js'
 
@@ -39,7 +40,8 @@ describe('initialViewState', () => {
     expect(initial).toEqual({
       lines: [{ id: 0, kind: 'header', version: '1.2.3' }],
       question: undefined,
-      output: emptyOutputTail,
+      steps: [],
+      plannedAt: undefined,
       nextId: 1,
     })
   })
@@ -108,54 +110,140 @@ describe('settleQuestion', () => {
   })
 })
 
-describe('startStep and addOutput', () => {
-  it("shows a step's command, then the end of its output", () => {
-    const state = addOutput(addOutput(startStep(initial, 'pnpm add x'), 'one\ntw'), 'o\n')
+describe('planSteps', () => {
+  it('lists each step pending, with the next keys, and keeps when the plan was given', () => {
+    const state = planSteps(addNote(initial, 'one'), ['Write', 'Install'], 1000)
 
-    expect(state.lines.slice(1)).toEqual([{ id: 1, kind: 'command', command: 'pnpm add x' }])
-    expect(state.output).toEqual({ lines: ['one', 'two'], unfinished: '' })
+    expect(state.steps).toEqual([
+      { id: 2, title: 'Write', state: 'pending', output: emptyOutputTail },
+      { id: 3, title: 'Install', state: 'pending', output: emptyOutputTail },
+    ])
+    expect(state.plannedAt).toBe(1000)
+    expect(state.nextId).toBe(4)
+  })
+})
+
+describe('startStep', () => {
+  /**
+   * Two steps planned at 1000.
+   */
+  const planned = planSteps(initial, ['Write', 'Install'], 1000)
+
+  it('starts the first pending step, with its command and when it started', () => {
+    const state = startStep(
+      endStep(startStep(planned, 'Write', undefined, 1000), 'done', 1200),
+      'Install',
+      'pnpm add x',
+      1300,
+    )
+
+    expect(state.steps).toEqual([
+      { id: 1, title: 'Write', state: 'done', output: emptyOutputTail, startedAt: 1000, endedAt: 1200 },
+      { id: 2, title: 'Install', state: 'running', output: emptyOutputTail, command: 'pnpm add x', startedAt: 1300 },
+    ])
   })
 
-  it('drops the output of the step before, and shows nothing for a step without a command', () => {
-    const before = addOutput(startStep(initial, 'pnpm add x'), 'one\n')
-    const state = startStep(before, undefined)
+  it('goes by position, and takes the title it is given', () => {
+    expect(startStep(planned, 'Write the files', undefined, 1000).steps[0]).toEqual({
+      id: 1,
+      title: 'Write the files',
+      state: 'running',
+      output: emptyOutputTail,
+      startedAt: 1000,
+    })
+  })
 
-    expect(state).toEqual({ ...before, output: emptyOutputTail })
+  it('changes nothing without a plan, or once every step has started', () => {
+    const started = startStep(startStep(planned, 'Write', undefined, 1000), 'Install', undefined, 1000)
+
+    expect(startStep(initial, 'Write', undefined, 1000)).toBe(initial)
+    expect(startStep(started, 'More', undefined, 1000)).toBe(started)
+  })
+})
+
+describe('addOutput', () => {
+  it("adds a chunk to the running step's output", () => {
+    const running = startStep(planSteps(initial, ['Install'], 1000), 'Install', 'pnpm add x', 1000)
+    const state = addOutput(addOutput(running, 'one\ntw'), 'o\n')
+
+    expect(state.steps[0]?.output).toEqual({ lines: ['one', 'two'], unfinished: '' })
+  })
+
+  it('changes nothing with no step running', () => {
+    const planned = planSteps(initial, ['Install'], 1000)
+
+    expect(addOutput(planned, 'one\n')).toBe(planned)
+    expect(addOutput(initial, 'one\n')).toBe(initial)
+  })
+})
+
+describe('endStep', () => {
+  it.each(['done', 'warned', 'failed'] as const)('ends the running step %s, with when it ended', (outcome) => {
+    const running = addOutput(startStep(planSteps(initial, ['Install'], 1000), 'Install', 'pnpm add x', 1000), 'a\n')
+
+    expect(endStep(running, outcome, 2500).steps).toEqual([
+      {
+        id: 1,
+        title: 'Install',
+        state: outcome,
+        output: { lines: ['a'], unfinished: '' },
+        command: 'pnpm add x',
+        startedAt: 1000,
+        endedAt: 2500,
+      },
+    ])
+  })
+
+  it('changes nothing with no step running', () => {
+    const planned = planSteps(initial, ['Install'], 1000)
+
+    expect(endStep(planned, 'done', 1000)).toBe(planned)
+    expect(endStep(initial, 'failed', 1000)).toBe(initial)
   })
 })
 
 describe('finishRun', () => {
-  it('shows the result, and drops the question and the output', () => {
-    const before: ViewState = addOutput(askQuestion(initial, textQuestion('Name')), 'one\n')
-    const state = finishRun(before, { exitCode: 2, stdout: '', stderr: 'hint: a\nStopped.\n' })
+  /**
+   * The result of a run that stopped before it wrote.
+   */
+  const stopped: InitResult = {
+    exitCode: 2,
+    stdout: '',
+    stderr: 'hint: a\nStopped.\n',
+    messages: ['hint: a', 'Stopped.'],
+  }
+
+  it('shows the result, and drops the question', () => {
+    const state = finishRun(askQuestion(initial, textQuestion('Name')), stopped)
 
     expect(state).toEqual({
-      lines: [...initial.lines, { id: 2, kind: 'note', text: 'hint: a' }, { id: 3, kind: 'failed', text: 'Stopped.' }],
+      lines: [...initial.lines, { id: 2, kind: 'summary', result: stopped }],
       question: undefined,
-      output: emptyOutputTail,
-      nextId: 4,
+      steps: [],
+      plannedAt: undefined,
+      nextId: 3,
     })
   })
-})
 
-describe('resultLinesOf', () => {
-  it('gives the stdout as one printed line, its blank lines kept and its last line break dropped', () => {
-    expect(resultLinesOf({ exitCode: 0, stdout: 'Wrote a\n\nDone.\n', stderr: '' })).toEqual([
-      { kind: 'printed', text: 'Wrote a\n\nDone.' },
-    ])
-  })
+  it('moves the steps, as they ended, into the lines before the result', () => {
+    const ended = endStep(
+      startStep(planSteps(initial, ['Write', 'Install'], 1000), 'Write', undefined, 1000),
+      'failed',
+      1500,
+    )
+    const state = finishRun(ended, stopped)
 
-  it('gives each stderr line as a note when it is a warning or a hint, else as a failure', () => {
-    expect(resultLinesOf({ exitCode: 2, stdout: '', stderr: 'Warning: a\nhint: b\nwarning: c\nd' })).toEqual([
-      { kind: 'note', text: 'Warning: a' },
-      { kind: 'note', text: 'hint: b' },
-      { kind: 'failed', text: 'warning: c' },
-      { kind: 'failed', text: 'd' },
-    ])
-  })
-
-  it('gives nothing for a result with no text', () => {
-    expect(resultLinesOf({ exitCode: 0, stdout: '', stderr: '' })).toEqual([])
+    expect(state).toEqual({
+      lines: [
+        ...initial.lines,
+        { id: 3, kind: 'steps', steps: ended.steps, startedAt: 1000 },
+        { id: 4, kind: 'summary', result: stopped },
+      ],
+      question: undefined,
+      steps: [],
+      plannedAt: undefined,
+      nextId: 5,
+    })
   })
 })
 

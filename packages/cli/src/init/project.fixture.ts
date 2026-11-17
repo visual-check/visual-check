@@ -74,6 +74,8 @@ export function makeProject({ manifest, files = {}, storybookVersion, git = true
 
 /**
  * Removes the projects `makeProject` made, and lets git look above folders again.
+ *
+ * @public
  */
 export function removeProjects(): void {
   vi.unstubAllEnvs()
@@ -111,6 +113,8 @@ export function snapshotFiles(root: string): Record<string, string> {
 /**
  * Makes a pnpm project with one Storybook in `.storybook`, started by `storybook dev -p 6006`, and storybook 10.6.7
  * installed. `manifest` is merged into its `package.json`, and `files` added to its files.
+ *
+ * @public
  */
 export function pnpmProject(
   options: { manifest?: Record<string, unknown>; files?: Record<string, string>; storybookVersion?: string } = {},

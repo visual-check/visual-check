@@ -1,4 +1,3 @@
-import { listOf } from './list-of.js'
 import {
   addDevDependenciesCommandOf,
   type CommandLine,
@@ -106,21 +105,10 @@ export function dependenciesToAddOf(input: DependenciesToAddInput): Dependencies
 }
 
 /**
- * Returns the name of a spec, without its version: `@visual-check/cli@0.0.0` gives `@visual-check/cli`. A scoped name
- * keeps its leading `@`.
+ * The title of a step that adds visual-check's packages. It's short, so it fits on one line, and the running step shows
+ * the exact command under it.
  */
-export function packageNameOf(spec: string): string {
-  const at = spec.lastIndexOf('@')
-
-  return at > 0 ? spec.slice(0, at) : spec
-}
-
-/**
- * Returns the title of the step that adds the specs.
- */
-export function installTitleOf(specs: readonly string[]): string {
-  return `Install ${listOf(specs.map(packageNameOf))}`
-}
+export const installTitle = "Install visual-check's packages"
 
 /**
  * Returns the title of the step that adds the addon to a Storybook.
@@ -164,7 +152,7 @@ export async function installDependencies(input: InstallDependenciesInput): Prom
 
     const exitCode = await runStep(
       progress,
-      { title: installTitleOf(specs), command: shown },
+      { title: installTitle, command: shown },
       () => runCommand(commandLine.command, commandLine.args, dir),
       (code) => (code === 0 ? 'done' : 'failed'),
     )

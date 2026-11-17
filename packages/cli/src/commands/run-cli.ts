@@ -470,7 +470,8 @@ type InitIo = Pick<InitTools, 'interactive' | 'prompter' | 'progress'>
 /**
  * Runs `init`. In a terminal, unless the caller gives a prompter, it loads the terminal UI, which asks the questions,
  * shows the steps and the end of the run, so the result carries only the exit code. Elsewhere it runs with the
- * caller's prompter, else the one that takes every default, and plain progress, and the result carries the text.
+ * caller's prompter, else the one that takes every default, and plain progress, and the result carries the text,
+ * without the messages and the summary only the terminal UI shows.
  *
  * @throws Any error `runInit` throws, after the terminal UI has stopped drawing.
  */
@@ -486,7 +487,12 @@ async function runInitCommand(
     const prompter = cliOptions.prompter ?? defaultsPrompter()
     const progress = plainSetupProgress(cliOptions.progress ?? (() => undefined))
 
-    return await runInit(cwd, initToolsOf(yes, { interactive, prompter, progress }, cliOptions))
+    const { exitCode, stdout, stderr } = await runInit(
+      cwd,
+      initToolsOf(yes, { interactive, prompter, progress }, cliOptions),
+    )
+
+    return { exitCode, stdout, stderr }
   }
 
   // Loaded only here, so `test` and `update` never load React and Ink.
@@ -503,7 +509,7 @@ async function runInitCommand(
   try {
     result = await runInit(cwd, initToolsOf(yes, { interactive, prompter: view, progress: view.progress }, cliOptions))
   } catch (error) {
-    await view.finish({ exitCode: 2, stdout: '', stderr: '' })
+    await view.finish({ exitCode: 2, stdout: '', stderr: '', messages: [] })
 
     throw error
   }

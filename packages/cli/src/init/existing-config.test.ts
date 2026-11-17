@@ -10,6 +10,7 @@ import {
   pnpmAdd,
   pnpmAddon,
   pnpmClosingMessage,
+  pnpmNextSteps,
   toolsOf,
 } from './init-tools.fixture.js'
 import { makeProject, pnpmProject, readText, removeProjects } from './project.fixture.js'
@@ -137,6 +138,14 @@ describe('init run again with a config there', () => {
         'Added the scripts visual:check and visual:update to package.json.\n' +
         `\n${pnpmClosingMessage}`,
       stderr: '',
+      messages: [],
+      summary: {
+        written: {
+          files: ['.storybook/visual-check.ts'],
+          scripts: ['Added the scripts visual:check and visual:update to package.json.'],
+        },
+        nextSteps: pnpmNextSteps,
+      },
     })
     expect(readText(root, 'visual-check.config.ts')).toBe(config)
     expect(readText(root, '.storybook/visual-check.ts')).toBe(modesFile)
@@ -189,6 +198,9 @@ describe('init run again with a config there', () => {
     const { tools, record } = toolsOf()
     const result = await runInit(root, tools)
 
+    const warning =
+      "Warning: visual-check init left visual-check.config.ts alone: Couldn't load visual-check.config.ts: broken config"
+
     expect(result).toEqual({
       exitCode: 0,
       stdout:
@@ -196,8 +208,15 @@ describe('init run again with a config there', () => {
         'Wrote .visual-check/.gitignore\n' +
         'Added the scripts visual:check and visual:update to package.json.\n' +
         `\n${pnpmClosingMessage}`,
-      stderr:
-        "Warning: visual-check init left visual-check.config.ts alone: Couldn't load visual-check.config.ts: broken config\n",
+      stderr: `${warning}\n`,
+      messages: [warning],
+      summary: {
+        written: {
+          files: ['.storybook/visual-check.ts', '.visual-check/.gitignore'],
+          scripts: ['Added the scripts visual:check and visual:update to package.json.'],
+        },
+        nextSteps: pnpmNextSteps,
+      },
     })
     expect(readText(root, 'visual-check.config.ts')).toBe(config)
     expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddon))
@@ -292,6 +311,11 @@ describe('init run again with a config there', () => {
 
     const { tools, record } = toolsOf()
 
+    const hints = [
+      `hint: visual-check.config.ts lists the Storybook shared in ${outside}, outside this project, so init left it alone.`,
+      "hint: visual-check.config.ts lists no Storybook in .storybook. To add it, put this under storybooks: 'web-app': { url: 'http://127.0.0.1:6006' },",
+    ]
+
     expect(await runInit(root, tools)).toEqual({
       exitCode: 0,
       stdout: `Wrote .visual-check/.gitignore
@@ -305,9 +329,34 @@ visual-check is set up. Next:
 
 To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
 `,
-      stderr:
-        `hint: visual-check.config.ts lists the Storybook shared in ${outside}, outside this project, so init left it alone.\n` +
-        "hint: visual-check.config.ts lists no Storybook in .storybook. To add it, put this under storybooks: 'web-app': { url: 'http://127.0.0.1:6006' },\n",
+      stderr: hints.map((hint) => `${hint}\n`).join(''),
+      messages: hints,
+      summary: {
+        written: {
+          files: ['.visual-check/.gitignore'],
+          scripts: ['Added the scripts visual:check and visual:update to package.json.'],
+        },
+        nextSteps: {
+          steps: [
+            ['Add your Storybook to ', { code: 'visual-check.config.ts' }, ', as the hints say, then start it.'],
+            [
+              'Run ',
+              { code: 'pnpm run visual:update' },
+              ' to write baselines. The first run downloads the browser image.',
+            ],
+            [
+              'Run ',
+              { code: 'pnpm run visual:check' },
+              '. It should pass. If a story fails, see ',
+              { code: 'https://visual-check.vercel.app/docs/broken-stories' },
+              '.',
+            ],
+            ['Commit ', { code: 'visual-check.config.ts' }, ' and ', { code: '.visual-check/' }, '.'],
+          ],
+          previews: [],
+          ciUrl: 'https://visual-check.vercel.app/docs/ci',
+        },
+      },
     })
     expect(existsSync(join(root, outside))).toBe(false)
     expect(existsSync(join(root, '.storybook/visual-check.ts'))).toBe(false)

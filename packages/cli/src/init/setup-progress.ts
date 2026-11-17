@@ -1,5 +1,7 @@
 /**
  * How a setup step ended: it did what it set out to, it did but gave a warning, or it failed.
+ *
+ * @public
  */
 export type StepOutcome = 'done' | 'warned' | 'failed'
 

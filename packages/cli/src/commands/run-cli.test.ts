@@ -29,7 +29,7 @@ import {
 } from '../capture/driver/driver.js'
 import { answerEvaluate } from '../capture/fake-driver.fixture.js'
 import { ContainerError } from '../container/container-error.js'
-import { pnpmClosingMessage, pnpmWrittenLines } from '../init/init-tools.fixture.js'
+import { pnpmClosingMessage, pnpmNextSteps, pnpmWrittenLines, pnpmWrittenList } from '../init/init-tools.fixture.js'
 import { scriptedPrompter } from '../init/prompter.fixture.js'
 import type { InitResult } from '../init/run-init.js'
 import { answerOptionsReadExpression, optionsReadAnswer } from '../storybook/options-read.fixture.js'
@@ -1065,14 +1065,16 @@ Other options:
       stdout: process.stdout,
     })
     expect(view.unused()).toEqual([])
-    expect(view.progress.start).toHaveBeenCalledWith(
-      'Install @visual-check/cli, @visual-check/chromium and @visual-check/storybook',
-      pnpmAddLine,
-    )
+    expect(view.progress.start).toHaveBeenCalledWith("Install visual-check's packages", pnpmAddLine)
     expect(view.finish).toHaveBeenCalledExactlyOnceWith({
       exitCode: 0,
       stdout: `${pnpmWrittenLines}\n${pnpmClosingMessage}`,
       stderr: '',
+      messages: [],
+      summary: {
+        written: pnpmWrittenList,
+        nextSteps: pnpmNextSteps,
+      },
     })
   })
 
@@ -1091,7 +1093,7 @@ Other options:
       }),
     ).rejects.toBe(error)
     expect(initViewModule.startInitView).toHaveBeenCalledWith(expect.objectContaining({ yes: true }))
-    expect(view.finish).toHaveBeenCalledExactlyOnceWith({ exitCode: 2, stdout: '', stderr: '' })
+    expect(view.finish).toHaveBeenCalledExactlyOnceWith({ exitCode: 2, stdout: '', stderr: '', messages: [] })
   })
 
   it('exits 2 for update in CI before looking at the config', async () => {

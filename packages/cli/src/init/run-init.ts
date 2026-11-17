@@ -1,11 +1,20 @@
 import { dirname, join } from 'node:path'
 import type { ProbeDocker } from '../container/docker-probe.js'
-import { closingMessageOf, type SetUpStorybook, type Written, writtenLinesOf } from './closing-message.js'
+import {
+  closingMessageTextOf,
+  type NextSteps,
+  nextStepsOf,
+  type SetUpStorybook,
+  type Written,
+  type WrittenList,
+  writtenLinesOf,
+  writtenListOf,
+} from './closing-message.js'
 import { type DetectedProject, detectProject } from './detect-project.js'
 import { type ExistingConfig, existingConfigOf, existingStorybooksOf } from './existing-config.js'
 import type { ListFiles } from './find-storybooks.js'
 import { blockingProblemsOf, dockerWarningOf, versionNotesOf } from './init-checks.js'
-import { addAddons, addonTitleOf, dependenciesToAddOf, installDependencies, installTitleOf } from './install.js'
+import { addAddons, addonTitleOf, dependenciesToAddOf, installDependencies, installTitle } from './install.js'
 import { InputEndedError, type Prompter } from './prompter.js'
 import { type Answers, askQuestions } from './questions.js'
 import type { RunCommand } from './run-command.js'
@@ -78,7 +87,8 @@ export interface InitTools {
 }
 
 /**
- * What `init` produced: the exit code and the text for each output stream.
+ * What `init` produced: the exit code, the text for each output stream, the messages stderr holds, and, once it has
+ * written, the summary the terminal UI shows.
  *
  * @public
  */
@@ -92,9 +102,33 @@ export interface InitResult {
    */
   stdout: string
   /**
-   * Text for standard error: the problems, hints and warnings, a line each.
+   * Text for standard error: the messages, each ending with a line break.
    */
   stderr: string
+  /**
+   * The problems, hints and warnings, in the order they arose. A message can span lines, so the terminal UI shows these
+   * rather than split `stderr`.
+   */
+  messages: readonly string[]
+  /**
+   * What the terminal UI sums the run up with, once `init` has written: what it wrote, and the next steps when it got
+   * to the end. A run that stopped before it wrote has none.
+   */
+  summary?: InitSummary
+}
+
+/**
+ * What the terminal UI sums up a run that wrote with.
+ */
+interface InitSummary {
+  /**
+   * What `init` wrote, worded for the person, with the paths relative to the folder it runs in.
+   */
+  written: WrittenList
+  /**
+   * What to do next, when `init` got to the end. A failed install leaves it out.
+   */
+  nextSteps?: NextSteps
 }
 
 /**
@@ -240,7 +274,8 @@ function setupOf(
 
 /**
  * Writes the files and the scripts, adds the dependencies and the addon, and checks for unlisted dependencies. A failed
- * install exits 2 after listing the files written so far, with no closing message.
+ * install exits 2 after listing the files written so far, with no closing message. The result carries a summary for the
+ * terminal UI: what was written, and the next steps unless the install failed.
  */
 async function applySetup(cwd: string, project: DetectedProject, setup: Setup, tools: InitTools): Promise<InitResult> {
   const { packageManager, scripts, addons } = setup.answers
@@ -256,7 +291,7 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
 
   progress.plan([
     writeFilesTitle,
-    ...installs.map(({ specs }) => installTitleOf(specs)),
+    ...installs.map(() => installTitle),
     ...addons.map(({ name }) => addonTitleOf(name)),
     checkUnlistedTitle,
   ])
@@ -266,11 +301,12 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
     () => writeSetupFiles(project, setup),
     () => 'done',
   )
-  const writtenLines = writtenLinesOf(written, cwd)
+  const writtenList = writtenListOf(written, cwd)
+  const writtenLines = writtenLinesOf(writtenList)
   const problem = await installDependencies({ installs, packageManager, runCommand, progress })
 
   if (problem !== undefined) {
-    return { exitCode: 2, stdout: linesOf(writtenLines), stderr: linesOf([...setup.notes, problem]) }
+    return { ...resultOf(2, linesOf(writtenLines), [...setup.notes, problem]), summary: { written: writtenList } }
   }
 
   const addonWarnings = await addAddons({
@@ -289,18 +325,19 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
     (warnings) => (warnings.length > 0 ? 'warned' : 'done'),
   )
 
-  const closingMessage = closingMessageOf({
+  const nextSteps = nextStepsOf({
     cwd,
     packageManager,
     configPath: setup.configPath,
     storybooks: setup.storybooks,
     scripts,
   })
+  const closingMessage = closingMessageTextOf(nextSteps)
+  const stdout = writtenLines.length === 0 ? closingMessage : `${linesOf(writtenLines)}\n${closingMessage}`
 
   return {
-    exitCode: 0,
-    stdout: writtenLines.length === 0 ? closingMessage : `${linesOf(writtenLines)}\n${closingMessage}`,
-    stderr: linesOf([...setup.notes, ...addonWarnings, ...fallowWarnings]),
+    ...resultOf(0, stdout, [...setup.notes, ...addonWarnings, ...fallowWarnings]),
+    summary: { written: writtenList, nextSteps },
   }
 }
 
@@ -384,8 +421,15 @@ function linesOf(lines: readonly string[]): string {
 }
 
 /**
+ * Builds a result with its messages, which stderr holds a line each, or more for a message that spans lines.
+ */
+function resultOf(exitCode: number, stdout: string, messages: readonly string[]): InitResult {
+  return { exitCode, stdout, stderr: linesOf(messages), messages }
+}
+
+/**
  * Builds the result for problems that stop `init`: each on its own line on stderr, exit code 2.
  */
 function failureOf(problems: readonly string[]): InitResult {
-  return { exitCode: 2, stdout: '', stderr: linesOf(problems) }
+  return resultOf(2, '', problems)
 }

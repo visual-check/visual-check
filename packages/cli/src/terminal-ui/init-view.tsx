@@ -8,9 +8,11 @@ import {
   addOutput,
   askQuestion,
   createViewStore,
+  endStep,
   finishRun,
   initialViewState,
   type NewQuestion,
+  planSteps,
   settleQuestion,
   startStep,
 } from './init-view-state.js'
@@ -22,14 +24,14 @@ import { colourEnabledOf, ThemeContext } from './theme.js'
  */
 export interface InitView extends Prompter {
   /**
-   * Shows the setup steps after the questions: `Running` and the command of each step that runs one, then the last
-   * five lines of that command's output.
+   * Shows the setup steps after the questions, from the plan on: a progress bar with the time taken, then each step
+   * pending, running with its command and the last three lines of its output, or ended with how long it took.
    */
   progress: SetupProgress
   /**
-   * Gives up on a question still waiting, which rejects with an `InputEndedError`. Then shows the end of the run: the
-   * result's stdout, then its stderr, a line each, the warnings and hints styled as notes and any other line as a
-   * failure. Then it stops drawing and hands the terminal back. Resolves once the last frame is written.
+   * Gives up on a question still waiting, which rejects with an `InputEndedError`. Then shows the end of the run, once:
+   * the steps as they ended, then the summary, which tells what was written and what to do next, or why `init`
+   * stopped. Then it stops drawing and hands the terminal back. Resolves once the last frame is written.
    */
   finish(result: InitResult): Promise<void>
 }
@@ -64,6 +66,10 @@ interface InitViewOptions {
    * `false` by default.
    */
   debug?: boolean
+  /**
+   * Tells the time now, in milliseconds since the epoch, which the steps' durations count with. `Date.now` by default.
+   */
+  clock?: () => number
 }
 
 /**
@@ -88,10 +94,11 @@ interface Settling<T> {
  * @public
  */
 export function startInitView(options: InitViewOptions): InitView {
+  const clock = options.clock ?? Date.now
   const store = createViewStore(initialViewState(options.version))
   const instance = render(
     <ThemeContext value={{ colour: colourEnabledOf(options.environment) }}>
-      <InitScreen store={store} />
+      <InitScreen clock={clock} store={store} />
     </ThemeContext>,
     {
       stdin: options.stdin,
@@ -176,14 +183,18 @@ export function startInitView(options: InitViewOptions): InitView {
       store.update((state) => addNote(state, text))
     },
     progress: {
-      plan: () => undefined,
-      start(_title, command) {
-        store.update((state) => startStep(state, command))
+      plan(titles) {
+        store.update((state) => planSteps(state, titles, clock()))
+      },
+      start(title, command) {
+        store.update((state) => startStep(state, title, command, clock()))
       },
       output(text) {
         store.update((state) => addOutput(state, text))
       },
-      end: () => undefined,
+      end(outcome) {
+        store.update((state) => endStep(state, outcome, clock()))
+      },
     },
     async finish(result) {
       store.get().question?.onCancel()

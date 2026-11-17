@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { NoteLine } from './note-line.js'
+import { MessageLine, NoteLine } from './message-line.js'
 import { cleanupSettled, plainFrameOf, renderSettled, renderSettledAt } from './terminal.fixture.js'
 import { ThemeContext } from './theme.js'
 
@@ -76,5 +76,55 @@ describe('NoteLine', () => {
     )
 
     expect(plainFrameOf(lastFrame())).toBe('Found 2 Storybooks, in .storybook and in\ndocs/.storybook.')
+  })
+})
+
+describe('MessageLine', () => {
+  it('draws a warning or a hint as a note', async () => {
+    const { lastFrame } = await renderSettled(
+      <>
+        <MessageLine text="Warning: git is missing." />
+        <MessageLine text="hint: run it again with --yes." />
+      </>,
+    )
+
+    expect(plainFrameOf(lastFrame())).toBe('▲ git is missing.\n· run it again with --yes.')
+  })
+
+  it('draws any other message as a problem, after a cross, all in the danger colour', async () => {
+    const { lastFrame } = await renderSettled(<MessageLine text="visual-check init stopped." />)
+
+    expect(lastFrame()).toBe('\u001b[31m✕\u001b[39m \u001b[31mvisual-check init stopped.\u001b[39m')
+  })
+
+  it('draws a problem without colour when the theme has colour off', async () => {
+    const { lastFrame } = await renderSettled(
+      <ThemeContext value={{ colour: false }}>
+        <MessageLine text="visual-check init stopped." />
+      </ThemeContext>,
+    )
+
+    expect(lastFrame()).toBe('✕ visual-check init stopped.')
+  })
+
+  it('wraps a long problem to a narrow terminal under its text, and keeps its later lines there too', async () => {
+    const { lastFrame } = await renderSettledAt(
+      <MessageLine text={'pnpm add failed with exit code 1. Run it yourself.\n  ERR_PNPM_FETCH_404'} />,
+      40,
+    )
+
+    expect(plainFrameOf(lastFrame())).toBe(
+      '✕ pnpm add failed with exit code 1. Run\n  it yourself.\n    ERR_PNPM_FETCH_404',
+    )
+  })
+
+  it('keeps the later lines of a warning that spans lines under its text', async () => {
+    const { lastFrame } = await renderSettled(
+      <MessageLine text={"Warning: Fallow couldn't check this project's imports.\nIt could not read tsconfig.json."} />,
+    )
+
+    expect(plainFrameOf(lastFrame())).toBe(
+      "▲ Fallow couldn't check this project's imports.\n  It could not read tsconfig.json.",
+    )
   })
 })
