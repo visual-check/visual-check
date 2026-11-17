@@ -30,13 +30,13 @@ async function ask(
  * The hints of the questions, by what each asks about.
  */
 const hints = {
-  packageManager: "Nothing in package.json or a lockfile names one. init installs visual-check's packages with it.",
+  packageManager: 'No lockfile or packageManager field names one.',
   name: 'What the config and the report call this Storybook.',
-  url: 'Where visual-check opens this Storybook, locally and in CI. Use 127.0.0.1, not localhost.',
-  startCommand: 'No script starts this Storybook, so the next steps use this command.',
-  testScript: 'Runs visual-check test, which compares each story with its baseline.',
-  updateScript: 'Runs visual-check update, which writes the baselines.',
-  addon: 'Checks and updates the open story from inside Storybook. Added through storybook add.',
+  url: 'Where visual-check opens it, locally and in CI. Use 127.0.0.1, not localhost.',
+  startCommand: 'No script starts this Storybook. The next steps show this command.',
+  testScript: 'Compares each story with its baseline.',
+  updateScript: 'Writes the baselines.',
+  addon: 'Check and update the open story from inside Storybook.',
 }
 
 /**
@@ -316,8 +316,8 @@ describe('askQuestions', () => {
       update: { name: 'visual:update', add: true },
     })
     expect(records.filter(({ message }) => message.startsWith('Name of the script')).map(({ hint }) => hint)).toEqual([
-      `${hints.testScript} package.json's visual:check runs vitest now; init replaces it.`,
-      `${hints.updateScript} package.json's visual:update runs vitest -u now; init replaces it.`,
+      `${hints.testScript} Replaces your current visual:check script.`,
+      `${hints.updateScript} Replaces your current visual:update script.`,
     ])
     expect(messagesOf(records, 'invalid')).toEqual([])
     expect(warnings).toEqual([])
@@ -383,13 +383,13 @@ describe('askQuestions', () => {
     expect(answers.scripts).toEqual(expected)
   })
 
-  it('says what a script with the suggested name runs, even another visual-check command', async () => {
+  it('says a script with the suggested name is replaced, even another visual-check command', async () => {
     const { records } = await ask(['', '', '', '', '', false], {
       project: { manifest: { scripts: { 'visual:check': 'visual-check init --yes' } } },
     })
 
     expect(records.find(({ message }) => message.endsWith('visual-check test'))?.hint).toBe(
-      `${hints.testScript} package.json's visual:check runs visual-check init --yes now; init replaces it.`,
+      `${hints.testScript} Replaces your current visual:check script.`,
     )
   })
 

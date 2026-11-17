@@ -128,15 +128,15 @@ export function versionNotesOf(project: DetectedProject): string[] {
   return project.storybooks.flatMap(({ configDir, version }) => {
     if (version === undefined) {
       return [
-        `hint: storybook isn't installed for the Storybook in ${configDir}, so init can't tell its version and skips ` +
-          'the addon. Install dependencies, then run visual-check init again to add it.',
+        `hint: storybook isn't installed for ${configDir}, so init skips its addon. ` +
+          'Install dependencies, then run init again.',
       ]
     }
 
     if (classifyStorybookVersion(version) === 'above-maximum') {
       return [
-        `Warning: The Storybook in ${configDir} runs storybook ${version}, ` +
-          `and visual-check is tested on ${minimumText} to ${newestSupportedMajor}. visual-check init carries on.`,
+        `Warning: ${configDir} runs storybook ${version}, ` +
+          `newer than the versions visual-check is tested on (${minimumText} to ${newestSupportedMajor}).`,
       ]
     }
 

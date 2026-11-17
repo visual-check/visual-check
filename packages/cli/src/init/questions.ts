@@ -153,8 +153,8 @@ const otherScriptNames = { test: 'visual:test', update: 'visual:update-baselines
  * The hint of the question that names each script, by the visual-check command the script runs.
  */
 const scriptHints = {
-  test: 'Runs visual-check test, which compares each story with its baseline.',
-  update: 'Runs visual-check update, which writes the baselines.',
+  test: 'Compares each story with its baseline.',
+  update: 'Writes the baselines.',
 } as const
 
 /**
@@ -197,7 +197,7 @@ function askPackageManager(project: DetectedProject, prompter: Prompter): Promis
   return prompter.select('Package manager', {
     choices: packageManagerChoices,
     defaultValue: defaultPackageManager,
-    hint: "Nothing in package.json or a lockfile names one. init installs visual-check's packages with it.",
+    hint: 'No lockfile or packageManager field names one.',
   })
 }
 
@@ -292,7 +292,7 @@ function askUrl(storybook: DetectedStorybook, name: string, prompter: Prompter):
 
   return prompter.text(`URL of ${name}`, {
     defaultValue: `http://127.0.0.1:${startScript?.port ?? defaultStorybookPort}`,
-    hint: 'Where visual-check opens this Storybook, locally and in CI. Use 127.0.0.1, not localhost.',
+    hint: 'Where visual-check opens it, locally and in CI. Use 127.0.0.1, not localhost.',
     validate(value) {
       switch (findStorybookUrlProblem(value)) {
         case 'not-http':
@@ -342,7 +342,7 @@ async function askStartCommand(
 
   return prompter.text(`Command that starts ${name}`, {
     defaultValue: commandLineOf(command),
-    hint: 'No script starts this Storybook, so the next steps use this command.',
+    hint: 'No script starts this Storybook. The next steps show this command.',
   })
 }
 
@@ -429,16 +429,14 @@ function defaultScriptNameOf(
 
 /**
  * Returns the hint of the question that names a script. When another script already has the suggested `name`, keeping
- * that name replaces it, so the hint says what that script runs now. The suggested name never starts a Storybook.
+ * that name replaces it, so the hint says so. The suggested name never starts a Storybook.
  */
 function scriptHintOf(kind: 'test' | 'update', name: string, scripts: Record<string, string>): string {
-  const current = scripts[name]
-
-  if (current === undefined) {
+  if (scripts[name] === undefined) {
     return scriptHints[kind]
   }
 
-  return `${scriptHints[kind]} package.json's ${name} runs ${current} now; init replaces it.`
+  return `${scriptHints[kind]} Replaces your current ${name} script.`
 }
 
 /**
@@ -480,7 +478,7 @@ function namedStorybooksOf(
 function askAddon(name: string, prompter: Prompter): Promise<boolean> {
   return prompter.confirm(`Add the Storybook addon to ${name}?`, {
     defaultValue: true,
-    hint: 'Checks and updates the open story from inside Storybook. Added through storybook add.',
+    hint: 'Check and update the open story from inside Storybook.',
   })
 }
 

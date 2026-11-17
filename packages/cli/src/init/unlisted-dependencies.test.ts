@@ -74,14 +74,21 @@ describe('unlistedDependenciesWarningOf', () => {
     expect(unlistedDependenciesWarningOf([])).toBeUndefined()
   })
 
-  it('names each package with its first path', () => {
+  it('names one package with its first path', () => {
+    expect(unlistedDependenciesWarningOf([{ name: 'a', paths: ['x.js', 'y.js'] }])).toBe(
+      "Warning: package.json doesn't list a, imported in x.js. visual-check can't tell which stories it affects.",
+    )
+  })
+
+  it('names several packages', () => {
     expect(
       unlistedDependenciesWarningOf([
-        { name: 'a', paths: ['x.js', 'y.js'] },
+        { name: 'a', paths: ['x.js'] },
         { name: 'b', paths: ['z.js'] },
+        { name: 'c', paths: ['w.js'] },
       ]),
     ).toBe(
-      "Warning: Fallow finds imports of packages package.json doesn't list: a (x.js), b (z.js). Affected stories follow imports through Fallow's graph, and an alias it can't see, such as one set in viteFinal, shows up this way. List the package, or teach Fallow the alias in its config.",
+      "Warning: package.json doesn't list a, b and c, which your code imports. visual-check can't tell which stories they affect.",
     )
   })
 })
@@ -107,10 +114,8 @@ describe('fallowFailureOf', () => {
 
 describe('fallowFailureWarningOf', () => {
   it('words an error and a thrown text', () => {
-    expect(fallowFailureWarningOf(new Error('boom'))).toBe(
-      "Warning: Fallow couldn't check this project's imports: boom",
-    )
-    expect(fallowFailureWarningOf('bang')).toBe("Warning: Fallow couldn't check this project's imports: bang")
+    expect(fallowFailureWarningOf(new Error('boom'))).toBe("Warning: Fallow couldn't check the imports: boom")
+    expect(fallowFailureWarningOf('bang')).toBe("Warning: Fallow couldn't check the imports: bang")
   })
 })
 

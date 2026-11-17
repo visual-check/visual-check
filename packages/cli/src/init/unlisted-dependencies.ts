@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { promisify } from 'node:util'
+import { listOf } from './list-of.js'
 import { isJsonObject } from './package-manager.js'
 
 /**
@@ -188,12 +189,20 @@ export function unlistedDependenciesWarningOf(unlisted: readonly UnlistedDepende
     return undefined
   }
 
-  const names = unlisted.map(({ name, paths }) => `${name} (${paths[0]})`).join(', ')
+  const [first] = unlisted
+
+  if (unlisted.length === 1 && first !== undefined) {
+    return (
+      `Warning: package.json doesn't list ${first.name}, imported in ${first.paths[0]}. ` +
+      "visual-check can't tell which stories it affects."
+    )
+  }
+
+  const names = listOf(unlisted.map(({ name }) => name))
 
   return (
-    `Warning: Fallow finds imports of packages package.json doesn't list: ${names}. ` +
-    "Affected stories follow imports through Fallow's graph, and an alias it can't see, such as one set in " +
-    'viteFinal, shows up this way. List the package, or teach Fallow the alias in its config.'
+    `Warning: package.json doesn't list ${names}, which your code imports. ` +
+    "visual-check can't tell which stories they affect."
   )
 }
 
@@ -203,5 +212,5 @@ export function unlistedDependenciesWarningOf(unlisted: readonly UnlistedDepende
 export function fallowFailureWarningOf(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
 
-  return `Warning: Fallow couldn't check this project's imports: ${message}`
+  return `Warning: Fallow couldn't check the imports: ${message}`
 }

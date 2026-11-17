@@ -118,13 +118,13 @@ describe('versionNotesOf', () => {
 
   it('warns of a version above the tested ones', () => {
     expect(versionNotesOf(projectOf({ storybooks: [storybookOf({ version: '12.0.0' })] }))).toEqual([
-      'Warning: The Storybook in .storybook runs storybook 12.0.0, and visual-check is tested on 9.1 to 11. visual-check init carries on.',
+      'Warning: .storybook runs storybook 12.0.0, newer than the versions visual-check is tested on (9.1 to 11).',
     ])
   })
 
   it('hints at installing dependencies when storybook is missing', () => {
     expect(versionNotesOf(projectOf({ storybooks: [storybookOf({ version: undefined })] }))).toEqual([
-      "hint: storybook isn't installed for the Storybook in .storybook, so init can't tell its version and skips the addon. Install dependencies, then run visual-check init again to add it.",
+      "hint: storybook isn't installed for .storybook, so init skips its addon. Install dependencies, then run init again.",
     ])
   })
 })

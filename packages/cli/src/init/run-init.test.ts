@@ -255,7 +255,7 @@ describe('runInit', () => {
       expect(prompter.records[0]).toEqual({
         kind: 'note',
         message:
-          'Warning: The Storybook in .storybook runs storybook 12.0.0, and visual-check is tested on 9.1 to 11. visual-check init carries on.',
+          'Warning: .storybook runs storybook 12.0.0, newer than the versions visual-check is tested on (9.1 to 11).',
       })
       expectWritten(root, result.stdout)
       expect(prompter.records.filter(({ kind }) => kind === 'confirm')).toEqual([])
@@ -330,7 +330,7 @@ describe('runInit', () => {
 
       expect(result.exitCode).toBe(0)
       expect(result.stderr).toBe(
-        "Warning: Fallow finds imports of packages package.json doesn't list: leftpad-zz (src/a.js). Affected stories follow imports through Fallow's graph, and an alias it can't see, such as one set in viteFinal, shows up this way. List the package, or teach Fallow the alias in its config.\n",
+        "Warning: package.json doesn't list leftpad-zz, imported in src/a.js. visual-check can't tell which stories it affects.\n",
       )
       expectWritten(root, result.stdout)
       expect(record.progress).toEqual(fullProgressOf('done', 'warned'))
@@ -356,15 +356,14 @@ describe('runInit', () => {
       const result = await runInit(root, tools)
 
       expect(result.exitCode).toBe(0)
-      expect(result.stderr).toBe("Warning: Fallow couldn't check this project's imports: Fallow broke.\n")
+      expect(result.stderr).toBe("Warning: Fallow couldn't check the imports: Fallow broke.\n")
       expectWritten(root, result.stdout)
       expect(record.progress).toEqual(fullProgressOf('done', 'warned'))
     })
 
     it('keeps a warning that spans lines as one message', async () => {
       const root = pnpmProject()
-      const warning =
-        "Warning: Fallow couldn't check this project's imports: Fallow broke.\nIt could not read tsconfig.json."
+      const warning = "Warning: Fallow couldn't check the imports: Fallow broke.\nIt could not read tsconfig.json."
       const result = await runInit(
         root,
         toolsOf({}, { fallow: new Error('Fallow broke.\nIt could not read tsconfig.json.') }).tools,
@@ -482,7 +481,7 @@ describe('runInit', () => {
       files: { '.storybook/main.ts': '' },
     })
     const hint =
-      "hint: storybook isn't installed for the Storybook in .storybook, so init can't tell its version and skips the addon. Install dependencies, then run visual-check init again to add it."
+      "hint: storybook isn't installed for .storybook, so init skips its addon. Install dependencies, then run init again."
     const yes = toolsOf()
     const yesResult = await runInit(root, yes.tools)
 
@@ -592,7 +591,7 @@ describe('runInit', () => {
         kind: 'select',
         message: 'Package manager',
         defaultValue: 'npm',
-        hint: "Nothing in package.json or a lockfile names one. init installs visual-check's packages with it.",
+        hint: 'No lockfile or packageManager field names one.',
       })
       expect(prompter.unused()).toEqual([])
       expect(record.commands).toEqual(
