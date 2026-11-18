@@ -1,5 +1,10 @@
 import { dirname, posix, relative, resolve, sep } from 'node:path'
-import { baselineStemOf, shortenedHashLength, shortenedPrefixBytes } from '../baselines/baseline-files.js'
+import {
+  baselineStemOf,
+  shortenedHashLength,
+  shortenedPrefixBytes,
+  stemOfFileName,
+} from '../baselines/baseline-files.js'
 
 /**
  * What the rules for a changed file read besides the file itself.
@@ -28,6 +33,20 @@ export interface ChangedFileContext {
 }
 
 /**
+ * A changed baseline.
+ */
+export interface ChangedBaseline {
+  /**
+   * The baselines folder that holds it, an absolute path.
+   */
+  folder: string
+  /**
+   * Its file name without `.png`, in NFC.
+   */
+  stem: string
+}
+
+/**
  * Which rule a changed file falls under.
  */
 export type ChangedFileRule =
@@ -44,20 +63,12 @@ export type ChangedFileRule =
        */
       kind: 'every-story'
     }
-  | {
+  | ({
       /**
        * It's a baseline, which selects the stories its stem names in the Storybook that keeps it.
        */
       kind: 'baseline'
-      /**
-       * The baselines folder that holds it, an absolute path.
-       */
-      folder: string
-      /**
-       * Its file name without `.png`, in NFC.
-       */
-      stem: string
-    }
+    } & ChangedBaseline)
   | {
       /**
        * It's a package's config, such as `package.json`, `tsconfig.json` or `.env`, which selects every story of the
@@ -196,7 +207,9 @@ function baselinesFolderOf(file: string, context: ChangedFileContext): string | 
  * `affected.ignore` is ignored; the config file, a lockfile at any depth, `pnpm-workspace.yaml` and a match for
  * `affected.selectAll` select every story; a `.png` directly in a baselines folder is a baseline; a package's config is
  * `package`; an image, a font or a JSON file that isn't config is an `asset`; anything else is left to the graph.
- * Names and extensions are compared lowercased, since the file system may not tell them apart.
+ * The names of lockfiles, `pnpm-workspace.yaml`, package configs and config JSON files, and the extensions, are compared
+ * lowercased, since the file system may not tell them apart. The config file's path is compared as it is, and the
+ * globs match as `path.matchesGlob` does, which ignores case only on macOS and Windows.
  */
 export function changedFileRuleOf(file: string, context: ChangedFileContext): ChangedFileRule {
   if (matchesAny(file, context.ignore, context)) {
@@ -221,7 +234,7 @@ export function changedFileRuleOf(file: string, context: ChangedFileContext): Ch
     return {
       kind: 'baseline',
       folder: baselinesFolder,
-      stem: posix.basename(file).slice(0, -'.png'.length).normalize('NFC'),
+      stem: stemOfFileName(posix.basename(file)).normalize('NFC'),
     }
   }
 
@@ -233,20 +246,24 @@ export function changedFileRuleOf(file: string, context: ChangedFileContext): Ch
 }
 
 /**
+ * The end of a shortened stem: `-` and the start of the full key's SHA-256 in hex.
+ */
+const shortenedHashPattern = new RegExp(`-[0-9a-f]{${shortenedHashLength}}$`)
+
+/**
  * Gives the start a shortened stem keeps of its key, or `undefined` when the stem isn't shortened: a shortened stem is
  * the key's first 223 bytes in whole characters, then `-` and 16 hex characters.
  */
 function keptStartOf(stem: string): string | undefined {
-  const suffixLength = shortenedHashLength + 1
-  const start = stem.slice(0, -suffixLength)
-  const hashPattern = new RegExp(`-[0-9a-f]{${shortenedHashLength}}$`)
-
-  // A start in whole characters is at most 3 bytes short of the limit, since a character takes up to 4 bytes.
-  if (!hashPattern.test(stem) || Buffer.byteLength(start, 'utf8') <= shortenedPrefixBytes - 4) {
+  if (!shortenedHashPattern.test(stem)) {
     return undefined
   }
 
-  return start
+  const start = stem.slice(0, -(shortenedHashLength + 1))
+  const bytes = Buffer.byteLength(start, 'utf8')
+
+  // A start in whole characters is at most 3 bytes short of the limit, since a character takes up to 4 bytes.
+  return bytes > shortenedPrefixBytes - 4 && bytes <= shortenedPrefixBytes ? start : undefined
 }
 
 /**

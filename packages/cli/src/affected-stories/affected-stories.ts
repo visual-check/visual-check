@@ -1,9 +1,10 @@
 import { realpath } from 'node:fs/promises'
 import { isAbsolute, posix, resolve } from 'node:path'
-import { baselineNamesStory, changedFileRuleOf, rootRelative } from './changed-file-rules.js'
+import { baselineNamesStory, type ChangedBaseline, changedFileRuleOf, rootRelative } from './changed-file-rules.js'
 import type { FindReachedFiles } from './fallow-graph.js'
 import { changedFilesOf } from './git-changes.js'
-import { type ChangedBaseline, changedPackagesOf, sortChanges } from './sorted-changes.js'
+import { changedPackagesOf, groupChanges } from './group-changes.js'
+import { packageFolderFinder } from './package-folder.js'
 
 /**
  * A Storybook, as the affected stories rules read it.
@@ -84,9 +85,9 @@ export interface AffectedStories {
 }
 
 /**
- * What `affectedStoriesFilesOf` reads.
+ * What `affectedStorybooksOf` reads.
  */
-interface AffectedStoriesFilesInput {
+interface AffectedStorybooksInput {
   /**
    * The project root that `reached` and `changedFiles` are relative to, an absolute path.
    */
@@ -244,7 +245,7 @@ function pathsOf(root: string, storybook: AffectedStorybookInput): StorybookPath
  */
 function reachesChangedPackage(
   paths: StorybookPaths,
-  input: AffectedStoriesFilesInput,
+  input: AffectedStorybooksInput,
   configFoldersReachedFromPackages: ReadonlySet<string>,
 ): boolean {
   const { changedPackages, reachedFromPackages } = input
@@ -286,7 +287,7 @@ function storyIdsOfBaselines(
  *
  * Otherwise its reached stories files are affected, plus the stories a changed baseline in its baselines folder names.
  */
-export function affectedStoriesFilesOf(input: AffectedStoriesFilesInput): AffectedStorybook[] {
+export function affectedStorybooksOf(input: AffectedStorybooksInput): AffectedStorybook[] {
   const { root, storybooks, reached } = input
   const configFolders = foldersWithConfigFilesOf(input.changedFiles, reached)
   const configFoldersReachedFromPackages = foldersWithConfigFilesOf(input.reachedFromPackages)
@@ -356,9 +357,9 @@ function withRealPaths(storybooks: readonly AffectedStorybookInput[]): Promise<A
 }
 
 /**
- * Works out each Storybook's affected stories: finds the changed files since the base, sorts them by rule, asks
+ * Works out each Storybook's affected stories: finds the changed files since the base, groups them by rule, asks
  * `findReachedFiles` what they reach, then what their changed packages reach, and applies the rules of
- * `affectedStoriesFilesOf`.
+ * `affectedStorybooksOf`.
  *
  * - A changed file that matches `affected.ignore` counts for nothing but `changedFiles`.
  * - The config file, a lockfile, `pnpm-workspace.yaml` or a match for `affected.selectAll` affects every story.
@@ -400,19 +401,19 @@ export async function workOutAffectedStories(options: WorkOutAffectedStoriesOpti
       ...(await Promise.all(options.baselinesFolders.map(realPathOf))),
     ],
   }
-  const sorted = await sortChanges(root, files, (file) => changedFileRuleOf(file, context))
+  const groups = await groupChanges(files, (file) => changedFileRuleOf(file, context), packageFolderFinder(root))
 
-  if (sorted === 'ignored') {
+  if (groups === 'ignored') {
     return outcome(noStoryAffected(storybooks))
   }
 
-  if (sorted === 'every-story') {
+  if (groups === 'every-story') {
     return outcome(everyStoryAffected(storybooks))
   }
 
-  const { graphFiles, baselines, packageScoped } = sorted
+  const { graphFiles, baselines, packageScoped } = groups
   const rulesInput = { root, storybooks: realStorybooks, changedFiles: graphFiles, changedBaselines: baselines }
-  const beforeGraph = affectedStoriesFilesOf({
+  const beforeGraph = affectedStorybooksOf({
     ...rulesInput,
     reached: new Set(),
     changedPackages: changedPackagesOf(packageScoped, undefined),
@@ -434,7 +435,7 @@ export async function workOutAffectedStories(options: WorkOutAffectedStoriesOpti
   const folders = [...changedPackages].filter((folder) => folder !== '.')
 
   return outcome(
-    affectedStoriesFilesOf({
+    affectedStorybooksOf({
       ...rulesInput,
       reached: reached.reached,
       changedPackages,

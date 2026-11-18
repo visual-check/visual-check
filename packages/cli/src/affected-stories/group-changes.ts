@@ -1,19 +1,4 @@
-import type { ChangedFileRule } from './changed-file-rules.js'
-import { packageFolderFinder } from './package-folder.js'
-
-/**
- * A changed baseline.
- */
-export interface ChangedBaseline {
-  /**
-   * The baselines folder that holds it, an absolute path.
-   */
-  folder: string
-  /**
-   * Its file name without `.png`, in NFC.
-   */
-  stem: string
-}
+import type { ChangedBaseline, ChangedFileRule } from './changed-file-rules.js'
 
 /**
  * A changed file that selects every story of the Storybooks whose graph reaches its package.
@@ -34,9 +19,9 @@ interface PackageScopedFile {
 }
 
 /**
- * The changed files that aren't ignored, sorted by what they select.
+ * The changed files that aren't ignored, grouped by what they select.
  */
-interface SortedChanges {
+interface ChangeGroups {
   /**
    * The files the graph is asked about: all but the baselines.
    */
@@ -52,14 +37,15 @@ interface SortedChanges {
 }
 
 /**
- * Sorts the changed files by the rule each falls under. Gives `ignored` when every file is ignored, and `every-story`
- * when any file that isn't ignored selects every story.
+ * Groups the changed files by the rule `ruleOf` gives each, and finds the package of each package-scoped file with
+ * `packageFolderOf`. Gives `ignored` when every file is ignored, and `every-story` when any file that isn't ignored
+ * selects every story, looking up no package then.
  */
-export async function sortChanges(
-  root: string,
+export async function groupChanges(
   files: readonly string[],
   ruleOf: (file: string) => ChangedFileRule,
-): Promise<SortedChanges | 'ignored' | 'every-story'> {
+  packageFolderOf: (file: string) => Promise<string>,
+): Promise<ChangeGroups | 'ignored' | 'every-story'> {
   const ruled = files.map((file) => ({ file, rule: ruleOf(file) })).filter(({ rule }) => rule.kind !== 'ignored')
 
   if (ruled.length === 0) {
@@ -70,18 +56,17 @@ export async function sortChanges(
     return 'every-story'
   }
 
-  const packageFolderOf = packageFolderFinder(root)
-  const sorted: SortedChanges = { graphFiles: [], baselines: [], packageScoped: [] }
+  const groups: ChangeGroups = { graphFiles: [], baselines: [], packageScoped: [] }
 
   for (const { file, rule } of ruled) {
     if (rule.kind === 'baseline') {
-      sorted.baselines.push({ folder: rule.folder, stem: rule.stem })
+      groups.baselines.push({ folder: rule.folder, stem: rule.stem })
     } else {
-      sorted.graphFiles.push(file)
+      groups.graphFiles.push(file)
     }
   }
 
-  sorted.packageScoped = await Promise.all(
+  groups.packageScoped = await Promise.all(
     ruled
       .filter(({ rule }) => rule.kind === 'package' || rule.kind === 'asset')
       .map(async ({ file, rule }) => ({
@@ -91,7 +76,7 @@ export async function sortChanges(
       })),
   )
 
-  return sorted
+  return groups
 }
 
 /**

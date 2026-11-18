@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   type AffectedStorybook,
   type AffectedStorybookInput,
-  affectedStoriesFilesOf,
+  affectedStorybooksOf,
   workOutAffectedStories,
 } from './affected-stories.js'
 import type { CantAnswer, FindReachedFiles, ReachedFiles } from './fallow-graph.js'
@@ -44,7 +44,7 @@ const rootStorybook: AffectedStorybookInput = {
  * Gives the stories files the rules select in the root Storybook, given the reached and the changed files.
  */
 function affectedIn(reached: readonly string[], changedFiles: readonly string[] = reached): AffectedStorybook[] {
-  return affectedStoriesFilesOf({
+  return affectedStorybooksOf({
     root,
     storybooks: [rootStorybook],
     reached: new Set(reached),
@@ -60,7 +60,7 @@ function some(...storiesFiles: string[]): AffectedStorybook {
   return { all: false, storiesFiles: new Set(storiesFiles), storyIds: new Set() }
 }
 
-describe('affectedStoriesFilesOf', () => {
+describe('affectedStorybooksOf', () => {
   it("selects only the importers' stories files of a component imported directly", () => {
     expect(affectedIn(['src/button.tsx', 'src/button.stories.tsx'], ['src/button.tsx'])).toEqual([
       some('./src/button.stories.tsx'),
@@ -152,7 +152,7 @@ describe('affectedStoriesFilesOf', () => {
     }
 
     expect(
-      affectedStoriesFilesOf({
+      affectedStorybooksOf({
         root,
         storybooks: [outside, rootStorybook],
         reached: new Set(['src/card.stories.tsx']),
@@ -171,7 +171,7 @@ describe('affectedStoriesFilesOf', () => {
     }
 
     expect(
-      affectedStoriesFilesOf({
+      affectedStorybooksOf({
         root,
         storybooks: [outside, rootStorybook],
         reached: new Set(['src/card.stories.tsx']),
@@ -190,7 +190,7 @@ describe('affectedStoriesFilesOf', () => {
     }
 
     expect(
-      affectedStoriesFilesOf({
+      affectedStorybooksOf({
         root,
         storybooks: [storybook],
         reached: new Set(['preview.ts']),
@@ -225,7 +225,7 @@ describe('affectedStoriesFilesOf', () => {
      * Gives the stories files the rules select in both Storybooks.
      */
     function affectedInBoth(reached: readonly string[], changedFiles: readonly string[] = reached) {
-      return affectedStoriesFilesOf({
+      return affectedStorybooksOf({
         root,
         storybooks: [web, ui],
         reached: new Set(reached),
@@ -260,7 +260,7 @@ describe('affectedStoriesFilesOf', () => {
       }
 
       expect(
-        affectedStoriesFilesOf({
+        affectedStorybooksOf({
           root,
           storybooks: [docs],
           reached: new Set(['packages/docs/src/intro.stories.tsx', 'src/other.stories.tsx']),
@@ -274,7 +274,7 @@ describe('affectedStoriesFilesOf', () => {
      * Gives the stories the rules select in both Storybooks when the packages changed reach `reachedFromPackages`.
      */
     function affectedByPackages(changedPackages: string[], reachedFromPackages: string[]) {
-      return affectedStoriesFilesOf({
+      return affectedStorybooksOf({
         root,
         storybooks: [web, ui],
         reached: new Set(),
@@ -323,7 +323,7 @@ describe('affectedStoriesFilesOf', () => {
       ]
 
       expect(
-        affectedStoriesFilesOf({
+        affectedStorybooksOf({
           root,
           storybooks: withIds,
           reached: new Set(),

@@ -197,6 +197,12 @@ describe('baselineNamesStory', () => {
     expect(baselineNamesStory(baselineStemOf(`${start}-one`), `${start}-two`)).toBe(true)
   })
 
+  it('takes a stem longer than a shortened one, ending like a hash, for a plain one', () => {
+    const start = `long--${'a'.repeat(230)}`
+
+    expect(baselineNamesStory(`${start}-0123456789abcdef`, `${start}-more`)).toBe(false)
+  })
+
   it('takes a short stem that ends like a hash for a plain one', () => {
     expect(baselineNamesStory('button--a-0123456789abcdef', 'button--active')).toBe(false)
   })
