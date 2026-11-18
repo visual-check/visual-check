@@ -63,6 +63,17 @@ describe('changedFileRuleOf', () => {
     expect(kindOf('fixtures/a.txt', { ...inApp, selectAll: ['fixtures/**'] })).toBe('graph')
   })
 
+  it('matches a glob that starts with ./ as it would without it', () => {
+    expect(kindOf('docs/a.md', { ignore: ['./docs/**'] })).toBe('ignored')
+    expect(kindOf('docs/a.md', { selectAll: ['././docs/*.md'] })).toBe('every-story')
+    expect(
+      kindOf('apps/web/notes/a.txt', {
+        configPath: join(root, 'apps/web/visual-check.config.ts'),
+        ignore: ['./notes/**'],
+      }),
+    ).toBe('ignored')
+  })
+
   it('matches dotfiles only with a glob that names the dot', () => {
     expect(kindOf('.env.local', { ignore: ['.env*'] })).toBe('ignored')
     expect(kindOf('apps/web/.env', { ignore: ['**/.env*'] })).toBe('ignored')

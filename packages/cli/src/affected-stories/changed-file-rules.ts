@@ -140,7 +140,8 @@ export function rootRelative(root: string, path: string): string {
 }
 
 /**
- * Tells whether a root-relative path matches one of the globs, which are relative to the config file's folder.
+ * Tells whether a root-relative path matches one of the globs, which are relative to the config file's folder. A glob
+ * that starts with `./` matches as it would without it, since the path it's matched against never starts so.
  */
 function matchesAny(file: string, globs: readonly string[], context: ChangedFileContext): boolean {
   if (globs.length === 0) {
@@ -149,7 +150,7 @@ function matchesAny(file: string, globs: readonly string[], context: ChangedFile
 
   const fromConfigFolder = rootRelative(dirname(context.configPath), resolve(context.root, file))
 
-  return globs.some((glob) => posix.matchesGlob(fromConfigFolder, glob))
+  return globs.some((glob) => posix.matchesGlob(fromConfigFolder, glob.replace(/^(\.\/)+/, '')))
 }
 
 /**
