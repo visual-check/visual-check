@@ -191,6 +191,35 @@ export function startInitView(options: InitViewOptions): InitView {
 
       return choiceOf(value).value
     },
+    async checklist(message, { choices, defaultValues, hint, validate }) {
+      /**
+       * Gives the values among `values` that a choice has, in the order of the choices. It turns the `string[]` the
+       * view state holds back into the `T[]` the prompter gives, as `choiceOf` does for select.
+       */
+      const pickedOf = (values: readonly string[]) =>
+        choices.map((choice) => choice.value).filter((value) => values.includes(value))
+      const defaults = pickedOf(defaultValues)
+      const values = await ask<string[]>(
+        message,
+        defaults,
+        (picked) => {
+          const labels = choices.filter((choice) => picked.includes(choice.value)).map((choice) => choice.label)
+
+          return labels.length === 0 ? 'none' : labels.join(', ')
+        },
+        (settling) => ({
+          kind: 'checklist',
+          message,
+          defaultValue: defaults,
+          hint,
+          choices,
+          validate: validate === undefined ? undefined : (picked) => validate(pickedOf(picked)),
+          ...settling,
+        }),
+      )
+
+      return pickedOf(values)
+    },
     note(text) {
       store.update((state) => addNote(state, text))
     },

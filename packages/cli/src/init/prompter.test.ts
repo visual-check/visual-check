@@ -17,6 +17,15 @@ describe('defaultsPrompter', () => {
     await expect(prompter.select('Package manager', { choices, defaultValue: 'bun', hint: 'A hint.' })).resolves.toBe(
       'bun',
     )
+    await expect(
+      prompter.checklist('Storybooks', {
+        choices,
+        defaultValues: ['bun', 'npm'],
+        hint: 'A hint.',
+        validate: () => 'No.',
+      }),
+    ).resolves.toEqual(['npm', 'bun'])
+    await expect(prompter.checklist('Storybooks', { choices, defaultValues: [] })).resolves.toEqual([])
     expect(prompter.notes).toEqual([])
   })
 

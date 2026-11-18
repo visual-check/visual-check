@@ -26,6 +26,7 @@ afterEach(async () => {
   for (const view of running.splice(0)) {
     await act(() => view.finish({ exitCode: 0, stdout: '', stderr: '', messages: [] }))
   }
+
   vi.useRealTimers()
   removeProjects()
 })
@@ -243,6 +244,51 @@ describe('startInitView', () => {
     expect(frame()).toBe(`${header}✓ Package manager Yarn\n`)
   })
 
+  it('asks a checklist question, toggled with Space, and collapses it to the labels ticked', async () => {
+    const { view, stdin, frame } = await startView()
+    const validate = vi.fn((values: string[]) => (values.length === 0 ? 'Pick one.' : undefined))
+    const { answer } = await asking(() =>
+      view.checklist('Package managers', {
+        choices: managers,
+        defaultValues: [],
+        hint: 'Nothing names one.',
+        validate,
+      }),
+    )
+
+    expect(frame()).toBe(
+      `${header}? Package managers\n  Nothing names one.\n❯ ◯ npm\n  ◯ Yarn · Yarn 1, or 2 and later\n  space to tick, a for all, enter to confirm`,
+    )
+
+    await typeInto(stdin, keys.enter, 'a', keys.enter)
+
+    await expect(answer).resolves.toEqual(['npm', 'yarn'])
+    expect(validate).toHaveBeenNthCalledWith(1, [])
+    expect(validate).toHaveBeenNthCalledWith(2, ['npm', 'yarn'])
+    expect(frame()).toBe(`${header}✓ Package managers npm, Yarn\n`)
+  })
+
+  it('collapses a checklist with nothing ticked to none', async () => {
+    const { view, stdin, frame } = await startView()
+    const { answer } = await asking(() => view.checklist('Addon', { choices: managers, defaultValues: [] }))
+
+    await typeInto(stdin, keys.enter)
+
+    await expect(answer).resolves.toEqual([])
+    expect(frame()).toBe(`${header}✓ Addon none\n`)
+  })
+
+  it('rejects a checklist with an InputEndedError on Ctrl+C', async () => {
+    const { view, stdin, frame } = await startView()
+    const { answer } = await asking(() => view.checklist('Addon', { choices: managers, defaultValues: [] }))
+    const settled = answer.catch((error: unknown) => error)
+
+    await typeInto(stdin, keys.ctrlC)
+
+    expect(await settled).toBeInstanceOf(InputEndedError)
+    expect(frame()).toBe(header)
+  })
+
   it('asks a yes or no question, switched with →, and collapses it to yes or no', async () => {
     const { view, stdin, frame } = await startView()
     const { answer } = await asking(() =>
@@ -269,6 +315,7 @@ describe('startInitView', () => {
         stdin.push(key)
         stdin.emit('readable')
       }
+
       second = view.text('Second', { defaultValue: 'b' })
     })
 
@@ -302,11 +349,15 @@ describe('startInitView', () => {
       view.select('Package manager', { choices: managers, defaultValue: 'yarn' }),
     )
     const { answer: confirm } = await asking(() => view.confirm('Add the addon?', { defaultValue: true }))
+    const { answer: checklist } = await asking(() =>
+      view.checklist('Storybooks', { choices: managers, defaultValues: ['yarn'], validate: () => 'Never.' }),
+    )
 
+    await expect(checklist).resolves.toEqual(['yarn'])
     await expect(text).resolves.toBe('web')
     await expect(select).resolves.toBe('yarn')
     await expect(confirm).resolves.toBe(true)
-    expect(frame()).toBe(`${header}✓ Name web\n✓ Package manager Yarn\n✓ Add the addon? yes\n`)
+    expect(frame()).toBe(`${header}✓ Name web\n✓ Package manager Yarn\n✓ Add the addon? yes\n✓ Storybooks Yarn\n`)
     expect(stdin.rawModes).toEqual([])
   })
 
@@ -468,6 +519,7 @@ describe('startInitView', () => {
       text: (message, options) => stops.reached(view.text(message, options)),
       confirm: (message, options) => stops.reached(view.confirm(message, options)),
       select: (message, options) => stops.reached(view.select(message, options)),
+      checklist: (message, options) => stops.reached(view.checklist(message, options)),
       note: (text) => view.note(text),
     }
     const runCommand: InitTools['runCommand'] = (_command, args) => {
@@ -537,6 +589,7 @@ describe('startInitView', () => {
       finishInstall(0)
       await run
     })
+
     const steps =
       '\n━━━━━━━━━━━━━━━━━━━━ 4/4 · 5.0s\n' +
       '✓ Write the files and scripts 0.0s\n' +

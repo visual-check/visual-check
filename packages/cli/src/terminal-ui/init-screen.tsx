@@ -2,6 +2,7 @@ import { Box, Static } from 'ink'
 import { type ReactNode, useSyncExternalStore } from 'react'
 import { AnsweredLine } from './answered-line.js'
 import { BrandHeader } from './brand-header.js'
+import { ChecklistQuestion } from './checklist-question.js'
 import { ConfirmQuestion } from './confirm-question.js'
 import type { ActiveQuestion, ShownLine, ViewStore } from './init-view-state.js'
 import { NoteLine } from './message-line.js'
@@ -107,6 +108,18 @@ function QuestionView({ question }: QuestionViewProps): ReactNode {
           message={message}
           onCancel={onCancel}
           onSubmit={question.onSubmit}
+        />
+      )
+    case 'checklist':
+      return (
+        <ChecklistQuestion
+          choices={question.choices}
+          defaultValue={question.defaultValue}
+          hint={hint}
+          message={message}
+          onCancel={onCancel}
+          onSubmit={question.onSubmit}
+          validate={question.validate}
         />
       )
   }

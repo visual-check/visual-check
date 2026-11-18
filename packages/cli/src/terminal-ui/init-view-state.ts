@@ -173,6 +173,20 @@ export type NewQuestion =
        */
       choices: readonly [Choice<string>, ...Choice<string>[]]
     })
+  | (QuestionBase<string[]> & {
+      /**
+       * Any of a list.
+       */
+      kind: 'checklist'
+      /**
+       * The answers, in the order they show.
+       */
+      choices: readonly [Choice<string>, ...Choice<string>[]]
+      /**
+       * Returns what is wrong with the values ticked, or `undefined` when they are fine.
+       */
+      validate: ((values: string[]) => string | undefined) | undefined
+    })
 
 /**
  * The question waiting for its answer.

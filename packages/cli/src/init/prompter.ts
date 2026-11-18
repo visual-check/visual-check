@@ -1,5 +1,5 @@
 /**
- * One answer a select question offers.
+ * One answer a select or checklist question offers.
  *
  * @public
  */
@@ -84,6 +84,32 @@ export interface Prompter {
     },
   ): Promise<T>
   /**
+   * Asks the person to tick any of `options.choices`, which start ticked when their value is in
+   * `options.defaultValues`. Gives the values of the choices ticked, in the order of the choices. When
+   * `options.validate` returns a message, the prompter shows it and asks again.
+   */
+  checklist<T extends string>(
+    message: string,
+    options: {
+      /**
+       * The answers, in the order they show. There is at least one.
+       */
+      choices: readonly [Choice<T>, ...Choice<T>[]]
+      /**
+       * The values of the choices the question starts with ticked.
+       */
+      defaultValues: readonly T[]
+      /**
+       * A line that helps answer the question.
+       */
+      hint?: string
+      /**
+       * Returns what is wrong with the values ticked, or `undefined` when they are fine.
+       */
+      validate?: (values: T[]) => string | undefined
+    },
+  ): Promise<T[]>
+  /**
    * Shows a line before or between the questions, such as a hint or a warning. The defaults prompter collects it
    * instead.
    */
@@ -110,8 +136,8 @@ export class InputEndedError extends Error {
 }
 
 /**
- * Builds a prompter for `--yes`: every question gets its default, a text isn't validated, hints are ignored, and the
- * notes are collected in `notes`. It never reads the input.
+ * Builds a prompter for `--yes`: every question gets its default, a text or a checklist isn't validated, hints are
+ * ignored, and the notes are collected in `notes`. It never reads the input.
  *
  * @public
  */
@@ -123,6 +149,8 @@ export function defaultsPrompter(): Prompter & { notes: string[] } {
     text: (_message, { defaultValue }) => Promise.resolve(defaultValue),
     confirm: (_message, { defaultValue }) => Promise.resolve(defaultValue),
     select: (_message, { defaultValue }) => Promise.resolve(defaultValue),
+    checklist: (_message, { choices, defaultValues }) =>
+      Promise.resolve(choices.map(({ value }) => value).filter((value) => defaultValues.includes(value))),
     note(text) {
       notes.push(text)
     },

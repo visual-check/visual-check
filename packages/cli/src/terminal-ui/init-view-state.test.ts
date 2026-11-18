@@ -74,6 +74,23 @@ describe('askQuestion', () => {
     expect(state.nextId).toBe(3)
   })
 
+  it('makes a checklist question wait with its choices and validation', () => {
+    const question: NewQuestion = {
+      kind: 'checklist',
+      message: 'Storybooks',
+      defaultValue: ['web'],
+      hint: undefined,
+      choices: [{ value: 'web', label: 'web' }],
+      validate: () => 'Never.',
+      onSubmit: () => undefined,
+      onCancel: () => undefined,
+    }
+    const state = askQuestion(initial, question)
+
+    expect(state.question).toEqual({ ...question, id: 1 })
+    expect(state.nextId).toBe(2)
+  })
+
   it('throws while another question waits', () => {
     const state = askQuestion(initial, textQuestion('Name'))
 

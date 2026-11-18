@@ -1,13 +1,14 @@
-import type { Prompter } from './prompter.js'
+import type { Choice, Prompter } from './prompter.js'
 
 /**
  * One thing a scripted prompter was asked or shown.
  */
 export interface PromptRecord {
   /**
-   * What happened: a text question, a yes or no question, a select question, a validation message, or a note.
+   * What happened: a text question, a yes or no question, a select question, a checklist question, a validation
+   * message, or a note.
    */
-  kind: 'text' | 'confirm' | 'select' | 'invalid' | 'note'
+  kind: 'text' | 'confirm' | 'select' | 'checklist' | 'invalid' | 'note'
   /**
    * The question, the validation message or the note.
    */
@@ -15,7 +16,7 @@ export interface PromptRecord {
   /**
    * The default of a question. `undefined` for a validation message or a note.
    */
-  defaultValue?: string | boolean
+  defaultValue?: string | boolean | readonly string[]
   /**
    * The hint of a question that has one.
    */
@@ -23,18 +24,50 @@ export interface PromptRecord {
 }
 
 /**
- * Builds a prompter that answers in order: a string for a text or select question, where `''` takes the default, and
- * a boolean for a yes or no question. A text is validated like the terminal UI does, and a failed answer takes up the
- * next one. A select answer must be the value of one of its choices. It records every question, validation message
- * and note in `records`, and `unused()` lists the answers left.
+ * One answer a scripted prompter gives: a string, a boolean or the values of the choices a checklist ticks.
+ */
+export type ScriptedAnswer = string | boolean | readonly string[]
+
+/**
+ * Gives the values a checklist answer ticks, in the order of the choices: the array's, or the defaults for `''`.
+ *
+ * @throws When the answer is not an array or `''`, or ticks a value no choice has.
+ */
+function tickedBy<T extends string>(
+  message: string,
+  answer: ScriptedAnswer,
+  choices: readonly Choice<T>[],
+  defaultValues: readonly T[],
+): T[] {
+  if (typeof answer === 'boolean' || (typeof answer === 'string' && answer !== '')) {
+    throw new Error(`"${message}" is a checklist, and the answer is "${answer}".`)
+  }
+
+  const ticked: readonly string[] = answer === '' ? defaultValues : answer
+  const offered: T[] = choices.map((choice) => choice.value)
+  const unknown = ticked.find((value) => !offered.some((offer) => offer === value))
+
+  if (unknown !== undefined) {
+    throw new Error(`"${message}" offers no choice "${unknown}".`)
+  }
+
+  return offered.filter((value) => ticked.includes(value))
+}
+
+/**
+ * Builds a prompter that answers in order: a string for a text or select question, where `''` takes the default, a
+ * boolean for a yes or no question, and for a checklist the array of values to tick, or `''` for its defaults. A text
+ * or a checklist is validated like the terminal UI does, and a failed answer takes up the next one. A select answer
+ * must be the value of one of its choices, and so must each value of a checklist's. It records every question,
+ * validation message and note in `records`, and `unused()` lists the answers left.
  *
  * @throws When it runs out of answers, or an answer is of the wrong kind.
  *
  * @public
  */
-export function scriptedPrompter(answers: readonly (string | boolean)[]): Prompter & {
+export function scriptedPrompter(answers: readonly ScriptedAnswer[]): Prompter & {
   records: PromptRecord[]
-  unused: () => (string | boolean)[]
+  unused: () => ScriptedAnswer[]
 } {
   const records: PromptRecord[] = []
   let next = 0
@@ -42,8 +75,9 @@ export function scriptedPrompter(answers: readonly (string | boolean)[]): Prompt
   /**
    * Takes the next answer.
    */
-  function take(message: string): string | boolean {
+  function take(message: string): ScriptedAnswer {
     const answer = answers[next]
+
     next += 1
 
     if (answer === undefined) {
@@ -106,6 +140,25 @@ export function scriptedPrompter(answers: readonly (string | boolean)[]): Prompt
       }
 
       return Promise.resolve(chosen.value)
+    },
+    checklist(message, { choices, defaultValues, hint, validate }) {
+      records.push({
+        kind: 'checklist',
+        message,
+        defaultValue: defaultValues,
+        ...(hint === undefined ? {} : { hint }),
+      })
+
+      for (;;) {
+        const values = tickedBy(message, take(message), choices, defaultValues)
+        const problem = validate?.(values)
+
+        if (problem === undefined) {
+          return Promise.resolve(values)
+        }
+
+        records.push({ kind: 'invalid', message: problem })
+      }
     },
     note(text) {
       records.push({ kind: 'note', message: text })
