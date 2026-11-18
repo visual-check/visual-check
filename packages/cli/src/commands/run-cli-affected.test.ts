@@ -58,11 +58,11 @@ function fakeGraph(): {
   calls: { root: string; changedFiles: readonly string[] }[]
 } {
   const calls: { root: string; changedFiles: readonly string[] }[] = []
-  const findReachedFiles: FindReachedFiles = async (root, changedFiles) => {
-    calls.push({ root, changedFiles })
+  const findReachedFiles: FindReachedFiles = async (root, changed) => {
+    calls.push({ root, changedFiles: changed.files })
 
     const reached = new Set<string>()
-    const next = [...changedFiles]
+    const next = [...changed.files]
 
     for (let file = next.pop(); file !== undefined; file = next.pop()) {
       if (!reached.has(file)) {
@@ -71,7 +71,7 @@ function fakeGraph(): {
       }
     }
 
-    return { reached }
+    return { reached, reachedFromFolders: new Set<string>() }
   }
 
   return { findReachedFiles, calls }

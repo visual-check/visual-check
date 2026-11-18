@@ -193,10 +193,10 @@ describe('workOutRunSelection for affected', () => {
 
   it('keeps the stories of the stories files the changed files reach, asking the graph once', async () => {
     const calls: (readonly string[])[] = []
-    const { input, head } = affectedRunIn(async (_root, changedFiles) => {
-      calls.push(changedFiles)
+    const { input, head } = affectedRunIn(async (_root, changed) => {
+      calls.push(changed.files)
 
-      return { reached: new Set(['button.tsx', 'button.stories.tsx']) }
+      return { reached: new Set(['button.tsx', 'button.stories.tsx']), reachedFromFolders: new Set<string>() }
     })
     const result = await workOutRunSelection(input)
 
@@ -213,7 +213,10 @@ describe('workOutRunSelection for affected', () => {
   })
 
   it('notes that the changed file affects no story when the graph reaches no stories file', async () => {
-    const { input } = affectedRunIn(async () => ({ reached: new Set(['button.tsx']) }))
+    const { input } = affectedRunIn(async () => ({
+      reached: new Set(['button.tsx']),
+      reachedFromFolders: new Set<string>(),
+    }))
     const result = await workOutRunSelection(input)
 
     expect(result.selections[0]?.stories).toEqual([])

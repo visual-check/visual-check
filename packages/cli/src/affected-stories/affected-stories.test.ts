@@ -239,8 +239,8 @@ describe('affectedStoriesFilesOf', () => {
  */
 function fakeFindReachedFiles(result: ReachedFiles | CantAnswer) {
   const calls: { root: string; changedFiles: readonly string[] }[] = []
-  const findReachedFiles: FindReachedFiles = (calledRoot, changedFiles) => {
-    calls.push({ root: calledRoot, changedFiles })
+  const findReachedFiles: FindReachedFiles = (calledRoot, changed) => {
+    calls.push({ root: calledRoot, changedFiles: changed.files })
 
     return Promise.resolve(result)
   }
@@ -300,7 +300,7 @@ describe('workOutAffectedStories', () => {
   }
 
   it("affects nothing and doesn't ask the graph when no file changed", async () => {
-    const fake = fakeFindReachedFiles({ reached: new Set() })
+    const fake = fakeFindReachedFiles({ reached: new Set(), reachedFromFolders: new Set() })
 
     expect(await workOut(fake.findReachedFiles)).toEqual({
       base,
@@ -315,7 +315,10 @@ describe('workOutAffectedStories', () => {
     commit(repo, { 'src/button.tsx': 'export const Button = 2\n' })
     writeFiles(repo, { 'README.md': 'hi\n' })
 
-    const fake = fakeFindReachedFiles({ reached: new Set(['src/button.tsx', 'src/button.stories.tsx']) })
+    const fake = fakeFindReachedFiles({
+      reached: new Set(['src/button.tsx', 'src/button.stories.tsx']),
+      reachedFromFolders: new Set(),
+    })
 
     expect(await workOut(fake.findReachedFiles)).toEqual({
       base,
@@ -334,7 +337,10 @@ describe('workOutAffectedStories', () => {
     symlinkSync(repo, link)
     storybook = { ...storybook, dir: link, configDir: join(link, '.storybook') }
 
-    const fake = fakeFindReachedFiles({ reached: new Set(['src/button.tsx', 'src/button.stories.tsx']) })
+    const fake = fakeFindReachedFiles({
+      reached: new Set(['src/button.tsx', 'src/button.stories.tsx']),
+      reachedFromFolders: new Set(),
+    })
 
     expect(await workOut(fake.findReachedFiles)).toMatchObject({ storybooks: [some('./src/button.stories.tsx')] })
   })
@@ -353,7 +359,7 @@ describe('workOutAffectedStories', () => {
   })
 
   it("affects every story when the folder isn't in a git repository", async () => {
-    const fake = fakeFindReachedFiles({ reached: new Set() })
+    const fake = fakeFindReachedFiles({ reached: new Set(), reachedFromFolders: new Set() })
 
     expect(await workOut(fake.findReachedFiles, { cwd: makeFolder() })).toEqual({
       base: null,
@@ -367,7 +373,7 @@ describe('workOutAffectedStories', () => {
   it('affects every story when no base branch is found', async () => {
     git(repo, 'branch', '-D', 'main')
 
-    const fake = fakeFindReachedFiles({ reached: new Set() })
+    const fake = fakeFindReachedFiles({ reached: new Set(), reachedFromFolders: new Set() })
     const result = await workOut(fake.findReachedFiles)
 
     expect(result).toMatchObject({ base: null, changedFiles: null, storybooks: [{ all: true }] })
@@ -375,7 +381,7 @@ describe('workOutAffectedStories', () => {
   })
 
   it('rejects with InvalidBaseError for a --base that names no commit', async () => {
-    const fake = fakeFindReachedFiles({ reached: new Set() })
+    const fake = fakeFindReachedFiles({ reached: new Set(), reachedFromFolders: new Set() })
 
     await expect(workOut(fake.findReachedFiles, { baseRef: 'nope' })).rejects.toThrow(InvalidBaseError)
   })

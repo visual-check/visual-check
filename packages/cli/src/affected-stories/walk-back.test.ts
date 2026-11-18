@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ImportGraph } from './import-graph.js'
-import { filesReachedFrom } from './walk-back.js'
+import { filesReachedFrom, filesReachedFromFolders } from './walk-back.js'
 
 /**
  * Builds a graph from `[importer, imported]` pairs, with every file the pairs name in it.
@@ -78,5 +78,51 @@ describe('filesReachedFrom', () => {
     expect(filesReachedFrom(graph, ['a.ts', 'b.ts', 'unknown.ts'])).toEqual(
       new Set(['a.ts', 'a-story.ts', 'b.ts', 'b-story.ts']),
     )
+  })
+})
+
+describe('filesReachedFromFolders', () => {
+  it('reaches every file under a folder, nested ones included', () => {
+    const graph = graphOf([], ['packages/ui/a.ts', 'packages/ui/src/b.ts', 'packages/other/c.ts'])
+
+    expect(filesReachedFromFolders(graph, ['packages/ui'])).toEqual(
+      new Set(['packages/ui/a.ts', 'packages/ui/src/b.ts']),
+    )
+  })
+
+  it('matches whole path segments only', () => {
+    const graph = graphOf([], ['packages/ui/a.ts', 'packages/ui-kit/x.ts', 'packages/uikit.ts'])
+
+    expect(filesReachedFromFolders(graph, ['packages/ui'])).toEqual(new Set(['packages/ui/a.ts']))
+  })
+
+  it('walks back from the folder files to importers outside the folder', () => {
+    const graph = graphOf([
+      ['apps/web/page.ts', 'packages/ui/button.ts'],
+      ['apps/web/story.ts', 'apps/web/page.ts'],
+      ['apps/web/unrelated.ts', 'apps/web/helper.ts'],
+    ])
+
+    expect(filesReachedFromFolders(graph, ['packages/ui'])).toEqual(
+      new Set(['packages/ui/button.ts', 'apps/web/page.ts', 'apps/web/story.ts']),
+    )
+  })
+
+  it('joins what several folders reach', () => {
+    const graph = graphOf([], ['a/x.ts', 'b/y.ts', 'c/z.ts'])
+
+    expect(filesReachedFromFolders(graph, ['a', 'b'])).toEqual(new Set(['a/x.ts', 'b/y.ts']))
+  })
+
+  it('reaches nothing when no folder is given', () => {
+    const graph = graphOf([['a.ts', 'b.ts']])
+
+    expect(filesReachedFromFolders(graph, [])).toEqual(new Set())
+  })
+
+  it('reaches nothing from a folder with no graph file', () => {
+    const graph = graphOf([['a.ts', 'b.ts']])
+
+    expect(filesReachedFromFolders(graph, ['docs'])).toEqual(new Set())
   })
 })

@@ -245,7 +245,7 @@ export async function workOutAffectedStories(options: WorkOutAffectedStoriesOpti
     }
   }
 
-  const reached = await findReachedFiles(root, files)
+  const reached = await findReachedFiles(root, { files, folders: [] })
 
   if ('cantAnswer' in reached) {
     return {
