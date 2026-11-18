@@ -4,7 +4,7 @@ import {
   workOutAffectedStories,
 } from '../affected-stories/affected-stories.js'
 import type { FindReachedFiles } from '../affected-stories/fallow-graph.js'
-import type { ResolvedStorybook } from '../config/resolve-config.js'
+import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
 import type { ReportSelection } from '../report/report-document.js'
 import type { Story } from '../storybook/read-stories.js'
 import type { Selection } from './parse-command-line.js'
@@ -86,6 +86,14 @@ interface RunSelectionInput {
    */
   storybooks: readonly IndexedStorybook[]
   /**
+   * visual-check's config file, an absolute path.
+   */
+  configPath: string
+  /**
+   * The globs, relative to the config file's folder, whose matches select every story or nothing.
+   */
+  affected: ResolvedConfig['affected']
+  /**
    * Finds the files the changed files reach.
    */
   findReachedFiles: FindReachedFiles
@@ -121,7 +129,7 @@ const allHint = 'Run with --all to cover every story.'
 
 /**
  * Gives the choice of a Storybook's stories that its affected stories make: every story, or those of its affected
- * stories files.
+ * stories files plus its affected stories by ID.
  */
 function choiceOf(affected: AffectedStorybook | undefined): StoryChoice {
   // workOutAffectedStories gives one entry per Storybook, so `undefined` never comes.
@@ -129,7 +137,7 @@ function choiceOf(affected: AffectedStorybook | undefined): StoryChoice {
     return { kind: 'all' }
   }
 
-  return { kind: 'stories-files', storiesFiles: affected.storiesFiles }
+  return { kind: 'affected', storiesFiles: affected.storiesFiles, storyIds: affected.storyIds }
 }
 
 /**
@@ -173,8 +181,9 @@ export function fallbackWarningOf(fallback: string | null): string {
 /**
  * Works out the stories a run takes in each Storybook. `all` keeps every story and `filter` the stories whose ID it
  * matches. `affected` finds the changed files since the base and what they reach, once for every Storybook in the run,
- * and keeps the stories of the affected stories files; when that can't be worked out, it keeps every story, with a
- * warning that says why. An affected run that keeps no story at all gets a note that hints at `--all`.
+ * reads them with the config file's `affected` globs, and keeps the affected stories: the stories of the affected
+ * stories files and the stories of the changed baselines, or every story of a Storybook a change reaches as a whole;
+ * when that can't be worked out, it keeps every story, with a warning that says why. An affected run that keeps no story at all gets a note that hints at `--all`.
  *
  * @throws {InvalidBaseError} When `--base` names no commit in the repository.
  */
@@ -204,7 +213,11 @@ export async function workOutRunSelection(input: RunSelectionInput): Promise<Run
       dir: storybook.dir,
       configDir: storybook.configDir,
       storiesFiles: [...new Set(stories.map((story) => story.importPath))],
+      baselines: storybook.baselines,
+      storyIds: stories.map((story) => story.id),
     })),
+    configPath: input.configPath,
+    affected: input.affected,
     findReachedFiles: input.findReachedFiles,
   })
   const selections = storybooks.map((storybook, index) => ({

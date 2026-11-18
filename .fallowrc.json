@@ -63,7 +63,7 @@
       { "from": "cli/capture", "allow": ["cli/capture/driver", "cli/storybook"] },
       { "from": "cli/container", "allow": ["cli/capture/driver"] },
       { "from": "cli/browser-process", "allow": ["cli/capture/driver"] },
-      { "from": "cli/affected-stories", "allow": [] },
+      { "from": "cli/affected-stories", "allow": ["cli/baselines"] },
       { "from": "cli/baselines", "allow": ["cli/system-error"] },
       { "from": "cli/browser", "allow": ["cli/config"] },
       { "from": "cli/browser-download", "allow": [] },

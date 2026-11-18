@@ -80,18 +80,23 @@ function fakeGraph(): {
 /**
  * Makes a git repository for a project whose one Storybook, `web`, lists the button, card and badge stories, with the
  * files of `importers`, a Storybook config folder and a baseline for each story of `baselines` (each story when not
- * given), and `extra` files besides. Commits it all, so no file has changed yet, and returns the project and the
- * commit's SHA.
+ * given), the config's `affected` globs when given, and `extra` files besides. Commits it all, so no file has changed
+ * yet, and returns the project and the commit's SHA.
  */
 async function createAffectedRun(
-  options: { baselines?: string[]; extra?: Record<string, string> } = {},
+  options: {
+    baselines?: string[]
+    affected?: { selectAll?: string[]; ignore?: string[] }
+    extra?: Record<string, string>
+  } = {},
 ): Promise<{ project: string; head: string }> {
   const url = await startStorybook(Object.keys(importPaths), importPaths)
   const project = makeRepo()
+  const affected = options.affected === undefined ? '' : `, affected: ${JSON.stringify(options.affected)}`
 
   writeFiles(project, {
     '.gitignore': '.visual-check/report/\n',
-    'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
+    'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } }${affected} }\n`,
     '.storybook/main.ts': 'export default {}\n',
     '.storybook/preview.ts': 'export default {}\n',
     'src/button.tsx': 'export const Button = 1\n',
@@ -203,7 +208,7 @@ describe('runCli covering the affected stories', () => {
     expect(readReport(project).selection).toEqual({ by: 'affected', base: head, changedFiles: 1, fallback: null })
   })
 
-  it('captures every story of the Storybook when its preview changes, whatever the graph reaches', async () => {
+  it('captures every story of the Storybook when its preview changes, never asking the graph', async () => {
     const { project } = await createAffectedRun()
     const graph = fakeGraph()
     const { options, record } = fakeBrowser()
@@ -214,7 +219,58 @@ describe('runCli covering the affected stories', () => {
 
     expect(result.exitCode).toBe(0)
     expect(capturedIdsOf(record)).toEqual(['badge--primary', 'button--primary', 'card--primary'])
-    expect(graph.calls).toEqual([{ root: project, changedFiles: ['.storybook/preview.ts'] }])
+    expect(graph.calls).toEqual([])
+  })
+
+  it('captures every story when the config file changes, never asking the graph', async () => {
+    const { project } = await createAffectedRun()
+    const graph = fakeGraph()
+    const { options, record } = fakeBrowser()
+    const config = join(project, 'visual-check.config.mjs')
+
+    writeFiles(project, { 'visual-check.config.mjs': `${readFileSync(config, 'utf8')}// Changed.\n` })
+
+    const result = await runCli(['test'], {}, project, { ...options, findReachedFiles: graph.findReachedFiles })
+
+    expect(result.exitCode).toBe(0)
+    expect(capturedIdsOf(record)).toEqual(['badge--primary', 'button--primary', 'card--primary'])
+    expect(graph.calls).toEqual([])
+  })
+
+  it('captures nothing for a changed file that affected.ignore matches, though the graph reaches stories', async () => {
+    const { project, head } = await createAffectedRun({ affected: { ignore: ['src/button.tsx'] } })
+    const graph = fakeGraph()
+    const { options, record } = fakeBrowser()
+
+    writeFiles(project, { 'src/button.tsx': 'export const Button = 2\n' })
+
+    const result = await runCli(['test'], {}, project, { ...options, findReachedFiles: graph.findReachedFiles })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout.split('\n')[1]).toBe('The changed file affects no story. Run with --all to cover every story.')
+    expect(record.captures).toEqual([])
+    expect(graph.calls).toEqual([])
+    expect(readReport(project).selection).toEqual({ by: 'affected', base: head, changedFiles: 1, fallback: null })
+  })
+
+  it("captures only a changed baseline's story, and update rewrites it", async () => {
+    const { project } = await createAffectedRun()
+    const graph = fakeGraph()
+    const { options, record } = fakeBrowser()
+    const baseline = join(project, '.visual-check', 'baselines', 'card--primary.png')
+
+    writeFileSync(baseline, otherSnapshot)
+
+    const result = await runCli(['update', '--reporter', 'json'], {}, project, {
+      ...options,
+      findReachedFiles: graph.findReachedFiles,
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(capturedIdsOf(record)).toEqual(['card--primary'])
+    expect((JSON.parse(result.stdout) as UpdateReport).counts).toMatchObject({ written: 1 })
+    expect(new Uint8Array(readFileSync(baseline))).toEqual(defaultRunSnapshot)
+    expect(graph.calls).toEqual([])
   })
 
   it("covers every story with a warning when the graph can't answer, and the report says why", async () => {
