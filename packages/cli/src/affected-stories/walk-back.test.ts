@@ -82,6 +82,14 @@ describe('filesReachedFrom', () => {
 })
 
 describe('filesReachedFromFolders', () => {
+  it('reaches every graph file from the root', () => {
+    const graph = graphOf([['packages/ui/a.ts', 'packages/ui/b.ts']], ['readme.ts'])
+
+    expect(filesReachedFromFolders(graph, ['.'])).toEqual(
+      new Set(['packages/ui/a.ts', 'packages/ui/b.ts', 'readme.ts']),
+    )
+  })
+
   it('reaches every file under a folder, nested ones included', () => {
     const graph = graphOf([], ['packages/ui/a.ts', 'packages/ui/src/b.ts', 'packages/other/c.ts'])
 

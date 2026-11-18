@@ -32,15 +32,16 @@ export function filesReachedFrom(graph: ImportGraph, changedFiles: Iterable<stri
 /**
  * Gives the files that changing any file under the given folders can alter: every graph file under one of the folders,
  * plus every file that imports one of them, directly or through other files. A folder covers whole path segments, so
- * `packages/ui` covers `packages/ui/a.ts` but not `packages/ui-kit/a.ts`. Folders are relative to the project root,
- * `/`-separated, without a trailing slash. It makes one pass over the graph's files.
+ * `packages/ui` covers `packages/ui/a.ts` but not `packages/ui-kit/a.ts`, and `.`, the root, covers every graph file.
+ * Folders are relative to the project root, `/`-separated, without a trailing slash. It makes one pass over the graph's
+ * files.
  */
 export function filesReachedFromFolders(graph: ImportGraph, folders: readonly string[]): Set<string> {
   if (folders.length === 0) {
     return new Set()
   }
 
-  const prefixes = folders.map((folder) => `${folder}/`)
+  const prefixes = folders.map((folder) => (folder === '.' ? '' : `${folder}/`))
   const filesUnder: string[] = []
 
   for (const file of graph.files) {

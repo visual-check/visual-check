@@ -142,8 +142,8 @@ interface WorkOutAffectedStoriesOptions {
    */
   storybooks: readonly AffectedStorybookInput[]
   /**
-   * The baselines folder of every Storybook in the config, those the run leaves out included, absolute paths. A
-   * changed `.png` directly in one is a baseline, which selects nothing in a Storybook the run leaves out.
+   * The baselines folder of every configured Storybook, those the run leaves out included, absolute paths. A changed
+   * `.png` directly in one is a baseline, which selects nothing in a Storybook the run leaves out.
    */
   baselinesFolders: readonly string[]
   /**
@@ -396,10 +396,7 @@ export async function workOutAffectedStories(options: WorkOutAffectedStoriesOpti
     configPath: await realPathOf(options.configPath),
     selectAll: options.affected.selectAll,
     ignore: options.affected.ignore,
-    baselinesFolders: [
-      ...realStorybooks.map(({ baselines }) => baselines),
-      ...(await Promise.all(options.baselinesFolders.map(realPathOf))),
-    ],
+    baselinesFolders: await Promise.all(options.baselinesFolders.map(realPathOf)),
   }
   const groups = await groupChanges(files, (file) => changedFileRuleOf(file, context), packageFolderFinder(root))
 
@@ -431,15 +428,13 @@ export async function workOutAffectedStories(options: WorkOutAffectedStoriesOpti
   }
 
   const changedPackages = changedPackagesOf(packageScoped, reached.reached)
-  // The root is never walked, since a changed root package affects every story.
-  const folders = [...changedPackages].filter((folder) => folder !== '.')
 
   return outcome(
     affectedStorybooksOf({
       ...rulesInput,
       reached: reached.reached,
       changedPackages,
-      reachedFromPackages: reached.reachedFromFolders(folders),
+      reachedFromPackages: reached.reachedFromFolders([...changedPackages]),
     }),
   )
 }

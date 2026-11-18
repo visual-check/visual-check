@@ -602,7 +602,7 @@ describe('workOutAffectedStories in a monorepo', () => {
 
   /**
    * Writes the changes, then works out the affected stories with the `affected` globs given, or none, in a run that
-   * covers both Storybooks and knows only their baselines folders, unless `run` says otherwise.
+   * covers both Storybooks, or those `run` gives, and knows the baselines folders of both, unless `run` says otherwise.
    */
   async function affectedBy(
     changes: Record<string, string>,
@@ -618,7 +618,7 @@ describe('workOutAffectedStories in a monorepo', () => {
       environment: {},
       cwd: repo,
       storybooks: inRun,
-      baselinesFolders: run.baselinesFolders ?? inRun.map(({ baselines }) => baselines),
+      baselinesFolders: run.baselinesFolders ?? storybooks.map(({ baselines }) => baselines),
       configPath: join(repo, 'visual-check.config.ts'),
       affected: { selectAll: affected.selectAll ?? [], ignore: affected.ignore ?? [] },
       findReachedFiles: graph.findReachedFiles,
@@ -711,7 +711,7 @@ describe('workOutAffectedStories in a monorepo', () => {
     const result = await affectedBy({ 'logo.png': 'png' })
 
     expect(result.storybooks).toEqual([{ all: true }, { all: true }])
-    expect(result.calls).toEqual([{ files: ['logo.png'], folders: [] }])
+    expect(result.calls).toEqual([{ files: ['logo.png'], folders: ['.'] }])
   })
 
   it('selects nothing for a config JSON file the graph does not hold', async () => {
@@ -826,7 +826,7 @@ describe('workOutAffectedStories in a monorepo', () => {
       environment: {},
       cwd: repo,
       storybooks,
-      baselinesFolders: [],
+      baselinesFolders: storybooks.map(({ baselines }) => baselines),
       configPath: join(repo, 'visual-check.config.ts'),
       affected: { selectAll: ['notes/**'], ignore: [] },
       findReachedFiles: fakeGraph().findReachedFiles,
@@ -836,7 +836,7 @@ describe('workOutAffectedStories in a monorepo', () => {
       environment: {},
       cwd: repo,
       storybooks,
-      baselinesFolders: [],
+      baselinesFolders: storybooks.map(({ baselines }) => baselines),
       configPath: join(repo, 'apps/web/visual-check.config.ts'),
       affected: { selectAll: ['notes/**'], ignore: [] },
       findReachedFiles: fakeGraph().findReachedFiles,

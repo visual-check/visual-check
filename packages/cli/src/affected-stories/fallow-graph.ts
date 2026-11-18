@@ -19,7 +19,7 @@ export interface ReachedFiles {
   /**
    * Gives every graph file under any of the folders, plus every file reached by walking back from them, from the same
    * graph as `reached`, so it can be asked once `reached` is known. Folders and paths are relative to the project root,
-   * `/`-separated, and a folder is never the root itself. Gives an empty set for no folder.
+   * `/`-separated, and `.` is the root, which covers every graph file. Gives an empty set for no folder.
    */
   reachedFromFolders: (folders: readonly string[]) => ReadonlySet<string>
 }
