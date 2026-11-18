@@ -10,6 +10,8 @@ import {
 import type { CantAnswer, FindReachedFiles, ReachedFiles } from './fallow-graph.js'
 import { InvalidBaseError } from './git-changes.js'
 import { commit, git, isolateGit, makeFolder, makeRepo, removeRepos, writeFiles } from './git-repo.fixture.js'
+import type { ImportGraph } from './import-graph.js'
+import { filesReachedFrom, filesReachedFromFolders } from './walk-back.js'
 
 // The tests of `workOutAffectedStories` run git several times each, which a machine busy with the other test files can
 // slow to seconds.
@@ -344,9 +346,9 @@ describe('affectedStorybooksOf', () => {
  * A fake `FindReachedFiles` that records its calls and gives `result`.
  */
 function fakeFindReachedFiles(result: ReachedFiles | CantAnswer) {
-  const calls: { root: string; changedFiles: readonly string[] }[] = []
+  const calls: { root: string; files: readonly string[] }[] = []
   const findReachedFiles: FindReachedFiles = (calledRoot, files) => {
-    calls.push({ root: calledRoot, changedFiles: files })
+    calls.push({ root: calledRoot, files })
 
     return Promise.resolve(result)
   }
@@ -437,7 +439,7 @@ describe('workOutAffectedStories', () => {
       fallback: null,
       storybooks: [some('./src/button.stories.tsx')],
     })
-    expect(fake.calls).toEqual([{ root: repo, changedFiles: ['README.md', 'src/button.tsx'] }])
+    expect(fake.calls).toEqual([{ root: repo, files: ['README.md', 'src/button.tsx'] }])
   })
 
   it('selects the right stories files when the Storybook is given through a symlink to the repository', async () => {
@@ -558,27 +560,14 @@ describe('workOutAffectedStories in a monorepo', () => {
   })
 
   /**
-   * Builds a graph that walks back through `importers` from the changed files and from every graph file under the
-   * folders it's asked about, and records every call, with the folders it was asked about, if any.
+   * Builds a graph of `importers` that the real walk goes back through from the changed files and from every graph file
+   * under the folders it's asked about, and records every call, with the folders it was asked about, if any.
    */
   function fakeGraph() {
     const calls: { files: readonly string[]; folders: readonly string[] }[] = []
-
-    /**
-     * Gives the graph files reached walking back from the given files.
-     */
-    const walkBack = (files: readonly string[]): Set<string> => {
-      const reached = new Set<string>()
-      const next = files.filter((file) => file in importers)
-
-      for (let file = next.pop(); file !== undefined; file = next.pop()) {
-        if (!reached.has(file)) {
-          reached.add(file)
-          next.push(...(importers[file] ?? []))
-        }
-      }
-
-      return reached
+    const graph: ImportGraph = {
+      files: new Set(Object.keys(importers)),
+      importersOf: new Map(Object.entries(importers)),
     }
     const findReachedFiles: FindReachedFiles = async (_root, files) => {
       const call = { files, folders: [] as readonly string[] }
@@ -586,13 +575,11 @@ describe('workOutAffectedStories in a monorepo', () => {
       calls.push(call)
 
       return {
-        reached: walkBack(files),
+        reached: filesReachedFrom(graph, files),
         reachedFromFolders: (folders) => {
           call.folders = folders
 
-          return walkBack(
-            Object.keys(importers).filter((file) => folders.some((folder) => file.startsWith(`${folder}/`))),
-          )
+          return filesReachedFromFolders(graph, folders)
         },
       }
     }
@@ -730,18 +717,28 @@ describe('workOutAffectedStories in a monorepo', () => {
     expect(result.calls).toEqual([])
   })
 
-  it('selects nothing for a baseline of a Storybook the run leaves out, never taking it for an image', async () => {
-    const run = {
+  /**
+   * A run that covers only web, and knows the baselines folders of docs and of a Storybook at the root besides.
+   */
+  function webOnly() {
+    return {
       storybooks: storybooks.slice(0, 1),
       baselinesFolders: [join(repo, '.visual-check/baselines'), ...storybooks.map(({ baselines }) => baselines)],
     }
+  }
 
-    expect((await affectedBy({ '.visual-check/baselines/home--page.png': 'png' }, {}, run)).storybooks).toEqual([
-      some(),
-    ])
-    expect(
-      (await affectedBy({ 'apps/docs/.visual-check/baselines/intro--page.png': 'changed' }, {}, run)).calls,
-    ).toEqual([])
+  it('selects nothing for a baseline of a Storybook the run leaves out, never taking it for an image', async () => {
+    const result = await affectedBy({ '.visual-check/baselines/home--page.png': 'png' }, {}, webOnly())
+
+    expect(result.storybooks).toEqual([some()])
+    expect(result.calls).toEqual([])
+  })
+
+  it("selects nothing for a baseline of a Storybook the run leaves out, in that Storybook's package", async () => {
+    const result = await affectedBy({ 'apps/docs/.visual-check/baselines/intro--page.png': 'changed' }, {}, webOnly())
+
+    expect(result.storybooks).toEqual([some()])
+    expect(result.calls).toEqual([])
   })
 
   it('takes a .png in the baselines folder of a Storybook it is not told about for an image', async () => {

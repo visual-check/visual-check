@@ -55,11 +55,11 @@ const importers: Record<string, string[]> = {
  */
 function fakeGraph(): {
   findReachedFiles: FindReachedFiles
-  calls: { root: string; changedFiles: readonly string[] }[]
+  calls: { root: string; files: readonly string[] }[]
 } {
-  const calls: { root: string; changedFiles: readonly string[] }[] = []
+  const calls: { root: string; files: readonly string[] }[] = []
   const findReachedFiles: FindReachedFiles = async (root, files) => {
-    calls.push({ root, changedFiles: files })
+    calls.push({ root, files })
 
     const reached = new Set<string>()
     const next = [...files]
@@ -188,7 +188,7 @@ describe('runCli covering the affected stories', () => {
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBe('')
     expect(capturedIdsOf(record)).toEqual(['button--primary', 'card--primary'])
-    expect(graph.calls).toEqual([{ root: project, changedFiles: ['src/button.tsx'] }])
+    expect(graph.calls).toEqual([{ root: project, files: ['src/button.tsx'] }])
     expect(readReport(project).selection).toEqual({ by: 'affected', base: head, changedFiles: 1, fallback: null })
   })
 
@@ -204,7 +204,7 @@ describe('runCli covering the affected stories', () => {
 
     expect(result.exitCode).toBe(0)
     expect(capturedIdsOf(record)).toEqual(['badge--primary'])
-    expect(graph.calls).toEqual([{ root: project, changedFiles: ['src/badge.tsx'] }])
+    expect(graph.calls).toEqual([{ root: project, files: ['src/badge.tsx'] }])
     expect(readReport(project).selection).toEqual({ by: 'affected', base: head, changedFiles: 1, fallback: null })
   })
 
@@ -458,7 +458,7 @@ describe('runCli covering the affected stories', () => {
     })
 
     expect(result.exitCode).toBe(0)
-    expect(graph.calls).toEqual([{ root: project, changedFiles: ['src/button.tsx'] }])
+    expect(graph.calls).toEqual([{ root: project, files: ['src/button.tsx'] }])
     expect(capturedIdsOf(record)).toEqual(['button--primary', 'card--primary'])
     expect(readReport(project).selection).toMatchObject({ by: 'affected', base: forked, changedFiles: 1 })
   })
