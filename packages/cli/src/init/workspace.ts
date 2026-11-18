@@ -23,7 +23,8 @@ export type WorkspaceKind = 'pnpm' | 'workspaces' | 'lerna' | 'nx' | 'rush' | 's
  */
 export interface PackageManagerLists {
   /**
-   * The folders `pnpm-workspace.yaml`'s `packages` lists, which pnpm reads.
+   * The folders `pnpm-workspace.yaml`'s `packages` lists, which pnpm reads: none when it lists no `packages`, and
+   * `undefined` only without the file.
    */
   pnpm: string[] | undefined
   /**
@@ -363,7 +364,7 @@ interface WorkspaceConfig {
  */
 interface PackageManagerGlobs {
   /**
-   * `pnpm-workspace.yaml`'s `packages`, or `undefined` for none.
+   * `pnpm-workspace.yaml`'s `packages`: none when it lists none, and `undefined` without the file.
    */
   pnpm: string[] | undefined
   /**
@@ -375,7 +376,15 @@ interface PackageManagerGlobs {
 /**
  * The glob lists the workspace's configs give.
  */
-interface GlobSources extends PackageManagerGlobs {
+interface GlobSources {
+  /**
+   * `pnpm-workspace.yaml`'s `packages`, or `undefined` for none.
+   */
+  pnpm: string[] | undefined
+  /**
+   * `package.json#workspaces`, or `undefined` for none.
+   */
+  workspaces: string[] | undefined
   /**
    * Lerna's packages, or `undefined` without a `lerna.json`.
    */
@@ -435,7 +444,8 @@ function workspaceConfigOf(read: ReadFile): WorkspaceConfig | undefined {
     return undefined
   }
 
-  const pnpm = pnpmPackagesOf(read('pnpm-workspace.yaml') ?? '')
+  const pnpmText = read('pnpm-workspace.yaml')
+  const pnpm = pnpmPackagesOf(pnpmText ?? '')
   const lerna = lernaGlobsOf(read('lerna.json'), pnpm ?? workspaces)
   const rush = kind === 'rush' ? parseJsonWithComments(read('rush.json')) : undefined
 
@@ -447,7 +457,7 @@ function workspaceConfigOf(read: ReadFile): WorkspaceConfig | undefined {
     folders: rushProjectFoldersOf(rush),
     readsProjectJson: kind === 'nx',
     packageManager: rushPackageManagerOf(rush),
-    packageManagerGlobs: { pnpm, workspaces },
+    packageManagerGlobs: { pnpm: pnpmText === undefined ? undefined : (pnpm ?? []), workspaces },
   }
 }
 

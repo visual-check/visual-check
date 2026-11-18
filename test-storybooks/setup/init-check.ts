@@ -326,7 +326,7 @@ const addedScripts: Record<string, string> = {
 }
 
 /**
- * The addon, which `storybook add` adds to `devDependencies` and `.storybook/main.js` at a range of its own choosing.
+ * The addon, which `init` adds to `devDependencies` at its exact version, and `storybook add` to `.storybook/main.js`.
  */
 const addonPackage = '@visual-check/storybook-addon'
 
@@ -824,12 +824,12 @@ function readManifest(path: string): Required<Manifest> {
 }
 
 /**
- * Gives the range `init` adds each of its own packages at: the packed CLI's version for the CLI and
- * `@visual-check/storybook`, and the CLI's peer range for `@visual-check/chromium`.
+ * Gives the spec `init` adds each of its own packages at: the packed CLI's exact version for the CLI,
+ * `@visual-check/storybook` and the addon, and the CLI's peer range for `@visual-check/chromium`.
  *
  * @throws {Error} When the packed CLI has no peer dependency on `@visual-check/chromium`.
  */
-function addedDependencyRangesOf(check: Check): Record<string, string> {
+function addedDependencySpecsOf(check: Check): Record<string, string> {
   const { version, peerDependencies } = cliTarballOf(check).manifest
   const browserRange = peerDependencies?.['@visual-check/chromium']
 
@@ -837,7 +837,12 @@ function addedDependencyRangesOf(check: Check): Record<string, string> {
     throw new Error("The packed CLI's package.json has no peer dependency on @visual-check/chromium")
   }
 
-  return { '@visual-check/cli': version, '@visual-check/chromium': browserRange, '@visual-check/storybook': version }
+  return {
+    '@visual-check/cli': version,
+    '@visual-check/chromium': browserRange,
+    '@visual-check/storybook': version,
+    [addonPackage]: version,
+  }
 }
 
 /**
@@ -849,7 +854,8 @@ function describedValueOf(value: string | undefined): string {
 
 /**
  * Lists what's wrong with the project's `package.json` after `init`: it must keep the fixture's scripts and
- * `devDependencies`, and add the two scripts, its three packages at their exact ranges, and the addon.
+ * `devDependencies`, and add the two scripts and its four packages, the addon included, the browser at the CLI's range
+ * and the others at their exact versions.
  */
 function manifestProblems(check: Check): string[] {
   const fixture = readManifest(join(check.fixture, 'package.json'))
@@ -862,14 +868,13 @@ function manifestProblems(check: Check): string[] {
         ([name, script]) =>
           `package.json's ${name} script should be "${script}", and it is ${describedValueOf(scripts[name])}`,
       ),
-    ...Object.entries({ ...fixture.devDependencies, ...addedDependencyRangesOf(check) })
+    ...Object.entries({ ...fixture.devDependencies, ...addedDependencySpecsOf(check) })
       .filter(([name, range]) => devDependencies[name] !== range)
       .map(
         ([name, range]) =>
           `package.json's devDependencies should have ${name} at "${range}", and it is ` +
           describedValueOf(devDependencies[name]),
       ),
-    ...(devDependencies[addonPackage] === undefined ? [`package.json's devDependencies have no ${addonPackage}`] : []),
   ]
 }
 

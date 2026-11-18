@@ -97,7 +97,9 @@ describe('askQuestions', () => {
         },
       ],
       scripts: { test: { name: 'visual:check', add: true }, update: { name: 'visual:update', add: true } },
-      addons: [{ configDir: '.storybook', name: 'project', packageDir: '/project' }],
+      addons: [
+        { configDir: '.storybook', name: 'project', packageDir: '/project', manifestDir: '/project', manifest: {} },
+      ],
     })
     expect(warnings).toEqual([])
   })
@@ -534,7 +536,9 @@ describe('askQuestions', () => {
       defaultValue: ['.storybook', 'docs/.storybook'],
       hint: hints.addon,
     })
-    expect(answers.addons).toEqual([{ configDir: 'docs/.storybook', name: 'b', packageDir: '/project' }])
+    expect(answers.addons).toEqual([
+      { configDir: 'docs/.storybook', name: 'b', packageDir: '/project', manifestDir: '/project', manifest: {} },
+    ])
   })
 
   it('asks no Storybook question with an existing config, and names the addon choice after the config', async () => {
@@ -546,7 +550,9 @@ describe('askQuestions', () => {
       'Name of the script that runs visual-check update',
       'Add the Storybook addon to',
     ])
-    expect(answers.addons).toEqual([{ configDir: '.storybook', name: 'web', packageDir: '/project' }])
+    expect(answers.addons).toEqual([
+      { configDir: '.storybook', name: 'web', packageDir: '/project', manifestDir: '/project', manifest: {} },
+    ])
   })
 
   it('does not warn about an explicit default port that matches the start script', async () => {
@@ -598,7 +604,9 @@ describe('askQuestions', () => {
         },
       ],
       scripts: { test: { name: 'visual:check', add: true }, update: { name: 'visual:update', add: true } },
-      addons: [{ configDir: '.storybook', name: 'project', packageDir: '/project' }],
+      addons: [
+        { configDir: '.storybook', name: 'project', packageDir: '/project', manifestDir: '/project', manifest: {} },
+      ],
     })
     expect(warnings).toEqual([])
     expect(prompter.notes).toEqual([
@@ -684,7 +692,13 @@ describe('askQuestions', () => {
         ['packages/web/.storybook'],
       ])
       expect(answers.addons).toEqual([
-        { configDir: 'packages/web/.storybook', name: 'web', packageDir: '/project/packages/web' },
+        {
+          configDir: 'packages/web/.storybook',
+          name: 'web',
+          packageDir: '/project/packages/web',
+          manifestDir: '/project/packages/web',
+          manifest: {},
+        },
       ])
     })
 

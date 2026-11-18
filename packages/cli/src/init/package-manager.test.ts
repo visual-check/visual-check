@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
+  type AddOptions,
   addDevDependenciesCommandOf,
+  commandInFolderOf,
   commandLineOf,
   listsDependency,
   lockfileNames,
   nonEmptyTextOf,
   nxCommandOf,
+  type PackageManager,
   packageManagerOf,
   runScriptCommandOf,
   rushPackageManagerOf,
@@ -107,24 +110,45 @@ describe('commands', () => {
     })
   })
 
+  it('runs a command in a folder, going into it from another', () => {
+    expect(commandInFolderOf('/p', '/p', 'pnpm run sb')).toBe('pnpm run sb')
+    expect(commandInFolderOf('/p', '/p/packages/ui', 'pnpm run sb')).toBe('cd packages/ui && pnpm run sb')
+    expect(commandInFolderOf('/p/apps/web', '/p/packages/ui', 'pnpm run sb')).toBe(
+      'cd ../../packages/ui && pnpm run sb',
+    )
+  })
+
   it('shows a command line with single spaces', () => {
     expect(commandLineOf({ command: 'pnpm', args: ['add', '--save-dev', 'a@1'] })).toBe('pnpm add --save-dev a@1')
     expect(commandLineOf({ command: 'pnpm', args: [] })).toBe('pnpm')
   })
 
-  it('adds dev dependencies', () => {
-    const specs = ['a@1', 'b@2']
+  it.each<[PackageManager, string, string]>([
+    ['npm', 'npm install --save-dev --save-exact a@1 b@2', 'npm install --save-dev a@1 b@2'],
+    ['pnpm', 'pnpm add --save-dev --save-exact a@1 b@2', 'pnpm add --save-dev a@1 b@2'],
+    ['yarn', 'yarn add --dev --exact a@1 b@2', 'yarn add --dev a@1 b@2'],
+    ['bun', 'bun add --dev --exact a@1 b@2', 'bun add --dev a@1 b@2'],
+  ])('adds dev dependencies under %s, exact or not', (packageManager, exact, ranged) => {
+    expect(commandLineOf(addDevDependenciesCommandOf(packageManager, ['a@1', 'b@2'], { exact: true }))).toBe(exact)
+    expect(commandLineOf(addDevDependenciesCommandOf(packageManager, ['a@1', 'b@2'], { exact: false }))).toBe(ranged)
+  })
 
-    expect(addDevDependenciesCommandOf('npm', specs)).toEqual({
-      command: 'npm',
-      args: ['install', '--save-dev', ...specs],
-    })
-    expect(addDevDependenciesCommandOf('pnpm', specs)).toEqual({
-      command: 'pnpm',
-      args: ['add', '--save-dev', ...specs],
-    })
-    expect(addDevDependenciesCommandOf('yarn', specs)).toEqual({ command: 'yarn', args: ['add', '--dev', ...specs] })
-    expect(addDevDependenciesCommandOf('bun', specs)).toEqual({ command: 'bun', args: ['add', '--dev', ...specs] })
+  it.each<[PackageManager, AddOptions, string]>([
+    ['pnpm', { exact: true, workspaceRoot: true }, 'pnpm add --save-dev --save-exact -w a@1'],
+    ['pnpm', { exact: false, workspaceRoot: true }, 'pnpm add --save-dev -w a@1'],
+    ['yarn', { exact: true, workspaceRoot: true }, 'yarn add --dev --exact -W a@1'],
+    ['yarn', { exact: false, workspaceRoot: true }, 'yarn add --dev -W a@1'],
+    ['yarn', { exact: true, workspaceRoot: true, yarnBerry: true }, 'yarn add --dev --exact a@1'],
+    ['npm', { exact: true, workspaceRoot: true }, 'npm install --save-dev --save-exact a@1'],
+    ['bun', { exact: true, workspaceRoot: true }, 'bun add --dev --exact a@1'],
+    [
+      'npm',
+      { exact: true, npmWorkspace: 'packages/ui' },
+      'npm install --save-dev --save-exact --workspace packages/ui a@1',
+    ],
+    ['pnpm', { exact: true, npmWorkspace: 'packages/ui' }, 'pnpm add --save-dev --save-exact a@1'],
+  ])('adds the flags %s takes for %j', (packageManager, options, command) => {
+    expect(commandLineOf(addDevDependenciesCommandOf(packageManager, ['a@1'], options))).toBe(command)
   })
 })
 

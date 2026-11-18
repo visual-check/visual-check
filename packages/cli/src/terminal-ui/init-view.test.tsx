@@ -523,7 +523,7 @@ describe('startInitView', () => {
       note: (text) => view.note(text),
     }
     const runCommand: InitTools['runCommand'] = (_command, args) => {
-      if (args[0] !== 'add') {
+      if (!args.includes('--save-exact')) {
         return Promise.resolve(0)
       }
 
@@ -575,11 +575,12 @@ describe('startInitView', () => {
     await advanceTimers(1000)
 
     expect(frame()).toBe(
-      `${header}${answers}\n━━━━━─────────────── 1/4 · 2.5s\n` +
+      `${header}${answers}\n━━━━──────────────── 1/5 · 2.5s\n` +
         '✓ Write the files and scripts 0.0s\n' +
         `⠹ ${installTitle} 2.5s\n` +
         `  ${pnpmAdd.command} ${pnpmAdd.args.join(' ')}\n` +
         '  │ Packages: +3\n  │ +++\n  │ Progress: resolved 3, reused 3, downloaded 0\n' +
+        '○ Install the browser package\n' +
         '○ Add the Storybook addon to web-app\n' +
         '○ Check for unlisted dependencies',
     )
@@ -591,9 +592,10 @@ describe('startInitView', () => {
     })
 
     const steps =
-      '\n━━━━━━━━━━━━━━━━━━━━ 4/4 · 5.0s\n' +
+      '\n━━━━━━━━━━━━━━━━━━━━ 5/5 · 5.0s\n' +
       '✓ Write the files and scripts 0.0s\n' +
       `✓ ${installTitle} 5.0s\n` +
+      '✓ Install the browser package 0.0s\n' +
       '✓ Add the Storybook addon to web-app 0.0s\n' +
       '✓ Check for unlisted dependencies 0.0s'
 

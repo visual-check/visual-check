@@ -88,8 +88,8 @@ describe('askAddons', () => {
       },
     ])
     expect(addons).toEqual([
-      { configDir: 'a/.storybook', name: 'a', packageDir: '/project/a' },
-      { configDir: 'e/.storybook', name: 'e', packageDir: '/project' },
+      { configDir: 'a/.storybook', name: 'a', packageDir: '/project/a', manifestDir: '/project/a', manifest: {} },
+      { configDir: 'e/.storybook', name: 'e', packageDir: '/project', manifestDir: '/project', manifest: {} },
     ])
   })
 
@@ -99,7 +99,9 @@ describe('askAddons', () => {
     expect(records).toEqual([
       { kind: 'checklist', message: 'Add the Storybook addon to', defaultValue: ['.storybook'], hint },
     ])
-    expect(addons).toEqual([{ configDir: '.storybook', name: 'project', packageDir: '/project' }])
+    expect(addons).toEqual([
+      { configDir: '.storybook', name: 'project', packageDir: '/project', manifestDir: '/project', manifest: {} },
+    ])
   })
 
   it('keeps the Storybooks ticked, and takes none', async () => {
@@ -110,7 +112,9 @@ describe('askAddons', () => {
     const some = await ask([['docs/.storybook']], storybooks)
     const none = await ask([[]], storybooks)
 
-    expect(some.addons).toEqual([{ configDir: 'docs/.storybook', name: 'b', packageDir: '/project' }])
+    expect(some.addons).toEqual([
+      { configDir: 'docs/.storybook', name: 'b', packageDir: '/project', manifestDir: '/project', manifest: {} },
+    ])
     expect(none.addons).toEqual([])
   })
 
@@ -125,7 +129,9 @@ describe('askAddons', () => {
       prompter,
     })
 
-    expect(addons).toEqual([{ configDir: 'docs/.storybook', name: 'docs', packageDir: '/project' }])
+    expect(addons).toEqual([
+      { configDir: 'docs/.storybook', name: 'docs', packageDir: '/project', manifestDir: '/project', manifest: {} },
+    ])
   })
 
   it('offers the addon only to the Storybooks of an existing config, named as the config names them', async () => {
@@ -138,6 +144,8 @@ describe('askAddons', () => {
     expect(records).toEqual([
       { kind: 'checklist', message: 'Add the Storybook addon to', defaultValue: ['docs/.storybook'], hint },
     ])
-    expect(addons).toEqual([{ configDir: 'docs/.storybook', name: 'docs', packageDir: '/project' }])
+    expect(addons).toEqual([
+      { configDir: 'docs/.storybook', name: 'docs', packageDir: '/project', manifestDir: '/project', manifest: {} },
+    ])
   })
 })

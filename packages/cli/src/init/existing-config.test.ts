@@ -8,6 +8,7 @@ import {
   gitignore,
   modesFile,
   pnpmAdd,
+  pnpmAddBrowser,
   pnpmAddon,
   pnpmClosingMessage,
   pnpmNextSteps,
@@ -241,7 +242,7 @@ describe('init run again with a config there', () => {
     })
     expect(readText(root, 'visual-check.config.ts')).toBe(config)
     expect(readText(root, '.storybook/visual-check.ts')).toBe(modesFile)
-    expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddon))
+    expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddBrowser, pnpmAddon))
   })
 
   it('hints at each detected Storybook the config leaves out, and sets up only the ones it holds', async () => {
@@ -267,7 +268,7 @@ describe('init run again with a config there', () => {
     expect(existsSync(join(root, '.storybook/visual-check.ts'))).toBe(false)
     expect(readText(root, 'visual-check.config.ts')).toBe(config)
     expect(record.commands).toEqual(
-      commandsIn(root, pnpmAdd, {
+      commandsIn(root, pnpmAdd, pnpmAddBrowser, {
         command: 'pnpm',
         args: [...pnpmAddon.args, '-c', 'docs/.storybook'],
       }),
@@ -284,7 +285,7 @@ describe('init run again with a config there', () => {
     expect(result.stderr).toBe('')
     expect(readText(root, '.storybook/visual-check.ts')).toBe(modesFile)
     expect(readText(root, '.visual-check/.gitignore')).toBe(gitignore)
-    expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddon))
+    expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddBrowser, pnpmAddon))
   })
 
   describe('reads the baselines folder the config names, to tell whether to write the first baselines', () => {
@@ -335,7 +336,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
     expect(readText(root, 'visual-check.config.ts')).toBe(config)
     expect(readText(root, '.storybook/visual-check.ts')).toBe(modesFile)
     expect(readText(root, '.visual-check/.gitignore')).toBe(gitignore)
-    expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddon))
+    expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddBrowser, pnpmAddon))
   })
 
   it.each([
@@ -389,7 +390,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
     expect(readText(root, '.visual-check/.gitignore')).toBe(gitignore)
     expect(existsSync(join(root, 'old'))).toBe(false)
     expect(existsSync(join(root, outside))).toBe(false)
-    expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddon))
+    expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddBrowser, pnpmAddon))
   })
 
   it('leaves alone a Storybook whose config folder is outside the project, even with its folder inside', async () => {
@@ -467,10 +468,11 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
     expect(existsSync(join(root, '.storybook/visual-check.ts'))).toBe(false)
     // Only the config's Storybooks get the Storybook package, and this config holds none in the project.
     expect(record.commands).toEqual(
-      commandsIn(root, {
-        command: 'pnpm',
-        args: pnpmAdd.args.filter((arg) => !arg.startsWith('@visual-check/storybook@')),
-      }),
+      commandsIn(
+        root,
+        { command: 'pnpm', args: pnpmAdd.args.filter((arg) => !/^@visual-check\/storybook(-addon)?@/.test(arg)) },
+        pnpmAddBrowser,
+      ),
     )
   })
 

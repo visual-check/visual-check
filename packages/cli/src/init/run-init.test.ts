@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ContainerError, DockerMissingError } from '../container/container-error.js'
+import { closingMessageTextOf } from './closing-message.js'
 import {
   browserRange,
   cliVersion,
@@ -10,7 +11,9 @@ import {
   modesFile,
   type ProgressCall,
   pnpmAdd,
+  pnpmAddBrowser,
   pnpmAddon,
+  pnpmAddWithoutAddon,
   pnpmClosingMessage,
   pnpmNextSteps,
   toolsOf,
@@ -50,13 +53,15 @@ const pnpmPlan: ProgressCall = [
   [
     'Write the files and scripts',
     installTitle,
+    'Install the browser package',
     'Add the Storybook addon to web-app',
     'Check for unlisted dependencies',
   ],
 ]
 
 /**
- * The calls to the progress of a run on the pnpm project that gets as far as the install, whose outcome is `install`.
+ * The calls to the progress of a run on the pnpm project that gets as far as the first install, whose outcome is
+ * `install`. One that succeeds goes on to add the browser package.
  */
 function installProgressOf(install: 'done' | 'failed'): ProgressCall[] {
   return [
@@ -65,6 +70,12 @@ function installProgressOf(install: 'done' | 'failed'): ProgressCall[] {
     ['end', 'done'],
     ['start', installTitle, `${pnpmAdd.command} ${pnpmAdd.args.join(' ')}`],
     ['end', install],
+    ...(install === 'done'
+      ? ([
+          ['start', 'Install the browser package', `${pnpmAddBrowser.command} ${pnpmAddBrowser.args.join(' ')}`],
+          ['end', 'done'],
+        ] as const)
+      : []),
   ]
 }
 
@@ -119,7 +130,7 @@ describe('runInit', () => {
       'visual:check': 'visual-check test',
       'visual:update': 'visual-check update',
     })
-    expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddon))
+    expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddBrowser, pnpmAddon))
     expect(record.progress).toEqual(fullProgressOf('done', 'done'))
     expect(record.probes).toBe(1)
     expect(record.fallowRoots).toEqual([root])
@@ -253,7 +264,7 @@ describe('runInit', () => {
       expectWritten(root, result.stdout)
       expect(prompter.records.filter(({ kind }) => kind === 'checklist')).toEqual([])
       expect(prompter.unused()).toEqual([])
-      expect(record.commands).toEqual(commandsIn(root, pnpmAdd))
+      expect(record.commands).toEqual(commandsIn(root, pnpmAddWithoutAddon, pnpmAddBrowser))
     })
 
     it.each([
@@ -331,12 +342,12 @@ describe('runInit', () => {
 
     it('warns when storybook add fails, and carries on', async () => {
       const root = pnpmProject()
-      const { tools, record } = toolsOf({}, { exitCodes: [0, 1] })
+      const { tools, record } = toolsOf({}, { exitCodes: [0, 0, 1] })
       const result = await runInit(root, tools)
 
       expect(result.exitCode).toBe(0)
       expect(result.stderr).toBe(
-        `Warning: pnpm exec storybook add @visual-check/storybook-addon@${cliVersion} --yes failed, so web-app has no addon. Run it yourself to add it.\n`,
+        `Warning: pnpm exec storybook add @visual-check/storybook-addon@${cliVersion} --yes --skip-install failed, so web-app has no addon. Run it yourself to add it, then set @visual-check/storybook-addon back to "${cliVersion}" in package.json.\n`,
       )
       expectWritten(root, result.stdout)
       expect(record.fallowRoots).toEqual([root])
@@ -380,12 +391,12 @@ describe('runInit', () => {
     it('prints the hints and warnings in the order they arose', async () => {
       const root = pnpmProject({ manifest: { scripts: { storybook: 'storybook dev' } } })
       const error = new ContainerError("Docker's daemon isn't running.")
-      const result = await runInit(root, toolsOf({}, { dockerError: error, exitCodes: [0, 1] }).tools)
+      const result = await runInit(root, toolsOf({}, { dockerError: error, exitCodes: [0, 0, 1] }).tools)
 
       expect(result.stderr.split('\n')).toEqual([
         `Warning: Docker's daemon isn't running. ${dockerFix}`,
         "hint: The storybook script sets no port. Add -p 6006 to it, so Storybook always starts on the port in web-app's URL.",
-        `Warning: pnpm exec storybook add @visual-check/storybook-addon@${cliVersion} --yes failed, so web-app has no addon. Run it yourself to add it.`,
+        `Warning: pnpm exec storybook add @visual-check/storybook-addon@${cliVersion} --yes --skip-install failed, so web-app has no addon. Run it yourself to add it, then set @visual-check/storybook-addon back to "${cliVersion}" in package.json.`,
         '',
       ])
     })
@@ -466,7 +477,7 @@ describe('runInit', () => {
       summary: pnpmSummary,
     })
     expect(existsSync(join(root, '.git'))).toBe(false)
-    expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddon))
+    expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddBrowser, pnpmAddon))
   })
 
   it('hints when storybook is not installed, asks nothing about the addon and still installs', async () => {
@@ -486,7 +497,7 @@ describe('runInit', () => {
       messages: [hint],
       summary: pnpmSummary,
     })
-    expect(yes.record.commands).toEqual(commandsIn(root, pnpmAdd))
+    expect(yes.record.commands).toEqual(commandsIn(root, pnpmAddWithoutAddon, pnpmAddBrowser))
 
     const asked = makeProject({
       manifest: { name: 'web-app', packageManager: 'pnpm@9.12.3', scripts: { storybook: 'storybook dev -p 6006' } },
@@ -660,6 +671,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
         commandsIn(
           root,
           { command: 'npm', args: ['install', ...pnpmAdd.args.slice(1)] },
+          { command: 'npm', args: ['install', ...pnpmAddBrowser.args.slice(1)] },
           { command: 'npx', args: pnpmAddon.args.slice(1) },
         ),
       )
@@ -683,7 +695,8 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
       expect(record.commands).toEqual(
         commandsIn(
           root,
-          { command: 'yarn', args: ['add', '--dev', ...pnpmAdd.args.slice(2)] },
+          { command: 'yarn', args: ['add', '--dev', '--exact', ...pnpmAdd.args.slice(3)] },
+          { command: 'yarn', args: ['add', '--dev', ...pnpmAddBrowser.args.slice(2)] },
           { command: 'npx', args: ['--no-install', ...pnpmAddon.args.slice(1)] },
         ),
       )
@@ -694,7 +707,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
     const root = pnpmProject()
     const { tools, record } = toolsOf({}, { exitCodes: [1] })
 
-    const problem = `pnpm add --save-dev @visual-check/cli@${cliVersion} @visual-check/chromium@${browserRange} @visual-check/storybook@${cliVersion} failed with exit code 1. Run it yourself, then run visual-check init again.`
+    const problem = `pnpm add --save-dev --save-exact @visual-check/cli@${cliVersion} @visual-check/storybook@${cliVersion} @visual-check/storybook-addon@${cliVersion} failed with exit code 1. Run it yourself, then run visual-check init again.`
 
     expect(await runInit(root, tools)).toEqual({
       exitCode: 2,
@@ -778,12 +791,13 @@ describe('runInit in a workspace', () => {
     expect(record.commands).toEqual([
       {
         command: 'pnpm',
-        args: ['add', '--save-dev', `@visual-check/cli@${cliVersion}`, `@visual-check/chromium@${browserRange}`],
+        args: ['add', '--save-dev', '--save-exact', '-w', `@visual-check/cli@${cliVersion}`],
         cwd: root,
       },
+      { command: 'pnpm', args: ['add', '--save-dev', '-w', `@visual-check/chromium@${browserRange}`], cwd: root },
       {
         command: 'pnpm',
-        args: ['add', '--save-dev', `@visual-check/storybook@${cliVersion}`],
+        args: ['add', '--save-dev', '--save-exact', `@visual-check/storybook@${cliVersion}`],
         cwd: join(root, 'packages/ui'),
       },
     ])
@@ -839,6 +853,128 @@ export default defineConfig({
     ])
   })
 
+  it("adds each package's dependencies and the addon in its folder, then runs storybook add there", async () => {
+    const root = onePortWorkspace()
+    const { tools, record } = toolsOf()
+    const result = await runInit(root, tools)
+    const storybookSpecs = [`@visual-check/storybook@${cliVersion}`, `@visual-check/storybook-addon@${cliVersion}`]
+    const storybookAdd = ['exec', 'storybook', 'add', `@visual-check/storybook-addon@${cliVersion}`, '--yes']
+
+    expect(result.exitCode).toBe(0)
+    expect(record.commands).toEqual([
+      {
+        command: 'pnpm',
+        args: ['add', '--save-dev', '--save-exact', '-w', `@visual-check/cli@${cliVersion}`],
+        cwd: root,
+      },
+      { command: 'pnpm', args: ['add', '--save-dev', '-w', `@visual-check/chromium@${browserRange}`], cwd: root },
+      {
+        command: 'pnpm',
+        args: ['add', '--save-dev', '--save-exact', ...storybookSpecs],
+        cwd: join(root, 'packages/ui'),
+      },
+      {
+        command: 'pnpm',
+        args: ['add', '--save-dev', '--save-exact', ...storybookSpecs],
+        cwd: join(root, 'packages/web'),
+      },
+      { command: 'pnpm', args: [...storybookAdd, '--skip-install'], cwd: join(root, 'packages/ui') },
+      { command: 'pnpm', args: [...storybookAdd, '--skip-install', '-c', '.sb'], cwd: join(root, 'packages/web') },
+    ])
+    expect(record.progress[0]).toEqual([
+      'plan',
+      [
+        'Write the files and scripts',
+        installTitle,
+        'Install the browser package',
+        `${installTitle} in packages/ui`,
+        `${installTitle} in packages/web`,
+        'Add the Storybook addon to ui',
+        'Add the Storybook addon to web',
+        'Check for unlisted dependencies',
+      ],
+    ])
+  })
+
+  it('adds through npm --workspace for a package its list names, and in the folder of one only Nx finds', async () => {
+    const root = makeProject({
+      manifest: { name: 'acme', private: true, packageManager: 'npm@10.9.0', workspaces: ['packages/*'] },
+      files: {
+        'nx.json': '{}',
+        'packages/ui/package.json': JSON.stringify({
+          name: '@acme/ui',
+          scripts: { storybook: 'storybook dev -p 6006' },
+        }),
+        'packages/ui/.storybook/main.ts': '',
+        'libs/docs/package.json': JSON.stringify({ name: 'docs', scripts: { storybook: 'storybook dev -p 6007' } }),
+        'libs/docs/project.json': JSON.stringify({ name: 'docs' }),
+        'libs/docs/.storybook/main.ts': '',
+      },
+      storybookVersion: '10.6.7',
+    })
+    const { tools, record } = toolsOf()
+    const result = await runInit(root, tools)
+    const storybookSpecs = [`@visual-check/storybook@${cliVersion}`, `@visual-check/storybook-addon@${cliVersion}`]
+    const storybookAdd = ['storybook', 'add', `@visual-check/storybook-addon@${cliVersion}`, '--yes', '--skip-install']
+
+    expect(result.exitCode).toBe(0)
+    expect(record.commands).toEqual([
+      { command: 'npm', args: ['install', '--save-dev', '--save-exact', `@visual-check/cli@${cliVersion}`], cwd: root },
+      { command: 'npm', args: ['install', '--save-dev', `@visual-check/chromium@${browserRange}`], cwd: root },
+      {
+        command: 'npm',
+        args: ['install', '--save-dev', '--save-exact', ...storybookSpecs],
+        cwd: join(root, 'libs/docs'),
+      },
+      {
+        command: 'npm',
+        args: ['install', '--save-dev', '--save-exact', '--workspace', 'packages/ui', ...storybookSpecs],
+        cwd: root,
+      },
+      { command: 'npx', args: storybookAdd, cwd: join(root, 'libs/docs') },
+      { command: 'npx', args: storybookAdd, cwd: join(root, 'packages/ui') },
+    ])
+    expect(result.summary?.nextSteps?.steps[0]).toEqual([
+      { command: 'cd libs/docs && npm run storybook', text: ['Start docs, and keep it running'] },
+      { command: 'npm run storybook --workspace packages/ui', text: ['Start ui, and keep it running'] },
+    ])
+  })
+
+  it('runs nothing under Rush, and prints the install steps before the closing message', async () => {
+    const root = makeProject({
+      manifest: { name: 'acme', private: true },
+      files: {
+        'rush.json': '{ "pnpmVersion": "9.0.0", "projects": [{ "packageName": "ui", "projectFolder": "libs/ui" }] }',
+        'libs/ui/package.json': JSON.stringify({ name: 'ui', scripts: { storybook: 'storybook dev -p 6006' } }),
+        'libs/ui/.storybook/main.ts': '',
+      },
+      storybookVersion: '10.6.7',
+    })
+    const { tools, record } = toolsOf()
+    const result = await runInit(root, tools)
+    const manualInstall = {
+      heading: "Add the Storybook addon and install visual-check's packages yourself:",
+      commands: [
+        `cd libs/ui && pnpm exec storybook add @visual-check/storybook-addon@${cliVersion} --yes --skip-install`,
+        `pnpm add --save-dev --save-exact @visual-check/cli@${cliVersion}`,
+        `pnpm add --save-dev "@visual-check/chromium@${browserRange}"`,
+        `cd libs/ui && rush add --dev --exact --skip-update -p @visual-check/storybook@${cliVersion} ` +
+          `-p @visual-check/storybook-addon@${cliVersion}`,
+        'rush update',
+      ],
+    }
+
+    expect(result.exitCode).toBe(0)
+    expect(record.commands).toEqual([])
+    expect(record.progress[0]).toEqual(['plan', ['Write the files and scripts', 'Check for unlisted dependencies']])
+    expect(result.summary?.manualInstall).toEqual(manualInstall)
+    expect(result.stdout).toBe(
+      `${manualInstall.heading}\n${manualInstall.commands.map((command) => `  ${command}\n`).join('')}\n` +
+        closingMessageTextOf(result.summary?.nextSteps ?? pnpmNextSteps),
+    )
+    expect(readText(root, 'libs/ui/.storybook/visual-check.ts')).toBe(modesFile)
+  })
+
   it('writes nothing, adds nothing and offers no addon for a Storybook left unticked', async () => {
     const root = onePortWorkspace()
     const prompter = scriptedPrompter([['packages/ui/.storybook'], '', '', '', '', ''])
@@ -874,7 +1010,7 @@ export default defineConfig({
 
     expect(result.exitCode).toBe(0)
     expect(readText(root, 'libs/ui/.visual-check/.gitignore')).toBe(gitignore)
-    expect(record.commands).toEqual(commandsIn(root, pnpmAdd))
+    expect(record.commands).toEqual(commandsIn(root, pnpmAddWithoutAddon, pnpmAddBrowser))
     expect(result.summary?.nextSteps?.steps[0]).toEqual([
       { command: 'pnpm exec nx run ui:storybook', text: ['Start Storybook, and keep it running'] },
     ])

@@ -73,6 +73,39 @@ To set options for every story, see .storybook/visual-check.ts.
 To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
   })
 
+  it('shows the install steps to run under Rush between the warnings and the next steps', async () => {
+    const manualInstall = {
+      heading: "Install visual-check's packages yourself, then add the addon:",
+      commands: [
+        'cd . && rush add --dev --exact --skip-update -p @visual-check/cli@1.0.0',
+        'rush update',
+        'cd libs/ui && pnpm exec storybook add @visual-check/storybook-addon@1.0.0 --yes --skip-install',
+      ],
+    }
+    const { lastFrame } = await renderSettledAt(
+      <Summary result={{ ...resultWith(0, [fallowWarning]), summary: { manualInstall, nextSteps } }} />,
+      160,
+    )
+
+    expect(plainFrameOf(lastFrame())).toBe(`
+✓ visual-check is set up
+▲ package.json doesn't list tailwindcss, imported in src/app/(landings)/bingo/landing-page.globals.css. visual-check can't tell which stories it affects.
+
+Install visual-check's packages yourself, then add the addon:
+  cd . && rush add --dev --exact --skip-update -p @visual-check/cli@1.0.0
+  rush update
+  cd libs/ui && pnpm exec storybook add @visual-check/storybook-addon@1.0.0 --yes --skip-install
+
+Next
+  1  pnpm storybook       Start Storybook, and keep it running
+  2  pnpm visual:update   Write the first baselines
+  3  pnpm visual:check    Check the stories against the baselines
+  4  Commit the changes, baselines included
+
+To set options for every story, see .storybook/visual-check.ts.
+To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
+  })
+
   it('puts each Storybook on a row of its own, its command in the same column, and wraps text under itself', async () => {
     const { lastFrame } = await renderSettledAt(
       <Summary

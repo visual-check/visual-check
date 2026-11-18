@@ -1,3 +1,5 @@
+import { relativePathOf } from './find-storybooks.js'
+
 /**
  * The package managers `init` sets a project up for.
  */
@@ -63,7 +65,7 @@ export function nonEmptyTextOf(value: unknown): string | undefined {
 /**
  * The manifest fields that list dependencies.
  */
-const dependencyFields = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'] as const
+export const dependencyFields = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'] as const
 
 /**
  * Returns whether the manifest lists `name` in any of its dependency fields.
@@ -294,18 +296,63 @@ export interface CommandLine {
 }
 
 /**
- * The command that adds `specs`, such as `@visual-check/cli@1.2.3`, to `devDependencies`.
+ * How an add command adds dependencies, besides the folder it runs in.
  */
-export function addDevDependenciesCommandOf(packageManager: PackageManager, specs: readonly string[]): CommandLine {
+export interface AddOptions {
+  /**
+   * Whether it saves each at the exact version it resolves to, with no `^`: `--save-exact` for npm and pnpm, `--exact`
+   * for Yarn and Bun. Only npm also pins a range, such as `^1.0.0`, to its newest version; the others keep the range.
+   */
+  exact: boolean
+  /**
+   * Whether it runs at the root of a workspace whose packages the package manager's own list names. pnpm then takes
+   * `-w`, and Yarn 1 `-W`, to add to the root.
+   */
+  workspaceRoot?: boolean
+  /**
+   * Whether Yarn is Yarn 2 or later, which adds to a workspace root without a flag.
+   */
+  yarnBerry?: boolean
+  /**
+   * The package folder, relative to the root, that npm adds to from the root with `--workspace`.
+   */
+  npmWorkspace?: string
+}
+
+/**
+ * The command that adds `specs`, such as `@visual-check/cli@1.2.3`, to `devDependencies`, with the flags `options`
+ * call for.
+ */
+export function addDevDependenciesCommandOf(
+  packageManager: PackageManager,
+  specs: readonly string[],
+  options: AddOptions,
+): CommandLine {
+  const { exact, workspaceRoot = false, yarnBerry = false, npmWorkspace } = options
+  const flagIf = (condition: boolean, flag: string) => (condition ? [flag] : [])
+
   switch (packageManager) {
-    case 'npm':
-      return { command: 'npm', args: ['install', '--save-dev', ...specs] }
+    case 'npm': {
+      const workspaceArgs = npmWorkspace === undefined ? [] : ['--workspace', npmWorkspace]
+
+      return {
+        command: 'npm',
+        args: ['install', '--save-dev', ...flagIf(exact, '--save-exact'), ...workspaceArgs, ...specs],
+      }
+    }
+
     case 'pnpm':
-      return { command: 'pnpm', args: ['add', '--save-dev', ...specs] }
+      return {
+        command: 'pnpm',
+        args: ['add', '--save-dev', ...flagIf(exact, '--save-exact'), ...flagIf(workspaceRoot, '-w'), ...specs],
+      }
     case 'yarn':
-      return { command: 'yarn', args: ['add', '--dev', ...specs] }
+      return {
+        command: 'yarn',
+        args: ['add', '--dev', ...flagIf(exact, '--exact'), ...flagIf(workspaceRoot && !yarnBerry, '-W'), ...specs],
+      }
     case 'bun':
-      return { command: 'bun', args: ['add', '--dev', ...specs] }
+      return { command: 'bun', args: ['add', '--dev', ...flagIf(exact, '--exact'), ...specs] }
   }
 }
 
@@ -352,6 +399,14 @@ export function storybookCommandOf(
  */
 export function nxCommandOf(packageManager: PackageManager, args: readonly string[], yarnBerry: boolean): CommandLine {
   return binCommandOf(packageManager, 'nx', args, yarnBerry)
+}
+
+/**
+ * Returns the command that runs `command` in `dir` from `from`: as it is when they're the same folder, else after going
+ * into `dir`, relative to `from`, as in `cd packages/ui && pnpm run storybook`.
+ */
+export function commandInFolderOf(from: string, dir: string, command: string): string {
+  return dir === from ? command : `cd ${relativePathOf(from, dir)} && ${command}`
 }
 
 /**

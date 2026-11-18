@@ -1,6 +1,6 @@
 import type { DetectedProject, DetectedStorybook } from './detect-project.js'
 import { nonEmptyOf } from './list-of.js'
-import { listsDependency } from './package-manager.js'
+import { listsDependency, type Manifest } from './package-manager.js'
 import type { Choice, Prompter } from './prompter.js'
 
 /**
@@ -19,6 +19,14 @@ export interface AddonAnswer {
    * The absolute folder of the Storybook's package, where it runs.
    */
   packageDir: string
+  /**
+   * The absolute folder of the `package.json` the addon goes in.
+   */
+  manifestDir: string
+  /**
+   * The parsed `package.json` in `manifestDir`.
+   */
+  manifest: Manifest
 }
 
 /**
@@ -64,7 +72,7 @@ interface AddonQuestionInput {
 /**
  * The name of the addon package.
  */
-const addonPackage = '@visual-check/storybook-addon'
+export const addonPackage = '@visual-check/storybook-addon'
 
 /**
  * The Storybook major version the addon is added to.
@@ -155,5 +163,11 @@ export async function askAddons(input: AddonQuestionInput): Promise<AddonAnswer[
 
   return fitting
     .filter(({ storybook }) => chosen.includes(storybook.configDir))
-    .map(({ storybook: { configDir, packageDir }, name }) => ({ configDir, name, packageDir }))
+    .map(({ storybook: { configDir, packageDir, manifestDir, manifest }, name }) => ({
+      configDir,
+      name,
+      packageDir,
+      manifestDir,
+      manifest,
+    }))
 }

@@ -9,6 +9,7 @@ import {
   type NextSteps,
   type Segment,
 } from '../init/closing-message.js'
+import type { ManualInstall } from '../init/install.js'
 import type { InitResult } from '../init/run-init.js'
 import { ColouredText } from './coloured-text.js'
 import { MessageLine } from './message-line.js'
@@ -60,6 +61,21 @@ interface ReplacedLineProps {
    * The line that names the scripts `init` replaced, when it replaced any.
    */
   text: string | undefined
+}
+
+/**
+ * How far each install command under Rush is indented.
+ */
+const manualCommandIndent = 2
+
+/**
+ * What `ManualInstallView` takes.
+ */
+interface ManualInstallViewProps {
+  /**
+   * The install steps to run.
+   */
+  manualInstall: ManualInstall
 }
 
 /**
@@ -187,6 +203,30 @@ function ReplacedLine({ text }: ReplacedLineProps): ReactNode {
 }
 
 /**
+ * Draws the install steps a person runs under Rush: the heading, then each command on its own line, indented, in the
+ * accent colour. A long command wraps under its own first letter.
+ */
+function ManualInstallView({ manualInstall }: ManualInstallViewProps): ReactNode {
+  const { columns } = useWindowSize()
+
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text>
+        <WrappedSegments segments={[manualInstall.heading]} width={columns} />
+      </Text>
+      {/* The commands never change, so where each one is tells it apart. */}
+      {Array.from(manualInstall.commands.entries(), ([position, command]) => (
+        <Box key={position} marginLeft={manualCommandIndent}>
+          <Text>
+            <WrappedSegments segments={[{ code: command }]} width={columns - manualCommandIndent} />
+          </Text>
+        </Box>
+      ))}
+    </Box>
+  )
+}
+
+/**
  * Draws the number column of a step's row.
  */
 function StepNumber({ label }: StepNumberProps): ReactNode {
@@ -284,8 +324,9 @@ function NextStepsView({ nextSteps }: NextStepsViewProps): ReactNode {
 
 /**
  * The end of a run. One that got to the end says visual-check is set up, names the scripts it replaced, shows the
- * warnings, then what to do next. One whose install failed names the scripts it replaced, then why it stopped. One
- * that stopped before it wrote shows its warnings and hints as notes, and why it stopped after `✕`.
+ * warnings, the install steps to run under Rush, then what to do next. One whose install failed names the scripts it
+ * replaced, then why it stopped. One that stopped before it wrote shows its warnings and hints as notes, and why it
+ * stopped after `✕`.
  */
 export function Summary({ result }: SummaryProps): ReactNode {
   const { summary } = result
@@ -305,6 +346,7 @@ export function Summary({ result }: SummaryProps): ReactNode {
       )}
       <ReplacedLine text={summary.replacedLine} />
       <MessageLines messages={result.messages} />
+      {summary.manualInstall === undefined ? null : <ManualInstallView manualInstall={summary.manualInstall} />}
       {summary.nextSteps === undefined ? null : <NextStepsView nextSteps={summary.nextSteps} />}
     </Box>
   )

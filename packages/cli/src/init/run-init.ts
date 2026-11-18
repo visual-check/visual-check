@@ -14,7 +14,19 @@ import { type DetectedProject, type DetectedStorybook, detectProject } from './d
 import { type ExistingConfig, existingConfigOf, existingStorybooksOf } from './existing-config.js'
 import type { ListFiles } from './find-storybooks.js'
 import { blockingProblemsOf, dockerWarningOf, versionNotesOf } from './init-checks.js'
-import { addAddons, addonTitleOf, dependenciesToAddOf, installDependencies, installTitle } from './install.js'
+import {
+  type AddonStep,
+  addAddons,
+  addonStepsOf,
+  addonTitleOf,
+  dependenciesToAddOf,
+  type InstallStep,
+  installDependencies,
+  installStepsOf,
+  type ManualInstall,
+  manualInstallTextOf,
+  rushInstallOf,
+} from './install.js'
 import { InputEndedError, type Prompter } from './prompter.js'
 import { type Answers, askQuestions } from './questions.js'
 import type { RunCommand } from './run-command.js'
@@ -105,8 +117,8 @@ export interface InitResult {
    */
   exitCode: number
   /**
-   * Text for standard output: the line that names the scripts replaced in `package.json`, when there are any, then the
-   * closing message, which a failed install leaves out.
+   * Text for standard output: the line that names the scripts replaced in `package.json`, when there are any, then
+   * under Rush the install steps to run, then the closing message, which a failed install leaves out.
    */
   stdout: string
   /**
@@ -133,6 +145,10 @@ interface InitSummary {
    * The line that names the scripts `init` replaced in `package.json`, when it replaced any.
    */
   replacedLine?: string
+  /**
+   * The install steps to run, under Rush, where `init` installs nothing itself, when there's anything to add.
+   */
+  manualInstall?: ManualInstall
   /**
    * What to do next, when `init` got to the end. A failed install leaves it out.
    */
@@ -296,26 +312,66 @@ function setupOf(
 }
 
 /**
- * Writes the files and the scripts, adds the dependencies and the addon, and checks for unlisted dependencies. Standard
- * output names the scripts it replaced, then gives the closing message. A failed install exits 2 with no closing
- * message. The result carries a summary for the terminal UI: the scripts replaced, and the next steps unless the
- * install failed.
+ * How `init` adds its packages and the addon: the commands it runs, or under Rush, the steps it prints instead.
  */
-async function applySetup(cwd: string, project: DetectedProject, setup: Setup, tools: InitTools): Promise<InitResult> {
-  const { packageManager, scripts, addons } = setup.answers
-  const { cliVersion, runCommand, progress } = tools
+interface InstallPlan {
+  /**
+   * The add commands to run, each with its step's title. None under Rush.
+   */
+  installSteps: InstallStep[]
+  /**
+   * The `storybook add` commands to run after them. None under Rush.
+   */
+  addonSteps: AddonStep[]
+  /**
+   * The install steps to print under Rush, when there's anything to add.
+   */
+  manualInstall: ManualInstall | undefined
+}
+
+/**
+ * Plans how to add the packages each folder still needs, the addon included, and then the addon to each Storybook
+ * ticked. Under Rush, which installs through its own `rush add` and `rush update`, `init` runs none of it and prints
+ * the steps instead.
+ */
+function installPlanOf(project: DetectedProject, setup: Setup, tools: InitTools): InstallPlan {
+  const { root, yarnBerry, workspace } = project
+  const { packageManager, addons } = setup.answers
+  const { cliVersion } = tools
   const installs = dependenciesToAddOf({
-    root: project.root,
+    root,
     rootManifest: project.manifest,
-    storybooks: setup.withDependencies.map(({ manifestDir, manifest }) => ({ packageDir: manifestDir, manifest })),
+    storybooks: setup.withDependencies,
+    addons,
     cliVersion,
     browserRange: tools.browserRange,
   })
+  const addonSteps = addonStepsOf({ addons, packageManager, yarnBerry, cliVersion, root })
+  const context = { packageManager, yarnBerry, root, packageManagerLists: workspace.packageManagerLists }
+
+  if (workspace.kind === 'rush') {
+    return { installSteps: [], addonSteps: [], manualInstall: rushInstallOf({ ...context, installs, addonSteps }) }
+  }
+
+  return { installSteps: installStepsOf({ ...context, installs }), addonSteps, manualInstall: undefined }
+}
+
+/**
+ * Writes the files and the scripts, adds the dependencies and the addon, and checks for unlisted dependencies. Under
+ * Rush it adds nothing and prints the install steps instead. Standard output names the scripts it replaced, then gives
+ * the install steps under Rush, then the closing message. A failed install exits 2 with no closing message. The result
+ * carries a summary for the terminal UI: the scripts replaced, the install steps under Rush, and the next steps unless
+ * the install failed.
+ */
+async function applySetup(cwd: string, project: DetectedProject, setup: Setup, tools: InitTools): Promise<InitResult> {
+  const { packageManager, scripts } = setup.answers
+  const { runCommand, progress } = tools
+  const { installSteps, addonSteps, manualInstall } = installPlanOf(project, setup, tools)
 
   progress.plan([
     writeFilesTitle,
-    ...installs.map(() => installTitle),
-    ...addons.map(({ name }) => addonTitleOf(name)),
+    ...installSteps.map(({ title }) => title),
+    ...addonSteps.map(({ name }) => addonTitleOf(name)),
     checkUnlistedTitle,
   ])
 
@@ -327,7 +383,7 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
   )
   const replacedLine = replacedScriptsLineOf(replacedScripts)
   const replacedSummary = replacedLine === undefined ? {} : { replacedLine }
-  const problem = await installDependencies({ installs, packageManager, runCommand, progress })
+  const problem = await installDependencies({ steps: installSteps, cwd, runCommand, progress })
 
   if (problem !== undefined) {
     return {
@@ -336,15 +392,7 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
     }
   }
 
-  const addonWarnings = await addAddons({
-    addons,
-    packageManager,
-    yarnBerry: project.yarnBerry,
-    cliVersion,
-    root: project.root,
-    runCommand,
-    progress,
-  })
+  const addonWarnings = await addAddons({ steps: addonSteps, cwd, runCommand, progress })
 
   const fallowWarnings = await runStep(
     progress,
@@ -361,12 +409,17 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
     scripts,
     needsBaselines: await needsBaselinesOf(setup.storybooks),
   })
-  const closingMessage = closingMessageTextOf(nextSteps)
-  const stdout = replacedLine === undefined ? closingMessage : `${replacedLine}\n\n${closingMessage}`
+  const stdout = [
+    replacedLine,
+    manualInstall === undefined ? undefined : manualInstallTextOf(manualInstall),
+    closingMessageTextOf(nextSteps),
+  ]
+    .filter((part) => part !== undefined)
+    .join('\n\n')
 
   return {
     ...resultOf(0, stdout, [...setup.notes, ...addonWarnings, ...fallowWarnings]),
-    summary: { ...replacedSummary, nextSteps },
+    summary: { ...replacedSummary, ...(manualInstall === undefined ? {} : { manualInstall }), nextSteps },
   }
 }
 

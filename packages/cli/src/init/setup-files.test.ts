@@ -7,6 +7,7 @@ import {
   configSourceOf,
   configStorybookOf,
   modesFileSource,
+  pinDependency,
   setScripts,
   visualCheckGitignore,
   writeIfMissing,
@@ -388,5 +389,58 @@ describe('setScripts', () => {
       new Error(`${path} is not a JSON object, so init can't add scripts to it.`),
     )
     expect(readFileSync(path, 'utf8')).toBe(text)
+  })
+})
+
+describe('pinDependency', () => {
+  /**
+   * Writes `text` to a `package.json` in a new folder and returns its path.
+   */
+  function manifestWith(text: string): string {
+    const path = join(createFolder(), 'package.json')
+
+    writeFileSync(path, text)
+
+    return path
+  }
+
+  it('sets a range back to the exact version in the field that lists it, keeping the key order and indentation', () => {
+    const path = manifestWith(
+      '{\n    "name": "ui",\n    "devDependencies": {\n        "a": "1.0.0",\n        "addon": "^1.2.3",\n        "z": "2"\n    }\n}\n',
+    )
+
+    pinDependency(path, 'addon', '1.2.3')
+
+    expect(readFileSync(path, 'utf8')).toBe(
+      '{\n    "name": "ui",\n    "devDependencies": {\n        "a": "1.0.0",\n        "addon": "1.2.3",\n        "z": "2"\n    }\n}\n',
+    )
+  })
+
+  it('keeps CRLF line endings and no trailing newline', () => {
+    const path = manifestWith('{\r\n  "dependencies": {\r\n    "addon": "^1.2.3"\r\n  }\r\n}')
+
+    pinDependency(path, 'addon', '1.2.3')
+
+    expect(readFileSync(path, 'utf8')).toBe('{\r\n  "dependencies": {\r\n    "addon": "1.2.3"\r\n  }\r\n}')
+  })
+
+  it.each([
+    ['already exact', '{ "devDependencies": { "addon": "1.2.3" } }'],
+    ['not listed', '{ "devDependencies": { "other": "^1.0.0" } }'],
+  ])('leaves the file alone when the dependency is %s', (_, text) => {
+    const path = manifestWith(text)
+
+    pinDependency(path, 'addon', '1.2.3')
+
+    expect(readFileSync(path, 'utf8')).toBe(text)
+  })
+
+  it("throws for a file that isn't a JSON object, or is missing", () => {
+    expect(() => pinDependency(manifestWith('[]'), 'addon', '1.2.3')).toThrow(
+      /is not a JSON object, so init can't pin addon\.$/,
+    )
+    expect(() => pinDependency(join(createFolder(), 'package.json'), 'addon', '1.2.3')).toThrow(
+      expect.objectContaining({ code: 'ENOENT' }),
+    )
   })
 })

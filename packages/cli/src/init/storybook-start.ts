@@ -1,6 +1,7 @@
 import { posix } from 'node:path'
 import { relativePathOf } from './find-storybooks.js'
 import {
+  commandInFolderOf,
   commandLineOf,
   isJsonObject,
   nonEmptyTextOf,
@@ -238,7 +239,7 @@ function scriptStartCommandOf(
     ? runPackageScriptCommandOf(packageManager, call.script, { dir, name: packageName })
     : undefined
 
-  return throughWorkspace ?? `cd ${dir} && ${runScriptCommandOf(packageManager, call.script)}`
+  return throughWorkspace ?? commandInFolderOf(root, packageDir, runScriptCommandOf(packageManager, call.script))
 }
 
 /**

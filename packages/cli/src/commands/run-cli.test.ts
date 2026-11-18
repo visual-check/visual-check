@@ -16,7 +16,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { BrowserDownloadError } from '../browser-download/browser-download-error.js'
 import { BrowserExitedError, BrowserLaunchError } from '../capture/driver/driver.js'
 import { ContainerError } from '../container/container-error.js'
-import { pnpmAdd, pnpmClosingMessage, pnpmNextSteps } from '../init/init-tools.fixture.js'
+import { pnpmAdd, pnpmAddBrowser, pnpmClosingMessage, pnpmNextSteps } from '../init/init-tools.fixture.js'
 import { scriptedPrompter } from '../init/prompter.fixture.js'
 import type { InitResult } from '../init/run-init.js'
 import type { StoriesFile } from '../storybook/options-read.js'
@@ -90,6 +90,11 @@ const oneWorker = 'workers: 1'
  * The command that adds visual-check's packages to the `init` project, under pnpm.
  */
 const pnpmAddLine = [pnpmAdd.command, ...pnpmAdd.args].join(' ')
+
+/**
+ * The command that adds the browser package to the `init` project at the CLI's range, under pnpm.
+ */
+const pnpmAddBrowserLine = [pnpmAddBrowser.command, ...pnpmAddBrowser.args].join(' ')
 
 /**
  * The terminal UI's module as `init` loads it in a terminal: a stand-in, so no test draws in the real terminal.
@@ -242,11 +247,11 @@ Other options:
         return 0
       },
     })
-    const addonLine = `pnpm exec storybook add @visual-check/storybook-addon@${version} --yes`
+    const addonLine = `pnpm exec storybook add @visual-check/storybook-addon@${version} --yes --skip-install`
 
     expect(result).toEqual({ exitCode: 0, stdout: pnpmClosingMessage, stderr: '' })
-    expect(written).toEqual([`Running ${pnpmAddLine}\n`, `Running ${addonLine}\n`])
-    expect(commands).toEqual([pnpmAddLine, addonLine])
+    expect(written).toEqual([`Running ${pnpmAddLine}\n`, `Running ${pnpmAddBrowserLine}\n`, `Running ${addonLine}\n`])
+    expect(commands).toEqual([pnpmAddLine, pnpmAddBrowserLine, addonLine])
     expect(initViewModule.startInitView).not.toHaveBeenCalled()
   })
 

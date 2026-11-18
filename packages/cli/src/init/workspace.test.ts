@@ -454,7 +454,7 @@ describe('findWorkspace', () => {
   it.each([
     [{ 'pnpm-workspace.yaml': 'packages:\n  - apps/*\n' }, {}, { pnpm: ['apps/web'], workspaces: undefined }],
     [{}, { workspaces: ['apps/*'] }, { pnpm: undefined, workspaces: ['apps/web'] }],
-    [{ 'pnpm-workspace.yaml': 'catalog: {}\n' }, {}, { pnpm: undefined, workspaces: undefined }],
+    [{ 'pnpm-workspace.yaml': 'catalog: {}\n' }, {}, { pnpm: [], workspaces: undefined }],
   ])('lists the packages each package manager list of an Nx root names: %j %j', async (files, fields, lists) => {
     const root = makeProject({
       manifest: { name: 'root', ...fields },

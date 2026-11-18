@@ -27,27 +27,46 @@ export const cliVersion = cliManifest.version
 export const browserRange = cliManifest.peerDependencies['@visual-check/chromium']
 
 /**
- * The dependencies `init` adds to a project that lists none of them, under pnpm.
- *
- * @public
+ * The packages `init` adds at exact versions to a project that lists none of them and gets no addon, under pnpm.
  */
-export const pnpmAdd = {
+export const pnpmAddWithoutAddon = {
   command: 'pnpm',
   args: [
     'add',
     '--save-dev',
+    '--save-exact',
     `@visual-check/cli@${cliVersion}`,
-    `@visual-check/chromium@${browserRange}`,
     `@visual-check/storybook@${cliVersion}`,
   ],
 }
 
 /**
- * The command that adds the addon to the `.storybook` Storybook, under pnpm.
+ * The packages `init` adds at exact versions to a project that lists none of them, the addon included, under pnpm.
+ *
+ * @public
+ */
+export const pnpmAdd = {
+  command: 'pnpm',
+  args: [...pnpmAddWithoutAddon.args, `@visual-check/storybook-addon@${cliVersion}`],
+}
+
+/**
+ * The command that adds the browser package at the CLI's range to a project that doesn't list it, under pnpm, after
+ * the exact ones.
+ *
+ * @public
+ */
+export const pnpmAddBrowser = {
+  command: 'pnpm',
+  args: ['add', '--save-dev', `@visual-check/chromium@${browserRange}`],
+}
+
+/**
+ * The command that adds the addon to the `.storybook` Storybook, under pnpm, once the add command has installed it.
  */
 export const pnpmAddon = {
   command: 'pnpm',
-  args: ['exec', 'storybook', 'add', `@visual-check/storybook-addon@${cliVersion}`, '--yes'],
+  args: ['exec', 'storybook', 'add', `@visual-check/storybook-addon@${cliVersion}`, '--yes', '--skip-install'],
 }
 
 /**
@@ -191,7 +210,9 @@ function install(args: readonly string[], cwd: string): void {
 
     manifest.devDependencies = { ...manifest.devDependencies, [spec.slice(0, at)]: spec.slice(at + 1) }
   }
+
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+
   if (specs.some((spec) => spec.startsWith('@visual-check/cli@'))) {
     const cliDir = join(cwd, 'node_modules', '@visual-check', 'cli')
 
@@ -244,6 +265,7 @@ export function toolsOf(
     const exitCode = behaviour.exitCodes?.[record.commands.length] ?? 0
 
     record.commands.push({ command, args, cwd })
+
     if (exitCode === 0 && behaviour.installs === true) {
       install(args, cwd)
     }
