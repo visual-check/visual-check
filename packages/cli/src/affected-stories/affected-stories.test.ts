@@ -345,8 +345,8 @@ describe('affectedStoriesFilesOf', () => {
  */
 function fakeFindReachedFiles(result: ReachedFiles | CantAnswer) {
   const calls: { root: string; changedFiles: readonly string[] }[] = []
-  const findReachedFiles: FindReachedFiles = (calledRoot, changed) => {
-    calls.push({ root: calledRoot, changedFiles: changed.files })
+  const findReachedFiles: FindReachedFiles = (calledRoot, files) => {
+    calls.push({ root: calledRoot, changedFiles: files })
 
     return Promise.resolve(result)
   }
@@ -410,7 +410,7 @@ describe('workOutAffectedStories', () => {
   }
 
   it("affects nothing and doesn't ask the graph when no file changed", async () => {
-    const fake = fakeFindReachedFiles({ reached: new Set(), reachedFromFolders: new Set() })
+    const fake = fakeFindReachedFiles({ reached: new Set(), reachedFromFolders: () => new Set() })
 
     expect(await workOut(fake.findReachedFiles)).toEqual({
       base,
@@ -427,7 +427,7 @@ describe('workOutAffectedStories', () => {
 
     const fake = fakeFindReachedFiles({
       reached: new Set(['src/button.tsx', 'src/button.stories.tsx']),
-      reachedFromFolders: new Set(),
+      reachedFromFolders: () => new Set(),
     })
 
     expect(await workOut(fake.findReachedFiles)).toEqual({
@@ -449,7 +449,7 @@ describe('workOutAffectedStories', () => {
 
     const fake = fakeFindReachedFiles({
       reached: new Set(['src/button.tsx', 'src/button.stories.tsx']),
-      reachedFromFolders: new Set(),
+      reachedFromFolders: () => new Set(),
     })
 
     expect(await workOut(fake.findReachedFiles)).toMatchObject({ storybooks: [some('./src/button.stories.tsx')] })
@@ -469,7 +469,7 @@ describe('workOutAffectedStories', () => {
   })
 
   it("affects every story when the folder isn't in a git repository", async () => {
-    const fake = fakeFindReachedFiles({ reached: new Set(), reachedFromFolders: new Set() })
+    const fake = fakeFindReachedFiles({ reached: new Set(), reachedFromFolders: () => new Set() })
 
     expect(await workOut(fake.findReachedFiles, { cwd: makeFolder() })).toEqual({
       base: null,
@@ -483,7 +483,7 @@ describe('workOutAffectedStories', () => {
   it('affects every story when no base branch is found', async () => {
     git(repo, 'branch', '-D', 'main')
 
-    const fake = fakeFindReachedFiles({ reached: new Set(), reachedFromFolders: new Set() })
+    const fake = fakeFindReachedFiles({ reached: new Set(), reachedFromFolders: () => new Set() })
     const result = await workOut(fake.findReachedFiles)
 
     expect(result).toMatchObject({ base: null, changedFiles: null, storybooks: [{ all: true }] })
@@ -491,7 +491,7 @@ describe('workOutAffectedStories', () => {
   })
 
   it('rejects with InvalidBaseError for a --base that names no commit', async () => {
-    const fake = fakeFindReachedFiles({ reached: new Set(), reachedFromFolders: new Set() })
+    const fake = fakeFindReachedFiles({ reached: new Set(), reachedFromFolders: () => new Set() })
 
     await expect(workOut(fake.findReachedFiles, { baseRef: 'nope' })).rejects.toThrow(InvalidBaseError)
   })
@@ -499,8 +499,8 @@ describe('workOutAffectedStories', () => {
 
 describe('workOutAffectedStories in a monorepo', () => {
   /**
-   * A repository on branch `work`, one commit after `main`: a root package, `packages/ui`, and the Storybooks of
-   * `apps/web`, which imports `packages/ui`, and `apps/docs`, which doesn't.
+   * A repository on branch `work`, one commit after `main`: a root package, `packages/ui`, `packages/theme`, and the
+   * Storybooks of `apps/web`, which imports `packages/ui`, and `apps/docs`, which imports `packages/theme`.
    */
   let repo: string
 
@@ -519,6 +519,7 @@ describe('workOutAffectedStories in a monorepo', () => {
     'apps/web/src/page.tsx': ['apps/web/src/page.stories.tsx'],
     'apps/web/src/page.stories.tsx': [],
     'apps/web/.storybook/main.ts': [],
+    'packages/theme/src/theme.ts': ['apps/docs/src/intro.stories.tsx'],
     'apps/docs/src/intro.stories.tsx': [],
     'apps/docs/.storybook/main.ts': [],
   }
@@ -533,6 +534,7 @@ describe('workOutAffectedStories in a monorepo', () => {
       'visual-check.config.ts': 'export default {}\n',
       'README.md': 'Read me.\n',
       'packages/ui/package.json': '{}\n',
+      'packages/theme/package.json': '{}\n',
       ...Object.fromEntries(Object.keys(importers).map((file) => [file, '\n'])),
       'apps/web/package.json': '{}\n',
       'apps/web/.visual-check/baselines/page--default.png': 'png',
@@ -556,7 +558,7 @@ describe('workOutAffectedStories in a monorepo', () => {
 
   /**
    * Builds a graph that walks back through `importers` from the changed files and from every graph file under the
-   * changed folders, and records every call.
+   * folders it's asked about, and records every call, with the folders it was asked about, if any.
    */
   function fakeGraph() {
     const calls: { files: readonly string[]; folders: readonly string[] }[] = []
@@ -577,14 +579,21 @@ describe('workOutAffectedStories in a monorepo', () => {
 
       return reached
     }
-    const findReachedFiles: FindReachedFiles = async (_root, changed) => {
-      calls.push({ files: changed.files, folders: changed.folders })
+    const findReachedFiles: FindReachedFiles = async (_root, files) => {
+      const call = { files, folders: [] as readonly string[] }
 
-      const underFolders = Object.keys(importers).filter((file) =>
-        changed.folders.some((folder) => file.startsWith(`${folder}/`)),
-      )
+      calls.push(call)
 
-      return { reached: walkBack(changed.files), reachedFromFolders: walkBack(underFolders) }
+      return {
+        reached: walkBack(files),
+        reachedFromFolders: (folders) => {
+          call.folders = folders
+
+          return walkBack(
+            Object.keys(importers).filter((file) => folders.some((folder) => file.startsWith(`${folder}/`))),
+          )
+        },
+      }
     }
 
     return { calls, findReachedFiles }
@@ -667,15 +676,30 @@ describe('workOutAffectedStories in a monorepo', () => {
     expect(result.storybooks).toEqual([{ all: true }, some()])
   })
 
-  it('selects like a package.json for a font or a data JSON file the graph does not hold', async () => {
+  it('selects like a package.json for a font the graph does not hold', async () => {
     expect((await affectedBy({ 'packages/ui/fonts/inter.woff2': 'font' })).storybooks).toEqual([{ all: true }, some()])
-    expect((await affectedBy({ 'apps/docs/src/data.json': '{}\n' })).storybooks).toEqual([{ all: true }, { all: true }])
+  })
+
+  it('selects like a package.json for a data JSON file the graph does not hold', async () => {
+    expect((await affectedBy({ 'apps/docs/src/data.json': '{}\n' })).storybooks).toEqual([some(), { all: true }])
   })
 
   it('selects what the graph says for an image the graph holds', async () => {
     const result = await affectedBy({ 'packages/ui/src/icons/star.svg': '<svg/>' })
 
     expect(result.storybooks).toEqual([some('./src/page.stories.tsx'), some()])
+  })
+
+  it("walks only the packages that count, so an image the graph holds doesn't scope its package", async () => {
+    const result = await affectedBy({
+      'packages/ui/src/icons/star.svg': '<svg/>',
+      'packages/theme/package.json': '{ "version": "2" }\n',
+    })
+
+    expect(result.storybooks).toEqual([some('./src/page.stories.tsx'), { all: true }])
+    expect(result.calls).toEqual([
+      { files: ['packages/theme/package.json', 'packages/ui/src/icons/star.svg'], folders: ['packages/theme'] },
+    ])
   })
 
   it('selects every story of every Storybook for an image at the root the graph does not hold', async () => {

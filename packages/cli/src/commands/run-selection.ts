@@ -183,7 +183,8 @@ export function fallbackWarningOf(fallback: string | null): string {
  * matches. `affected` finds the changed files since the base and what they reach, once for every Storybook in the run,
  * reads them with the config file's `affected` globs, and keeps the affected stories: the stories of the affected
  * stories files and the stories of the changed baselines, or every story of a Storybook a change reaches as a whole;
- * when that can't be worked out, it keeps every story, with a warning that says why. An affected run that keeps no story at all gets a note that hints at `--all`.
+ * when that can't be worked out, it keeps every story, with a warning that says why. An affected run that keeps no
+ * story at all gets a note that hints at `--all`.
  *
  * @throws {InvalidBaseError} When `--base` names no commit in the repository.
  */

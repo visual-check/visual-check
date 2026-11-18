@@ -17,10 +17,11 @@ export interface ReachedFiles {
    */
   reached: ReadonlySet<string>
   /**
-   * Every graph file under any of the changed folders, plus every file reached by walking back from them. Empty when
-   * no folder was given. Paths are relative to the project root, `/`-separated.
+   * Gives every graph file under any of the folders, plus every file reached by walking back from them, from the same
+   * graph as `reached`, so it can be asked once `reached` is known. Folders and paths are relative to the project root,
+   * `/`-separated, and a folder is never the root itself. Gives an empty set for no folder.
    */
-  reachedFromFolders: ReadonlySet<string>
+  reachedFromFolders: (folders: readonly string[]) => ReadonlySet<string>
 }
 
 /**
@@ -34,25 +35,13 @@ export interface CantAnswer {
 }
 
 /**
- * Finds the files that changing `changed.files`, or any file under `changed.folders`, can alter in the project at
- * `root`. Both are relative to the root, `/`-separated, and a folder is never the root itself. It never rejects:
- * anything that keeps it from answering gives `CantAnswer`.
+ * Finds the files that changing `files` can alter in the project at `root`, and answers which files changing any file
+ * under some folders can alter. The files are relative to the root, `/`-separated. It never rejects: anything that
+ * keeps it from answering gives `CantAnswer`.
  *
  * @public
  */
-export type FindReachedFiles = (
-  root: string,
-  changed: {
-    /**
-     * The changed files.
-     */
-    files: readonly string[]
-    /**
-     * The folders whose every file counts as changed.
-     */
-    folders: readonly string[]
-  },
-) => Promise<ReachedFiles | CantAnswer>
+export type FindReachedFiles = (root: string, files: readonly string[]) => Promise<ReachedFiles | CantAnswer>
 
 /**
  * How `readFallowGraph` runs Fallow.
@@ -253,11 +242,12 @@ export function readFallowGraph(root: string, options: FallowGraphOptions = {}):
 }
 
 /**
- * Finds the reached files with one run of Fallow's graph, walked back in memory from the changed files and folders.
+ * Finds the reached files with one run of Fallow's graph, kept in memory and walked back from the changed files, and
+ * from the folders when asked.
  *
  * @public
  */
-export const findReachedFilesWithFallow: FindReachedFiles = async (root, changed) => {
+export const findReachedFilesWithFallow: FindReachedFiles = async (root, files) => {
   const graph = await readFallowGraph(root)
 
   if ('cantAnswer' in graph) {
@@ -265,7 +255,7 @@ export const findReachedFilesWithFallow: FindReachedFiles = async (root, changed
   }
 
   return {
-    reached: filesReachedFrom(graph, changed.files),
-    reachedFromFolders: filesReachedFromFolders(graph, changed.folders),
+    reached: filesReachedFrom(graph, files),
+    reachedFromFolders: (folders) => filesReachedFromFolders(graph, folders),
   }
 }

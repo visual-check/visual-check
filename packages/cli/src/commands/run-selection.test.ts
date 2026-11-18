@@ -204,10 +204,10 @@ describe('workOutRunSelection for affected', () => {
 
   it('keeps the stories of the stories files the changed files reach, asking the graph once', async () => {
     const calls: (readonly string[])[] = []
-    const { input, head } = affectedRunIn(async (_root, changed) => {
-      calls.push(changed.files)
+    const { input, head } = affectedRunIn(async (_root, files) => {
+      calls.push(files)
 
-      return { reached: new Set(['button.tsx', 'button.stories.tsx']), reachedFromFolders: new Set<string>() }
+      return { reached: new Set(['button.tsx', 'button.stories.tsx']), reachedFromFolders: () => new Set<string>() }
     })
     const result = await workOutRunSelection(input)
 
@@ -226,7 +226,7 @@ describe('workOutRunSelection for affected', () => {
   it("keeps a changed baseline's story beside the stories of the reached stories files", async () => {
     const { input, repo } = affectedRunIn(async () => ({
       reached: new Set(['button.tsx', 'button.stories.tsx']),
-      reachedFromFolders: new Set<string>(),
+      reachedFromFolders: () => new Set<string>(),
     }))
 
     writeFiles(repo, { '.visual-check/baselines/card--primary.png': 'png' })
@@ -249,7 +249,7 @@ describe('workOutRunSelection for affected', () => {
   it('notes that the changed file affects no story when the graph reaches no stories file', async () => {
     const { input } = affectedRunIn(async () => ({
       reached: new Set(['button.tsx']),
-      reachedFromFolders: new Set<string>(),
+      reachedFromFolders: () => new Set<string>(),
     }))
     const result = await workOutRunSelection(input)
 

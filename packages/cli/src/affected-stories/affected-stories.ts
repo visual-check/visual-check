@@ -352,7 +352,8 @@ function withRealPaths(storybooks: readonly AffectedStorybookInput[]): Promise<A
 
 /**
  * Works out each Storybook's affected stories: finds the changed files since the base, sorts them by rule, asks
- * `findReachedFiles` what they and their packages reach, and applies the rules of `affectedStoriesFilesOf`.
+ * `findReachedFiles` what they reach, then what their changed packages reach, and applies the rules of
+ * `affectedStoriesFilesOf`.
  *
  * - A changed file that matches `affected.ignore` counts for nothing but `changedFiles`.
  * - The config file, a lockfile, `pnpm-workspace.yaml` or a match for `affected.selectAll` affects every story.
@@ -414,23 +415,22 @@ export async function workOutAffectedStories(options: WorkOutAffectedStoriesOpti
     return outcome(beforeGraph)
   }
 
-  // An asset's package is walked too, in case the graph doesn't hold it. The root is never walked, since a changed
-  // root package affects every story.
-  const folders = [...new Set(packageScoped.map(({ packageFolder }) => packageFolder))].filter(
-    (folder) => folder !== '.',
-  )
-  const reached = await findReachedFiles(root, { files: graphFiles, folders })
+  const reached = await findReachedFiles(root, graphFiles)
 
   if ('cantAnswer' in reached) {
     return outcome(everyStoryAffected(storybooks), reached.cantAnswer)
   }
 
+  const changedPackages = changedPackagesOf(packageScoped, reached.reached)
+  // The root is never walked, since a changed root package affects every story.
+  const folders = [...changedPackages].filter((folder) => folder !== '.')
+
   return outcome(
     affectedStoriesFilesOf({
       ...rulesInput,
       reached: reached.reached,
-      changedPackages: changedPackagesOf(packageScoped, reached.reached),
-      reachedFromPackages: reached.reachedFromFolders,
+      changedPackages,
+      reachedFromPackages: reached.reachedFromFolders(folders),
     }),
   )
 }

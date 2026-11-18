@@ -44,9 +44,9 @@ function fakeFallow(name: string, source: string): () => string {
 
 describe('findReachedFilesWithFallow', () => {
   it('reaches the importers of a changed file, through re-exports and Storybook config', async () => {
-    const result = await findReachedFilesWithFallow(project, { files: ['src/tokens.ts'], folders: [] })
+    const result = await findReachedFilesWithFallow(project, ['src/tokens.ts'])
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       reached: new Set([
         'src/tokens.ts',
         'src/re-export-all.ts',
@@ -55,40 +55,37 @@ describe('findReachedFilesWithFallow', () => {
         'src/button.stories.ts',
         '.storybook/preview.ts',
       ]),
-      reachedFromFolders: new Set(),
     })
   })
 
   it("keeps a file the project's own Fallow config ignores", async () => {
-    const result = await findReachedFilesWithFallow(project, { files: [ignoredFile], folders: [] })
+    const result = await findReachedFilesWithFallow(project, [ignoredFile])
 
-    expect(result).toEqual({
-      reached: new Set([ignoredFile, 'src/button.ts', 'src/button.stories.ts']),
-      reachedFromFolders: new Set(),
-    })
+    expect(result).toMatchObject({ reached: new Set([ignoredFile, 'src/button.ts', 'src/button.stories.ts']) })
   })
 
   it('reaches nothing from a changed file outside the graph', async () => {
-    const result = await findReachedFilesWithFallow(project, { files: ['README.md'], folders: [] })
+    const result = await findReachedFilesWithFallow(project, ['README.md'])
 
-    expect(result).toEqual({ reached: new Set(), reachedFromFolders: new Set() })
+    expect(result).toMatchObject({ reached: new Set() })
   })
 
-  it('reaches the files under a folder and their importers', async () => {
-    const result = await findReachedFilesWithFallow(project, { files: [], folders: ['src/nested'] })
+  it('reaches the files under a folder and their importers, from the same graph, once asked', async () => {
+    const result = await findReachedFilesWithFallow(project, [])
 
-    expect(result).toEqual({
-      reached: new Set(),
-      reachedFromFolders: new Set([
-        'src/nested/deep/deep.ts',
-        'src/with space/ünïcode file.ts',
-        'src/button.stories.ts',
-      ]),
-    })
+    if ('cantAnswer' in result) {
+      throw new Error(`Fallow couldn't answer: ${result.cantAnswer}`)
+    }
+
+    expect(result.reached).toEqual(new Set())
+    expect(result.reachedFromFolders(['src/nested'])).toEqual(
+      new Set(['src/nested/deep/deep.ts', 'src/with space/ünïcode file.ts', 'src/button.stories.ts']),
+    )
+    expect(result.reachedFromFolders([])).toEqual(new Set())
   })
 
   it("can't answer when the project folder is gone", async () => {
-    const result = await findReachedFilesWithFallow(join(fakes, 'missing'), { files: ['src/tokens.ts'], folders: [] })
+    const result = await findReachedFilesWithFallow(join(fakes, 'missing'), ['src/tokens.ts'])
 
     expect(result).toEqual({ cantAnswer: expect.stringMatching(/^Fallow couldn't start: /) })
   })
