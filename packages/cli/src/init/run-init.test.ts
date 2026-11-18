@@ -818,7 +818,7 @@ describe('runInit in a workspace', () => {
     const { tools } = toolsOf()
     const result = await runInit(root, tools)
     const warning =
-      "Warning: ui and sb both use port 6006, so they can't run at the same time. Give each Storybook its own port."
+      "Warning: ui and web both use port 6006, so they can't run at the same time. Give each Storybook its own port."
 
     expect(result.exitCode).toBe(0)
     expect(result.messages).toEqual([warning])
@@ -828,14 +828,14 @@ describe('runInit in a workspace', () => {
 export default defineConfig({
   storybooks: {
     ui: { dir: 'packages/ui', url: 'http://127.0.0.1:6006' },
-    sb: { dir: 'packages/web', configDir: '.sb', url: 'http://127.0.0.1:6006' },
+    web: { dir: 'packages/web', configDir: '.sb', url: 'http://127.0.0.1:6006' },
   },
 })
 `)
     expect(readText(root, 'packages/web/.sb/visual-check.ts')).toBe(modesFile)
     expect(result.summary?.nextSteps?.steps[0]).toEqual([
       { command: 'pnpm --filter @acme/ui run storybook', text: ['Start ui, and keep it running'] },
-      { command: 'pnpm --filter web run storybook', text: ['Start sb, and keep it running'] },
+      { command: 'pnpm --filter web run storybook', text: ['Start web, and keep it running'] },
     ])
   })
 

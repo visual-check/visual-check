@@ -132,11 +132,35 @@ function slugOf(text: string): string {
 }
 
 /**
- * Returns the text a Storybook's default name comes from, for a config folder relative to its package's folder. See
- * `defaultNameOf`.
+ * What a Storybook's default name comes from.
  */
-function nameSourceOf(configDir: string, packageName: string | undefined, packageDir: string): string {
-  if (configDir === defaultConfigDir || configDir === '.') {
+interface NameSource {
+  /**
+   * The config folder, relative to the package's folder.
+   */
+  configDir: string
+  /**
+   * The package's name: its `package.json`'s, or for an Nx project without one, its `project.json`'s. `undefined`
+   * when it has none.
+   */
+  packageName: string | undefined
+  /**
+   * The absolute folder of the package.
+   */
+  packageDir: string
+  /**
+   * Whether the package is the workspace root's.
+   */
+  rootPackage: boolean
+}
+
+/**
+ * Returns the text a Storybook's default name comes from. See `defaultNameOf`.
+ */
+function nameSourceOf({ configDir, packageName, packageDir, rootPackage }: NameSource): string {
+  const directlyInPackage = !rootPackage && !configDir.includes('/')
+
+  if (configDir === defaultConfigDir || configDir === '.' || directlyInPackage) {
     return packageName === undefined ? basename(packageDir) : packageName.replace(/^@[^/]+\//, '')
   }
 
@@ -164,11 +188,11 @@ export function takeUniqueName(base: string, used: Set<string>): string {
 }
 
 /**
- * Returns the default Storybook name of a config folder, relative to its package's folder `packageDir`: valid, but not
- * yet unique. A `.storybook` in the package, or the package itself (`.`), takes the package name without its scope,
- * else the package folder's name. Another folder takes the name of the folder holding it, or its own name without a
- * leading `.` when it isn't called `.storybook`.
+ * Returns the default Storybook name of a config folder: valid, but not yet unique. The package itself (`.`), its
+ * `.storybook`, and in a package other than the root's any config folder directly in it, take the package name without
+ * its scope, else the package folder's name. Another folder takes the name of the folder holding it, or its own name
+ * without a leading `.` when it isn't called `.storybook`.
  */
-export function defaultNameOf(configDir: string, packageName: string | undefined, packageDir: string): string {
-  return slugOf(nameSourceOf(configDir, packageName, packageDir))
+export function defaultNameOf(source: NameSource): string {
+  return slugOf(nameSourceOf(source))
 }

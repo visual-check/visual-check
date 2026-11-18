@@ -356,7 +356,7 @@ describe('detectProject in a workspace', () => {
       {
         configDir: 'apps/docs/.sb',
         packageDir: join(root, 'apps/docs'),
-        defaultName: 'sb',
+        defaultName: 'docs',
         start: {
           kind: 'script',
           call: { script: 'sb', configDir: '.sb', port: 7000 },

@@ -229,11 +229,12 @@ function storybooksOf(
     const packageDir = join(root, workspacePackage.dir)
     const projectJson = readJsonFile(join(packageDir, 'project.json'))
     const packageName = nonEmptyTextOf(workspacePackage.manifest.name)
-    const name = defaultNameOf(
-      packageRelativeOf(workspacePackage.dir, configDir),
-      workspacePackage.hasManifest ? packageName : nxProjectNameOf(projectJson),
+    const name = defaultNameOf({
+      configDir: packageRelativeOf(workspacePackage.dir, configDir),
+      packageName: workspacePackage.hasManifest ? packageName : nxProjectNameOf(projectJson),
       packageDir,
-    )
+      rootPackage: workspacePackage.dir === '.',
+    })
 
     storybooks.push({
       configDir,
