@@ -6,10 +6,11 @@ import { defaultBaselinesIn, type ResolvedConfig, type ResolvedStorybook } from 
 import type { SetUpStorybook } from './closing-message.js'
 import type { DetectedProject, DetectedStorybook } from './detect-project.js'
 import { isInsideRoot, mainFileOnDiskIn, relativePathOf, takeUniqueName } from './find-storybooks.js'
-import { commandLineOf, type PackageManager, runScriptCommandOf, storybookCommandOf } from './package-manager.js'
+import { commandLineOf, type PackageManager, storybookCommandOf } from './package-manager.js'
 import { defaultStorybookPort } from './questions.js'
 import { configEntryOf } from './setup-files.js'
 import { defaultConfigDir } from './storybook-scripts.js'
+import { portOfStart, startCommandOf } from './storybook-start.js'
 
 /**
  * A Storybook of a config that was already there, which `init` sets up: its name, its absolute folders and its URL.
@@ -166,7 +167,7 @@ function missingStorybookHintsOf(
 function missingStorybookHintOf(cwd: string, configPath: string, storybook: DetectedStorybook, name: string): string {
   const entry = configEntryOf({
     name,
-    url: `http://127.0.0.1:${storybook.startScript?.port ?? defaultStorybookPort}`,
+    url: `http://127.0.0.1:${portOfStart(storybook.start) ?? defaultStorybookPort}`,
     dir: relativePathOf(dirname(configPath), storybook.packageDir),
     configDir: storybook.configDir,
   })
@@ -224,7 +225,7 @@ function startPortOf(url: string | undefined): string {
 }
 
 /**
- * Returns the command that starts the Storybook of a config folder, relative to the root: its start script, else
+ * Returns the command that starts the Storybook of a config folder, relative to the root: its detected start, else
  * `storybook dev` on its URL's port, with `-c` when the folder isn't `.storybook`.
  */
 function detectedStartCommandOf(
@@ -233,10 +234,10 @@ function detectedStartCommandOf(
   configDir: string,
   url: string | undefined,
 ): string {
-  const startScript = project.storybooks.find((storybook) => storybook.configDir === configDir)?.startScript
+  const start = project.storybooks.find((storybook) => storybook.configDir === configDir)?.start
 
-  if (startScript !== undefined) {
-    return runScriptCommandOf(packageManager, startScript.script)
+  if (start !== undefined) {
+    return startCommandOf(start, packageManager)
   }
 
   const configArgs = configDir === defaultConfigDir ? [] : ['-c', configDir]

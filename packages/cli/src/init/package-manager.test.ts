@@ -4,6 +4,8 @@ import {
   commandLineOf,
   listsDependency,
   lockfileNames,
+  nonEmptyTextOf,
+  nxCommandOf,
   packageManagerOf,
   runScriptCommandOf,
   rushPackageManagerOf,
@@ -116,6 +118,26 @@ describe('commands', () => {
     })
     expect(addDevDependenciesCommandOf('yarn', specs)).toEqual({ command: 'yarn', args: ['add', '--dev', ...specs] })
     expect(addDevDependenciesCommandOf('bun', specs)).toEqual({ command: 'bun', args: ['add', '--dev', ...specs] })
+  })
+})
+
+describe('nonEmptyTextOf', () => {
+  it('gives text that is not empty, else undefined', () => {
+    expect(nonEmptyTextOf('web')).toBe('web')
+    expect(nonEmptyTextOf('')).toBeUndefined()
+    expect(nonEmptyTextOf(7)).toBeUndefined()
+    expect(nonEmptyTextOf(undefined)).toBeUndefined()
+  })
+})
+
+describe('nxCommandOf', () => {
+  it.each([
+    ['pnpm', 'pnpm exec nx run ui:storybook'],
+    ['npm', 'npx nx run ui:storybook'],
+    ['yarn', 'yarn nx run ui:storybook'],
+    ['bun', 'bunx nx run ui:storybook'],
+  ] as const)('runs nx under %s', (packageManager, command) => {
+    expect(commandLineOf(nxCommandOf(packageManager, ['run', 'ui:storybook']))).toBe(command)
   })
 })
 

@@ -81,13 +81,18 @@ export function orderWithFirst(first: string): (left: string, right: string) => 
 }
 
 /**
+ * Whether a folder is an absolute path: posix, or one on a Windows drive.
+ */
+export function isAbsoluteFolder(folder: string): boolean {
+  return posix.isAbsolute(folder) || /^[A-Za-z]:/.test(folder)
+}
+
+/**
  * Whether a normalized folder, relative to the project root, is inside it: not `..`, not under `../`, and not an
- * absolute path (posix or a Windows drive).
+ * absolute path.
  */
 export function isInsideRoot(configDir: string): boolean {
-  return (
-    configDir !== '..' && !configDir.startsWith('../') && !posix.isAbsolute(configDir) && !/^[A-Za-z]:/.test(configDir)
-  )
+  return configDir !== '..' && !configDir.startsWith('../') && !isAbsoluteFolder(configDir)
 }
 
 /**
@@ -127,15 +132,12 @@ function slugOf(text: string): string {
 }
 
 /**
- * Returns the text a Storybook's default name comes from. For the root's `.storybook` or the root itself (`.`) that's
- * the package name without its scope, else the root folder's name. For another folder it's the name of the folder
- * holding the config folder, or the config folder's own name without a leading `.` when it isn't called `.storybook`.
+ * Returns the text a Storybook's default name comes from, for a config folder relative to its package's folder. See
+ * `defaultNameOf`.
  */
-function nameSourceOf(configDir: string, packageName: unknown, rootDir: string): string {
+function nameSourceOf(configDir: string, packageName: string | undefined, packageDir: string): string {
   if (configDir === defaultConfigDir || configDir === '.') {
-    return typeof packageName === 'string' && packageName !== ''
-      ? packageName.replace(/^@[^/]+\//, '')
-      : basename(rootDir)
+    return packageName === undefined ? basename(packageDir) : packageName.replace(/^@[^/]+\//, '')
   }
 
   if (posix.basename(configDir) === defaultConfigDir) {
@@ -143,20 +145,6 @@ function nameSourceOf(configDir: string, packageName: unknown, rootDir: string):
   }
 
   return posix.basename(configDir).replace(/^\./, '')
-}
-
-/**
- * A config folder with its default Storybook name.
- */
-export interface NamedConfigDir {
-  /**
-   * The config folder, relative to the project root.
-   */
-  configDir: string
-  /**
-   * The Storybook name: valid, and unique in the list.
-   */
-  name: string
 }
 
 /**
@@ -176,14 +164,11 @@ export function takeUniqueName(base: string, used: Set<string>): string {
 }
 
 /**
- * Gives each config folder a valid Storybook name, unique in the list. A name taken by an earlier folder gets `-2`,
- * `-3` and so on.
+ * Returns the default Storybook name of a config folder, relative to its package's folder `packageDir`: valid, but not
+ * yet unique. A `.storybook` in the package, or the package itself (`.`), takes the package name without its scope,
+ * else the package folder's name. Another folder takes the name of the folder holding it, or its own name without a
+ * leading `.` when it isn't called `.storybook`.
  */
-export function nameConfigDirs(configDirs: readonly string[], packageName: unknown, rootDir: string): NamedConfigDir[] {
-  const used = new Set<string>()
-
-  return configDirs.map((configDir) => ({
-    configDir,
-    name: takeUniqueName(slugOf(nameSourceOf(configDir, packageName, rootDir)), used),
-  }))
+export function defaultNameOf(configDir: string, packageName: string | undefined, packageDir: string): string {
+  return slugOf(nameSourceOf(configDir, packageName, packageDir))
 }

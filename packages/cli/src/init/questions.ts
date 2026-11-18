@@ -4,12 +4,12 @@ import {
   commandLineOf,
   listsDependency,
   type PackageManager,
-  runScriptCommandOf,
   scriptsOf,
   storybookCommandOf,
 } from './package-manager.js'
 import type { Choice, Prompter } from './prompter.js'
 import { defaultConfigDir, storybookCallsOf } from './storybook-scripts.js'
+import { portOfStart, startCommandOf } from './storybook-start.js'
 
 /**
  * What the person chose for one Storybook.
@@ -181,7 +181,7 @@ export async function askQuestions({
   const storybooks =
     existingConfig === undefined ? await askStorybooks(project, packageManager, prompter, warnings) : []
   const scripts = await askScripts(project, prompter)
-  const addons = await askAddons(project, namedStorybooksOf(project, storybooks, existingConfig), prompter)
+  const addons = await askAddons(namedStorybooksOf(project, storybooks, existingConfig), prompter)
 
   return { answers: { packageManager, storybooks, scripts, addons }, warnings }
 }
@@ -248,12 +248,13 @@ async function askStorybook(
 }
 
 /**
- * Returns the port a Storybook's start command starts it on: the one its start script sets, or, for a command the person
- * typed, the one its `storybook dev` call sets. `undefined` when none is set, or the command runs no `storybook dev`.
+ * Returns the port a Storybook's start command starts it on: the one its detected start sets, or, for a command the
+ * person typed, the one its `storybook dev` call sets. `undefined` when none is set, or the command runs no
+ * `storybook dev`.
  */
 function startPortOf(storybook: DetectedStorybook, startCommand: string): number | undefined {
-  if (storybook.startScript !== undefined) {
-    return storybook.startScript.port
+  if (storybook.start !== undefined) {
+    return portOfStart(storybook.start)
   }
 
   return storybookCallsOf({ start: startCommand }).find((call) => call.subcommand === 'dev')?.port
@@ -277,21 +278,28 @@ function askName(storybook: DetectedStorybook, takenNames: readonly string[], pr
 }
 
 /**
- * Asks for the URL of a Storybook. A start script that sets no port gets a hint first. The message about a URL with a
- * login never holds the URL, so the password isn't echoed.
+ * Asks for the URL of a Storybook. A start script or Nx target that sets no port gets a hint first. The message about
+ * a URL with a login never holds the URL, so the password isn't echoed.
  */
 function askUrl(storybook: DetectedStorybook, name: string, prompter: Prompter): Promise<string> {
-  const { startScript } = storybook
+  const { start } = storybook
 
-  if (startScript !== undefined && startScript.port === undefined) {
+  if (start?.kind === 'script' && start.call.port === undefined) {
     prompter.note(
-      `hint: The ${startScript.script} script sets no port. ` +
+      `hint: The ${start.call.script} script sets no port. ` +
         `Add -p ${defaultStorybookPort} to it, so Storybook always starts on the port in ${name}'s URL.`,
     )
   }
 
+  if (start?.kind === 'nx' && start.port === undefined) {
+    prompter.note(
+      `hint: The ${start.project}:${start.target} target sets no port. ` +
+        `Set its port option to ${defaultStorybookPort}, so Storybook always starts on the port in ${name}'s URL.`,
+    )
+  }
+
   return prompter.text(`URL of ${name}`, {
-    defaultValue: `http://127.0.0.1:${startScript?.port ?? defaultStorybookPort}`,
+    defaultValue: `http://127.0.0.1:${portOfStart(start) ?? defaultStorybookPort}`,
     hint: 'Where visual-check opens it, locally and in CI. Use 127.0.0.1, not localhost.',
     validate(value) {
       switch (findStorybookUrlProblem(value)) {
@@ -323,8 +331,8 @@ function urlPortOf(url: string): number {
 }
 
 /**
- * Finds the command that starts a Storybook: the one that runs its start script, or, with no script, the one the
- * person gives.
+ * Finds the command that starts a Storybook: the one that runs its detected start, or, with none, the one the person
+ * gives.
  */
 async function askStartCommand(
   storybook: DetectedStorybook,
@@ -333,8 +341,8 @@ async function askStartCommand(
   packageManager: PackageManager,
   prompter: Prompter,
 ): Promise<string> {
-  if (storybook.startScript !== undefined) {
-    return runScriptCommandOf(packageManager, storybook.startScript.script)
+  if (storybook.start !== undefined) {
+    return startCommandOf(storybook.start, packageManager)
   }
 
   const configArgs = storybook.configDir === defaultConfigDir ? [] : ['-c', storybook.configDir]
@@ -352,8 +360,9 @@ async function askStartCommand(
  */
 async function askScripts(project: DetectedProject, prompter: Prompter): Promise<Answers['scripts']> {
   const scripts = scriptsOf(project.manifest)
-  const startScripts = project.storybooks.flatMap(({ startScript }) =>
-    startScript === undefined ? [] : [startScript.script],
+  // The scripts are the root's, so only a start script the root's package.json holds can clash with them.
+  const startScripts = project.storybooks.flatMap(({ start }) =>
+    start?.kind === 'script' && start.packageDir === project.root ? [start.call.script] : [],
   )
   const reusedTest = reusedScriptOf(scripts, 'test')
   const reusedUpdate = reusedScriptOf(scripts, 'update')
@@ -483,10 +492,10 @@ function askAddon(name: string, prompter: Prompter): Promise<boolean> {
 }
 
 /**
- * Asks, for each Storybook 10 that doesn't list the addon, whether to add it. Gives the ones the person said yes to.
+ * Asks, for each Storybook 10 whose package doesn't list the addon, whether to add it. Gives the ones the person said
+ * yes to.
  */
 async function askAddons(
-  project: DetectedProject,
   named: readonly { storybook: DetectedStorybook; name: string }[],
   prompter: Prompter,
 ): Promise<AddonAnswer[]> {
@@ -497,7 +506,7 @@ async function askAddons(
     const wanted =
       version !== undefined &&
       majorOf(version) === addonStorybookMajor &&
-      !listsDependency(project.manifest, addonPackage)
+      !listsDependency(storybook.manifest, addonPackage)
 
     if (wanted && (await askAddon(name, prompter))) {
       addons.push({ configDir, name })

@@ -1,7 +1,7 @@
 import { existsSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { projectOf, storybookOf } from './detected-project.fixture.js'
+import { projectOf, scriptStartOf, storybookOf } from './detected-project.fixture.js'
 import { type ExistingConfig, existingConfigOf, existingStorybooksOf } from './existing-config.js'
 import {
   commandsIn,
@@ -105,8 +105,8 @@ describe('existingStorybooksOf', () => {
   }
 
   it('starts a Storybook with its start script', () => {
-    const startScript = { script: 'storybook', subcommand: 'dev' as const, configDir: undefined, port: 6006 }
-    const project = projectOf({ storybooks: [storybookOf({ startScript })] })
+    const start = scriptStartOf('storybook', 6006)
+    const project = projectOf({ storybooks: [storybookOf({ start })] })
     const existing = configOf([
       {
         name: 'web',
@@ -160,6 +160,63 @@ describe('existingStorybooksOf', () => {
     expect(existingStorybooksOf(projectOf(), existing, 'yarn')[0]?.startCommand).toBe(
       'yarn storybook dev -p 6008 -c docs/.storybook',
     )
+  })
+})
+
+describe('existingStorybooksOf with an Nx start', () => {
+  it("starts a Storybook with Nx's storybook target through the package manager", () => {
+    const project = projectOf({
+      storybooks: [
+        storybookOf({
+          configDir: 'libs/ui/.storybook',
+          start: { kind: 'nx', project: 'ui', target: 'storybook', port: 4400 },
+        }),
+      ],
+    })
+    const existing: ExistingConfig = {
+      path: '/project/visual-check.config.ts',
+      names: {},
+      storybooks: [
+        {
+          name: 'ui',
+          dir: '/project/libs/ui',
+          configDir: '/project/libs/ui/.storybook',
+          baselines: '/project/libs/ui/.visual-check/baselines',
+          url: 'http://127.0.0.1:4400',
+        },
+      ],
+      notes: [],
+    }
+
+    expect(existingStorybooksOf(project, existing, 'pnpm')[0]?.startCommand).toBe('pnpm exec nx run ui:storybook')
+  })
+})
+
+describe('existingConfigOf in a workspace', () => {
+  it("hints at a package's Storybook the config leaves out, with the package folder and its start's port", async () => {
+    const root = makeProject({
+      manifest: { name: 'acme' },
+      files: {
+        'visual-check.config.ts': "export default { storybooks: { web: { url: 'http://127.0.0.1:6006' } } }\n",
+        '.storybook/main.ts': '',
+        'packages/ui/.storybook/main.ts': '',
+      },
+    })
+    const project = projectOf({
+      root,
+      storybooks: [
+        storybookOf({
+          configDir: 'packages/ui/.storybook',
+          packageDir: join(root, 'packages/ui'),
+          defaultName: 'ui',
+          start: scriptStartOf('storybook', 6100),
+        }),
+      ],
+    })
+
+    expect((await existingConfigOf(join(root, 'packages/ui'), project))?.notes).toEqual([
+      "hint: ../../visual-check.config.ts lists no Storybook in packages/ui/.storybook. To add it, put this under storybooks: ui: { dir: 'packages/ui', configDir: 'packages/ui/.storybook', url: 'http://127.0.0.1:6100' },",
+    ])
   })
 })
 

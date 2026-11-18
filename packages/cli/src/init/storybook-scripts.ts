@@ -98,15 +98,11 @@ function envValueOf(tokens: readonly string[], name: string): string | undefined
 }
 
 /**
- * Cleans up a config folder: posix, with no leading `./` and no trailing `/`. The project root, in any spelling (`.`,
- * `./` or empty), is `.`. Without a folder, gives `undefined`.
+ * Tidies a folder or a glob: `/` separated, with no `./` and no trailing `/`. The folder it is relative to, in any
+ * spelling (`.`, `./` or empty), is `.`.
  */
-function normalizeConfigDir(text: string | undefined): string | undefined {
-  if (text === undefined) {
-    return undefined
-  }
-
-  return posix.normalize(text.replace(/\\/g, '/')).replace(/(?<=.)\/+$/, '')
+export function tidyFolder(text: string): string {
+  return posix.normalize(text.replaceAll('\\', '/')).replace(/(?<=.)\/+$/, '')
 }
 
 /**
@@ -136,11 +132,12 @@ function callOfSegment(script: string, segment: string): StorybookCall | undefin
   }
 
   const after = tokens.slice(index + 1)
+  const configDir = flagValueOf(after, ['-c', '--config-dir'])
 
   return {
     script,
     subcommand: after[0] === 'build' ? 'build' : 'dev',
-    configDir: normalizeConfigDir(flagValueOf(after, ['-c', '--config-dir'])),
+    configDir: configDir === undefined ? undefined : tidyFolder(configDir),
     port: portOfCall(tokens.slice(0, index), after),
   }
 }

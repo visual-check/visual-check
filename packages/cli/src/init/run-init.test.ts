@@ -416,6 +416,7 @@ describe('runInit', () => {
     for (const path of Object.keys(files)) {
       expect(after[path]).toBe(before[path])
     }
+
     expect(readText(root, 'package.json')).toBe(
       `${JSON.stringify(
         {
@@ -735,5 +736,135 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
       'package.json',
       'visual-check.config.ts',
     ])
+  })
+})
+
+describe('runInit in a workspace', () => {
+  /**
+   * Makes a pnpm workspace with two packages, `packages/ui` and `packages/web`, each with a `.storybook` its
+   * `storybook` script starts. `packages/web` already lists `@visual-check/storybook`.
+   */
+  function pnpmWorkspace(): string {
+    return makeProject({
+      manifest: { name: 'acme', private: true, packageManager: 'pnpm@9.12.3' },
+      files: {
+        'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+        'packages/ui/package.json': JSON.stringify({
+          name: '@acme/ui',
+          scripts: { storybook: 'storybook dev -p 6006' },
+        }),
+        'packages/ui/.storybook/main.ts': '',
+        'packages/web/package.json': JSON.stringify({
+          name: 'web',
+          scripts: { storybook: 'storybook dev -p 6007' },
+          devDependencies: { '@visual-check/storybook': cliVersion },
+        }),
+        'packages/web/.storybook/main.ts': '',
+      },
+    })
+  }
+
+  it('sets up the workspace root from inside a package, and adds the Storybook package where it is missing', async () => {
+    const root = pnpmWorkspace()
+    const { tools, record } = toolsOf()
+    const result = await runInit(join(root, 'packages/ui'), tools)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.messages[0]).toBe('hint: init sets up the workspace at ../.., where the config goes.')
+    expect(existsSync(join(root, 'visual-check.config.ts'))).toBe(true)
+    expect(existsSync(join(root, 'packages/ui/visual-check.config.ts'))).toBe(false)
+    expect(readText(root, 'packages/ui/.storybook/visual-check.ts')).toBe(modesFile)
+    expect(readText(root, 'packages/web/.visual-check/.gitignore')).toBe(gitignore)
+    expect(record.commands).toEqual([
+      {
+        command: 'pnpm',
+        args: ['add', '--save-dev', `@visual-check/cli@${cliVersion}`, `@visual-check/chromium@${browserRange}`],
+        cwd: root,
+      },
+      {
+        command: 'pnpm',
+        args: ['add', '--save-dev', `@visual-check/storybook@${cliVersion}`],
+        cwd: join(root, 'packages/ui'),
+      },
+    ])
+  })
+
+  it('adds the Storybook package to the root for an Nx project with only a project.json', async () => {
+    const root = makeProject({
+      manifest: { name: 'acme', private: true, packageManager: 'pnpm@9.12.3' },
+      files: {
+        'nx.json': '{}',
+        'libs/ui/project.json': JSON.stringify({ name: 'ui', targets: { storybook: { options: { port: 4400 } } } }),
+        'libs/ui/.storybook/main.ts': '',
+      },
+    })
+    const { tools, record } = toolsOf()
+    const result = await runInit(root, tools)
+
+    expect(result.exitCode).toBe(0)
+    expect(readText(root, 'libs/ui/.visual-check/.gitignore')).toBe(gitignore)
+    expect(record.commands).toEqual(commandsIn(root, pnpmAdd))
+    expect(result.summary?.nextSteps?.steps[0]).toEqual([
+      { command: 'pnpm exec nx run ui:storybook', text: ['Start Storybook, and keep it running'] },
+    ])
+  })
+
+  it("stops on a Storybook package's package.json it can't read, writing nothing and running nothing", async () => {
+    const root = makeProject({
+      manifest: { name: 'acme', private: true, packageManager: 'pnpm@9.12.3' },
+      files: {
+        'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+        'packages/ui/package.json': '{"name":"ui","scripts":"storybook dev"}',
+        'packages/ui/.storybook/main.ts': '',
+      },
+    })
+    const before = snapshotFiles(root)
+    const { tools, record } = toolsOf()
+    const result = await runInit(root, tools)
+
+    expect(result).toMatchObject({ exitCode: 2, stdout: '' })
+    expect(result.messages).toEqual([
+      'visual-check init can\'t read packages/ui/package.json: "scripts" must be an object. ' +
+        'Fix it, then run visual-check init again.',
+    ])
+    expect(snapshotFiles(root)).toEqual(before)
+    expect(record.commands).toEqual([])
+  })
+
+  it('stops a Rush workspace without a root package.json, writing nothing and running nothing', async () => {
+    const root = makeProject({
+      files: {
+        'rush.json': '{ "pnpmVersion": "9.0.0", "projects": [{ "packageName": "ui", "projectFolder": "libs/ui" }] }',
+        'libs/ui/package.json': JSON.stringify({ name: 'ui', scripts: { storybook: 'storybook dev -p 6006' } }),
+        'libs/ui/.storybook/main.ts': '',
+      },
+    })
+    const before = snapshotFiles(root)
+    const { tools, record } = toolsOf()
+    const result = await runInit(join(root, 'libs/ui'), tools)
+
+    expect(result).toMatchObject({ exitCode: 2, stdout: '' })
+    expect(result.messages).toEqual([
+      'hint: init sets up the workspace at ../.., where the config goes.',
+      'visual-check init needs a package.json at the root of this Rush workspace, for its scripts and the CLI. ' +
+        'Add a private one, then run visual-check init again.',
+    ])
+    expect(snapshotFiles(root)).toEqual(before)
+    expect(record.commands).toEqual([])
+  })
+
+  it('gives the note on a skipped Storybook before the problem that stops it', async () => {
+    const root = makeProject({
+      manifest: { name: 'app' },
+      files: { 'examples/package-lock.json': '{}', 'examples/.storybook/main.ts': '' },
+    })
+    const result = await runInit(root, toolsOf().tools)
+
+    expect(result.exitCode).toBe(2)
+    expect(result.messages[0]).toBe(
+      "hint: init skips the Storybook in examples/.storybook: examples has its own lockfile, so it's a workspace of " +
+        'its own. Run visual-check init there to set it up.',
+    )
+    expect(result.messages[1]).toMatch(/^visual-check init found no Storybook/)
   })
 })

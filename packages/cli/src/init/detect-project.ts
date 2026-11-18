@@ -1,39 +1,72 @@
-import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
-import { isFile } from '../config/find-config.js'
+import { existsSync } from 'node:fs'
+import { basename, join, resolve } from 'node:path'
 import { readInstalledStorybookVersion } from '../storybook/storybook-version.js'
-import { type ListFiles, mainFileOnDiskIn, nameConfigDirs, storybookConfigDirsOf } from './find-storybooks.js'
 import {
-  isJsonObject,
+  defaultNameOf,
+  type ListFiles,
+  mainFileOnDiskIn,
+  relativePathOf,
+  storybookConfigDirsOf,
+  takeUniqueName,
+} from './find-storybooks.js'
+import {
   lockfileNames,
   type Manifest,
+  nonEmptyTextOf,
   type PackageManager,
   packageManagerOf,
-  scriptsOf,
 } from './package-manager.js'
-import { type StorybookCall, startScriptOf, storybookCallsOf } from './storybook-scripts.js'
+import { startScriptOf } from './storybook-scripts.js'
+import { nxProjectNameOf, nxStartOf, nxStorybookPluginTargetOf, type StorybookStart } from './storybook-start.js'
+import { findWorkspace, readJsonFile, type Workspace } from './workspace.js'
+import {
+  nestedWorkspaceOf,
+  packageOf,
+  packageRelativeOf,
+  packagesOf,
+  rootRelativeCallOf,
+  type WorkspacePackage,
+} from './workspace-packages.js'
 
 /**
  * A Storybook `init` found.
  */
 export interface DetectedStorybook {
   /**
-   * The config folder, relative to the project root: `/` separated, with no `./` and no trailing `/`, such as
-   * `.storybook` or `docs/.storybook`.
+   * The config folder, relative to the workspace root: `/` separated, with no `./` and no trailing `/`, such as
+   * `.storybook` or `packages/ui/.storybook`.
    */
   configDir: string
   /**
-   * The absolute folder of the package the Storybook belongs to. In a single package, the project root.
+   * The absolute folder of the package the Storybook belongs to, where it runs: the deepest package folder holding its
+   * config folder, else the workspace root. An Nx project's folder may hold no `package.json`.
    */
   packageDir: string
   /**
-   * A valid Storybook name, unique within the project.
+   * The absolute folder of the `package.json` the Storybook's dependencies go in: the deepest package folder holding
+   * its config folder that has one, else the workspace root. Mostly `packageDir`.
+   */
+  manifestDir: string
+  /**
+   * The parsed `package.json` in `manifestDir`, or `{}` when there's none or it can't be read.
+   */
+  manifest: Manifest
+  /**
+   * What is wrong with the `package.json` in `manifestDir`, as for the root's. `undefined` when it is fine or missing.
+   */
+  manifestProblem: string | undefined
+  /**
+   * The name the `package.json` in `packageDir` gives, or `undefined` when it holds none or it names none.
+   */
+  packageName: string | undefined
+  /**
+   * A valid Storybook name, unique within the workspace.
    */
   defaultName: string
   /**
-   * The script call that starts the Storybook, or `undefined` when no script does.
+   * How the Storybook starts, or `undefined` when no script and no Nx target does.
    */
-  startScript: StorybookCall | undefined
+  start: StorybookStart | undefined
   /**
    * The installed `storybook` version, or `undefined` when it isn't installed.
    */
@@ -45,7 +78,7 @@ export interface DetectedStorybook {
  */
 export interface DetectedProject {
   /**
-   * The absolute project root: the nearest folder holding a `package.json`.
+   * The absolute project root: the root of the workspace `init` runs in, where the config goes.
    */
   root: string
   /**
@@ -57,8 +90,12 @@ export interface DetectedProject {
    */
   manifestPath: string
   /**
+   * Whether the root holds a `package.json`. Only a workspace, such as Rush's, can lack one.
+   */
+  hasManifest: boolean
+  /**
    * What is wrong with the root's `package.json`: the parse error, that it isn't a JSON object, or that its
-   * `scripts` isn't one. `undefined` when it is fine. `manifest` is `{}` otherwise.
+   * `scripts` isn't one. `undefined` when it is fine or missing. `manifest` is `{}` otherwise.
    */
   manifestProblem: string | undefined
   /**
@@ -66,13 +103,26 @@ export interface DetectedProject {
    */
   packageManager: PackageManager | undefined
   /**
+   * Whether the root shows Yarn 2 or later. It means something only when the package manager is Yarn.
+   */
+  yarnBerry: boolean
+  /**
    * The Deno file found in the root, or `undefined` for none.
    */
   denoFile: string | undefined
   /**
+   * What lists the workspace's packages, and their folders relative to the root.
+   */
+  workspace: Pick<Workspace, 'kind' | 'packageDirs'>
+  /**
    * The Storybooks, `.storybook` first, then by path.
    */
   storybooks: DetectedStorybook[]
+  /**
+   * The hints about what detection found, a line each, in order: that `init` works at a workspace root above the
+   * folder it runs in, then each Storybook it skips.
+   */
+  notes: string[]
 }
 
 /**
@@ -81,99 +131,168 @@ export interface DetectedProject {
 const denoFileNames = ['deno.json', 'deno.jsonc', 'deno.lock']
 
 /**
- * Finds the project root: the nearest folder from `cwd` up that holds `package.json`. The search stops after the folder
- * that holds `.git` (a folder, or a file in a worktree or a submodule), or at the filesystem root. Returns `undefined`
- * when it finds none.
+ * Words the hint for a Storybook `init` skips, because `folder` holds a lockfile of its own.
  */
-function findRoot(cwd: string): string | undefined {
-  if (isFile(join(cwd, 'package.json'))) {
-    return cwd
-  }
-
-  const parent = dirname(cwd)
-
-  if (parent === cwd || existsSync(join(cwd, '.git'))) {
-    return undefined
-  }
-
-  return findRoot(parent)
+function nestedWorkspaceNoteOf(configDir: string, folder: string): string {
+  return (
+    `hint: init skips the Storybook in ${configDir}: ${folder} has its own lockfile, so it's a workspace of its own. ` +
+    'Run visual-check init there to set it up.'
+  )
 }
 
 /**
- * What reading a `package.json` gave.
+ * What finding a Storybook's start reads besides its package.
  */
-interface ManifestRead {
+interface StartContext {
   /**
-   * The parsed manifest, or `{}` when it can't be read or isn't a JSON object.
+   * The absolute workspace root.
    */
-  manifest: Manifest
+  root: string
   /**
-   * What is wrong with the file, or `undefined` when it is fine.
+   * The root's package, whose scripts may start a package's Storybook with `-c`.
    */
-  problem: string | undefined
+  rootPackage: WorkspacePackage
+  /**
+   * The target `@nx/storybook/plugin` infers, or `undefined` when `nx.json` doesn't use it.
+   */
+  inferredTarget: string | undefined
 }
 
 /**
- * Reads a `package.json`. A file that can't be read or parsed, isn't a JSON object or has `scripts` that isn't one,
- * gives an empty manifest and the problem.
+ * Finds how the Storybook in `configDir`, relative to the root, starts. The first that does wins:
+ *
+ * 1. its package's `storybook` script, when it runs `storybook dev` on that folder;
+ * 2. the first script of its package whose `storybook dev` names that folder;
+ * 3. the same two among the root's scripts, whose `-c` is relative to the root;
+ * 4. Nx's `storybook` target in the package's `project.json`, or the one `@nx/storybook/plugin` infers.
  */
-function readManifest(path: string): ManifestRead {
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
+function startOf(
+  { root, rootPackage, inferredTarget }: StartContext,
+  workspacePackage: WorkspacePackage,
+  projectJson: unknown,
+  configDir: string,
+): StorybookStart | undefined {
+  const packageDir = join(root, workspacePackage.dir)
+  const ownCall = startScriptOf(workspacePackage.calls, packageRelativeOf(workspacePackage.dir, configDir))
 
-    if (!isJsonObject(parsed)) {
-      return { manifest: {}, problem: 'the file must hold a JSON object' }
-    }
-
-    if (parsed.scripts !== undefined && !isJsonObject(parsed.scripts)) {
-      return { manifest: {}, problem: '"scripts" must be an object' }
-    }
-
-    return { manifest: parsed as Manifest, problem: undefined }
-  } catch (error) {
-    return { manifest: {}, problem: error instanceof Error ? error.message : String(error) }
+  if (ownCall !== undefined) {
+    return { kind: 'script', call: ownCall, packageDir }
   }
-}
 
-/**
- * Finds the Storybooks of the root package, each with its start command, name and installed version.
- */
-function storybooksOf(root: string, manifest: Manifest, files: readonly string[]): DetectedStorybook[] {
-  const calls = storybookCallsOf(scriptsOf(manifest))
-  const configDirs = storybookConfigDirsOf(files, calls, mainFileOnDiskIn(root))
-  const version = readInstalledStorybookVersion(root)
+  const rootCall = startScriptOf(rootPackage.calls, configDir)
 
-  return nameConfigDirs(configDirs, manifest.name, root).map(({ configDir, name }) => ({
+  if (rootCall !== undefined) {
+    return { kind: 'script', call: rootCall, packageDir: root }
+  }
+
+  return nxStartOf({
+    projectJson,
+    packageName: nonEmptyTextOf(workspacePackage.manifest.name),
+    hasManifest: workspacePackage.hasManifest,
+    folderName: basename(packageDir),
+    packageDir: workspacePackage.dir,
     configDir,
-    packageDir: root,
-    defaultName: name,
-    startScript: startScriptOf(calls, configDir),
-    version,
-  }))
+    inferredTarget,
+  })
 }
 
 /**
- * Detects the project `init` sets up: the root, its package manager, a Deno file and its Storybooks. Every Storybook
- * belongs to the root package. Returns `undefined` when there's no `package.json` from `cwd` up to the repo root.
+ * Finds the Storybooks of a workspace among its listed `files` and its packages' scripts, each matched to its package
+ * with its start, name and installed version. A Storybook under a nested workspace is skipped with a note. Each
+ * default name is the one its package gives it, made unique across the workspace in order. A package's name is its
+ * `package.json`'s, or for an Nx project without one, its `project.json`'s.
+ */
+function storybooksOf(
+  root: string,
+  { rootPackage, packages }: ReturnType<typeof packagesOf>,
+  files: readonly string[],
+): { storybooks: DetectedStorybook[]; notes: string[] } {
+  const packageDirs = packages.map(({ dir }) => dir)
+  const calls = packages.flatMap(({ dir, calls: packageCalls }) =>
+    packageCalls.map((call) => rootRelativeCallOf(dir, call)),
+  )
+  const context = { root, rootPackage, inferredTarget: nxStorybookPluginTargetOf(readJsonFile(join(root, 'nx.json'))) }
+  const usedNames = new Set<string>()
+  const storybooks: DetectedStorybook[] = []
+  const notes: string[] = []
+
+  for (const configDir of storybookConfigDirsOf(files, calls, mainFileOnDiskIn(root))) {
+    const nested = nestedWorkspaceOf(root, configDir, packageDirs)
+
+    if (nested !== undefined) {
+      notes.push(nestedWorkspaceNoteOf(configDir, nested))
+      continue
+    }
+
+    const workspacePackage = packageOf(packages, rootPackage, configDir)
+    const manifestPackage = packageOf(packages, rootPackage, configDir, ({ hasManifest }) => hasManifest)
+    const packageDir = join(root, workspacePackage.dir)
+    const projectJson = readJsonFile(join(packageDir, 'project.json'))
+    const packageName = nonEmptyTextOf(workspacePackage.manifest.name)
+    const name = defaultNameOf(
+      packageRelativeOf(workspacePackage.dir, configDir),
+      workspacePackage.hasManifest ? packageName : nxProjectNameOf(projectJson),
+      packageDir,
+    )
+
+    storybooks.push({
+      configDir,
+      packageDir,
+      manifestDir: join(root, manifestPackage.dir),
+      manifest: manifestPackage.manifest,
+      manifestProblem: manifestPackage.manifestProblem,
+      packageName,
+      defaultName: takeUniqueName(name, usedNames),
+      start: startOf(context, workspacePackage, projectJson, configDir),
+      version: readInstalledStorybookVersion(packageDir),
+    })
+  }
+
+  return { storybooks, notes }
+}
+
+/**
+ * Words the hint that `init` works at a workspace root above `startDir`, the folder it runs in. A lone package gets
+ * none: there, `init` has always worked at the nearest `package.json`.
+ */
+function workspaceRootNotesOf(startDir: string, workspace: Workspace): string[] {
+  if (workspace.kind === 'single' || workspace.root === startDir) {
+    return []
+  }
+
+  return [`hint: init sets up the workspace at ${relativePathOf(startDir, workspace.root)}, where the config goes.`]
+}
+
+/**
+ * Detects the project `init` sets up: the workspace `cwd` is in, its package manager, a Deno file and its Storybooks,
+ * each matched to its package. Returns `undefined` when there's neither a workspace nor a `package.json` from `cwd` up
+ * to the repo root.
  */
 export async function detectProject(cwd: string, listFiles: ListFiles): Promise<DetectedProject | undefined> {
-  const root = findRoot(resolve(cwd))
+  const startDir = resolve(cwd)
+  const workspace = await findWorkspace(startDir, listFiles)
 
-  if (root === undefined) {
+  if (workspace === undefined) {
     return undefined
   }
 
-  const manifestPath = join(root, 'package.json')
-  const { manifest, problem } = readManifest(manifestPath)
+  const { root, kind, packageDirs } = workspace
+  const packages = packagesOf(root, packageDirs)
+  const { manifest, hasManifest, manifestProblem } = packages.rootPackage
   const lockfiles = lockfileNames.filter((name) => existsSync(join(root, name)))
+  const { storybooks, notes } = storybooksOf(root, packages, workspace.files)
 
   return {
     root,
     manifest,
-    manifestPath,
-    manifestProblem: problem,
-    packageManager: packageManagerOf(manifest, lockfiles),
+    manifestPath: join(root, 'package.json'),
+    hasManifest,
+    manifestProblem,
+    packageManager: workspace.packageManager ?? packageManagerOf(manifest, lockfiles),
+    yarnBerry: workspace.yarnBerry,
     denoFile: denoFileNames.find((name) => existsSync(join(root, name))),
-    storybooks: storybooksOf(root, manifest, await listFiles(root)),
+    workspace: { kind, packageDirs },
+    storybooks,
+    notes: [...workspaceRootNotesOf(startDir, workspace), ...notes],
   }
 }

@@ -9,6 +9,7 @@ import {
   rushPackageManagerOf,
   yarnBerryOf,
 } from './package-manager.js'
+import { tidyFolder } from './storybook-scripts.js'
 
 /**
  * What lists a workspace's packages: `pnpm-workspace.yaml`, `package.json#workspaces` (npm, Yarn and Bun),
@@ -247,13 +248,6 @@ function pnpmPackagesOf(yaml: string): string[] | undefined {
 }
 
 /**
- * Tidies a folder or a glob: `/` separated, with no `./` and no trailing `/`.
- */
-function tidyPath(path: string): string {
-  return posix.normalize(path.replaceAll('\\', '/')).replace(/\/+$/, '')
-}
-
-/**
  * Returns the folders, relative to the root, that hold a listed file named `name`, leaving out any in a
  * `node_modules`.
  */
@@ -269,7 +263,7 @@ function foldersHolding(files: readonly string[], name: string): string[] {
  * them, matched with `path.matchesGlob`. Matching the file, as pnpm and npm do, lets `apps/**` match `apps` too.
  */
 function foldersMatching(folders: readonly string[], globs: readonly string[]): string[] {
-  const manifestGlobsOf = (list: readonly string[]) => list.map((glob) => `${tidyPath(glob)}/package.json`)
+  const manifestGlobsOf = (list: readonly string[]) => list.map((glob) => `${tidyFolder(glob)}/package.json`)
   const included = manifestGlobsOf(globs.filter((glob) => !glob.startsWith('!')))
   const excluded = manifestGlobsOf(globs.filter((glob) => glob.startsWith('!')).map((glob) => glob.slice(1)))
   const matchesAny = (path: string, list: readonly string[]) => list.some((glob) => posix.matchesGlob(path, glob))
@@ -290,7 +284,7 @@ function rushProjectFoldersOf(rush: unknown): string[] {
 
   return projects
     .flatMap((project) =>
-      isJsonObject(project) && typeof project.projectFolder === 'string' ? [tidyPath(project.projectFolder)] : [],
+      isJsonObject(project) && typeof project.projectFolder === 'string' ? [tidyFolder(project.projectFolder)] : [],
     )
     .filter((folder) => folder !== '.' && isInsideRoot(folder))
 }
@@ -482,13 +476,33 @@ export function workspaceLayoutOf(
 const byteOrderMark = /^\uFEFF/
 
 /**
+ * Reads a text file, without a leading byte order mark.
+ *
+ * @throws When the file can't be read.
+ */
+export function readTextFile(path: string): string {
+  return readFileSync(path, 'utf8').replace(byteOrderMark, '')
+}
+
+/**
+ * Reads and parses a JSON file, without a leading byte order mark. Gives `undefined` when it can't be read or parsed.
+ */
+export function readJsonFile(path: string): unknown {
+  try {
+    return JSON.parse(readTextFile(path))
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * Returns a reader of the files in `folder`, without a leading byte order mark. A file that can't be read gives
  * `undefined`.
  */
 function readerIn(folder: string): ReadFile {
   return (path) => {
     try {
-      return readFileSync(join(folder, path), 'utf8').replace(byteOrderMark, '')
+      return readTextFile(join(folder, path))
     } catch {
       return undefined
     }

@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { ContainerError, DockerMissingError } from '../container/container-error.js'
 import { classifyStorybookVersion, minimumText, newestSupportedMajor } from '../storybook/storybook-version.js'
 import type { DetectedProject } from './detect-project.js'
@@ -42,8 +43,9 @@ const noManifestProblem =
 
 /**
  * Lists what stops `init` before it asks anything, each as one line of text, in the order the checks run: Node, no
- * `package.json` (which ends the list, since the other checks need a project), an unreadable `package.json`, Deno, no
- * terminal without `--yes`, no Storybook, and each Storybook older than the minimum. Gives `[]` when `init` can go on.
+ * `package.json` (which ends the list, since the other checks need a project), a workspace root without one, an
+ * unreadable `package.json` at the root, then in each Storybook's package, Deno, no terminal without `--yes`, no
+ * Storybook, and each Storybook older than the minimum. Gives `[]` when `init` can go on.
  */
 export function blockingProblemsOf({ cwd, nodeVersion, project, yes, interactive }: BlockingCheck): string[] {
   const nodeProblems = nodeProblemsOf(nodeVersion)
@@ -70,16 +72,25 @@ function nodeProblemsOf(nodeVersion: string): string[] {
 }
 
 /**
- * Lists the problems with the project and the run, in order: an unreadable `package.json`, Deno, and no terminal
- * without `--yes`.
+ * Lists the problems with the project and the run, in order: a workspace root without a `package.json`, such as
+ * Rush's, an unreadable `package.json` at the root, then in each Storybook's package, Deno, and no terminal without
+ * `--yes`.
  */
 function setupProblemsOf(cwd: string, project: DetectedProject, yes: boolean, interactive: boolean): string[] {
   const problems: string[] = []
 
-  if (project.manifestProblem !== undefined) {
+  if (!project.hasManifest) {
+    const workspace = project.workspace.kind === 'rush' ? 'Rush workspace' : 'workspace'
+
     problems.push(
-      `visual-check init can't read ${relativePathOf(cwd, project.manifestPath)}: ${project.manifestProblem}. ` +
-        'Fix it, then run visual-check init again.',
+      `visual-check init needs a package.json at the root of this ${workspace}, for its scripts and the CLI. ` +
+        'Add a private one, then run visual-check init again.',
+    )
+  }
+
+  for (const [path, problem] of manifestProblemsOf(project)) {
+    problems.push(
+      `visual-check init can't read ${relativePathOf(cwd, path)}: ${problem}. Fix it, then run visual-check init again.`,
     )
   }
 
@@ -95,6 +106,28 @@ function setupProblemsOf(cwd: string, project: DetectedProject, yes: boolean, in
       "visual-check init asks questions, and there's no terminal to ask them in. " +
         'Run it in a terminal, or pass --yes to take every default.',
     )
+  }
+
+  return problems
+}
+
+/**
+ * Gives what is wrong with each `package.json` `init` reads and can't: the root's, then each Storybook package's, by
+ * absolute path, each once.
+ */
+function manifestProblemsOf(project: DetectedProject): Map<string, string> {
+  const problems = new Map<string, string>()
+  const found = [
+    [project.manifestPath, project.manifestProblem] as const,
+    ...project.storybooks.map(
+      ({ manifestDir, manifestProblem }) => [join(manifestDir, 'package.json'), manifestProblem] as const,
+    ),
+  ]
+
+  for (const [path, problem] of found) {
+    if (problem !== undefined && !problems.has(path)) {
+      problems.set(path, problem)
+    }
   }
 
   return problems

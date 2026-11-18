@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  defaultNameOf,
   isInsideRoot,
   listProjectFiles,
   mainFileOnDiskIn,
-  nameConfigDirs,
   relativePathOf,
   storybookConfigDirsOf,
   takeUniqueName,
@@ -137,57 +137,36 @@ describe('mainFileOnDiskIn', () => {
   })
 })
 
-describe('nameConfigDirs', () => {
-  /**
-   * Names one config folder and returns the name.
-   */
-  function nameOf(configDir: string, packageName: unknown, rootDir: string): string | undefined {
-    return nameConfigDirs([configDir], packageName, rootDir)[0]?.name
-  }
-
-  it('names the root Storybook after the package, without its scope', () => {
-    expect(nameOf('.storybook', '@acme/web', '/work/app')).toBe('web')
+describe('defaultNameOf', () => {
+  it("names a package's .storybook after the package, without its scope", () => {
+    expect(defaultNameOf('.storybook', '@acme/web', '/work/app')).toBe('web')
   })
 
-  it('names the project root like the root .storybook', () => {
-    expect(nameOf('.', '@acme/web', '/work/app')).toBe('web')
-    expect(nameOf('.', undefined, '/work/app')).toBe('app')
+  it("names the package's own folder like its .storybook", () => {
+    expect(defaultNameOf('.', '@acme/web', '/work/app')).toBe('web')
+    expect(defaultNameOf('.', undefined, '/work/app')).toBe('app')
   })
 
-  it('falls back to the root folder name', () => {
-    expect(nameOf('.storybook', undefined, '/work/My App')).toBe('my-app')
+  it('falls back to the package folder name', () => {
+    expect(defaultNameOf('.storybook', undefined, '/work/My App')).toBe('my-app')
   })
 
   it('names another config folder after the folder holding it', () => {
-    expect(nameConfigDirs(['docs/.storybook', 'apps/web/.storybook'], 'pkg', '/r').map(({ name }) => name)).toEqual([
-      'docs',
-      'web',
-    ])
+    expect(defaultNameOf('docs/.storybook', 'pkg', '/r')).toBe('docs')
+    expect(defaultNameOf('apps/web/.storybook', 'pkg', '/r')).toBe('web')
   })
 
   it('names a differently called config folder after itself', () => {
-    expect(nameConfigDirs(['.storybook-mobile', 'config/sb'], 'pkg', '/r').map(({ name }) => name)).toEqual([
-      'storybook-mobile',
-      'sb',
-    ])
+    expect(defaultNameOf('.storybook-mobile', 'pkg', '/r')).toBe('storybook-mobile')
+    expect(defaultNameOf('config/sb', 'pkg', '/r')).toBe('sb')
   })
 
   it('replaces invalid characters and trims dashes', () => {
-    expect(nameOf('.storybook', 'My_Pkg!! v2', '/r')).toBe('my-pkg-v2')
+    expect(defaultNameOf('.storybook', 'My_Pkg!! v2', '/r')).toBe('my-pkg-v2')
   })
 
   it('falls back to storybook for an empty name', () => {
-    expect(nameOf('.storybook', '@acme/---', '/r')).toBe('storybook')
-  })
-
-  it('numbers clashes from 2 in detection order', () => {
-    const named = nameConfigDirs(['.storybook', 'a/web/.storybook', 'b/web/.storybook'], 'web', '/r')
-
-    expect(named).toEqual([
-      { configDir: '.storybook', name: 'web' },
-      { configDir: 'a/web/.storybook', name: 'web-2' },
-      { configDir: 'b/web/.storybook', name: 'web-3' },
-    ])
+    expect(defaultNameOf('.storybook', '@acme/---', '/r')).toBe('storybook')
   })
 })
 

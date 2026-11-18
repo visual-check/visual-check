@@ -174,10 +174,11 @@ const writeFilesTitle = 'Write the files and scripts'
 const checkUnlistedTitle = 'Check for unlisted dependencies'
 
 /**
- * Sets up visual-check in the project around `cwd`. It detects the project and runs the checks that stop it, before it
- * writes or runs anything. Then it notes the Storybook versions, Docker and a config that's already there, asks its
- * questions, writes the files that are missing and the scripts, adds the dependencies and the addon, and asks Fallow
- * for unlisted dependencies. A check that fails, a question the person gives up on, or a failed install, exits 2.
+ * Sets up visual-check in the workspace around `cwd`. It detects the project and runs the checks that stop it, before
+ * it writes or runs anything. A stop gives detection's notes, then the problems. Then it notes what detection found,
+ * the Storybook versions, Docker and a config that's already there, asks its questions, writes the files that are
+ * missing and the scripts, adds the dependencies and the addon, and asks Fallow for unlisted dependencies. A check
+ * that fails, a question the person gives up on, or a failed install, exits 2.
  *
  * @throws Any error besides the ones it words, such as a `package.json` it can't write.
  *
@@ -189,7 +190,7 @@ export async function runInit(cwd: string, tools: InitTools): Promise<InitResult
   const problems = blockingProblemsOf({ cwd, nodeVersion, project, yes, interactive })
 
   if (project === undefined || problems.length > 0) {
-    return failureOf(problems)
+    return failureOf([...(project?.notes ?? []), ...problems])
   }
 
   const setup = await settleSetup(cwd, project, tools)
@@ -220,9 +221,9 @@ async function settleSetup(cwd: string, project: DetectedProject, tools: InitToo
 }
 
 /**
- * Shows, through the prompter, what's known before the questions, so a person answering sees it first: the notes on
- * Storybook versions, the Docker warning, and the hints or the warning about a config that's already there. Gives that
- * config.
+ * Shows, through the prompter, what's known before the questions, so a person answering sees it first: the notes from
+ * detection, the notes on Storybook versions, the Docker warning, and the hints or the warning about a config that's
+ * already there. Gives that config.
  */
 async function noteBeforeQuestions(
   cwd: string,
@@ -232,7 +233,7 @@ async function noteBeforeQuestions(
   const dockerNotes = await dockerNotesOf(tools.probeDocker, tools.os)
   const existing = await existingConfigOf(cwd, project)
 
-  for (const note of [...versionNotesOf(project), ...dockerNotes, ...(existing?.notes ?? [])]) {
+  for (const note of [...project.notes, ...versionNotesOf(project), ...dockerNotes, ...(existing?.notes ?? [])]) {
     tools.prompter.note(note)
   }
 
@@ -284,8 +285,7 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
   const installs = dependenciesToAddOf({
     root: project.root,
     rootManifest: project.manifest,
-    // In a single package, every Storybook belongs to the root package.
-    storybooks: project.storybooks.map(({ packageDir }) => ({ packageDir, manifest: project.manifest })),
+    storybooks: project.storybooks.map(({ manifestDir, manifest }) => ({ packageDir: manifestDir, manifest })),
     cliVersion,
     browserRange: tools.browserRange,
   })
@@ -296,6 +296,7 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
     ...addons.map(({ name }) => addonTitleOf(name)),
     checkUnlistedTitle,
   ])
+
   const replacedScripts = await runStep(
     progress,
     { title: writeFilesTitle },

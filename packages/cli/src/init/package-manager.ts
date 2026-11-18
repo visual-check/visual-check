@@ -54,6 +54,13 @@ export function isJsonObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Returns `value` when it is text that isn't empty, else `undefined`. Reads a name from user-written JSON.
+ */
+export function nonEmptyTextOf(value: unknown): string | undefined {
+  return typeof value === 'string' && value !== '' ? value : undefined
+}
+
+/**
  * The manifest fields that list dependencies.
  */
 const dependencyFields = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'] as const
@@ -289,6 +296,13 @@ function binCommandOf(packageManager: PackageManager, bin: string, args: readonl
  */
 export function storybookCommandOf(packageManager: PackageManager, args: readonly string[]): CommandLine {
   return binCommandOf(packageManager, 'storybook', args)
+}
+
+/**
+ * The command that runs the project's `nx` binary with `args`, such as `['run', 'ui:storybook']`.
+ */
+export function nxCommandOf(packageManager: PackageManager, args: readonly string[]): CommandLine {
+  return binCommandOf(packageManager, 'nx', args)
 }
 
 /**
