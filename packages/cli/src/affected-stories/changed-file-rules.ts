@@ -209,7 +209,8 @@ function baselinesFolderOf(file: string, context: ChangedFileContext): string | 
  * `package`; an image, a font or a JSON file that isn't config is an `asset`; anything else is left to the graph.
  * The names of lockfiles, `pnpm-workspace.yaml`, package configs and config JSON files, and the extensions, are compared
  * lowercased, since the file system may not tell them apart. The config file's path is compared as it is, and the
- * globs match as `path.matchesGlob` does, which ignores case only on macOS and Windows.
+ * globs match as `path.matchesGlob` does: their literal parts match case exactly, and on macOS and Windows their
+ * wildcards may match either case.
  */
 export function changedFileRuleOf(file: string, context: ChangedFileContext): ChangedFileRule {
   if (matchesAny(file, context.ignore, context)) {
