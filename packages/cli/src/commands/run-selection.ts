@@ -1,9 +1,6 @@
-import {
-  type AffectedStories,
-  type AffectedStorybook,
-  workOutAffectedStories,
-} from '../affected-stories/affected-stories.js'
+import { type AffectedStories, workOutAffectedStories } from '../affected-stories/affected-stories.js'
 import type { FindReachedFiles } from '../affected-stories/fallow-graph.js'
+import type { AffectedStorybook } from '../affected-stories/storybook-rules.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
 import type { ReportSelection } from '../report/report-document.js'
 import type { Story } from '../storybook/read-stories.js'
