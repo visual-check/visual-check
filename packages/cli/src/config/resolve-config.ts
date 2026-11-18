@@ -55,6 +55,11 @@ export interface ResolvedConfig {
    */
   storybooks: ResolvedStorybook[]
   /**
+   * The absolute baselines folder of every Storybook in the config, in config order, those `--storybook` leaves out
+   * included, so a changed baseline is never taken for an image.
+   */
+  baselinesFolders: string[]
+  /**
    * Where the browser runs.
    */
   platform: Platform
@@ -152,7 +157,7 @@ const configDefaults = {
   retries: 1,
   silenceHosts: [],
   affected: { selectAll: [], ignore: [] },
-} as const satisfies Omit<ResolvedConfig, 'path' | 'storybooks' | 'image'>
+} as const satisfies Omit<ResolvedConfig, 'path' | 'storybooks' | 'baselinesFolders' | 'image'>
 
 /**
  * The default folder of Storybook's config, relative to `dir`.
@@ -315,6 +320,7 @@ export function resolveConfig(config: Config, options: ResolveOptions): Resolved
   return {
     path,
     storybooks: inRun.filter(hasUrl),
+    baselinesFolders: pending.map(({ baselines }) => baselines),
     platform: config.platform ?? configDefaults.platform,
     image: config.image,
     tolerance: { ...configDefaults.tolerance, ...config.tolerance },

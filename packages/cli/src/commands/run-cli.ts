@@ -720,6 +720,7 @@ async function runSelectionOf(
         environment: context.environment,
         cwd: context.cwd,
         storybooks: checked.storybooks,
+        baselinesFolders: config.baselinesFolders,
         configPath: config.path,
         affected: config.affected,
         findReachedFiles: context.cliOptions.findReachedFiles ?? findReachedFilesWithFallow,

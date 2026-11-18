@@ -403,6 +403,7 @@ describe('workOutAffectedStories', () => {
       environment: {},
       cwd: options.cwd ?? repo,
       storybooks: [storybook],
+      baselinesFolders: [storybook.baselines],
       configPath: join(repo, 'visual-check.config.ts'),
       affected: { selectAll: [], ignore: [] },
       findReachedFiles,
@@ -600,20 +601,24 @@ describe('workOutAffectedStories in a monorepo', () => {
   }
 
   /**
-   * Writes the changes, then works out the affected stories with the `affected` globs given, or none.
+   * Writes the changes, then works out the affected stories with the `affected` globs given, or none, in a run that
+   * covers both Storybooks and knows only their baselines folders, unless `run` says otherwise.
    */
   async function affectedBy(
     changes: Record<string, string>,
     affected: { selectAll?: string[]; ignore?: string[] } = {},
+    run: { storybooks?: AffectedStorybookInput[]; baselinesFolders?: string[] } = {},
   ) {
     writeFiles(repo, changes)
 
     const graph = fakeGraph()
+    const inRun = run.storybooks ?? storybooks
     const result = await workOutAffectedStories({
       baseRef: undefined,
       environment: {},
       cwd: repo,
-      storybooks,
+      storybooks: inRun,
+      baselinesFolders: run.baselinesFolders ?? inRun.map(({ baselines }) => baselines),
       configPath: join(repo, 'visual-check.config.ts'),
       affected: { selectAll: affected.selectAll ?? [], ignore: affected.ignore ?? [] },
       findReachedFiles: graph.findReachedFiles,
@@ -725,6 +730,30 @@ describe('workOutAffectedStories in a monorepo', () => {
     expect(result.calls).toEqual([])
   })
 
+  it('selects nothing for a baseline of a Storybook the run leaves out, never taking it for an image', async () => {
+    const run = {
+      storybooks: storybooks.slice(0, 1),
+      baselinesFolders: [join(repo, '.visual-check/baselines'), ...storybooks.map(({ baselines }) => baselines)],
+    }
+
+    expect((await affectedBy({ '.visual-check/baselines/home--page.png': 'png' }, {}, run)).storybooks).toEqual([
+      some(),
+    ])
+    expect(
+      (await affectedBy({ 'apps/docs/.visual-check/baselines/intro--page.png': 'changed' }, {}, run)).calls,
+    ).toEqual([])
+  })
+
+  it('takes a .png in the baselines folder of a Storybook it is not told about for an image', async () => {
+    const result = await affectedBy(
+      { '.visual-check/baselines/home--page.png': 'png' },
+      {},
+      { storybooks: storybooks.slice(0, 1) },
+    )
+
+    expect(result.storybooks).toEqual([{ all: true }])
+  })
+
   it('selects a baseline story beside the stories files the graph reaches', async () => {
     const result = await affectedBy({
       'apps/web/.visual-check/baselines/page--wide.png': 'new',
@@ -797,6 +826,7 @@ describe('workOutAffectedStories in a monorepo', () => {
       environment: {},
       cwd: repo,
       storybooks,
+      baselinesFolders: [],
       configPath: join(repo, 'visual-check.config.ts'),
       affected: { selectAll: ['notes/**'], ignore: [] },
       findReachedFiles: fakeGraph().findReachedFiles,
@@ -806,6 +836,7 @@ describe('workOutAffectedStories in a monorepo', () => {
       environment: {},
       cwd: repo,
       storybooks,
+      baselinesFolders: [],
       configPath: join(repo, 'apps/web/visual-check.config.ts'),
       affected: { selectAll: ['notes/**'], ignore: [] },
       findReachedFiles: fakeGraph().findReachedFiles,

@@ -141,6 +141,11 @@ interface WorkOutAffectedStoriesOptions {
    */
   storybooks: readonly AffectedStorybookInput[]
   /**
+   * The baselines folder of every Storybook in the config, those the run leaves out included, absolute paths. A
+   * changed `.png` directly in one is a baseline, which selects nothing in a Storybook the run leaves out.
+   */
+  baselinesFolders: readonly string[]
+  /**
    * visual-check's config file, an absolute path.
    */
   configPath: string
@@ -357,7 +362,7 @@ function withRealPaths(storybooks: readonly AffectedStorybookInput[]): Promise<A
  *
  * - A changed file that matches `affected.ignore` counts for nothing but `changedFiles`.
  * - The config file, a lockfile, `pnpm-workspace.yaml` or a match for `affected.selectAll` affects every story.
- * - A changed baseline affects its story.
+ * - A changed baseline affects its story, and nothing when its Storybook isn't in the run.
  * - A package's config, such as `package.json`, `tsconfig*` or `.env*`, and an image, a font or a data JSON file the
  *   graph doesn't hold, affect every story of the Storybooks whose graph reaches its package.
  * - Any other file affects what the graph says it reaches.
@@ -390,7 +395,10 @@ export async function workOutAffectedStories(options: WorkOutAffectedStoriesOpti
     configPath: await realPathOf(options.configPath),
     selectAll: options.affected.selectAll,
     ignore: options.affected.ignore,
-    baselinesFolders: realStorybooks.map(({ baselines }) => baselines),
+    baselinesFolders: [
+      ...realStorybooks.map(({ baselines }) => baselines),
+      ...(await Promise.all(options.baselinesFolders.map(realPathOf))),
+    ],
   }
   const sorted = await sortChanges(root, files, (file) => changedFileRuleOf(file, context))
 

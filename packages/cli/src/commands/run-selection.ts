@@ -86,6 +86,10 @@ interface RunSelectionInput {
    */
   storybooks: readonly IndexedStorybook[]
   /**
+   * The baselines folder of every Storybook in the config, those the run leaves out included, absolute paths.
+   */
+  baselinesFolders: readonly string[]
+  /**
    * visual-check's config file, an absolute path.
    */
   configPath: string
@@ -217,6 +221,7 @@ export async function workOutRunSelection(input: RunSelectionInput): Promise<Run
       baselines: storybook.baselines,
       storyIds: stories.map((story) => story.id),
     })),
+    baselinesFolders: input.baselinesFolders,
     configPath: input.configPath,
     affected: input.affected,
     findReachedFiles: input.findReachedFiles,

@@ -53,6 +53,7 @@ describe('resolveConfig defaults', () => {
           url,
         },
       ],
+      baselinesFolders: ['/repo/.visual-check/baselines'],
       platform: 'linux/amd64',
       image: undefined,
       tolerance: { color: 0.01, pixels: 20 },
@@ -373,6 +374,13 @@ describe('resolveConfig with --storybook', () => {
 
   it('returns only the Storybook it names', () => {
     expect(resolve(two, { storybook: 'ui' }).storybooks.map(({ name }) => name)).toStrictEqual(['ui'])
+  })
+
+  it('keeps the baselines folder of every Storybook in the config, in config order', () => {
+    expect(resolve(two, { storybook: 'ui' }).baselinesFolders).toStrictEqual([
+      '/repo/web/.visual-check/baselines',
+      '/repo/ui/.visual-check/baselines',
+    ])
   })
 
   it('needs no URL for a Storybook outside the run', () => {

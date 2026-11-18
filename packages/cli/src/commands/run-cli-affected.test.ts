@@ -547,6 +547,32 @@ describe('runCli covering the affected stories', () => {
     expect(docs.record.captures).toEqual([])
   })
 
+  it('captures nothing in the Storybook --storybook names for a changed baseline of another Storybook', async () => {
+    const docsUrl = await startStorybook(['intro--page'], { 'intro--page': './intro.stories.tsx' })
+    const { project } = await createAffectedRun({ extra: { 'docs/intro.stories.tsx': '' } })
+
+    writeFiles(project, {
+      'visual-check.config.mjs': readFileSync(join(project, 'visual-check.config.mjs'), 'utf8').replace(
+        '} } }',
+        `}, docs: { url: '${docsUrl}', dir: 'docs' } } }`,
+      ),
+    })
+    commit(project)
+    writeFiles(project, { 'docs/.visual-check/baselines/intro--page.png': 'png' })
+
+    const graph = fakeGraph()
+    const { options, record } = fakeBrowser()
+    const result = await runCli(['test', '--storybook', 'web'], {}, project, {
+      ...options,
+      findReachedFiles: graph.findReachedFiles,
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout.split('\n')[1]).toBe('The changed file affects no story. Run with --all to cover every story.')
+    expect(record.captures).toEqual([])
+    expect(graph.calls).toEqual([])
+  })
+
   it('covers every story of test --consistency locally, without reading git or the graph', async () => {
     const { project } = await createRun(['a'], { a: defaultRunSnapshot })
     const graph = fakeGraph()
