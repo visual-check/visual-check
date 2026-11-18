@@ -186,7 +186,7 @@ describe('installDependencies', () => {
 })
 
 describe('addAddons', () => {
-  const base = { packageManager: 'pnpm' as const, cliVersion: '0.0.0', root: '/p' }
+  const base = { packageManager: 'pnpm' as const, yarnBerry: false, cliVersion: '0.0.0', root: '/p' }
 
   it('runs storybook add in the root', async () => {
     const { runCommand, calls } = fakeRunCommand()

@@ -339,6 +339,7 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
   const addonWarnings = await addAddons({
     addons,
     packageManager,
+    yarnBerry: project.yarnBerry,
     cliVersion,
     root: project.root,
     runCommand,

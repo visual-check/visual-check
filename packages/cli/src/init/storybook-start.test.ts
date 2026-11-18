@@ -163,9 +163,13 @@ describe('startWorkspaceOf', () => {
     ['npm', { pnpm: ['a'], workspaces: undefined }, []],
     ['yarn', { pnpm: undefined, workspaces: undefined }, []],
   ])('gives the packages %s reads from the lists %j', (packageManager, packageManagerLists, listed) => {
-    const project = { root: '/p', workspace: { packageManagerLists } }
+    const project = { root: '/p', yarnBerry: false, workspace: { packageManagerLists } }
 
-    expect(startWorkspaceOf(project, packageManager)).toEqual({ root: '/p', listedPackageDirs: listed })
+    expect(startWorkspaceOf(project, packageManager)).toEqual({
+      root: '/p',
+      listedPackageDirs: listed,
+      yarnBerry: false,
+    })
   })
 })
 
@@ -184,7 +188,7 @@ describe('startCommandOf', () => {
    * `listed`.
    */
   function workspaceOf(listed: boolean): StartWorkspace {
-    return { root: '/p', listedPackageDirs: listed ? ['packages/ui', 'libs/ui'] : [] }
+    return { root: '/p', listedPackageDirs: listed ? ['packages/ui', 'libs/ui'] : [], yarnBerry: false }
   }
 
   it.each<[StorybookStart, string]>([
@@ -193,6 +197,15 @@ describe('startCommandOf', () => {
     [{ kind: 'nx', project: 'ui', target: 'sb', port: undefined }, 'npx nx run ui:sb'],
   ])('words %j under npm', (start, command) => {
     expect(startCommandOf(start, 'npm', workspaceOf(true))).toBe(command)
+  })
+
+  it.each<[boolean, string]>([
+    [false, 'npx --no-install nx run ui:storybook'],
+    [true, 'yarn exec nx run ui:storybook'],
+  ])('runs an Nx target through the nx binary under Yarn, Yarn 2 or later: %s', (yarnBerry, command) => {
+    const start: StorybookStart = { kind: 'nx', project: 'ui', target: 'storybook', port: undefined }
+
+    expect(startCommandOf(start, 'yarn', { ...workspaceOf(true), yarnBerry })).toBe(command)
   })
 
   it.each<[PackageManager, boolean, string]>([
@@ -226,7 +239,7 @@ describe('startCommandOf', () => {
   it.each<PackageManager>(['pnpm', 'npm', 'yarn', 'bun'])(
     "goes into the package's folder under %s when its own list names another package only",
     (packageManager) => {
-      const workspace = { root: '/p', listedPackageDirs: ['packages/ui'] }
+      const workspace = { root: '/p', listedPackageDirs: ['packages/ui'], yarnBerry: false }
 
       expect(startCommandOf(startIn('/p/libs/ui', '@acme/ui'), packageManager, workspace)).toBe(
         `cd libs/ui && ${packageManager} run sb`,

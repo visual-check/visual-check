@@ -183,6 +183,10 @@ export interface StartWorkspace {
    * pnpm, `package.json#workspaces` for npm, Yarn and Bun. It can run their scripts from the root.
    */
   listedPackageDirs: readonly string[]
+  /**
+   * Whether Yarn is Yarn 2 or later, which runs a binary differently.
+   */
+  yarnBerry: boolean
 }
 
 /**
@@ -196,6 +200,10 @@ export function startWorkspaceOf(
      */
     root: string
     /**
+     * Whether the root shows Yarn 2 or later.
+     */
+    yarnBerry: boolean
+    /**
      * The workspace, with the lists of packages its root holds that a package manager reads.
      */
     workspace: Pick<Workspace, 'packageManagerLists'>
@@ -205,6 +213,7 @@ export function startWorkspaceOf(
   return {
     root: project.root,
     listedPackageDirs: packageManagerListOf(project.workspace.packageManagerLists, packageManager) ?? [],
+    yarnBerry: project.yarnBerry,
   }
 }
 
@@ -245,5 +254,5 @@ export function startCommandOf(
     return scriptStartCommandOf(start, packageManager, workspace)
   }
 
-  return commandLineOf(nxCommandOf(packageManager, ['run', `${start.project}:${start.target}`]))
+  return commandLineOf(nxCommandOf(packageManager, ['run', `${start.project}:${start.target}`], workspace.yarnBerry))
 }

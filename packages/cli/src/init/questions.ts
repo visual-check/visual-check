@@ -411,7 +411,7 @@ async function askStartCommand(
   }
 
   const configArgs = storybook.configDir === defaultConfigDir ? [] : ['-c', storybook.configDir]
-  const command = storybookCommandOf(packageManager, ['dev', '-p', String(urlPort), ...configArgs])
+  const command = storybookCommandOf(packageManager, ['dev', '-p', String(urlPort), ...configArgs], workspace.yarnBerry)
 
   return prompter.text(`Command that starts ${name}`, {
     defaultValue: commandLineOf(command),

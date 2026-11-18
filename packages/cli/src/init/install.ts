@@ -178,6 +178,10 @@ interface AddAddonsInput {
    */
   packageManager: PackageManager
   /**
+   * Whether Yarn is Yarn 2 or later, which runs the `storybook` binary differently.
+   */
+  yarnBerry: boolean
+  /**
    * The version of the CLI that runs `init`, which is the addon's version too.
    */
   cliVersion: string
@@ -198,15 +202,17 @@ interface AddAddonsInput {
 /**
  * Returns the command that adds the addon to a Storybook. The config folder is passed when it isn't `.storybook`.
  */
-function addonCommandOf(packageManager: PackageManager, cliVersion: string, configDir: string): CommandLine {
+function addonCommandOf(
+  { packageManager, yarnBerry, cliVersion }: Pick<AddAddonsInput, 'packageManager' | 'yarnBerry' | 'cliVersion'>,
+  configDir: string,
+): CommandLine {
   const configArgs = configDir === defaultConfigDir ? [] : ['-c', configDir]
 
-  return storybookCommandOf(packageManager, [
-    'add',
-    `@visual-check/storybook-addon@${cliVersion}`,
-    '--yes',
-    ...configArgs,
-  ])
+  return storybookCommandOf(
+    packageManager,
+    ['add', `@visual-check/storybook-addon@${cliVersion}`, '--yes', ...configArgs],
+    yarnBerry,
+  )
 }
 
 /**
@@ -214,11 +220,11 @@ function addonCommandOf(packageManager: PackageManager, cliVersion: string, conf
  * Storybook still runs. Returns the warnings.
  */
 export async function addAddons(input: AddAddonsInput): Promise<string[]> {
-  const { addons, packageManager, cliVersion, root, runCommand, progress } = input
+  const { addons, root, runCommand, progress } = input
   const warnings: string[] = []
 
   for (const { configDir, name } of addons) {
-    const commandLine = addonCommandOf(packageManager, cliVersion, configDir)
+    const commandLine = addonCommandOf(input, configDir)
     const shown = commandLineOf(commandLine)
 
     const exitCode = await runStep(

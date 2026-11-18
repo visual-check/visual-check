@@ -158,7 +158,10 @@ describe('existingStorybooksOf', () => {
     ])
 
     expect(existingStorybooksOf(projectOf(), existing, 'yarn')[0]?.startCommand).toBe(
-      'yarn storybook dev -p 6008 -c docs/.storybook',
+      'npx --no-install storybook dev -p 6008 -c docs/.storybook',
+    )
+    expect(existingStorybooksOf(projectOf({ yarnBerry: true }), existing, 'yarn')[0]?.startCommand).toBe(
+      'yarn exec storybook dev -p 6008 -c docs/.storybook',
     )
   })
 })

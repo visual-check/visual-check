@@ -684,7 +684,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
         commandsIn(
           root,
           { command: 'yarn', args: ['add', '--dev', ...pnpmAdd.args.slice(2)] },
-          { command: 'yarn', args: pnpmAddon.args.slice(1) },
+          { command: 'npx', args: ['--no-install', ...pnpmAddon.args.slice(1)] },
         ),
       )
     })

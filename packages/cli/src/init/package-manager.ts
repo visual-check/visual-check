@@ -310,33 +310,48 @@ export function addDevDependenciesCommandOf(packageManager: PackageManager, spec
 }
 
 /**
- * The command that runs a binary the project installed, such as `storybook`, with `args`.
+ * The command that runs a binary the project installed, such as `storybook`, with `args`. `yarn <bin>` would run a
+ * script of that name instead, such as the usual `storybook` one, so Yarn 2 or later runs it with `yarn exec`, and Yarn
+ * 1, which has no such command that passes every flag on, with `npx --no-install`.
  */
-function binCommandOf(packageManager: PackageManager, bin: string, args: readonly string[]): CommandLine {
+function binCommandOf(
+  packageManager: PackageManager,
+  bin: string,
+  args: readonly string[],
+  yarnBerry: boolean,
+): CommandLine {
   switch (packageManager) {
     case 'pnpm':
       return { command: 'pnpm', args: ['exec', bin, ...args] }
     case 'npm':
       return { command: 'npx', args: [bin, ...args] }
     case 'yarn':
-      return { command: 'yarn', args: [bin, ...args] }
+      return yarnBerry
+        ? { command: 'yarn', args: ['exec', bin, ...args] }
+        : { command: 'npx', args: ['--no-install', bin, ...args] }
     case 'bun':
       return { command: 'bunx', args: [bin, ...args] }
   }
 }
 
 /**
- * The command that runs the project's `storybook` binary with `args`, such as `['dev', '-p', '6006']`.
+ * The command that runs the project's `storybook` binary with `args`, such as `['dev', '-p', '6006']`. `yarnBerry`
+ * says whether Yarn is Yarn 2 or later.
  */
-export function storybookCommandOf(packageManager: PackageManager, args: readonly string[]): CommandLine {
-  return binCommandOf(packageManager, 'storybook', args)
+export function storybookCommandOf(
+  packageManager: PackageManager,
+  args: readonly string[],
+  yarnBerry: boolean,
+): CommandLine {
+  return binCommandOf(packageManager, 'storybook', args, yarnBerry)
 }
 
 /**
- * The command that runs the project's `nx` binary with `args`, such as `['run', 'ui:storybook']`.
+ * The command that runs the project's `nx` binary with `args`, such as `['run', 'ui:storybook']`. `yarnBerry` says
+ * whether Yarn is Yarn 2 or later.
  */
-export function nxCommandOf(packageManager: PackageManager, args: readonly string[]): CommandLine {
-  return binCommandOf(packageManager, 'nx', args)
+export function nxCommandOf(packageManager: PackageManager, args: readonly string[], yarnBerry: boolean): CommandLine {
+  return binCommandOf(packageManager, 'nx', args, yarnBerry)
 }
 
 /**

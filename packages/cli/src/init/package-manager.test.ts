@@ -94,10 +94,17 @@ describe('commands', () => {
   })
 
   it('runs the storybook binary', () => {
-    expect(storybookCommandOf('pnpm', ['dev'])).toEqual({ command: 'pnpm', args: ['exec', 'storybook', 'dev'] })
-    expect(storybookCommandOf('npm', ['dev'])).toEqual({ command: 'npx', args: ['storybook', 'dev'] })
-    expect(storybookCommandOf('yarn', ['dev'])).toEqual({ command: 'yarn', args: ['storybook', 'dev'] })
-    expect(storybookCommandOf('bun', [])).toEqual({ command: 'bunx', args: ['storybook'] })
+    expect(storybookCommandOf('pnpm', ['dev'], false)).toEqual({ command: 'pnpm', args: ['exec', 'storybook', 'dev'] })
+    expect(storybookCommandOf('npm', ['dev'], false)).toEqual({ command: 'npx', args: ['storybook', 'dev'] })
+    expect(storybookCommandOf('bun', [], false)).toEqual({ command: 'bunx', args: ['storybook'] })
+  })
+
+  it("runs the storybook binary under Yarn so a script named storybook can't shadow it", () => {
+    expect(storybookCommandOf('yarn', ['dev'], true)).toEqual({ command: 'yarn', args: ['exec', 'storybook', 'dev'] })
+    expect(storybookCommandOf('yarn', ['dev'], false)).toEqual({
+      command: 'npx',
+      args: ['--no-install', 'storybook', 'dev'],
+    })
   })
 
   it('shows a command line with single spaces', () => {
@@ -132,12 +139,13 @@ describe('nonEmptyTextOf', () => {
 
 describe('nxCommandOf', () => {
   it.each([
-    ['pnpm', 'pnpm exec nx run ui:storybook'],
-    ['npm', 'npx nx run ui:storybook'],
-    ['yarn', 'yarn nx run ui:storybook'],
-    ['bun', 'bunx nx run ui:storybook'],
-  ] as const)('runs nx under %s', (packageManager, command) => {
-    expect(commandLineOf(nxCommandOf(packageManager, ['run', 'ui:storybook']))).toBe(command)
+    ['pnpm', false, 'pnpm exec nx run ui:storybook'],
+    ['npm', false, 'npx nx run ui:storybook'],
+    ['yarn', false, 'npx --no-install nx run ui:storybook'],
+    ['yarn', true, 'yarn exec nx run ui:storybook'],
+    ['bun', false, 'bunx nx run ui:storybook'],
+  ] as const)('runs nx under %s, Yarn 2 or later: %s', (packageManager, yarnBerry, command) => {
+    expect(commandLineOf(nxCommandOf(packageManager, ['run', 'ui:storybook'], yarnBerry))).toBe(command)
   })
 })
 

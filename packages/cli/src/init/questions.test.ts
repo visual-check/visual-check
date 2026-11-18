@@ -305,7 +305,7 @@ describe('askQuestions', () => {
 
     expect(messagesOf(records, 'select')).toEqual(['Package manager'])
     expect(answers.packageManager).toBe('yarn')
-    expect(answers.storybooks[0]?.startCommand).toBe('yarn storybook dev -p 6006')
+    expect(answers.storybooks[0]?.startCommand).toBe('npx --no-install storybook dev -p 6006')
   })
 
   it('runs the start script with the package manager answered', async () => {

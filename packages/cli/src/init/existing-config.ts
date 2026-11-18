@@ -257,5 +257,7 @@ function detectedStartCommandOf(
 
   const configArgs = configDir === defaultConfigDir ? [] : ['-c', configDir]
 
-  return commandLineOf(storybookCommandOf(packageManager, ['dev', '-p', startPortOf(url), ...configArgs]))
+  return commandLineOf(
+    storybookCommandOf(packageManager, ['dev', '-p', startPortOf(url), ...configArgs], project.yarnBerry),
+  )
 }
