@@ -1,49 +1,10 @@
 import { realpath } from 'node:fs/promises'
-import { isAbsolute, posix, relative, resolve, sep } from 'node:path'
+import { changedFileRuleOf } from './changed-file-rules.js'
 import type { FindReachedFiles } from './fallow-graph.js'
 import { changedFilesOf } from './git-changes.js'
-
-/**
- * A Storybook, as the affected stories rules read it.
- */
-export interface AffectedStorybookInput {
-  /**
-   * The folder the Storybook runs in, an absolute path.
-   */
-  dir: string
-  /**
-   * The Storybook's config folder, an absolute path.
-   */
-  configDir: string
-  /**
-   * The Storybook's stories files, as `index.json` gives their import paths: relative to `dir`, such as
-   * `./stories/card.stories.tsx`.
-   */
-  storiesFiles: readonly string[]
-}
-
-/**
- * Which of a Storybook's stories are affected: all of them, or those of some stories files.
- *
- * @public
- */
-export type AffectedStorybook =
-  | {
-      /**
-       * Every story of the Storybook is affected.
-       */
-      all: true
-    }
-  | {
-      /**
-       * Only the stories of `storiesFiles` are affected.
-       */
-      all: false
-      /**
-       * The affected stories files, as the import paths the Storybook's input gives them.
-       */
-      storiesFiles: ReadonlySet<string>
-    }
+import { changedPackagesOf, groupChanges } from './group-changes.js'
+import { packageFolderFinder } from './package-folder.js'
+import { type AffectedStorybook, type AffectedStorybookInput, affectedStorybooksOf } from './storybook-rules.js'
 
 /**
  * The affected stories of each Storybook, and what they were worked out from.
@@ -70,28 +31,6 @@ export interface AffectedStories {
 }
 
 /**
- * What `affectedStoriesFilesOf` reads.
- */
-interface AffectedStoriesFilesInput {
-  /**
-   * The project root that `reached` and `changedFiles` are relative to, an absolute path.
-   */
-  root: string
-  /**
-   * The Storybooks.
-   */
-  storybooks: readonly AffectedStorybookInput[]
-  /**
-   * The graph files reached walking back from the changed files, relative to the root, `/`-separated.
-   */
-  reached: ReadonlySet<string>
-  /**
-   * The changed files, relative to the root, `/`-separated.
-   */
-  changedFiles: readonly string[]
-}
-
-/**
  * What `workOutAffectedStories` reads.
  */
 interface WorkOutAffectedStoriesOptions {
@@ -112,78 +51,31 @@ interface WorkOutAffectedStoriesOptions {
    */
   storybooks: readonly AffectedStorybookInput[]
   /**
+   * The baselines folder of every configured Storybook, those the run leaves out included, absolute paths. A changed
+   * `.png` directly in one is a baseline, which selects nothing in a Storybook the run leaves out.
+   */
+  baselinesFolders: readonly string[]
+  /**
+   * visual-check's config file, an absolute path.
+   */
+  configPath: string
+  /**
+   * The globs, relative to the config file's folder, whose matches select every story or nothing.
+   */
+  affected: {
+    /**
+     * A changed file that matches selects every story.
+     */
+    selectAll: readonly string[]
+    /**
+     * A changed file that matches selects nothing.
+     */
+    ignore: readonly string[]
+  }
+  /**
    * Finds the files the changed files reach.
    */
   findReachedFiles: FindReachedFiles
-}
-
-/**
- * Gives an absolute path relative to the root, `/`-separated. Only the platform's separator is replaced, so a POSIX
- * file name holding a literal `\` keeps it.
- */
-function rootRelative(root: string, path: string): string {
-  return relative(root, path).split(sep).join('/')
-}
-
-/**
- * Tells whether a root-relative path leaves the root: it is `..`, starts with `../`, or is absolute, as a path on
- * another Windows drive is.
- */
-function isOutsideRoot(rootRelativePath: string): boolean {
-  return rootRelativePath === '..' || rootRelativePath.startsWith('../') || isAbsolute(rootRelativePath)
-}
-
-/**
- * Gives the root-relative folders that hold a changed or reached file whose name starts with `preview` or `main`,
- * whatever its case.
- */
-function foldersWithConfigFilesOf(changedFiles: readonly string[], reached: ReadonlySet<string>): Set<string> {
-  const folders = new Set<string>()
-
-  for (const files of [changedFiles, reached]) {
-    for (const file of files) {
-      const name = posix.basename(file).toLowerCase()
-
-      if (name.startsWith('preview') || name.startsWith('main')) {
-        folders.add(posix.dirname(file))
-      }
-    }
-  }
-
-  return folders
-}
-
-/**
- * Works out each Storybook's affected stories files from the reached and the changed files. A changed or reached
- * `preview*` or `main*` file directly in a Storybook's config folder affects every story of that Storybook. Names are
- * compared lowercased, since the file system may not tell `Preview.tsx` from `preview.tsx`, and the prefixes also
- * match files such as `previewer.ts` or `maintenance.ts`: selecting too many stories is accepted over missing one.
- * A Storybook whose folder or config folder is outside the root has every story affected, since git doesn't see its
- * changes. Otherwise the reached stories files are affected. Changed files count for the config files only, since
- * some, such as `preview-head.html` or a deleted `preview.ts`, aren't in the graph.
- */
-export function affectedStoriesFilesOf(input: AffectedStoriesFilesInput): AffectedStorybook[] {
-  const { root, storybooks, reached, changedFiles } = input
-  const foldersWithConfigFiles = foldersWithConfigFilesOf(changedFiles, reached)
-
-  return storybooks.map((storybook) => {
-    const folder = rootRelative(root, storybook.dir)
-    const configFolder = rootRelative(root, storybook.configDir)
-
-    if (isOutsideRoot(folder) || isOutsideRoot(configFolder)) {
-      return { all: true }
-    }
-
-    if (foldersWithConfigFiles.has(configFolder || '.')) {
-      return { all: true }
-    }
-
-    const storiesFiles = storybook.storiesFiles.filter((importPath) =>
-      reached.has(rootRelative(root, resolve(storybook.dir, importPath))),
-    )
-
-    return { all: false, storiesFiles: new Set(storiesFiles) }
-  })
 }
 
 /**
@@ -191,6 +83,13 @@ export function affectedStoriesFilesOf(input: AffectedStoriesFilesInput): Affect
  */
 function everyStoryAffected(storybooks: readonly AffectedStorybookInput[]): AffectedStorybook[] {
   return storybooks.map(() => ({ all: true }))
+}
+
+/**
+ * Gives every Storybook with no story affected.
+ */
+function noStoryAffected(storybooks: readonly AffectedStorybookInput[]): AffectedStorybook[] {
+  return storybooks.map(() => ({ all: false, storiesFiles: new Set<string>(), storyIds: new Set<string>() }))
 }
 
 /**
@@ -206,7 +105,7 @@ async function realPathOf(path: string): Promise<string> {
 }
 
 /**
- * Gives the Storybooks with their folder and config folder as real paths.
+ * Gives the Storybooks with their folder, config folder and baselines folder as real paths.
  */
 function withRealPaths(storybooks: readonly AffectedStorybookInput[]): Promise<AffectedStorybookInput[]> {
   return Promise.all(
@@ -214,15 +113,27 @@ function withRealPaths(storybooks: readonly AffectedStorybookInput[]): Promise<A
       ...storybook,
       dir: await realPathOf(storybook.dir),
       configDir: await realPathOf(storybook.configDir),
+      baselines: await realPathOf(storybook.baselines),
     })),
   )
 }
 
 /**
- * Works out each Storybook's affected stories: finds the changed files since the base, asks `findReachedFiles` what
- * they reach and applies the rules. With no changed files nothing is affected, and the graph isn't asked. When git or
- * the graph can't answer, every story is affected and `fallback` says why. A `--base` that names no commit rejects
- * with `InvalidBaseError`.
+ * Works out each Storybook's affected stories: finds the changed files since the base, groups them by rule, asks
+ * `findReachedFiles` what they reach, then what their changed packages reach, and applies the rules of
+ * `affectedStorybooksOf`.
+ *
+ * - A changed file that matches `affected.ignore` counts for nothing but `changedFiles`.
+ * - The config file, a lockfile, `pnpm-workspace.yaml` or a match for `affected.selectAll` affects every story.
+ * - A changed baseline affects its story, and nothing when its Storybook isn't in the run.
+ * - A package's config, such as `package.json`, `tsconfig*` or `.env*`, and an image, a font or a data JSON file the
+ *   graph doesn't hold, affect every story of the Storybooks whose graph reaches its package.
+ * - Any other file affects what the graph says it reaches.
+ *
+ * The graph isn't asked when no changed file is left once the ignored ones are dropped, when one affects every story,
+ * when no file is left to walk, or when every Storybook already has every story affected. When git or the graph can't
+ * answer, every story is affected and `fallback` says why. A `--base` that names no commit rejects with
+ * `InvalidBaseError`.
  *
  * @public
  */
@@ -235,36 +146,57 @@ export async function workOutAffectedStories(options: WorkOutAffectedStoriesOpti
   }
 
   const { root, base, files } = changes
-
-  if (files.length === 0) {
-    return {
-      base,
-      changedFiles: 0,
-      fallback: null,
-      storybooks: storybooks.map(() => ({ all: false, storiesFiles: new Set<string>() })),
-    }
-  }
-
-  const reached = await findReachedFiles(root, files)
-
-  if ('cantAnswer' in reached) {
-    return {
-      base,
-      changedFiles: files.length,
-      fallback: reached.cantAnswer,
-      storybooks: everyStoryAffected(storybooks),
-    }
-  }
-
-  return {
+  const outcome = (affected: AffectedStorybook[], fallback: string | null = null): AffectedStories => ({
     base,
     changedFiles: files.length,
-    fallback: null,
-    storybooks: affectedStoriesFilesOf({
-      root,
-      storybooks: await withRealPaths(storybooks),
-      reached: reached.reached,
-      changedFiles: files,
-    }),
+    fallback,
+    storybooks: affected,
+  })
+  const realStorybooks = await withRealPaths(storybooks)
+  const context = {
+    root,
+    configPath: await realPathOf(options.configPath),
+    selectAll: options.affected.selectAll,
+    ignore: options.affected.ignore,
+    baselinesFolders: await Promise.all(options.baselinesFolders.map(realPathOf)),
   }
+  const groups = await groupChanges(files, (file) => changedFileRuleOf(file, context), packageFolderFinder(root))
+
+  if (groups === 'ignored') {
+    return outcome(noStoryAffected(storybooks))
+  }
+
+  if (groups === 'every-story') {
+    return outcome(everyStoryAffected(storybooks))
+  }
+
+  const { graphFiles, baselines, packageScoped } = groups
+  const rulesInput = { root, storybooks: realStorybooks, changedFiles: graphFiles, changedBaselines: baselines }
+  const beforeGraph = affectedStorybooksOf({
+    ...rulesInput,
+    reached: new Set(),
+    changedPackages: changedPackagesOf(packageScoped, undefined),
+    reachedFromPackages: new Set(),
+  })
+
+  if (graphFiles.length === 0 || beforeGraph.every(({ all }) => all)) {
+    return outcome(beforeGraph)
+  }
+
+  const reached = await findReachedFiles(root, graphFiles)
+
+  if ('cantAnswer' in reached) {
+    return outcome(everyStoryAffected(storybooks), reached.cantAnswer)
+  }
+
+  const changedPackages = changedPackagesOf(packageScoped, reached.reached)
+
+  return outcome(
+    affectedStorybooksOf({
+      ...rulesInput,
+      reached: reached.reached,
+      changedPackages,
+      reachedFromPackages: reached.reachedFromFolders([...changedPackages]),
+    }),
+  )
 }

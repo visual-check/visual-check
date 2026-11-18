@@ -44,18 +44,31 @@ describe('selectStories', () => {
   it('keeps the stories of the given stories files, in their order', () => {
     expect(
       selectStories(stories, {
-        kind: 'stories-files',
+        kind: 'affected',
         storiesFiles: new Set(['./src/card.stories.tsx', './src/button.stories.tsx']),
+        storyIds: new Set(),
       }).map((story) => story.id),
     ).toEqual(['button--primary', 'button--secondary', 'card--primary'])
     expect(
-      selectStories(stories, { kind: 'stories-files', storiesFiles: new Set(['./src/card.stories.tsx']) }).map(
-        (story) => story.id,
-      ),
+      selectStories(stories, {
+        kind: 'affected',
+        storiesFiles: new Set(['./src/card.stories.tsx']),
+        storyIds: new Set(),
+      }).map((story) => story.id),
     ).toEqual(['card--primary'])
   })
 
-  it('keeps nothing when no stories file is given', () => {
-    expect(selectStories(stories, { kind: 'stories-files', storiesFiles: new Set() })).toEqual([])
+  it('keeps the stories of the given IDs besides those of the stories files, in their order', () => {
+    expect(
+      selectStories(stories, {
+        kind: 'affected',
+        storiesFiles: new Set(['./src/card.stories.tsx']),
+        storyIds: new Set(['button--secondary', 'card--primary']),
+      }).map((story) => story.id),
+    ).toEqual(['button--secondary', 'card--primary'])
+  })
+
+  it('keeps nothing when no stories file and no ID is given', () => {
+    expect(selectStories(stories, { kind: 'affected', storiesFiles: new Set(), storyIds: new Set() })).toEqual([])
   })
 })

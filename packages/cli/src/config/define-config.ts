@@ -97,11 +97,15 @@ export interface StorybookSettings {
  */
 export interface AffectedSettings {
   /**
-   * Globs relative to the config file's folder. A changed file that matches selects every story. Defaults to `[]`.
+   * Globs relative to the config file's folder. A changed file that matches selects every story. `*` and `**` skip
+   * names that start with `.`, so name the dot to match one, as in `docs/.vitepress/**` or `.env*`. Defaults to
+   * `[]`.
    */
   selectAll?: string[]
   /**
-   * Globs relative to the config file's folder. A changed file that matches selects nothing. Defaults to `[]`.
+   * Globs relative to the config file's folder. A changed file that matches selects nothing, whatever else it is. `*`
+   * and `**` skip names that start with `.`, so name the dot to match one, as in `docs/.vitepress/**` or `.env*`.
+   * Defaults to `[]`.
    */
   ignore?: string[]
 }

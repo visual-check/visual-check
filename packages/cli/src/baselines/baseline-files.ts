@@ -21,11 +21,15 @@ const longestKeptKeyBytes = 240
 
 /**
  * How many bytes of a shortened key's start its baseline's file name keeps.
+ *
+ * @public
  */
 export const shortenedPrefixBytes = 223
 
 /**
  * How many hex characters of the full key's SHA-256 a shortened key ends with.
+ *
+ * @public
  */
 export const shortenedHashLength = 16
 

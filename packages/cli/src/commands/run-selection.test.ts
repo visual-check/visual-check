@@ -124,6 +124,9 @@ describe('workOutRunSelection', () => {
     environment: {},
     cwd: '/nowhere',
     storybooks: [{ storybook, version: '10.0.0', stories }],
+    baselinesFolders: [storybook.baselines],
+    configPath: '/nowhere/visual-check.config.ts',
+    affected: { selectAll: [], ignore: [] },
     findReachedFiles: () => Promise.reject(new Error('The run asked for the import graph.')),
   }
 
@@ -165,6 +168,7 @@ describe('workOutRunSelection for affected', () => {
   function affectedRunIn(findReachedFiles: FindReachedFiles): {
     input: Parameters<typeof workOutRunSelection>[0]
     head: string
+    repo: string
   } {
     const repo = makeRepo()
     const head = commit(repo, {
@@ -176,7 +180,12 @@ describe('workOutRunSelection for affected', () => {
 
     writeFiles(repo, { 'button.tsx': 'export const Button = 2\n' })
 
-    const storybookInRepo = { ...storybook, dir: repo, configDir: join(repo, '.storybook') }
+    const storybookInRepo = {
+      ...storybook,
+      dir: repo,
+      configDir: join(repo, '.storybook'),
+      baselines: join(repo, '.visual-check/baselines'),
+    }
 
     return {
       input: {
@@ -185,18 +194,22 @@ describe('workOutRunSelection for affected', () => {
         environment: {},
         cwd: repo,
         storybooks: [{ storybook: storybookInRepo, version: '10.0.0', stories }],
+        baselinesFolders: [storybookInRepo.baselines],
+        configPath: join(repo, 'visual-check.config.ts'),
+        affected: { selectAll: [], ignore: [] },
         findReachedFiles,
       },
       head,
+      repo,
     }
   }
 
   it('keeps the stories of the stories files the changed files reach, asking the graph once', async () => {
     const calls: (readonly string[])[] = []
-    const { input, head } = affectedRunIn(async (_root, changedFiles) => {
-      calls.push(changedFiles)
+    const { input, head } = affectedRunIn(async (_root, files) => {
+      calls.push(files)
 
-      return { reached: new Set(['button.tsx', 'button.stories.tsx']) }
+      return { reached: new Set(['button.tsx', 'button.stories.tsx']), reachedFromFolders: () => new Set<string>() }
     })
     const result = await workOutRunSelection(input)
 
@@ -212,8 +225,34 @@ describe('workOutRunSelection for affected', () => {
     })
   })
 
+  it("keeps a changed baseline's story beside the stories of the reached stories files", async () => {
+    const { input, repo } = affectedRunIn(async () => ({
+      reached: new Set(['button.tsx', 'button.stories.tsx']),
+      reachedFromFolders: () => new Set<string>(),
+    }))
+
+    writeFiles(repo, { '.visual-check/baselines/card--primary.png': 'png' })
+
+    const result = await workOutRunSelection(input)
+
+    expect(result.selections.map((selection) => selection.stories.map((story) => story.id))).toEqual([
+      ['button--primary', 'button--secondary', 'card--primary'],
+    ])
+  })
+
+  it('keeps no story when every changed file matches affected.ignore', async () => {
+    const { input } = affectedRunIn(() => Promise.reject(new Error('The run asked for the import graph.')))
+    const result = await workOutRunSelection({ ...input, affected: { selectAll: [], ignore: ['*.tsx'] } })
+
+    expect(result.selections[0]?.stories).toEqual([])
+    expect(result.notes).toEqual(['The changed file affects no story. Run with --all to cover every story.'])
+  })
+
   it('notes that the changed file affects no story when the graph reaches no stories file', async () => {
-    const { input } = affectedRunIn(async () => ({ reached: new Set(['button.tsx']) }))
+    const { input } = affectedRunIn(async () => ({
+      reached: new Set(['button.tsx']),
+      reachedFromFolders: () => new Set<string>(),
+    }))
     const result = await workOutRunSelection(input)
 
     expect(result.selections[0]?.stories).toEqual([])
