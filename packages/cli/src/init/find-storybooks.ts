@@ -66,21 +66,18 @@ export function relativePathOf(from: string, path: string): string {
 }
 
 /**
- * Orders config folders: `.storybook` first, then by path.
+ * Returns a comparator that orders paths with `first` first, then by code point.
  */
-function compareConfigDirs(left: string, right: string): number {
-  const leftRank = left === defaultConfigDir ? 0 : 1
-  const rightRank = right === defaultConfigDir ? 0 : 1
+export function orderWithFirst(first: string): (left: string, right: string) => number {
+  return (left, right) => {
+    const rank = Number(left !== first) - Number(right !== first)
 
-  if (leftRank !== rightRank) {
-    return leftRank - rightRank
+    if (rank !== 0 || left === right) {
+      return rank
+    }
+
+    return left < right ? -1 : 1
   }
-
-  if (left === right) {
-    return 0
-  }
-
-  return left < right ? -1 : 1
 }
 
 /**
@@ -113,7 +110,7 @@ export function storybookConfigDirsOf(
     }
   }
 
-  return [...found].sort(compareConfigDirs)
+  return [...found].sort(orderWithFirst(defaultConfigDir))
 }
 
 /**
@@ -172,6 +169,7 @@ export function takeUniqueName(base: string, used: Set<string>): string {
   for (let suffix = 2; used.has(name); suffix += 1) {
     name = `${base}-${suffix}`
   }
+
   used.add(name)
 
   return name

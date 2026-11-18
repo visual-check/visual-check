@@ -25,6 +25,10 @@ export interface Manifest {
    */
   scripts?: unknown
   /**
+   * The `workspaces` field: the globs of the workspace's packages, or an object holding them in `packages`.
+   */
+  workspaces?: unknown
+  /**
    * The `dependencies`, by name.
    */
   dependencies?: unknown
@@ -121,20 +125,26 @@ function fromPackageManagerField(value: unknown): PackageManager | undefined {
 }
 
 /**
+ * Returns the entries of the `devEngines.packageManager` field, which holds one object or an array of them. Gives
+ * `[]` when `devEngines` isn't an object.
+ */
+function devEnginesEntriesOf(devEngines: unknown): unknown[] {
+  if (!isJsonObject(devEngines)) {
+    return []
+  }
+
+  const field = devEngines.packageManager
+
+  return Array.isArray(field) ? field : [field]
+}
+
+/**
  * Reads the `devEngines.packageManager` field: an object with a `name`, or an array of them. Returns the first known
  * name.
  */
 function fromDevEngines(devEngines: unknown): PackageManager | undefined {
-  if (typeof devEngines !== 'object' || devEngines === null) {
-    return undefined
-  }
-
-  const field = (devEngines as { packageManager?: unknown }).packageManager
-  const entries: unknown[] = Array.isArray(field) ? field : [field]
-
-  for (const entry of entries) {
-    const name = typeof entry === 'object' && entry !== null ? (entry as { name?: unknown }).name : undefined
-    const known = knownPackageManager(name)
+  for (const entry of devEnginesEntriesOf(devEngines)) {
+    const known = knownPackageManager(isJsonObject(entry) ? entry.name : undefined)
 
     if (known !== undefined) {
       return known
@@ -159,6 +169,65 @@ export function packageManagerOf(manifest: Manifest, lockfiles: readonly string[
   return (
     fromPackageManagerField(manifest.packageManager) ?? fromDevEngines(manifest.devEngines) ?? fromLockfiles(lockfiles)
   )
+}
+
+/**
+ * Returns the major version a version or range starts with, such as `4` for `4.1.0`, `^4.1.0` or `>=4`. Gives
+ * `undefined` for one without a number, such as `*`, or a value that isn't text.
+ */
+function majorOf(version: unknown): number | undefined {
+  const major = typeof version === 'string' ? /\d+/.exec(version)?.[0] : undefined
+
+  return major === undefined ? undefined : Number(major)
+}
+
+/**
+ * Returns the Yarn version the `packageManager` field declares, such as `4.1.0` for `yarn@4.1.0+sha512...`, or
+ * `undefined` when it declares none or names another package manager.
+ */
+function yarnVersionOfField(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined
+  }
+
+  const [name, version] = value.split('@')
+
+  return name === 'yarn' ? version : undefined
+}
+
+/**
+ * Returns whether a project uses Yarn 2 or later, which `init` calls Yarn Berry: the root holds a `.yarnrc.yml`, or the
+ * manifest's `packageManager` or `devEngines.packageManager` declares Yarn with a major version of 2 or more. It
+ * doesn't say whether Yarn is the package manager: read it only when `packageManagerOf` gives `yarn`.
+ */
+export function yarnBerryOf(manifest: Manifest, hasYarnrcYml: boolean): boolean {
+  const devEnginesVersions = devEnginesEntriesOf(manifest.devEngines).flatMap((entry) =>
+    isJsonObject(entry) && entry.name === 'yarn' ? [entry.version] : [],
+  )
+  const versions = [yarnVersionOfField(manifest.packageManager), ...devEnginesVersions]
+
+  return hasYarnrcYml || versions.some((version) => (majorOf(version) ?? 0) >= 2)
+}
+
+/**
+ * The `rush.json` fields that name the package manager and its version, in the order `init` tries them.
+ */
+const rushVersionFields: readonly (readonly [string, PackageManager])[] = [
+  ['pnpmVersion', 'pnpm'],
+  ['npmVersion', 'npm'],
+  ['yarnVersion', 'yarn'],
+]
+
+/**
+ * Finds the package manager of a Rush workspace from its parsed `rush.json`: the first of `pnpmVersion`, `npmVersion`
+ * and `yarnVersion` that is text. Returns `undefined` when none is, or `rush` isn't a JSON object.
+ */
+export function rushPackageManagerOf(rush: unknown): PackageManager | undefined {
+  if (!isJsonObject(rush)) {
+    return undefined
+  }
+
+  return rushVersionFields.find(([field]) => typeof rush[field] === 'string')?.[1]
 }
 
 /**

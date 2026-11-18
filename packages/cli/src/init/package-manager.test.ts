@@ -6,8 +6,10 @@ import {
   lockfileNames,
   packageManagerOf,
   runScriptCommandOf,
+  rushPackageManagerOf,
   scriptsOf,
   storybookCommandOf,
+  yarnBerryOf,
 } from './package-manager.js'
 
 describe('packageManagerOf', () => {
@@ -148,5 +150,55 @@ describe('listsDependency', () => {
 
   it('does not find an inherited property', () => {
     expect(listsDependency({ dependencies: {} }, 'toString')).toBe(false)
+  })
+})
+
+describe('yarnBerryOf', () => {
+  it('counts a .yarnrc.yml', () => {
+    expect(yarnBerryOf({}, true)).toBe(true)
+  })
+
+  it.each([
+    ['yarn@4.1.0', true],
+    ['yarn@2.0.0+sha512.abc', true],
+    ['yarn@1.22.22', false],
+    ['yarn', false],
+    ['pnpm@9.12.3', false],
+  ])('reads packageManager %s', (packageManager, expected) => {
+    expect(yarnBerryOf({ packageManager }, false)).toBe(expected)
+  })
+
+  it.each([
+    [{ name: 'yarn', version: '^4.1.0' }, true],
+    [
+      [
+        { name: 'pnpm', version: '9' },
+        { name: 'yarn', version: '>=2' },
+      ],
+      true,
+    ],
+    [{ name: 'yarn', version: '1.x' }, false],
+    [{ name: 'yarn' }, false],
+    [{ name: 'npm', version: '10' }, false],
+  ])('reads devEngines.packageManager %j', (packageManager, expected) => {
+    expect(yarnBerryOf({ devEngines: { packageManager } }, false)).toBe(expected)
+  })
+
+  it('returns false when nothing shows Yarn 2 or later', () => {
+    expect(yarnBerryOf({ packageManager: 7, devEngines: 'yarn@4' }, false)).toBe(false)
+  })
+})
+
+describe('rushPackageManagerOf', () => {
+  it.each([
+    [{ pnpmVersion: '9.12.3' }, 'pnpm'],
+    [{ npmVersion: '10.0.0' }, 'npm'],
+    [{ yarnVersion: '1.22.22' }, 'yarn'],
+  ])('reads %j', (rush, expected) => {
+    expect(rushPackageManagerOf(rush)).toBe(expected)
+  })
+
+  it.each([{}, { pnpmVersion: 9 }, null, []])('returns undefined for %j', (rush) => {
+    expect(rushPackageManagerOf(rush)).toBeUndefined()
   })
 })

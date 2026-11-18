@@ -139,3 +139,7 @@ _Avoid_: Sandbox, VM
 **Platform**:
 The OS and CPU architecture a snapshot is rendered on. A baseline and a snapshot from different platforms can differ even when nothing changed.
 _Avoid_: Environment, arch, machine
+
+**Workspace**:
+A root folder and the packages under it that `pnpm-workspace.yaml`, `package.json#workspaces`, Lerna, Nx or Rush lists. A project without such a list is a workspace of one package, its root. `init` writes the config at the workspace root.
+_Avoid_: Monorepo root, repo
