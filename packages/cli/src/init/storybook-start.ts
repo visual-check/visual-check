@@ -1,13 +1,16 @@
 import { posix } from 'node:path'
+import { relativePathOf } from './find-storybooks.js'
 import {
   commandLineOf,
   isJsonObject,
   nonEmptyTextOf,
   nxCommandOf,
   type PackageManager,
+  runPackageScriptCommandOf,
   runScriptCommandOf,
 } from './package-manager.js'
 import { defaultConfigDir, type StorybookCall, tidyFolder } from './storybook-scripts.js'
+import type { Workspace } from './workspace.js'
 
 /**
  * How a Storybook starts: a `storybook dev` call in a script, or an Nx target of the project its package is.
@@ -26,6 +29,10 @@ export type StorybookStart =
        * The absolute folder of the `package.json` that holds the script: the Storybook's package's, or the root's.
        */
       packageDir: string
+      /**
+       * The name that `package.json` gives, or `undefined` when it names none.
+       */
+      packageName: string | undefined
     }
   | {
       /**
@@ -164,12 +171,77 @@ export function portOfStart(start: StorybookStart | undefined): number | undefin
 }
 
 /**
- * Returns the command that starts a Storybook, as shown to the user: the package manager running its script, or
- * `nx run <project>:<target>` through the package manager's runner.
+ * The workspace a start command runs in: its root, and whether the package manager runs its packages' scripts itself.
  */
-export function startCommandOf(start: StorybookStart, packageManager: PackageManager): string {
+export interface StartWorkspace {
+  /**
+   * The absolute workspace root, where the command runs.
+   */
+  root: string
+  /**
+   * Whether the package manager's own list names the workspace's packages: `pnpm-workspace.yaml` for pnpm,
+   * `package.json#workspaces` for npm, Yarn and Bun. Then it can run a package's script from the root.
+   */
+  listedByPackageManager: boolean
+}
+
+/**
+ * Returns the workspace a project's start commands run in, under `packageManager`: its root, and whether that package
+ * manager's own list names its packages, whatever else lists them too, such as Nx or Lerna.
+ */
+export function startWorkspaceOf(
+  project: {
+    /**
+     * The absolute workspace root.
+     */
+    root: string
+    /**
+     * The workspace, with the lists of packages its root holds that a package manager reads.
+     */
+    workspace: Pick<Workspace, 'packageManagerLists'>
+  },
+  packageManager: PackageManager,
+): StartWorkspace {
+  const { pnpm, workspaces } = project.workspace.packageManagerLists
+
+  return { root: project.root, listedByPackageManager: packageManager === 'pnpm' ? pnpm : workspaces }
+}
+
+/**
+ * Returns the command that runs a Storybook's start script from the workspace root. A root script runs as is. Another
+ * package's runs through the package manager's workspace support, when its own list names the packages and it can
+ * pick the package. Else the command goes into the package's folder first.
+ */
+function scriptStartCommandOf(
+  start: Extract<StorybookStart, { kind: 'script' }>,
+  packageManager: PackageManager,
+  { root, listedByPackageManager }: StartWorkspace,
+): string {
+  const { call, packageDir, packageName } = start
+
+  if (packageDir === root) {
+    return runScriptCommandOf(packageManager, call.script)
+  }
+
+  const dir = relativePathOf(root, packageDir)
+  const throughWorkspace = listedByPackageManager
+    ? runPackageScriptCommandOf(packageManager, call.script, { dir, name: packageName })
+    : undefined
+
+  return throughWorkspace ?? `cd ${dir} && ${runScriptCommandOf(packageManager, call.script)}`
+}
+
+/**
+ * Returns the command that starts a Storybook from the workspace root, as shown to the user: the package manager
+ * running its script, or `nx run <project>:<target>` through the package manager's runner.
+ */
+export function startCommandOf(
+  start: StorybookStart,
+  packageManager: PackageManager,
+  workspace: StartWorkspace,
+): string {
   if (start.kind === 'script') {
-    return runScriptCommandOf(packageManager, start.call.script)
+    return scriptStartCommandOf(start, packageManager, workspace)
   }
 
   return commandLineOf(nxCommandOf(packageManager, ['run', `${start.project}:${start.target}`]))

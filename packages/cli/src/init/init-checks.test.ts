@@ -41,7 +41,7 @@ describe('blockingProblemsOf', () => {
     const project = projectOf({
       hasManifest: false,
       denoFile: 'deno.json',
-      workspace: { kind: 'rush', packageDirs: ['libs/ui'] },
+      workspace: { kind: 'rush', packageDirs: ['libs/ui'], packageManagerLists: { pnpm: false, workspaces: false } },
     })
 
     expect(blockingProblemsOf({ ...fine, project })).toEqual([
@@ -52,7 +52,10 @@ describe('blockingProblemsOf', () => {
   })
 
   it('asks for a package.json at the root of any other workspace without one', () => {
-    const project = projectOf({ hasManifest: false, workspace: { kind: 'pnpm', packageDirs: ['libs/ui'] } })
+    const project = projectOf({
+      hasManifest: false,
+      workspace: { kind: 'pnpm', packageDirs: ['libs/ui'], packageManagerLists: { pnpm: true, workspaces: false } },
+    })
 
     expect(blockingProblemsOf({ ...fine, project })).toEqual([
       'visual-check init needs a package.json at the root of this workspace, for its scripts and the CLI. ' +

@@ -18,6 +18,20 @@ import { tidyFolder } from './storybook-scripts.js'
 export type WorkspaceKind = 'pnpm' | 'workspaces' | 'lerna' | 'nx' | 'rush' | 'single'
 
 /**
+ * The lists of packages a workspace root holds that a package manager reads itself, whatever the workspace's kind.
+ */
+export interface PackageManagerLists {
+  /**
+   * Whether `pnpm-workspace.yaml` lists `packages`, which pnpm reads.
+   */
+  pnpm: boolean
+  /**
+   * Whether `package.json` has `workspaces`, which npm, Yarn and Bun read.
+   */
+  workspaces: boolean
+}
+
+/**
  * A workspace `init` found: a root folder and its packages.
  */
 export interface Workspace {
@@ -34,6 +48,11 @@ export interface Workspace {
    * one when it holds a `package.json`.
    */
   packageDirs: string[]
+  /**
+   * The lists of packages the root holds that a package manager reads itself. An Nx or Lerna workspace may have them
+   * too.
+   */
+  packageManagerLists: PackageManagerLists
   /**
    * The root's files, as `listFiles` gave them: relative to the root and `/` separated.
    */
@@ -321,6 +340,10 @@ interface WorkspaceConfig {
    * The package manager the config names: `rush.json`'s for Rush, else `undefined`.
    */
   packageManager: PackageManager | undefined
+  /**
+   * The lists of packages the root holds that a package manager reads itself.
+   */
+  packageManagerLists: PackageManagerLists
 }
 
 /**
@@ -406,6 +429,7 @@ function workspaceConfigOf(read: ReadFile): WorkspaceConfig | undefined {
     folders: rushProjectFoldersOf(rush),
     readsProjectJson: kind === 'nx',
     packageManager: rushPackageManagerOf(rush),
+    packageManagerLists: { pnpm: pnpm !== undefined, workspaces: workspaces !== undefined },
   }
 }
 
@@ -421,6 +445,7 @@ function singlePackageConfigOf(read: ReadFile): WorkspaceConfig {
     folders: [],
     readsProjectJson: false,
     packageManager: undefined,
+    packageManagerLists: { pnpm: false, workspaces: false },
   }
 }
 
@@ -524,6 +549,7 @@ function workspaceOf(root: string, config: WorkspaceConfig, packageDirs: string[
     root,
     kind: config.kind,
     packageDirs,
+    packageManagerLists: config.packageManagerLists,
     files,
     packageManager: config.packageManager,
     yarnBerry: yarnBerryOf(config.manifest ?? {}, isFile(join(root, '.yarnrc.yml'))),

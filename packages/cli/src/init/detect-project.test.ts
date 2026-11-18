@@ -211,6 +211,7 @@ describe('detectProject', () => {
           kind: 'script',
           call: { script: 'storybook', subcommand: 'dev', configDir: undefined, port: 6007 },
           packageDir: root,
+          packageName: '@acme/web',
         },
         version: '10.1.2',
       },
@@ -273,7 +274,11 @@ describe('detectProject in a workspace', () => {
       hasManifest: true,
       packageManager: 'pnpm',
       yarnBerry: false,
-      workspace: { kind: 'pnpm', packageDirs: ['.', 'packages/ui', 'packages/web'] },
+      workspace: {
+        kind: 'pnpm',
+        packageDirs: ['.', 'packages/ui', 'packages/web'],
+        packageManagerLists: { pnpm: true, workspaces: false },
+      },
       notes: [],
     })
     expect(project?.storybooks).toEqual([
@@ -289,6 +294,7 @@ describe('detectProject in a workspace', () => {
           kind: 'script',
           call: { script: 'storybook', subcommand: 'dev', configDir: undefined, port: 6006 },
           packageDir: join(root, 'packages/ui'),
+          packageName: '@acme/ui',
         },
         version: '10.1.0',
       },
@@ -304,6 +310,7 @@ describe('detectProject in a workspace', () => {
           kind: 'script',
           call: { script: 'storybook', subcommand: 'dev', configDir: undefined, port: 6007 },
           packageDir: join(root, 'packages/web'),
+          packageName: 'web',
         },
         version: undefined,
       },
@@ -354,6 +361,7 @@ describe('detectProject in a workspace', () => {
           kind: 'script',
           call: { script: 'sb', configDir: '.sb', port: 7000 },
           packageDir: join(root, 'apps/docs'),
+          packageName: 'docs',
         },
       },
     ])
@@ -386,7 +394,11 @@ describe('detectProject in a workspace', () => {
 
     const project = await detectProject(root, listProjectFiles)
 
-    expect(project?.workspace).toEqual({ kind: 'nx', packageDirs: ['.', 'libs/ui'] })
+    expect(project?.workspace).toEqual({
+      kind: 'nx',
+      packageDirs: ['.', 'libs/ui'],
+      packageManagerLists: { pnpm: false, workspaces: false },
+    })
     expect(project?.storybooks).toMatchObject([
       {
         configDir: 'libs/ui/.storybook',
@@ -416,7 +428,7 @@ describe('detectProject in a workspace', () => {
       manifest: {},
       manifestProblem: undefined,
       packageManager: 'pnpm',
-      workspace: { kind: 'rush', packageDirs: ['libs/ui'] },
+      workspace: { kind: 'rush', packageDirs: ['libs/ui'], packageManagerLists: { pnpm: false, workspaces: false } },
     })
     expect(project?.storybooks.map(({ configDir, defaultName }) => [configDir, defaultName])).toEqual([
       ['libs/ui/.storybook', 'ui'],
@@ -556,6 +568,7 @@ describe('detectProject in a workspace', () => {
       kind: 'script',
       call: { script: 'sb:ui', subcommand: 'dev', configDir: 'packages/ui/.storybook', port: 6200 },
       packageDir: root,
+      packageName: 'acme',
     })
   })
 

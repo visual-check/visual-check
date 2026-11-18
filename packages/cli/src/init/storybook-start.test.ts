@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest'
+import type { PackageManager } from './package-manager.js'
 import {
   type NxStartInput,
   nxProjectNameOf,
   nxStartOf,
   nxStorybookPluginTargetOf,
   portOfStart,
+  type StartWorkspace,
   type StorybookStart,
   startCommandOf,
+  startWorkspaceOf,
 } from './storybook-start.js'
+import type { PackageManagerLists } from './workspace.js'
 
 /**
  * A `project.json` named `name`, if given, whose `storybook` target has `options`.
@@ -143,21 +147,87 @@ describe('portOfStart', () => {
   it('gives the port of a script call or an Nx target', () => {
     const call = { script: 'sb', subcommand: 'dev' as const, configDir: undefined, port: 6007 }
 
-    expect(portOfStart({ kind: 'script', call, packageDir: '/project' })).toBe(6007)
+    expect(portOfStart({ kind: 'script', call, packageDir: '/project', packageName: undefined })).toBe(6007)
     expect(portOfStart({ kind: 'nx', project: 'ui', target: 'storybook', port: 4400 })).toBe(4400)
     expect(portOfStart(undefined)).toBeUndefined()
   })
 })
 
+describe('startWorkspaceOf', () => {
+  it.each<[PackageManager, PackageManagerLists, boolean]>([
+    ['pnpm', { pnpm: true, workspaces: false }, true],
+    ['pnpm', { pnpm: false, workspaces: true }, false],
+    ['npm', { pnpm: false, workspaces: true }, true],
+    ['yarn', { pnpm: false, workspaces: true }, true],
+    ['bun', { pnpm: false, workspaces: true }, true],
+    ['npm', { pnpm: true, workspaces: false }, false],
+    ['yarn', { pnpm: false, workspaces: false }, false],
+  ])('says whether %s reads one of the lists %j', (packageManager, packageManagerLists, listed) => {
+    const project = { root: '/p', workspace: { packageManagerLists } }
+
+    expect(startWorkspaceOf(project, packageManager)).toEqual({ root: '/p', listedByPackageManager: listed })
+  })
+})
+
 describe('startCommandOf', () => {
+  /**
+   * Builds the start of a Storybook whose `sb` script is in the package in `packageDir`, named `packageName`.
+   */
+  function startIn(packageDir: string, packageName: string | undefined): StorybookStart {
+    const call = { script: 'sb', subcommand: 'dev' as const, configDir: undefined, port: 6006 }
+
+    return { kind: 'script', call, packageDir, packageName }
+  }
+
+  /**
+   * The workspace at `/p`, whose packages the package manager's own list names when `listed`.
+   */
+  function workspaceOf(listed: boolean): StartWorkspace {
+    return { root: '/p', listedByPackageManager: listed }
+  }
+
   it.each<[StorybookStart, string]>([
-    [
-      { kind: 'script', call: { script: 'sb', subcommand: 'dev', configDir: undefined, port: 6006 }, packageDir: '/p' },
-      'npm run sb',
-    ],
+    [startIn('/p', 'app'), 'npm run sb'],
     [{ kind: 'nx', project: 'ui', target: 'storybook', port: undefined }, 'npx nx run ui:storybook'],
     [{ kind: 'nx', project: 'ui', target: 'sb', port: undefined }, 'npx nx run ui:sb'],
   ])('words %j under npm', (start, command) => {
-    expect(startCommandOf(start, 'npm')).toBe(command)
+    expect(startCommandOf(start, 'npm', workspaceOf(true))).toBe(command)
   })
+
+  it.each<[PackageManager, boolean, string]>([
+    ['pnpm', true, 'pnpm run sb'],
+    ['npm', true, 'npm run sb'],
+    ['yarn', true, 'yarn run sb'],
+    ['bun', true, 'bun run sb'],
+    ['pnpm', false, 'pnpm run sb'],
+  ])('runs a root script as is under %s, listed: %s', (packageManager, listed, command) => {
+    expect(startCommandOf(startIn('/p', 'app'), packageManager, workspaceOf(listed))).toBe(command)
+  })
+
+  it.each<[PackageManager, string]>([
+    ['pnpm', 'pnpm --filter @acme/ui run sb'],
+    ['npm', 'npm run sb --workspace packages/ui'],
+    ['yarn', 'yarn workspace @acme/ui run sb'],
+    ['bun', 'bun run --filter @acme/ui sb'],
+  ])("runs a named package's script through %s's workspace support", (packageManager, command) => {
+    expect(startCommandOf(startIn('/p/packages/ui', '@acme/ui'), packageManager, workspaceOf(true))).toBe(command)
+  })
+
+  it.each<[PackageManager, string]>([
+    ['pnpm', 'pnpm --filter ./packages/ui run sb'],
+    ['npm', 'npm run sb --workspace packages/ui'],
+    ['yarn', 'cd packages/ui && yarn run sb'],
+    ['bun', 'bun run --filter ./packages/ui sb'],
+  ])('picks a package with no name by its folder under %s, or goes into it under Yarn', (packageManager, command) => {
+    expect(startCommandOf(startIn('/p/packages/ui', undefined), packageManager, workspaceOf(true))).toBe(command)
+  })
+
+  it.each<PackageManager>(['pnpm', 'npm', 'yarn', 'bun'])(
+    "goes into the package's folder under %s when its own list doesn't name the packages",
+    (packageManager) => {
+      expect(startCommandOf(startIn('/p/libs/ui', '@acme/ui'), packageManager, workspaceOf(false))).toBe(
+        `cd libs/ui && ${packageManager} run sb`,
+      )
+    },
+  )
 })

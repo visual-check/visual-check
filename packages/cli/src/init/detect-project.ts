@@ -111,9 +111,9 @@ export interface DetectedProject {
    */
   denoFile: string | undefined
   /**
-   * What lists the workspace's packages, and their folders relative to the root.
+   * What lists the workspace's packages, their folders relative to the root, and the lists a package manager reads.
    */
-  workspace: Pick<Workspace, 'kind' | 'packageDirs'>
+  workspace: Pick<Workspace, 'kind' | 'packageDirs' | 'packageManagerLists'>
   /**
    * The Storybooks, `.storybook` first, then by path.
    */
@@ -176,13 +176,13 @@ function startOf(
   const ownCall = startScriptOf(workspacePackage.calls, packageRelativeOf(workspacePackage.dir, configDir))
 
   if (ownCall !== undefined) {
-    return { kind: 'script', call: ownCall, packageDir }
+    return { kind: 'script', call: ownCall, packageDir, packageName: nonEmptyTextOf(workspacePackage.manifest.name) }
   }
 
   const rootCall = startScriptOf(rootPackage.calls, configDir)
 
   if (rootCall !== undefined) {
-    return { kind: 'script', call: rootCall, packageDir: root }
+    return { kind: 'script', call: rootCall, packageDir: root, packageName: nonEmptyTextOf(rootPackage.manifest.name) }
   }
 
   return nxStartOf({
@@ -276,7 +276,7 @@ export async function detectProject(cwd: string, listFiles: ListFiles): Promise<
     return undefined
   }
 
-  const { root, kind, packageDirs } = workspace
+  const { root, kind, packageDirs, packageManagerLists } = workspace
   const packages = packagesOf(root, packageDirs)
   const { manifest, hasManifest, manifestProblem } = packages.rootPackage
   const lockfiles = lockfileNames.filter((name) => existsSync(join(root, name)))
@@ -291,7 +291,7 @@ export async function detectProject(cwd: string, listFiles: ListFiles): Promise<
     packageManager: workspace.packageManager ?? packageManagerOf(manifest, lockfiles),
     yarnBerry: workspace.yarnBerry,
     denoFile: denoFileNames.find((name) => existsSync(join(root, name))),
-    workspace: { kind, packageDirs },
+    workspace: { kind, packageDirs, packageManagerLists },
     storybooks,
     notes: [...workspaceRootNotesOf(startDir, workspace), ...notes],
   }

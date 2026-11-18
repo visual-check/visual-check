@@ -363,6 +363,7 @@ describe('findWorkspace', () => {
       root,
       kind: 'pnpm',
       packageDirs: ['.', 'apps/web'],
+      packageManagerLists: { pnpm: true, workspaces: false },
       files: expect.any(Array),
       packageManager: undefined,
       yarnBerry: false,
@@ -422,6 +423,7 @@ describe('findWorkspace', () => {
       root: join(root, 'examples/demo'),
       kind: 'single',
       packageDirs: ['.'],
+      packageManagerLists: { pnpm: false, workspaces: false },
       files: expect.any(Array),
       packageManager: undefined,
       yarnBerry: false,
@@ -441,11 +443,27 @@ describe('findWorkspace', () => {
       root,
       kind: 'rush',
       packageDirs: ['apps/web'],
+      packageManagerLists: { pnpm: false, workspaces: false },
       files: expect.any(Array),
       packageManager: 'yarn',
       yarnBerry: false,
     })
     expect((await findWorkspace(join(root, 'tools'), listProjectFiles))?.root).toBe(root)
+  })
+
+  it.each([
+    [{ 'pnpm-workspace.yaml': 'packages:\n  - apps/*\n' }, {}, { pnpm: true, workspaces: false }],
+    [{}, { workspaces: ['apps/*'] }, { pnpm: false, workspaces: true }],
+    [{ 'pnpm-workspace.yaml': 'catalog: {}\n' }, {}, { pnpm: false, workspaces: false }],
+  ])('tells which package manager lists an Nx root holds: %j %j', async (files, fields, lists) => {
+    const root = makeProject({
+      manifest: { name: 'root', ...fields },
+      files: { 'nx.json': '{}', 'apps/web/package.json': manifest(), ...files },
+    })
+    const workspace = await findWorkspace(root, listProjectFiles)
+
+    expect(workspace?.kind).toBe('nx')
+    expect(workspace?.packageManagerLists).toEqual(lists)
   })
 
   it('finds a single package from a subfolder', async () => {
@@ -455,6 +473,7 @@ describe('findWorkspace', () => {
       root,
       kind: 'single',
       packageDirs: ['.'],
+      packageManagerLists: { pnpm: false, workspaces: false },
       files: expect.any(Array),
       packageManager: undefined,
       yarnBerry: false,

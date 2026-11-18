@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { relativePathOf } from './find-storybooks.js'
 import { isJsonObject } from './package-manager.js'
 
 /**
@@ -44,6 +45,42 @@ export interface ConfigStorybook {
    * Storybook's config folder, relative to `dir`. Left out when it is `'.storybook'`.
    */
   configDir?: string
+}
+
+/**
+ * Builds the config entry of a Storybook from where it is: its package folder becomes `dir`, relative to the config's
+ * folder, and its config folder becomes `configDir`, relative to that package folder.
+ */
+export function configStorybookOf(place: {
+  /**
+   * The Storybook's name.
+   */
+  name: string
+  /**
+   * The URL the Storybook is served at.
+   */
+  url: string
+  /**
+   * The absolute folder that holds the config.
+   */
+  configFolder: string
+  /**
+   * The absolute folder of the Storybook's package.
+   */
+  packageDir: string
+  /**
+   * The absolute path of Storybook's config folder.
+   */
+  configDir: string
+}): ConfigStorybook {
+  const { name, url, configFolder, packageDir, configDir } = place
+
+  return {
+    name,
+    url,
+    dir: relativePathOf(configFolder, packageDir),
+    configDir: relativePathOf(packageDir, configDir),
+  }
 }
 
 /**
@@ -186,6 +223,7 @@ export function setScripts(manifestPath: string, scripts: Record<string, string>
   }
 
   manifest.scripts = { ...existing, ...scripts }
+
   const json = JSON.stringify(manifest, null, indentationOf(text)) + (text.endsWith('\n') ? '\n' : '')
 
   writeFileSync(manifestPath, text.includes('\r\n') ? json.replaceAll('\n', '\r\n') : json)

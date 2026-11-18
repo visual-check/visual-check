@@ -246,6 +246,40 @@ export function runScriptCommandOf(packageManager: PackageManager, script: strin
 }
 
 /**
+ * Returns the command that runs a workspace package's script from the workspace root, through the package manager's
+ * own workspace support. npm's `--workspace` takes the package's folder. pnpm's and Bun's `--filter` take its name,
+ * else its folder as `./<dir>`. Yarn's `workspace` takes its name, so a package with none gives `undefined`.
+ */
+export function runPackageScriptCommandOf(
+  packageManager: PackageManager,
+  script: string,
+  workspacePackage: {
+    /**
+     * The package's folder, relative to the workspace root.
+     */
+    dir: string
+    /**
+     * The name the package's `package.json` gives, or `undefined` for none.
+     */
+    name: string | undefined
+  },
+): string | undefined {
+  const { dir, name } = workspacePackage
+  const selector = name ?? `./${dir}`
+
+  switch (packageManager) {
+    case 'npm':
+      return `npm run ${script} --workspace ${dir}`
+    case 'pnpm':
+      return `pnpm --filter ${selector} run ${script}`
+    case 'yarn':
+      return name === undefined ? undefined : `yarn workspace ${name} run ${script}`
+    case 'bun':
+      return `bun run --filter ${selector} ${script}`
+  }
+}
+
+/**
  * A command to run: the program and its arguments.
  */
 export interface CommandLine {

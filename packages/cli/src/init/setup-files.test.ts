@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   configEntryOf,
   configSourceOf,
+  configStorybookOf,
   modesFileSource,
   setScripts,
   visualCheckGitignore,
@@ -142,6 +143,41 @@ export default defineConfig({
 
     expect(source).not.toContain('platform')
     expect(source).not.toContain('image')
+  })
+})
+
+describe('configStorybookOf', () => {
+  it.each([
+    ['/r/.storybook', '/r', { dir: '.', configDir: '.storybook' }, "web: { url: 'http://127.0.0.1:6006' },"],
+    [
+      '/r/packages/ui/.storybook',
+      '/r/packages/ui',
+      { dir: 'packages/ui', configDir: '.storybook' },
+      "web: { dir: 'packages/ui', url: 'http://127.0.0.1:6006' },",
+    ],
+    [
+      '/r/packages/ui/config/sb',
+      '/r/packages/ui',
+      { dir: 'packages/ui', configDir: 'config/sb' },
+      "web: { dir: 'packages/ui', configDir: 'config/sb', url: 'http://127.0.0.1:6006' },",
+    ],
+    [
+      '/r/docs/.storybook',
+      '/r',
+      { dir: '.', configDir: 'docs/.storybook' },
+      "web: { configDir: 'docs/.storybook', url: 'http://127.0.0.1:6006' },",
+    ],
+  ])('places the config folder %s of the package %s relative to it', (configDir, packageDir, place, entry) => {
+    const storybook = configStorybookOf({
+      name: 'web',
+      url: 'http://127.0.0.1:6006',
+      configFolder: '/r',
+      packageDir,
+      configDir,
+    })
+
+    expect(storybook).toEqual({ name: 'web', url: 'http://127.0.0.1:6006', ...place })
+    expect(configEntryOf(storybook)).toBe(entry)
   })
 })
 

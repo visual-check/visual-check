@@ -568,7 +568,7 @@ describe('startInitView', () => {
       '✓ URL of web-app http://127.0.0.1:6006\n' +
       '✓ Name of the script that runs visual-check test visual:check\n' +
       '✓ Name of the script that runs visual-check update visual:update\n' +
-      '✓ Add the Storybook addon to web-app? yes\n'
+      '✓ Add the Storybook addon to web-app\n'
     const installTitle = "Install visual-check's packages"
 
     now = 3500

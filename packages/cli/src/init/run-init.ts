@@ -10,7 +10,7 @@ import {
   replacedScriptsLineOf,
   type SetUpStorybook,
 } from './closing-message.js'
-import { type DetectedProject, detectProject } from './detect-project.js'
+import { type DetectedProject, type DetectedStorybook, detectProject } from './detect-project.js'
 import { type ExistingConfig, existingConfigOf, existingStorybooksOf } from './existing-config.js'
 import type { ListFiles } from './find-storybooks.js'
 import { blockingProblemsOf, dockerWarningOf, versionNotesOf } from './init-checks.js'
@@ -18,7 +18,14 @@ import { addAddons, addonTitleOf, dependenciesToAddOf, installDependencies, inst
 import { InputEndedError, type Prompter } from './prompter.js'
 import { type Answers, askQuestions } from './questions.js'
 import type { RunCommand } from './run-command.js'
-import { configSourceOf, modesFileSource, setScripts, visualCheckGitignore, writeIfMissing } from './setup-files.js'
+import {
+  configSourceOf,
+  configStorybookOf,
+  modesFileSource,
+  setScripts,
+  visualCheckGitignore,
+  writeIfMissing,
+} from './setup-files.js'
 import { runStep, type SetupProgress } from './setup-progress.js'
 import {
   type FindUnlistedDependencies,
@@ -153,6 +160,11 @@ interface Setup {
    */
   storybooks: SetUpStorybook[]
   /**
+   * The packages that get the Storybook dependencies, by the folder of their `package.json`: the chosen Storybooks',
+   * or with a config that was already there, the ones of its Storybooks that were detected.
+   */
+  withDependencies: Pick<DetectedStorybook, 'manifestDir' | 'manifest'>[]
+  /**
    * The hints and warnings for stderr so far, a line each, in the order they arose.
    */
   notes: string[]
@@ -241,8 +253,8 @@ async function noteBeforeQuestions(
 }
 
 /**
- * Builds what to set up from the answers: the config to write when there was none, and the Storybooks, the ones
- * answered or the config's own.
+ * Builds what to set up from the answers: the config to write when there was none, listing each Storybook chosen with
+ * its package folder as `dir`, and the Storybooks, the ones answered or the config's own.
  */
 function setupOf(
   project: DetectedProject,
@@ -256,19 +268,29 @@ function setupOf(
       configPath: existing.path,
       configSource: undefined,
       storybooks: existingStorybooksOf(project, existing, answers.packageManager),
+      withDependencies: project.storybooks.filter(({ configDir }) => Object.hasOwn(existing.names, configDir)),
       notes,
     }
   }
 
+  const { root } = project
+
   return {
     answers,
-    configPath: join(project.root, configFileName),
-    configSource: configSourceOf(answers.storybooks.map(({ name, url, configDir }) => ({ name, url, configDir }))),
-    storybooks: answers.storybooks.map(({ name, configDir, startCommand }) => {
-      const dir = project.storybooks.find((storybook) => storybook.configDir === configDir)?.packageDir ?? project.root
-
-      return { name, dir, configDir: join(project.root, configDir), baselines: defaultBaselinesIn(dir), startCommand }
-    }),
+    configPath: join(root, configFileName),
+    configSource: configSourceOf(
+      answers.storybooks.map(({ name, url, configDir, packageDir }) =>
+        configStorybookOf({ name, url, configFolder: root, packageDir, configDir: join(root, configDir) }),
+      ),
+    ),
+    storybooks: answers.storybooks.map(({ name, configDir, packageDir, startCommand }) => ({
+      name,
+      dir: packageDir,
+      configDir: join(root, configDir),
+      baselines: defaultBaselinesIn(packageDir),
+      startCommand,
+    })),
+    withDependencies: answers.storybooks,
     notes,
   }
 }
@@ -285,7 +307,7 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
   const installs = dependenciesToAddOf({
     root: project.root,
     rootManifest: project.manifest,
-    storybooks: project.storybooks.map(({ manifestDir, manifest }) => ({ packageDir: manifestDir, manifest })),
+    storybooks: setup.withDependencies.map(({ manifestDir, manifest }) => ({ packageDir: manifestDir, manifest })),
     cliVersion,
     browserRange: tools.browserRange,
   })

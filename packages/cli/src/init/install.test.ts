@@ -193,7 +193,7 @@ describe('addAddons', () => {
     const { progress, calls: progressCalls } = recordingProgress()
     const warnings = await addAddons({
       ...base,
-      addons: [{ configDir: '.storybook', name: 'app' }],
+      addons: [{ configDir: '.storybook', name: 'app', packageDir: '/p' }],
       runCommand,
       progress,
     })
@@ -218,8 +218,8 @@ describe('addAddons', () => {
     await addAddons({
       ...base,
       addons: [
-        { configDir: 'docs/.storybook', name: 'docs' },
-        { configDir: '.', name: 'root' },
+        { configDir: 'docs/.storybook', name: 'docs', packageDir: '/p' },
+        { configDir: '.', name: 'root', packageDir: '/p' },
       ],
       runCommand,
       progress: silentProgress,
@@ -237,8 +237,8 @@ describe('addAddons', () => {
     const warnings = await addAddons({
       ...base,
       addons: [
-        { configDir: 'docs/.storybook', name: 'docs' },
-        { configDir: '.storybook', name: 'app' },
+        { configDir: 'docs/.storybook', name: 'docs', packageDir: '/p' },
+        { configDir: '.storybook', name: 'app', packageDir: '/p' },
       ],
       runCommand,
       progress,
@@ -266,7 +266,7 @@ describe('addAddons', () => {
     const warnings = await addAddons({
       ...base,
       packageManager: 'npm',
-      addons: [{ configDir: '.storybook', name: 'app' }],
+      addons: [{ configDir: '.storybook', name: 'app', packageDir: '/p' }],
       runCommand,
       progress,
     })

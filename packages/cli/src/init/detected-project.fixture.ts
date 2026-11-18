@@ -24,10 +24,15 @@ export function storybookOf(overrides: Partial<DetectedStorybook> = {}): Detecte
 
 /**
  * Builds the start of a Storybook whose `script`, in the `package.json` in `packageDir` (the root package's unless
- * given), runs `storybook dev` on `port`, with no `-c`.
+ * given) named `packageName` (none unless given), runs `storybook dev` on `port`, with no `-c`.
  */
-export function scriptStartOf(script: string, port: number | undefined, packageDir = '/project'): StorybookStart {
-  return { kind: 'script', call: { script, subcommand: 'dev', configDir: undefined, port }, packageDir }
+export function scriptStartOf(
+  script: string,
+  port: number | undefined,
+  packageDir = '/project',
+  packageName: string | undefined = undefined,
+): StorybookStart {
+  return { kind: 'script', call: { script, subcommand: 'dev', configDir: undefined, port }, packageDir, packageName }
 }
 
 /**
@@ -44,7 +49,7 @@ export function projectOf(overrides: Partial<DetectedProject> = {}): DetectedPro
     packageManager: 'pnpm',
     yarnBerry: false,
     denoFile: undefined,
-    workspace: { kind: 'single', packageDirs: ['.'] },
+    workspace: { kind: 'single', packageDirs: ['.'], packageManagerLists: { pnpm: false, workspaces: false } },
     storybooks: [storybookOf()],
     notes: [],
     ...overrides,

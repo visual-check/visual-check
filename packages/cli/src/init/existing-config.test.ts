@@ -215,7 +215,7 @@ describe('existingConfigOf in a workspace', () => {
     })
 
     expect((await existingConfigOf(join(root, 'packages/ui'), project))?.notes).toEqual([
-      "hint: ../../visual-check.config.ts lists no Storybook in packages/ui/.storybook. To add it, put this under storybooks: ui: { dir: 'packages/ui', configDir: 'packages/ui/.storybook', url: 'http://127.0.0.1:6100' },",
+      "hint: ../../visual-check.config.ts lists no Storybook in packages/ui/.storybook. To add it, put this under storybooks: ui: { dir: 'packages/ui', url: 'http://127.0.0.1:6100' },",
     ])
   })
 })
@@ -462,7 +462,13 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
     expect(readText(root, '.visual-check/.gitignore')).toBe(gitignore)
     expect(existsSync(join(root, outside))).toBe(false)
     expect(existsSync(join(root, '.storybook/visual-check.ts'))).toBe(false)
-    expect(record.commands).toEqual(commandsIn(root, pnpmAdd))
+    // Only the config's Storybooks get the Storybook package, and this config holds none in the project.
+    expect(record.commands).toEqual(
+      commandsIn(root, {
+        command: 'pnpm',
+        args: pnpmAdd.args.filter((arg) => !arg.startsWith('@visual-check/storybook@')),
+      }),
+    )
   })
 
   it('asks no Storybook question when a config is there', async () => {
@@ -471,14 +477,14 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
         'visual-check.config.ts': "export default { storybooks: { web: { url: 'http://127.0.0.1:6006' } } }\n",
       },
     })
-    const prompter = scriptedPrompter(['', '', true])
+    const prompter = scriptedPrompter(['', '', ''])
     const result = await runInit(root, toolsOf({ yes: false, interactive: true, prompter }).tools)
 
     expect(result.exitCode).toBe(0)
     expect(prompter.records.map(({ kind, message, defaultValue }) => ({ kind, message, defaultValue }))).toEqual([
       { kind: 'text', message: 'Name of the script that runs visual-check test', defaultValue: 'visual:check' },
       { kind: 'text', message: 'Name of the script that runs visual-check update', defaultValue: 'visual:update' },
-      { kind: 'confirm', message: 'Add the Storybook addon to web?', defaultValue: true },
+      { kind: 'checklist', message: 'Add the Storybook addon to', defaultValue: ['.storybook'] },
     ])
     expect(prompter.unused()).toEqual([])
   })

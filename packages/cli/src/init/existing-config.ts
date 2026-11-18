@@ -8,9 +8,9 @@ import type { DetectedProject, DetectedStorybook } from './detect-project.js'
 import { isInsideRoot, mainFileOnDiskIn, relativePathOf, takeUniqueName } from './find-storybooks.js'
 import { commandLineOf, type PackageManager, storybookCommandOf } from './package-manager.js'
 import { defaultStorybookPort } from './questions.js'
-import { configEntryOf } from './setup-files.js'
+import { configEntryOf, configStorybookOf } from './setup-files.js'
 import { defaultConfigDir } from './storybook-scripts.js'
-import { portOfStart, startCommandOf } from './storybook-start.js'
+import { portOfStart, startCommandOf, startWorkspaceOf } from './storybook-start.js'
 
 /**
  * A Storybook of a config that was already there, which `init` sets up: its name, its absolute folders and its URL.
@@ -156,7 +156,13 @@ function missingStorybookHintsOf(
   return project.storybooks
     .filter(({ configDir }) => !Object.hasOwn(names, configDir))
     .map((storybook) =>
-      missingStorybookHintOf(cwd, configPath, storybook, takeUniqueName(storybook.defaultName, usedNames)),
+      missingStorybookHintOf(
+        cwd,
+        project.root,
+        configPath,
+        storybook,
+        takeUniqueName(storybook.defaultName, usedNames),
+      ),
     )
 }
 
@@ -164,13 +170,22 @@ function missingStorybookHintsOf(
  * Words the hint for a detected Storybook the config doesn't hold, with the entry to add under `storybooks`, named
  * `name`.
  */
-function missingStorybookHintOf(cwd: string, configPath: string, storybook: DetectedStorybook, name: string): string {
-  const entry = configEntryOf({
-    name,
-    url: `http://127.0.0.1:${portOfStart(storybook.start) ?? defaultStorybookPort}`,
-    dir: relativePathOf(dirname(configPath), storybook.packageDir),
-    configDir: storybook.configDir,
-  })
+function missingStorybookHintOf(
+  cwd: string,
+  root: string,
+  configPath: string,
+  storybook: DetectedStorybook,
+  name: string,
+): string {
+  const entry = configEntryOf(
+    configStorybookOf({
+      name,
+      url: `http://127.0.0.1:${portOfStart(storybook.start) ?? defaultStorybookPort}`,
+      configFolder: dirname(configPath),
+      packageDir: storybook.packageDir,
+      configDir: join(root, storybook.configDir),
+    }),
+  )
 
   return (
     `hint: ${relativePathOf(cwd, configPath)} lists no Storybook in ${storybook.configDir}. ` +
@@ -237,7 +252,7 @@ function detectedStartCommandOf(
   const start = project.storybooks.find((storybook) => storybook.configDir === configDir)?.start
 
   if (start !== undefined) {
-    return startCommandOf(start, packageManager)
+    return startCommandOf(start, packageManager, startWorkspaceOf(project, packageManager))
   }
 
   const configArgs = configDir === defaultConfigDir ? [] : ['-c', configDir]

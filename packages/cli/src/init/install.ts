@@ -1,3 +1,4 @@
+import type { AddonAnswer } from './addon-question.js'
 import {
   addDevDependenciesCommandOf,
   type CommandLine,
@@ -7,7 +8,6 @@ import {
   type PackageManager,
   storybookCommandOf,
 } from './package-manager.js'
-import type { AddonAnswer } from './questions.js'
 import type { RunCommand } from './run-command.js'
 import { runStep, type SetupProgress } from './setup-progress.js'
 import { defaultConfigDir } from './storybook-scripts.js'

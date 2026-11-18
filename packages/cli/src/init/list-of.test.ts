@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { listOf } from './list-of.js'
+import { listOf, nonEmptyOf } from './list-of.js'
 
 describe('listOf', () => {
   it('gives nothing for no items', () => {
@@ -16,5 +16,16 @@ describe('listOf', () => {
 
   it('separates the first items with commas and the last with and', () => {
     expect(listOf(['a', 'b', 'c'])).toBe('a, b and c')
+  })
+})
+
+describe('nonEmptyOf', () => {
+  it('gives undefined for no items', () => {
+    expect(nonEmptyOf([])).toBeUndefined()
+  })
+
+  it('gives the items when there is one or more', () => {
+    expect(nonEmptyOf(['a'])).toEqual(['a'])
+    expect(nonEmptyOf(['a', 'b'])).toEqual(['a', 'b'])
   })
 })

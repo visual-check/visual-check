@@ -251,7 +251,7 @@ describe('runInit', () => {
           'Warning: .storybook runs storybook 12.0.0, newer than the versions visual-check is tested on (9.1 to 11).',
       })
       expectWritten(root, result.stdout)
-      expect(prompter.records.filter(({ kind }) => kind === 'confirm')).toEqual([])
+      expect(prompter.records.filter(({ kind }) => kind === 'checklist')).toEqual([])
       expect(prompter.unused()).toEqual([])
       expect(record.commands).toEqual(commandsIn(root, pnpmAdd))
     })
@@ -303,7 +303,7 @@ describe('runInit', () => {
 
     it("warns when the URL's port isn't the start command's", async () => {
       const root = pnpmProject()
-      const prompter = scriptedPrompter(['', 'http://127.0.0.1:7000', '', '', true])
+      const prompter = scriptedPrompter(['', 'http://127.0.0.1:7000', '', '', ''])
       const result = await runInit(root, toolsOf({ yes: false, interactive: true, prompter }).tools)
 
       expect(result.exitCode).toBe(0)
@@ -497,7 +497,7 @@ describe('runInit', () => {
     await runInit(asked, toolsOf({ yes: false, interactive: true, prompter }).tools)
 
     expect(prompter.records[0]).toEqual({ kind: 'note', message: hint })
-    expect(prompter.records.filter(({ kind }) => kind === 'confirm')).toEqual([])
+    expect(prompter.records.filter(({ kind }) => kind === 'checklist')).toEqual([])
     expect(prompter.unused()).toEqual([])
   })
 
@@ -668,7 +668,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
 
     it('asks for one when nothing shows one', async () => {
       const root = pnpmProject({ manifest: { packageManager: undefined } })
-      const prompter = scriptedPrompter(['yarn', '', '', '', '', true])
+      const prompter = scriptedPrompter(['yarn', '', '', '', '', ''])
       const { tools, record } = toolsOf({ yes: false, interactive: true, prompter })
 
       await runInit(root, tools)
@@ -787,6 +787,77 @@ describe('runInit in a workspace', () => {
         cwd: join(root, 'packages/ui'),
       },
     ])
+  })
+
+  /**
+   * Makes a pnpm workspace with two packages, `packages/ui` and `packages/web`, whose Storybooks both start on port
+   * 6006, with storybook 10 installed in the root. `packages/web`'s config folder is `.sb`.
+   */
+  function onePortWorkspace(): string {
+    return makeProject({
+      manifest: { name: 'acme', private: true, packageManager: 'pnpm@9.12.3' },
+      files: {
+        'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+        'packages/ui/package.json': JSON.stringify({
+          name: '@acme/ui',
+          scripts: { storybook: 'storybook dev -p 6006' },
+        }),
+        'packages/ui/.storybook/main.ts': '',
+        'packages/web/package.json': JSON.stringify({
+          name: 'web',
+          scripts: { storybook: 'storybook dev -c .sb -p 6006' },
+        }),
+        'packages/web/.sb/main.ts': '',
+      },
+      storybookVersion: '10.6.7',
+    })
+  }
+
+  it('lists every Storybook in one root config with --yes, and warns that they share a port', async () => {
+    const root = onePortWorkspace()
+    const { tools } = toolsOf()
+    const result = await runInit(root, tools)
+    const warning =
+      "Warning: ui and sb both use port 6006, so they can't run at the same time. Give each Storybook its own port."
+
+    expect(result.exitCode).toBe(0)
+    expect(result.messages).toEqual([warning])
+    expect(result.stderr).toBe(`${warning}\n`)
+    expect(readText(root, 'visual-check.config.ts')).toBe(`import { defineConfig } from '@visual-check/cli'
+
+export default defineConfig({
+  storybooks: {
+    ui: { dir: 'packages/ui', url: 'http://127.0.0.1:6006' },
+    sb: { dir: 'packages/web', configDir: '.sb', url: 'http://127.0.0.1:6006' },
+  },
+})
+`)
+    expect(readText(root, 'packages/web/.sb/visual-check.ts')).toBe(modesFile)
+    expect(result.summary?.nextSteps?.steps[0]).toEqual([
+      { command: 'pnpm --filter @acme/ui run storybook', text: ['Start ui, and keep it running'] },
+      { command: 'pnpm --filter web run storybook', text: ['Start sb, and keep it running'] },
+    ])
+  })
+
+  it('writes nothing, adds nothing and offers no addon for a Storybook left unticked', async () => {
+    const root = onePortWorkspace()
+    const prompter = scriptedPrompter([['packages/ui/.storybook'], '', '', '', '', ''])
+    const { tools, record } = toolsOf({ yes: false, interactive: true, prompter })
+    const result = await runInit(root, tools)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.messages).toEqual([])
+    expect(prompter.unused()).toEqual([])
+    expect(prompter.records.filter(({ kind }) => kind === 'checklist').map(({ defaultValue }) => defaultValue)).toEqual(
+      [['packages/ui/.storybook', 'packages/web/.sb'], ['packages/ui/.storybook']],
+    )
+    expect(readText(root, 'visual-check.config.ts')).toContain(
+      "  storybooks: {\n    ui: { dir: 'packages/ui', url: 'http://127.0.0.1:6006' },\n  },",
+    )
+    expect(existsSync(join(root, 'packages/web/.sb/visual-check.ts'))).toBe(false)
+    expect(existsSync(join(root, 'packages/web/.visual-check'))).toBe(false)
+    expect(record.commands.map(({ cwd }) => cwd)).not.toContain(join(root, 'packages/web'))
+    expect(JSON.stringify(record.commands)).not.toContain('.sb')
   })
 
   it('adds the Storybook package to the root for an Nx project with only a project.json', async () => {

@@ -1,15 +1,11 @@
 import { findStorybookUrlProblem, serveStorybookFix } from '../config/find-storybook-url-problem.js'
+import { type AddonAnswer, askAddons } from './addon-question.js'
 import type { DetectedProject, DetectedStorybook } from './detect-project.js'
-import {
-  commandLineOf,
-  listsDependency,
-  type PackageManager,
-  scriptsOf,
-  storybookCommandOf,
-} from './package-manager.js'
+import { listOf, nonEmptyOf } from './list-of.js'
+import { commandLineOf, type Manifest, type PackageManager, scriptsOf, storybookCommandOf } from './package-manager.js'
 import type { Choice, Prompter } from './prompter.js'
 import { defaultConfigDir, storybookCallsOf } from './storybook-scripts.js'
-import { portOfStart, startCommandOf } from './storybook-start.js'
+import { portOfStart, type StartWorkspace, startCommandOf, startWorkspaceOf } from './storybook-start.js'
 
 /**
  * What the person chose for one Storybook.
@@ -31,6 +27,18 @@ export interface StorybookAnswers {
    * The command that starts the Storybook.
    */
   startCommand: string
+  /**
+   * The absolute folder of the Storybook's package, where it runs: its `dir` in the config.
+   */
+  packageDir: string
+  /**
+   * The absolute folder of the `package.json` the Storybook's dependencies go in.
+   */
+  manifestDir: string
+  /**
+   * The parsed `package.json` in `manifestDir`.
+   */
+  manifest: Manifest
 }
 
 /**
@@ -56,7 +64,7 @@ export interface Answers {
    */
   packageManager: PackageManager
   /**
-   * The answers for each Storybook, in the order they were found. Empty when a config already exists.
+   * The answers for each Storybook chosen, in the order they were found. Empty when a config already exists.
    */
   storybooks: StorybookAnswers[]
   /**
@@ -73,23 +81,9 @@ export interface Answers {
     update: ScriptAnswer
   }
   /**
-   * The Storybooks that get the visual-check addon: the config folder and the name of each.
+   * The Storybooks that get the visual-check addon.
    */
   addons: AddonAnswer[]
-}
-
-/**
- * A Storybook the addon is added to.
- */
-export interface AddonAnswer {
-  /**
-   * The config folder of the Storybook, relative to the project root.
-   */
-  configDir: string
-  /**
-   * The name of the Storybook.
-   */
-  name: string
 }
 
 /**
@@ -158,18 +152,9 @@ const scriptHints = {
 } as const
 
 /**
- * The name of the addon package.
- */
-const addonPackage = '@visual-check/storybook-addon'
-
-/**
- * The Storybook major version the addon is added to.
- */
-const addonStorybookMajor = 10
-
-/**
- * Asks the questions of `init`, in order: the package manager, each Storybook, the script names, and the addon. Gives
- * the answers, and the warnings the answers call for. It prints nothing: hints go through the prompter.
+ * Asks the questions of `init`, in order: the package manager, which Storybooks to set up, each of them, the script
+ * names, and the addon. Gives the answers, and the warnings the answers call for. It prints nothing: hints go through
+ * the prompter.
  */
 export async function askQuestions({
   project,
@@ -181,9 +166,12 @@ export async function askQuestions({
   const storybooks =
     existingConfig === undefined ? await askStorybooks(project, packageManager, prompter, warnings) : []
   const scripts = await askScripts(project, prompter)
-  const addons = await askAddons(namedStorybooksOf(project, storybooks, existingConfig), prompter)
+  const addons = await askAddons({ project, answered: storybooks, existingConfig, prompter })
 
-  return { answers: { packageManager, storybooks, scripts, addons }, warnings }
+  return {
+    answers: { packageManager, storybooks, scripts, addons },
+    warnings: [...warnings, ...sharedPortWarningsOf(storybooks)],
+  }
 }
 
 /**
@@ -202,7 +190,8 @@ function askPackageManager(project: DetectedProject, prompter: Prompter): Promis
 }
 
 /**
- * Asks about each Storybook in turn. The names already answered are taken.
+ * Asks which Storybooks to set up, when there's more than one, then about each one chosen in turn. The names already
+ * answered are taken.
  */
 async function askStorybooks(
   project: DetectedProject,
@@ -211,14 +200,88 @@ async function askStorybooks(
   warnings: string[],
 ): Promise<StorybookAnswers[]> {
   const answers: StorybookAnswers[] = []
+  const workspace = startWorkspaceOf(project, packageManager)
 
-  for (const storybook of project.storybooks) {
+  for (const storybook of await askWhichStorybooks(project.storybooks, prompter)) {
     const taken = answers.map(({ name }) => name)
 
-    answers.push(await askStorybook(storybook, taken, packageManager, prompter, warnings))
+    answers.push(await askStorybook(storybook, taken, packageManager, workspace, prompter, warnings))
   }
 
   return answers
+}
+
+/**
+ * Asks which Storybooks to set up, from a checklist with all ticked, and gives the ones ticked. A lone Storybook is
+ * set up without asking.
+ */
+async function askWhichStorybooks(
+  storybooks: readonly DetectedStorybook[],
+  prompter: Prompter,
+): Promise<readonly DetectedStorybook[]> {
+  const choices = nonEmptyOf(
+    storybooks.map(
+      ({ configDir, packageName, defaultName }): Choice<string> => ({
+        value: configDir,
+        label: configDir,
+        hint: packageName ?? defaultName,
+      }),
+    ),
+  )
+
+  if (choices === undefined || choices.length === 1) {
+    return storybooks
+  }
+
+  const chosen = await prompter.checklist('Storybooks to set up', {
+    choices,
+    defaultValues: storybooks.map(({ configDir }) => configDir),
+    hint: 'The ones ticked go in the config.',
+    validate: (values) => (values.length === 0 ? 'Tick at least one Storybook.' : undefined),
+  })
+
+  return storybooks.filter(({ configDir }) => chosen.includes(configDir))
+}
+
+/**
+ * The host names that all reach this machine, which share its ports. Any `127.x.x.x` does too.
+ */
+const loopbackHosts = new Set(['localhost', '[::1]', '0.0.0.0'])
+
+/**
+ * Returns the host a URL's port is taken on: one for every name of this machine, else the URL's host name.
+ */
+function portHostOf(url: URL): string {
+  return loopbackHosts.has(url.hostname) || url.hostname.startsWith('127.') ? 'loopback' : url.hostname
+}
+
+/**
+ * Words a warning for each port two Storybooks or more share on the same host: they can't run at the same time.
+ * Every name of this machine counts as one host.
+ */
+function sharedPortWarningsOf(storybooks: readonly StorybookAnswers[]): string[] {
+  const namesByHost = new Map<string, { port: number; names: string[] }>()
+
+  for (const { name, url } of storybooks) {
+    const parsed = new URL(url)
+    const port = urlPortOf(parsed)
+    const key = `${portHostOf(parsed)}:${port}`
+    const sharing = namesByHost.get(key)
+
+    if (sharing === undefined) {
+      namesByHost.set(key, { port, names: [name] })
+    } else {
+      sharing.names.push(name)
+    }
+  }
+
+  return [...namesByHost.values()]
+    .filter(({ names }) => names.length > 1)
+    .map(
+      ({ port, names }) =>
+        `Warning: ${listOf(names)} ${names.length === 2 ? 'both' : 'all'} use port ${port}, ` +
+        "so they can't run at the same time. Give each Storybook its own port.",
+    )
 }
 
 /**
@@ -229,22 +292,25 @@ async function askStorybook(
   storybook: DetectedStorybook,
   takenNames: readonly string[],
   packageManager: PackageManager,
+  workspace: StartWorkspace,
   prompter: Prompter,
   warnings: string[],
 ): Promise<StorybookAnswers> {
+  const { configDir, packageDir, manifestDir, manifest } = storybook
   const name = await askName(storybook, takenNames, prompter)
   const url = await askUrl(storybook, name, prompter)
-  const startCommand = await askStartCommand(storybook, name, url, packageManager, prompter)
+  const urlPort = urlPortOf(new URL(url))
+  const startCommand = await askStartCommand(storybook, name, urlPort, packageManager, workspace, prompter)
   const commandPort = startPortOf(storybook, startCommand)
 
-  if (commandPort !== undefined && urlPortOf(url) !== commandPort) {
+  if (commandPort !== undefined && urlPort !== commandPort) {
     warnings.push(
-      `Warning: ${name}'s URL, ${url}, has port ${urlPortOf(url)}, ` +
+      `Warning: ${name}'s URL, ${url}, has port ${urlPort}, ` +
         `and its start command, ${startCommand}, starts Storybook on port ${commandPort}.`,
     )
   }
 
-  return { configDir: storybook.configDir, name, url, startCommand }
+  return { configDir, name, url, startCommand, packageDir, manifestDir, manifest }
 }
 
 /**
@@ -320,14 +386,12 @@ function askUrl(storybook: DetectedStorybook, name: string, prompter: Prompter):
 /**
  * Returns the port of a URL: its own, or the one its protocol uses.
  */
-function urlPortOf(url: string): number {
-  const parsed = new URL(url)
-
-  if (parsed.port !== '') {
-    return Number(parsed.port)
+function urlPortOf(url: URL): number {
+  if (url.port !== '') {
+    return Number(url.port)
   }
 
-  return parsed.protocol === 'https:' ? 443 : 80
+  return url.protocol === 'https:' ? 443 : 80
 }
 
 /**
@@ -337,16 +401,17 @@ function urlPortOf(url: string): number {
 async function askStartCommand(
   storybook: DetectedStorybook,
   name: string,
-  url: string,
+  urlPort: number,
   packageManager: PackageManager,
+  workspace: StartWorkspace,
   prompter: Prompter,
 ): Promise<string> {
   if (storybook.start !== undefined) {
-    return startCommandOf(storybook.start, packageManager)
+    return startCommandOf(storybook.start, packageManager, workspace)
   }
 
   const configArgs = storybook.configDir === defaultConfigDir ? [] : ['-c', storybook.configDir]
-  const command = storybookCommandOf(packageManager, ['dev', '-p', String(urlPortOf(url)), ...configArgs])
+  const command = storybookCommandOf(packageManager, ['dev', '-p', String(urlPort), ...configArgs])
 
   return prompter.text(`Command that starts ${name}`, {
     defaultValue: commandLineOf(command),
@@ -446,72 +511,4 @@ function scriptHintOf(kind: 'test' | 'update', name: string, scripts: Record<str
   }
 
   return `${scriptHints[kind]} Replaces your current ${name} script.`
-}
-
-/**
- * Returns the major version of a version text, or `undefined` for one that starts with no number.
- */
-function majorOf(version: string): number | undefined {
-  const match = /^\D*(\d+)/.exec(version)
-
-  return match?.[1] === undefined ? undefined : Number(match[1])
-}
-
-/**
- * Returns the name the config gives the Storybook in `configDir`, or `undefined` when it holds none.
- */
-function existingNameOf(names: Record<string, string>, configDir: string): string | undefined {
-  return Object.hasOwn(names, configDir) ? names[configDir] : undefined
-}
-
-/**
- * Pairs each Storybook that may get the addon with its name: the one answered or, with an existing config, the one in
- * the config. With a config, a Storybook it doesn't hold is left out.
- */
-function namedStorybooksOf(
-  project: DetectedProject,
-  answered: readonly StorybookAnswers[],
-  existingConfig: QuestionInput['existingConfig'],
-): { storybook: DetectedStorybook; name: string }[] {
-  return project.storybooks.flatMap((storybook, index) => {
-    const name =
-      existingConfig === undefined ? answered[index]?.name : existingNameOf(existingConfig.names, storybook.configDir)
-
-    return name === undefined ? [] : [{ storybook, name }]
-  })
-}
-
-/**
- * Asks whether to add the addon to one Storybook. Yes by default.
- */
-function askAddon(name: string, prompter: Prompter): Promise<boolean> {
-  return prompter.confirm(`Add the Storybook addon to ${name}?`, {
-    defaultValue: true,
-    hint: 'Check and update the open story from inside Storybook.',
-  })
-}
-
-/**
- * Asks, for each Storybook 10 whose package doesn't list the addon, whether to add it. Gives the ones the person said
- * yes to.
- */
-async function askAddons(
-  named: readonly { storybook: DetectedStorybook; name: string }[],
-  prompter: Prompter,
-): Promise<AddonAnswer[]> {
-  const addons: AddonAnswer[] = []
-
-  for (const { storybook, name } of named) {
-    const { configDir, version } = storybook
-    const wanted =
-      version !== undefined &&
-      majorOf(version) === addonStorybookMajor &&
-      !listsDependency(storybook.manifest, addonPackage)
-
-    if (wanted && (await askAddon(name, prompter))) {
-      addons.push({ configDir, name })
-    }
-  }
-
-  return addons
 }
