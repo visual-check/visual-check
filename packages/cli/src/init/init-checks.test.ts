@@ -41,7 +41,11 @@ describe('blockingProblemsOf', () => {
     const project = projectOf({
       hasManifest: false,
       denoFile: 'deno.json',
-      workspace: { kind: 'rush', packageDirs: ['libs/ui'], packageManagerLists: { pnpm: false, workspaces: false } },
+      workspace: {
+        kind: 'rush',
+        packageDirs: ['libs/ui'],
+        packageManagerLists: { pnpm: undefined, workspaces: undefined },
+      },
     })
 
     expect(blockingProblemsOf({ ...fine, project })).toEqual([
@@ -54,7 +58,11 @@ describe('blockingProblemsOf', () => {
   it('asks for a package.json at the root of any other workspace without one', () => {
     const project = projectOf({
       hasManifest: false,
-      workspace: { kind: 'pnpm', packageDirs: ['libs/ui'], packageManagerLists: { pnpm: true, workspaces: false } },
+      workspace: {
+        kind: 'pnpm',
+        packageDirs: ['libs/ui'],
+        packageManagerLists: { pnpm: ['libs/ui'], workspaces: undefined },
+      },
     })
 
     expect(blockingProblemsOf({ ...fine, project })).toEqual([

@@ -277,7 +277,7 @@ describe('detectProject in a workspace', () => {
       workspace: {
         kind: 'pnpm',
         packageDirs: ['.', 'packages/ui', 'packages/web'],
-        packageManagerLists: { pnpm: true, workspaces: false },
+        packageManagerLists: { pnpm: ['packages/ui', 'packages/web'], workspaces: undefined },
       },
       notes: [],
     })
@@ -397,7 +397,7 @@ describe('detectProject in a workspace', () => {
     expect(project?.workspace).toEqual({
       kind: 'nx',
       packageDirs: ['.', 'libs/ui'],
-      packageManagerLists: { pnpm: false, workspaces: false },
+      packageManagerLists: { pnpm: undefined, workspaces: undefined },
     })
     expect(project?.storybooks).toMatchObject([
       {
@@ -428,7 +428,11 @@ describe('detectProject in a workspace', () => {
       manifest: {},
       manifestProblem: undefined,
       packageManager: 'pnpm',
-      workspace: { kind: 'rush', packageDirs: ['libs/ui'], packageManagerLists: { pnpm: false, workspaces: false } },
+      workspace: {
+        kind: 'rush',
+        packageDirs: ['libs/ui'],
+        packageManagerLists: { pnpm: undefined, workspaces: undefined },
+      },
     })
     expect(project?.storybooks.map(({ configDir, defaultName }) => [configDir, defaultName])).toEqual([
       ['libs/ui/.storybook', 'ui'],

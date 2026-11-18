@@ -10,7 +10,7 @@ import {
   runScriptCommandOf,
 } from './package-manager.js'
 import { defaultConfigDir, type StorybookCall, tidyFolder } from './storybook-scripts.js'
-import type { Workspace } from './workspace.js'
+import { packageManagerListOf, type Workspace } from './workspace.js'
 
 /**
  * How a Storybook starts: a `storybook dev` call in a script, or an Nx target of the project its package is.
@@ -171,7 +171,7 @@ export function portOfStart(start: StorybookStart | undefined): number | undefin
 }
 
 /**
- * The workspace a start command runs in: its root, and whether the package manager runs its packages' scripts itself.
+ * The workspace a start command runs in: its root, and the packages the package manager runs scripts of itself.
  */
 export interface StartWorkspace {
   /**
@@ -179,15 +179,15 @@ export interface StartWorkspace {
    */
   root: string
   /**
-   * Whether the package manager's own list names the workspace's packages: `pnpm-workspace.yaml` for pnpm,
-   * `package.json#workspaces` for npm, Yarn and Bun. Then it can run a package's script from the root.
+   * The package folders, relative to the root, that the package manager's own list names: `pnpm-workspace.yaml` for
+   * pnpm, `package.json#workspaces` for npm, Yarn and Bun. It can run their scripts from the root.
    */
-  listedByPackageManager: boolean
+  listedPackageDirs: readonly string[]
 }
 
 /**
- * Returns the workspace a project's start commands run in, under `packageManager`: its root, and whether that package
- * manager's own list names its packages, whatever else lists them too, such as Nx or Lerna.
+ * Returns the workspace a project's start commands run in, under `packageManager`: its root, and the packages that
+ * package manager's own list names. A package only Nx, Lerna or Rush finds isn't one of them.
  */
 export function startWorkspaceOf(
   project: {
@@ -202,20 +202,21 @@ export function startWorkspaceOf(
   },
   packageManager: PackageManager,
 ): StartWorkspace {
-  const { pnpm, workspaces } = project.workspace.packageManagerLists
-
-  return { root: project.root, listedByPackageManager: packageManager === 'pnpm' ? pnpm : workspaces }
+  return {
+    root: project.root,
+    listedPackageDirs: packageManagerListOf(project.workspace.packageManagerLists, packageManager) ?? [],
+  }
 }
 
 /**
  * Returns the command that runs a Storybook's start script from the workspace root. A root script runs as is. Another
- * package's runs through the package manager's workspace support, when its own list names the packages and it can
- * pick the package. Else the command goes into the package's folder first.
+ * package's runs through the package manager's workspace support, when its own list names the package and it can pick
+ * the package. Else the command goes into the package's folder first.
  */
 function scriptStartCommandOf(
   start: Extract<StorybookStart, { kind: 'script' }>,
   packageManager: PackageManager,
-  { root, listedByPackageManager }: StartWorkspace,
+  { root, listedPackageDirs }: StartWorkspace,
 ): string {
   const { call, packageDir, packageName } = start
 
@@ -224,7 +225,7 @@ function scriptStartCommandOf(
   }
 
   const dir = relativePathOf(root, packageDir)
-  const throughWorkspace = listedByPackageManager
+  const throughWorkspace = listedPackageDirs.includes(dir)
     ? runPackageScriptCommandOf(packageManager, call.script, { dir, name: packageName })
     : undefined
 

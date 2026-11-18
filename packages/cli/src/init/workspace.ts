@@ -18,17 +18,29 @@ import { tidyFolder } from './storybook-scripts.js'
 export type WorkspaceKind = 'pnpm' | 'workspaces' | 'lerna' | 'nx' | 'rush' | 'single'
 
 /**
- * The lists of packages a workspace root holds that a package manager reads itself, whatever the workspace's kind.
+ * The lists of packages a workspace root holds that a package manager reads itself, whatever the workspace's kind: the
+ * package folders each one's globs match, relative to the root, or `undefined` when the root holds no such list.
  */
 export interface PackageManagerLists {
   /**
-   * Whether `pnpm-workspace.yaml` lists `packages`, which pnpm reads.
+   * The folders `pnpm-workspace.yaml`'s `packages` lists, which pnpm reads.
    */
-  pnpm: boolean
+  pnpm: string[] | undefined
   /**
-   * Whether `package.json` has `workspaces`, which npm, Yarn and Bun read.
+   * The folders `package.json#workspaces` lists, which npm, Yarn and Bun read.
    */
-  workspaces: boolean
+  workspaces: string[] | undefined
+}
+
+/**
+ * Returns the list of packages `packageManager` reads itself: `pnpm-workspace.yaml`'s for pnpm,
+ * `package.json#workspaces` for npm, Yarn and Bun. `undefined` when the root holds none.
+ */
+export function packageManagerListOf(
+  lists: PackageManagerLists,
+  packageManager: PackageManager,
+): readonly string[] | undefined {
+  return packageManager === 'pnpm' ? lists.pnpm : lists.workspaces
 }
 
 /**
@@ -50,7 +62,7 @@ export interface Workspace {
   packageDirs: string[]
   /**
    * The lists of packages the root holds that a package manager reads itself. An Nx or Lerna workspace may have them
-   * too.
+   * too, and they may leave out packages that only Nx, Lerna or Rush finds.
    */
   packageManagerLists: PackageManagerLists
   /**
@@ -341,15 +353,15 @@ interface WorkspaceConfig {
    */
   packageManager: PackageManager | undefined
   /**
-   * The lists of packages the root holds that a package manager reads itself.
+   * The globs of the lists of packages the root holds that a package manager reads itself.
    */
-  packageManagerLists: PackageManagerLists
+  packageManagerGlobs: PackageManagerGlobs
 }
 
 /**
- * The glob lists the workspace's configs give.
+ * The globs of the lists of packages a workspace root holds that a package manager reads itself.
  */
-interface GlobSources {
+interface PackageManagerGlobs {
   /**
    * `pnpm-workspace.yaml`'s `packages`, or `undefined` for none.
    */
@@ -358,6 +370,12 @@ interface GlobSources {
    * `package.json#workspaces`, or `undefined` for none.
    */
   workspaces: string[] | undefined
+}
+
+/**
+ * The glob lists the workspace's configs give.
+ */
+interface GlobSources extends PackageManagerGlobs {
   /**
    * Lerna's packages, or `undefined` without a `lerna.json`.
    */
@@ -429,7 +447,7 @@ function workspaceConfigOf(read: ReadFile): WorkspaceConfig | undefined {
     folders: rushProjectFoldersOf(rush),
     readsProjectJson: kind === 'nx',
     packageManager: rushPackageManagerOf(rush),
-    packageManagerLists: { pnpm: pnpm !== undefined, workspaces: workspaces !== undefined },
+    packageManagerGlobs: { pnpm, workspaces },
   }
 }
 
@@ -445,7 +463,7 @@ function singlePackageConfigOf(read: ReadFile): WorkspaceConfig {
     folders: [],
     readsProjectJson: false,
     packageManager: undefined,
-    packageManagerLists: { pnpm: false, workspaces: false },
+    packageManagerGlobs: { pnpm: undefined, workspaces: undefined },
   }
 }
 
@@ -468,6 +486,18 @@ function packageDirsOf(config: WorkspaceConfig, files: readonly string[]): strin
   }
 
   return [...folders].sort(orderWithFirst('.'))
+}
+
+/**
+ * Lists the package folders each package manager's own list matches among the folders holding a listed `package.json`,
+ * relative to the root. A list the root doesn't hold gives `undefined`.
+ */
+function packageManagerListsOf(globs: PackageManagerGlobs, files: readonly string[]): PackageManagerLists {
+  const manifestFolders = foldersHolding(files, 'package.json')
+  const matching = (list: string[] | undefined) =>
+    list === undefined ? undefined : foldersMatching(manifestFolders, list)
+
+  return { pnpm: matching(globs.pnpm), workspaces: matching(globs.workspaces) }
 }
 
 /**
@@ -549,7 +579,7 @@ function workspaceOf(root: string, config: WorkspaceConfig, packageDirs: string[
     root,
     kind: config.kind,
     packageDirs,
-    packageManagerLists: config.packageManagerLists,
+    packageManagerLists: packageManagerListsOf(config.packageManagerGlobs, files),
     files,
     packageManager: config.packageManager,
     yarnBerry: yarnBerryOf(config.manifest ?? {}, isFile(join(root, '.yarnrc.yml'))),

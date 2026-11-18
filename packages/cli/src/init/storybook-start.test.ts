@@ -154,18 +154,18 @@ describe('portOfStart', () => {
 })
 
 describe('startWorkspaceOf', () => {
-  it.each<[PackageManager, PackageManagerLists, boolean]>([
-    ['pnpm', { pnpm: true, workspaces: false }, true],
-    ['pnpm', { pnpm: false, workspaces: true }, false],
-    ['npm', { pnpm: false, workspaces: true }, true],
-    ['yarn', { pnpm: false, workspaces: true }, true],
-    ['bun', { pnpm: false, workspaces: true }, true],
-    ['npm', { pnpm: true, workspaces: false }, false],
-    ['yarn', { pnpm: false, workspaces: false }, false],
-  ])('says whether %s reads one of the lists %j', (packageManager, packageManagerLists, listed) => {
+  it.each<[PackageManager, PackageManagerLists, string[]]>([
+    ['pnpm', { pnpm: ['a'], workspaces: ['b'] }, ['a']],
+    ['pnpm', { pnpm: undefined, workspaces: ['b'] }, []],
+    ['npm', { pnpm: ['a'], workspaces: ['b'] }, ['b']],
+    ['yarn', { pnpm: undefined, workspaces: ['b'] }, ['b']],
+    ['bun', { pnpm: undefined, workspaces: ['b'] }, ['b']],
+    ['npm', { pnpm: ['a'], workspaces: undefined }, []],
+    ['yarn', { pnpm: undefined, workspaces: undefined }, []],
+  ])('gives the packages %s reads from the lists %j', (packageManager, packageManagerLists, listed) => {
     const project = { root: '/p', workspace: { packageManagerLists } }
 
-    expect(startWorkspaceOf(project, packageManager)).toEqual({ root: '/p', listedByPackageManager: listed })
+    expect(startWorkspaceOf(project, packageManager)).toEqual({ root: '/p', listedPackageDirs: listed })
   })
 })
 
@@ -180,10 +180,11 @@ describe('startCommandOf', () => {
   }
 
   /**
-   * The workspace at `/p`, whose packages the package manager's own list names when `listed`.
+   * The workspace at `/p`, whose packages `packages/ui` and `libs/ui` the package manager's own list names when
+   * `listed`.
    */
   function workspaceOf(listed: boolean): StartWorkspace {
-    return { root: '/p', listedByPackageManager: listed }
+    return { root: '/p', listedPackageDirs: listed ? ['packages/ui', 'libs/ui'] : [] }
   }
 
   it.each<[StorybookStart, string]>([
@@ -221,6 +222,17 @@ describe('startCommandOf', () => {
   ])('picks a package with no name by its folder under %s, or goes into it under Yarn', (packageManager, command) => {
     expect(startCommandOf(startIn('/p/packages/ui', undefined), packageManager, workspaceOf(true))).toBe(command)
   })
+
+  it.each<PackageManager>(['pnpm', 'npm', 'yarn', 'bun'])(
+    "goes into the package's folder under %s when its own list names another package only",
+    (packageManager) => {
+      const workspace = { root: '/p', listedPackageDirs: ['packages/ui'] }
+
+      expect(startCommandOf(startIn('/p/libs/ui', '@acme/ui'), packageManager, workspace)).toBe(
+        `cd libs/ui && ${packageManager} run sb`,
+      )
+    },
+  )
 
   it.each<PackageManager>(['pnpm', 'npm', 'yarn', 'bun'])(
     "goes into the package's folder under %s when its own list doesn't name the packages",

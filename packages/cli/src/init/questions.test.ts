@@ -629,7 +629,7 @@ describe('askQuestions', () => {
       workspace: {
         kind: 'pnpm' as const,
         packageDirs: ['.', 'packages/ui', 'packages/web'],
-        packageManagerLists: { pnpm: true, workspaces: false },
+        packageManagerLists: { pnpm: ['packages/ui', 'packages/web'], workspaces: undefined },
       },
     }
 
@@ -694,7 +694,7 @@ describe('askQuestions', () => {
           workspace: {
             kind: 'nx',
             packageDirs: ['.', 'packages/ui'],
-            packageManagerLists: { pnpm: false, workspaces: true },
+            packageManagerLists: { pnpm: undefined, workspaces: ['packages/ui', 'packages/web'] },
           },
           storybooks,
         }),
@@ -707,14 +707,14 @@ describe('askQuestions', () => {
       ])
     })
 
-    it('starts a package of an Nx workspace through the package manager when its own list names the packages', async () => {
+    it('starts a package of an Nx workspace through the package manager when its own list names the package', async () => {
       const { answers } = await askQuestions({
         project: projectOf({
           packageManager: 'npm',
           workspace: {
             kind: 'nx',
-            packageDirs: ['.', 'packages/ui'],
-            packageManagerLists: { pnpm: false, workspaces: true },
+            packageDirs: ['.', 'packages/ui', 'packages/web'],
+            packageManagerLists: { pnpm: undefined, workspaces: ['packages/ui', 'packages/web'] },
           },
           storybooks,
         }),
@@ -724,6 +724,26 @@ describe('askQuestions', () => {
       expect(answers.storybooks.map(({ startCommand }) => startCommand)).toEqual([
         'npm run storybook --workspace packages/ui',
         'npm run storybook --workspace packages/web',
+      ])
+    })
+
+    it("goes into the folder of a package only Nx finds, while one the package manager's list names runs through it", async () => {
+      const { answers } = await askQuestions({
+        project: projectOf({
+          packageManager: 'npm',
+          workspace: {
+            kind: 'nx',
+            packageDirs: ['.', 'packages/ui', 'packages/web'],
+            packageManagerLists: { pnpm: undefined, workspaces: ['packages/ui'] },
+          },
+          storybooks,
+        }),
+        prompter: defaultsPrompter(),
+      })
+
+      expect(answers.storybooks.map(({ startCommand }) => startCommand)).toEqual([
+        'npm run storybook --workspace packages/ui',
+        'cd packages/web && npm run storybook',
       ])
     })
 
