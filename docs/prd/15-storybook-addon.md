@@ -80,7 +80,7 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
 ## Versions and install
 
 - The addon and the CLI release in lockstep. The addon peer-depends on exactly its own version of the CLI, and on a mismatch the panel says which package to upgrade.
-- `init` offers it for each Storybook on 10, and installs it with `storybook add` ([Config and init](03-config-and-init.md)).
+- `init` offers it for each Storybook on 10. It installs it with the package manager's exact add, registers it with `storybook add --skip-install`, then sets its spec back to the exact version ([Config and init](03-config-and-init.md)).
 - The addon has no postinstall.
 
 ## Tests

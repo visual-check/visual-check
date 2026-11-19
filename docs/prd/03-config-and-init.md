@@ -96,12 +96,12 @@ Rules for the keys:
 - **Workspace and packages:**
   - `pnpm-workspace.yaml`'s `packages`. Without that field, the repo is one package;
   - `package.json#workspaces` for npm, Yarn and Bun;
-  - `lerna.json`, `nx.json` and `rush.json`. Lerna's globs and Nx's `project.json` folders add to the package manager's list. Nx also reads the package manager's workspaces and Lerna's globs.
+  - `lerna.json`, `nx.json` and `rush.json`. Lerna's packages are `lerna.json#packages`, else the package manager's workspaces, else `packages/*`. Nx's are every folder with a `project.json`, plus the package manager's workspaces, plus Lerna's packages.
 
   Turbo uses the package manager's workspaces.
 
   Run inside a package, `init` works at the workspace root and says so. A workspace root without a `package.json`, such as Rush's, stops `init`: it needs the root's scripts and a place for the CLI.
-- **Package manager:** the `packageManager` or `devEngines.packageManager` field, then the lockfile.
+- **Package manager:** `rush.json`'s `pnpmVersion`, `npmVersion` or `yarnVersion`, then the `packageManager` or `devEngines.packageManager` field, then the lockfile.
   - npm, pnpm, Yarn 1 and Yarn 4 are supported. Bun works but isn't tested.
   - Yarn counts as Yarn 2 or later when there's a `.yarnrc.yml`, `yarn.lock` opens with Yarn 2's `__metadata:` entry, or the declared version is 2 or later.
   - With nothing found, `init` asks, with npm as the default.
@@ -167,10 +167,12 @@ Yarn 4 refuses a package version published less than a day ago by default (`npmM
 - **Dependencies,** as [Packages](01-packages.md) lists them:
   - `@visual-check/cli`, `@visual-check/storybook` and `@visual-check/storybook-addon` at the CLI's exact version (`--save-exact`, or `--exact` for Yarn and Bun);
   - `@visual-check/chromium` at the CLI's peer range, in an add of its own at the root;
-  - the CLI and the browser go to the workspace root, and `@visual-check/storybook` and the addon to each Storybook's package, which is the nearest one with a `package.json`;
+  - the CLI and the browser go to the workspace root, and `@visual-check/storybook` and the addon to each Storybook's package, which is the deepest workspace package holding it that has a `package.json`, else the root;
   - at a root that is a workspace, pnpm adds with `-w` and Yarn 1 with `-W`. npm adds to a listed package from the root with `--workspace <dir>`; the others add from the package's folder;
+  - a package only Nx or Lerna lists gets its add in its own folder, where npm leaves a nested lockfile and Yarn 2 and later refuse;
+  - if a package manager's add fails, including the one that adds the addon, `init` stops with exit 2 and names the command to run;
   - under Rush it prints the install steps instead of running them.
-- **The addon:** for each ticked Storybook it adds the addon at the CLI's exact version, runs `storybook add @visual-check/storybook-addon@<cli version> --skip-install` in that Storybook's package, then sets the spec in `package.json` back to the exact version, because `storybook add` rewrites it to a `^` range. If the add fails, it warns, prints the command and carries on. Under Yarn Plug'n'Play (a `.pnp.cjs` or `.pnp.js`, `nodeLinker: pnp`, or Yarn 2 or later with no `nodeLinker` and no `node_modules`), `init` can't read Storybook's version, so it skips the addon, with one hint to set `nodeLinker: node-modules`.
+- **The addon:** for each ticked Storybook it adds the addon at the CLI's exact version, runs `storybook add @visual-check/storybook-addon@<cli version> --skip-install` in that Storybook's package, then sets the spec in `package.json` back to the exact version, because `storybook add` rewrites it to a `^` range. If `storybook add` fails, it warns, prints the command and carries on. Under Yarn Plug'n'Play (a `.pnp.cjs` or `.pnp.js`, `nodeLinker: pnp`, or Yarn 2 or later with no `nodeLinker` and no `node_modules`), `init` can't read Storybook's version, so it skips the addon, with one hint to set `nodeLinker: node-modules`.
 - **The two npm scripts.** The summary names the scripts it replaced, not what they ran.
 - **The agent skill** ([Agent skill](16-agent-skill.md)).
 
