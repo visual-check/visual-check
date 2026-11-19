@@ -489,7 +489,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
     expect(prompter.records.map(({ kind, message, defaultValue }) => ({ kind, message, defaultValue }))).toEqual([
       { kind: 'text', message: 'Name of the script that runs visual-check test', defaultValue: 'visual:check' },
       { kind: 'text', message: 'Name of the script that runs visual-check update', defaultValue: 'visual:update' },
-      { kind: 'checklist', message: 'Add the Storybook addon to', defaultValue: ['.storybook'] },
+      { kind: 'confirm', message: 'Add the Storybook addon to web?', defaultValue: true },
     ])
     expect(prompter.unused()).toEqual([])
   })

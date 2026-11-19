@@ -65,3 +65,18 @@ describe('scriptedPrompter checklist', () => {
     )
   })
 })
+
+describe('scriptedPrompter confirm', () => {
+  it('answers with the boolean scripted, or the default for an empty string', async () => {
+    const prompter = scriptedPrompter([false, ''])
+
+    await expect(prompter.confirm('Add it?', { defaultValue: true })).resolves.toBe(false)
+    await expect(prompter.confirm('Add it?', { defaultValue: true })).resolves.toBe(true)
+  })
+
+  it('throws for a string answer other than the empty one', () => {
+    expect(() => scriptedPrompter(['yes']).confirm('Add it?', { defaultValue: true })).toThrow(
+      '"Add it?" is a yes or no question, and the answer is "yes".',
+    )
+  })
+})

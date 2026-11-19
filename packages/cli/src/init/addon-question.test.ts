@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { askAddons } from './addon-question.js'
+import { addonOfferedTo, askAddons } from './addon-question.js'
 import type { DetectedStorybook } from './detect-project.js'
 import { projectOf, storybookOf } from './detected-project.fixture.js'
 import { type PromptRecord, type ScriptedAnswer, scriptedPrompter } from './prompter.fixture.js'
@@ -47,9 +47,9 @@ describe('askAddons', () => {
     ['12.0.0', 0, ['hint: project runs Storybook 12, and the addon is for Storybook 10, so init skips it.']],
     [undefined, 0, []],
   ])('asks about the addon for Storybook %s: %s question', async (version, questions, notes) => {
-    const { records } = await ask(questions === 1 ? [''] : [], [storybookOf({ version })])
+    const { records } = await ask(questions === 1 ? [true] : [], [storybookOf({ version })])
 
-    expect(messagesOf(records, 'checklist')).toHaveLength(questions)
+    expect(messagesOf(records, 'confirm')).toHaveLength(questions)
     expect(messagesOf(records, 'note')).toEqual(notes)
   })
 
@@ -93,15 +93,33 @@ describe('askAddons', () => {
     ])
   })
 
-  it('asks a one-item checklist for one Storybook', async () => {
-    const { addons, records } = await ask([''], [storybookOf()])
+  it('asks yes or no for one Storybook, yes by default', async () => {
+    const { addons, records } = await ask([true], [storybookOf()])
 
     expect(records).toEqual([
-      { kind: 'checklist', message: 'Add the Storybook addon to', defaultValue: ['.storybook'], hint },
+      { kind: 'confirm', message: 'Add the Storybook addon to project?', defaultValue: true, hint },
     ])
     expect(addons).toEqual([
       { configDir: '.storybook', name: 'project', packageDir: '/project', manifestDir: '/project', manifest: {} },
     ])
+  })
+
+  it('takes no for one Storybook', async () => {
+    const { addons } = await ask([false], [storybookOf()])
+
+    expect(addons).toEqual([])
+  })
+
+  it('asks yes or no for the one Storybook that takes the addon among several', async () => {
+    const { records } = await ask(
+      [true],
+      [
+        storybookOf({ defaultName: 'a' }),
+        storybookOf({ configDir: 'b/.storybook', defaultName: 'b', version: '9.1.0' }),
+      ],
+    )
+
+    expect(messagesOf(records, 'confirm')).toEqual(['Add the Storybook addon to a?'])
   })
 
   it('keeps the Storybooks ticked, and takes none', async () => {
@@ -119,7 +137,7 @@ describe('askAddons', () => {
   })
 
   it('leaves out a Storybook not answered', async () => {
-    const prompter = scriptedPrompter([''])
+    const prompter = scriptedPrompter([true])
     const addons = await askAddons({
       project: projectOf({
         storybooks: [storybookOf(), storybookOf({ configDir: 'docs/.storybook', defaultName: 'docs' })],
@@ -136,16 +154,51 @@ describe('askAddons', () => {
 
   it('offers the addon only to the Storybooks of an existing config, named as the config names them', async () => {
     const { addons, records } = await ask(
-      [''],
+      [true],
       [storybookOf(), storybookOf({ configDir: 'docs/.storybook', defaultName: 'docs-x' })],
       { names: { 'docs/.storybook': 'docs' } },
     )
 
     expect(records).toEqual([
-      { kind: 'checklist', message: 'Add the Storybook addon to', defaultValue: ['docs/.storybook'], hint },
+      { kind: 'confirm', message: 'Add the Storybook addon to docs?', defaultValue: true, hint },
     ])
     expect(addons).toEqual([
       { configDir: 'docs/.storybook', name: 'docs', packageDir: '/project', manifestDir: '/project', manifest: {} },
     ])
+  })
+})
+
+describe('addonOfferedTo', () => {
+  /**
+   * Three Storybooks: `a` and `b` on Storybook 10, `c` on Storybook 9.
+   */
+  const storybooks = [
+    storybookOf({ configDir: 'a/.storybook', defaultName: 'a' }),
+    storybookOf({ configDir: 'b/.storybook', defaultName: 'b' }),
+    storybookOf({ configDir: 'c/.storybook', defaultName: 'c', version: '9.1.0' }),
+  ]
+  const project = projectOf({ storybooks })
+
+  it('offers the addon to each Storybook answered that takes it, with its name', () => {
+    const offered = addonOfferedTo({
+      project,
+      answered: [
+        { configDir: 'b/.storybook', name: 'web' },
+        { configDir: 'c/.storybook', name: 'old' },
+      ],
+      existingConfig: undefined,
+    })
+
+    expect(offered.map(({ storybook, name }) => [storybook.configDir, name])).toEqual([['b/.storybook', 'web']])
+  })
+
+  it("offers it only to the config's Storybooks, named as the config names them, with an existing config", () => {
+    const offered = addonOfferedTo({
+      project,
+      answered: [{ configDir: 'b/.storybook', name: 'b' }],
+      existingConfig: { names: { 'a/.storybook': 'app', 'c/.storybook': 'old' } },
+    })
+
+    expect(offered.map(({ storybook, name }) => [storybook.configDir, name])).toEqual([['a/.storybook', 'app']])
   })
 })

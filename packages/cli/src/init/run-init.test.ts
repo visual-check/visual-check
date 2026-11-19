@@ -997,8 +997,11 @@ export default defineConfig({
     expect(result.messages).toEqual([])
     expect(prompter.unused()).toEqual([])
     expect(prompter.records.filter(({ kind }) => kind === 'checklist').map(({ defaultValue }) => defaultValue)).toEqual(
-      [['packages/ui/.storybook', 'packages/web/.sb'], ['packages/ui/.storybook']],
+      [['packages/ui/.storybook', 'packages/web/.sb']],
     )
+    expect(prompter.records.filter(({ kind }) => kind === 'confirm').map(({ message }) => message)).toEqual([
+      'Add the Storybook addon to ui?',
+    ])
     expect(readText(root, 'visual-check.config.ts')).toContain(
       "  storybooks: {\n    ui: { dir: 'packages/ui', url: 'http://127.0.0.1:6006' },\n  },",
     )

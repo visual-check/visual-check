@@ -56,9 +56,9 @@ function tickedBy<T extends string>(
 }
 
 /**
- * Builds a prompter that answers in order: a string for a text or select question, where `''` takes the default, a
- * boolean for a yes or no question, and for a checklist the array of values to tick, or `''` for its defaults. A text
- * or a checklist is validated like the terminal UI does, and a failed answer takes up the next one. A select answer
+ * Builds a prompter that answers in order: a string for a text or select question, a boolean for a yes or no
+ * question, and for a checklist the array of values to tick, where `''` takes the default of any question. A text or a
+ * checklist is validated like the terminal UI does, and a failed answer takes up the next one. A select answer
  * must be the value of one of its choices, and so must each value of a checklist's. It records every question,
  * validation message and note in `records`, and `unused()` lists the answers left.
  *
@@ -123,6 +123,10 @@ export function scriptedPrompter(answers: readonly ScriptedAnswer[]): Prompter &
       records.push({ kind: 'confirm', message, defaultValue, ...(hint === undefined ? {} : { hint }) })
 
       const answer = take(message)
+
+      if (answer === '') {
+        return Promise.resolve(defaultValue)
+      }
 
       if (typeof answer !== 'boolean') {
         throw new Error(`"${message}" is a yes or no question, and the answer is "${answer}".`)

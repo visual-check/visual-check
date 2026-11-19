@@ -1,5 +1,5 @@
 import { findStorybookUrlProblem, serveStorybookFix } from '../config/find-storybook-url-problem.js'
-import { type AddonAnswer, askAddons, takesAddon } from './addon-question.js'
+import { type AddonAnswer, addonOfferedTo, askAddons } from './addon-question.js'
 import type { DetectedProject, DetectedStorybook } from './detect-project.js'
 import { listOf, nonEmptyOf } from './list-of.js'
 import { commandLineOf, type Manifest, type PackageManager, scriptsOf, storybookCommandOf } from './package-manager.js'
@@ -178,16 +178,18 @@ export function plannedQuestionCountOf({
       ? (project.storybooks.length > 1 ? 1 : 0) +
         chosen.reduce((count, { start }) => count + (start === undefined ? 3 : 2), 0)
       : 0
-  const addonCandidates =
-    existingConfig === undefined
-      ? chosen
-      : project.storybooks.filter(({ configDir }) => Object.hasOwn(existingConfig.names, configDir))
+  const addonOffered = addonOfferedTo({
+    project,
+    // Names don't change which Storybooks are offered the addon, so the default ones stand in for the answers.
+    answered: chosen.map(({ configDir, defaultName }) => ({ configDir, name: defaultName })),
+    existingConfig,
+  })
 
   return (
     (project.packageManager === undefined ? 1 : 0) +
     storybookQuestions +
     (['test', 'update'] as const).filter((kind) => reusedScriptOf(scripts, kind) === undefined).length +
-    (addonCandidates.some(takesAddon) ? 1 : 0)
+    (addonOffered.length > 0 ? 1 : 0)
   )
 }
 

@@ -131,7 +131,7 @@ Rules for the keys:
 2. **For each Storybook:** its name, its URL, and its start command when none was found. The name is the package's name without its scope when the config folder is `.storybook` in a package, or sits directly in a package that isn't the root. Otherwise it's the config folder's name, or the name of the folder that holds `.storybook`. An Nx project without a `package.json` takes its `project.json` name, else its folder's name. A name already taken gets `-2`, `-3` and so on.
 3. **Script names,** `visual:check` and `visual:update` by default. A name another script has replaces that script, unless it starts a Storybook. A script that already runs `visual-check test` or `update` is reused, and when the default name is taken by the other script or by a script that starts Storybook, the suggestion is `visual:test` or `visual:update-baselines`.
 4. **"Install the agent skill?"**, yes by default.
-5. **"Add the Storybook addon?"** A checklist of the chosen Storybooks on 10, all ticked, or one item when there's only one. It's shown only when at least one is on 10. Storybooks on another major are skipped with a note.
+5. **"Add the Storybook addon?"** A checklist of the chosen Storybooks on 10, all ticked. When only one is on 10, it's a yes or no question instead, `Add the Storybook addon to <name>?`, yes by default. It's shown only when at least one is on 10. Storybooks on another major are skipped with a note.
 
 Rules:
 
