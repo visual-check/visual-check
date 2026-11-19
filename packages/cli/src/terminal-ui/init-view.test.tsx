@@ -257,7 +257,7 @@ describe('startInitView', () => {
     )
 
     expect(frame()).toBe(
-      `${header}? Package managers\n  Nothing names one.\n❯ ◯ npm\n  ◯ Yarn · Yarn 1, or 2 and later\n  space to tick, a for all, enter to confirm`,
+      `${header}? Package managers\n  Nothing names one.\n❯ ◯ npm\n  ◯ Yarn · Yarn 1, or 2 and later\n  <space> to tick, 'a' for all, <enter> to confirm`,
     )
 
     await typeInto(stdin, keys.enter, 'a', keys.enter)
