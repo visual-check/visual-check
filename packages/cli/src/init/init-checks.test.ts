@@ -125,8 +125,8 @@ describe('blockingProblemsOf', () => {
     })
 
     expect(blockingProblemsOf({ ...fine, project })).toEqual([
-      'The Storybook in .storybook runs storybook 9.0.0, and visual-check needs 9.1 or later. Upgrade storybook, then run visual-check init again.',
-      'The Storybook in docs/.storybook runs storybook 8.6.0, and visual-check needs 9.1 or later. Upgrade storybook, then run visual-check init again.',
+      'The Storybook in project runs storybook 9.0.0, and visual-check needs 9.1 or later. Upgrade storybook, then run visual-check init again.',
+      'The Storybook in docs runs storybook 8.6.0, and visual-check needs 9.1 or later. Upgrade storybook, then run visual-check init again.',
     ])
   })
 
@@ -146,7 +146,7 @@ describe('blockingProblemsOf', () => {
 
     expect(blockingProblemsOf({ ...base, project })).toEqual([
       ...common,
-      'The Storybook in .storybook runs storybook 9.0.0, and visual-check needs 9.1 or later. Upgrade storybook, then run visual-check init again.',
+      'The Storybook in project runs storybook 9.0.0, and visual-check needs 9.1 or later. Upgrade storybook, then run visual-check init again.',
     ])
     expect(blockingProblemsOf({ ...base, project: { ...project, storybooks: [] } })).toEqual([
       ...common,
@@ -168,13 +168,21 @@ describe('versionNotesOf', () => {
 
   it('warns of a version above the tested ones', () => {
     expect(versionNotesOf(projectOf({ storybooks: [storybookOf({ version: '12.0.0' })] }))).toEqual([
-      'Warning: .storybook runs storybook 12.0.0, newer than the versions visual-check is tested on (9.1 to 11).',
+      [
+        'Warning: ',
+        { code: 'project' },
+        ' runs storybook 12.0.0, newer than the versions visual-check is tested on (9.1 to 11).',
+      ],
     ])
   })
 
   it('hints at installing dependencies when storybook is missing', () => {
     expect(versionNotesOf(projectOf({ storybooks: [storybookOf({ version: undefined })] }))).toEqual([
-      "hint: storybook isn't installed for .storybook, so init skips its addon. Install dependencies, then run init again.",
+      [
+        "hint: storybook isn't installed for ",
+        { code: 'project' },
+        ', so init skips its addon. Install dependencies, then run init again.',
+      ],
     ])
   })
 
@@ -193,7 +201,11 @@ describe('versionNotesOf', () => {
     expect(versionNotesOf(project)).toEqual([
       "hint: init can't read Storybook's version under Yarn Plug'n'Play, so it skips the addon. To have init add it, " +
         'set nodeLinker: node-modules in .yarnrc.yml, run yarn install, then run init again.',
-      'Warning: docs/.storybook runs storybook 12.0.0, newer than the versions visual-check is tested on (9.1 to 11).',
+      [
+        'Warning: ',
+        { code: 'docs' },
+        ' runs storybook 12.0.0, newer than the versions visual-check is tested on (9.1 to 11).',
+      ],
     ])
   })
 })

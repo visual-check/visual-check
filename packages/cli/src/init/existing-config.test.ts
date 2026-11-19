@@ -17,6 +17,7 @@ import {
 import { makeProject, pnpmProject, readText, removeProjects } from './project.fixture.js'
 import { scriptedPrompter } from './prompter.fixture.js'
 import { runInit } from './run-init.js'
+import { textOf } from './segment.js'
 
 afterEach(() => {
   removeProjects()
@@ -219,7 +220,11 @@ describe('existingConfigOf in a workspace', () => {
     })
 
     expect((await existingConfigOf(join(root, 'packages/ui'), project))?.notes).toEqual([
-      "hint: ../../visual-check.config.ts lists no Storybook in packages/ui/.storybook. To add it, put this under storybooks: ui: { dir: 'packages/ui', url: 'http://127.0.0.1:6100' },",
+      [
+        'hint: ../../visual-check.config.ts lists no Storybook in ',
+        { code: 'packages/ui' },
+        ". To add it, put this under storybooks: ui: { dir: 'packages/ui', url: 'http://127.0.0.1:6100' },",
+      ],
     ])
   })
 })
@@ -259,7 +264,7 @@ describe('init run again with a config there', () => {
 
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBe(
-      "hint: visual-check.config.ts lists no Storybook in .storybook. To add it, put this under storybooks: 'web-app': { url: 'http://127.0.0.1:6007' },\n",
+      `hint: visual-check.config.ts lists no Storybook in ${basename(root)}. To add it, put this under storybooks: 'web-app': { url: 'http://127.0.0.1:6007' },\n`,
     )
     expect(readText(root, 'docs/.storybook/visual-check.ts')).toBe(modesFile)
     expect(readText(root, '.visual-check/.gitignore')).toBe(gitignore)
@@ -362,7 +367,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
     const result = await runInit(root, toolsOf().tools)
 
     expect(result.stderr).toBe(
-      "hint: visual-check.config.ts lists no Storybook in .storybook. To add it, put this under storybooks: 'web-app-2': { url: 'http://127.0.0.1:6006' },\n",
+      `hint: visual-check.config.ts lists no Storybook in ${basename(root)}. To add it, put this under storybooks: 'web-app-2': { url: 'http://127.0.0.1:6006' },\n`,
     )
   })
 
@@ -427,7 +432,11 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
 
     const hints = [
       `hint: visual-check.config.ts lists the Storybook shared in ${outside}, outside this project, so init left it alone.`,
-      "hint: visual-check.config.ts lists no Storybook in .storybook. To add it, put this under storybooks: 'web-app': { url: 'http://127.0.0.1:6006' },",
+      [
+        'hint: visual-check.config.ts lists no Storybook in ',
+        { code: basename(root) },
+        ". To add it, put this under storybooks: 'web-app': { url: 'http://127.0.0.1:6006' },",
+      ],
     ]
 
     expect(await runInit(root, tools)).toEqual({
@@ -440,7 +449,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
 
 To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
 `,
-      stderr: hints.map((hint) => `${hint}\n`).join(''),
+      stderr: hints.map((hint) => `${textOf(hint)}\n`).join(''),
       messages: hints,
       summary: {
         nextSteps: {

@@ -1,6 +1,7 @@
 import { render } from 'ink'
 import { InputEndedError, type Prompter } from '../init/prompter.js'
 import type { InitResult } from '../init/run-init.js'
+import type { Message } from '../init/segment.js'
 import type { SetupProgress } from '../init/setup-progress.js'
 import { InitScreen } from './init-screen.js'
 import {
@@ -125,7 +126,7 @@ export function startInitView(options: InitViewOptions): InitView {
    * `InputEndedError`, and the question goes.
    */
   function ask<T>(
-    message: string,
+    message: Message,
     defaultValue: T,
     answerOf: (value: T) => string,
     questionOf: (settling: Settling<T>) => NewQuestion,

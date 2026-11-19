@@ -1,3 +1,4 @@
+import { basename } from 'node:path'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { pnpmAdd, toolsOf } from '../init/init-tools.fixture.js'
@@ -600,7 +601,7 @@ describe('startInitView', () => {
 
     expect(frame()).toBe(
       `${header}──────────────────── Step 1 of 5\n` +
-        '? Name of the Storybook in .storybook\n  What the config and the report call this Storybook.\n› web-app (default)',
+        `? Name of the Storybook in ${basename(root)}\n  What the config and the report call this Storybook.\n› web-app (default)`,
     )
 
     for (let answered = 0; answered < 5; answered += 1) {
@@ -608,7 +609,7 @@ describe('startInitView', () => {
     }
 
     const answers =
-      '✓ Name of the Storybook in .storybook web-app\n' +
+      `✓ Name of the Storybook in ${basename(root)} web-app\n` +
       '✓ URL of web-app http://127.0.0.1:6006\n' +
       '✓ Name of the script that runs visual-check test visual:check\n' +
       '✓ Name of the script that runs visual-check update visual:update\n' +

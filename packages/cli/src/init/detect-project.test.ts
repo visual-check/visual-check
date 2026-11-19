@@ -332,8 +332,11 @@ describe('detectProject in a workspace', () => {
         { code: basename(root) },
         ', where the config goes and the next steps run.',
       ],
-      "hint: init skips the Storybook in examples/.storybook: examples has its own lockfile, so it's a workspace of " +
-        'its own. Run visual-check init there to set it up.',
+      [
+        'hint: init skips the Storybook in ',
+        { code: 'examples' },
+        ": examples has its own lockfile, so it's a workspace of its own. Run visual-check init there to set it up.",
+      ],
     ])
   })
 
@@ -453,8 +456,11 @@ describe('detectProject in a workspace', () => {
 
     expect(project?.storybooks.map(({ configDir }) => configDir)).toEqual(['.storybook'])
     expect(project?.notes).toEqual([
-      "hint: init skips the Storybook in examples/demo/.storybook: examples/demo has its own lockfile, so it's a " +
-        'workspace of its own. Run visual-check init there to set it up.',
+      [
+        'hint: init skips the Storybook in ',
+        { code: 'examples/demo' },
+        ": examples/demo has its own lockfile, so it's a workspace of its own. Run visual-check init there to set it up.",
+      ],
     ])
   })
 

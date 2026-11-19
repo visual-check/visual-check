@@ -1,5 +1,6 @@
 import { type Key, useInput } from 'ink'
 import { useRef, useState } from 'react'
+import type { Message } from '../init/segment.js'
 
 /**
  * What every question takes.
@@ -8,7 +9,7 @@ export interface QuestionProps<T> {
   /**
    * The question.
    */
-  message: string
+  message: Message
   /**
    * The answer the question starts on: what an empty text input gives, the side a yes or no question starts on, the
    * choice a select question highlights first, or the values of the choices a checklist question starts with ticked.

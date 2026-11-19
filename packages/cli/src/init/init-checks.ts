@@ -2,7 +2,8 @@ import { join } from 'node:path'
 import { ContainerError, DockerMissingError } from '../container/container-error.js'
 import { classifyStorybookVersion, minimumText, newestSupportedMajor } from '../storybook/storybook-version.js'
 import type { DetectedProject } from './detect-project.js'
-import { relativePathOf } from './find-storybooks.js'
+import { relativePathOf, storybookFolderOf } from './find-storybooks.js'
+import type { Message } from './segment.js'
 
 /**
  * What `blockingProblemsOf` looks at.
@@ -148,7 +149,7 @@ function storybookProblemsOf(project: DetectedProject): string[] {
     .filter(({ version }) => version !== undefined && classifyStorybookVersion(version) === 'below-minimum')
     .map(
       ({ configDir, version }) =>
-        `The Storybook in ${configDir} runs storybook ${version}, and visual-check needs ${minimumText} or later. ` +
+        `The Storybook in ${storybookFolderOf(configDir, project.root)} runs storybook ${version}, and visual-check needs ${minimumText} or later. ` +
         'Upgrade storybook, then run visual-check init again.',
     )
 }
@@ -165,21 +166,28 @@ const yarnPnpNote =
  * hint for a Storybook that isn't installed, so has no version. Under Yarn Plug'n'Play, one hint covers every Storybook
  * without a version, since none can be read there.
  */
-export function versionNotesOf(project: DetectedProject): string[] {
+export function versionNotesOf(project: DetectedProject): Message[] {
   const notes = project.storybooks.flatMap(({ configDir, version }) => {
     if (version === undefined) {
       return [
         project.yarnPnp
           ? yarnPnpNote
-          : `hint: storybook isn't installed for ${configDir}, so init skips its addon. ` +
-            'Install dependencies, then run init again.',
+          : [
+              "hint: storybook isn't installed for ",
+              { code: storybookFolderOf(configDir, project.root) },
+              ', so init skips its addon. Install dependencies, then run init again.',
+            ],
       ]
     }
 
     if (classifyStorybookVersion(version) === 'above-maximum') {
       return [
-        `Warning: ${configDir} runs storybook ${version}, ` +
-          `newer than the versions visual-check is tested on (${minimumText} to ${newestSupportedMajor}).`,
+        [
+          'Warning: ',
+          { code: storybookFolderOf(configDir, project.root) },
+          ` runs storybook ${version}, ` +
+            `newer than the versions visual-check is tested on (${minimumText} to ${newestSupportedMajor}).`,
+        ],
       ]
     }
 

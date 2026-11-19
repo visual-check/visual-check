@@ -1,6 +1,7 @@
 import { findStorybookUrlProblem, serveStorybookFix } from '../config/find-storybook-url-problem.js'
 import { type AddonAnswer, addonOfferedTo, askAddons } from './addon-question.js'
 import type { DetectedProject, DetectedStorybook } from './detect-project.js'
+import { storybookFolderOf } from './find-storybooks.js'
 import { listOf, nonEmptyOf } from './list-of.js'
 import { commandLineOf, type Manifest, type PackageManager, scriptsOf, storybookCommandOf } from './package-manager.js'
 import { type Choice, countingPrompter, type Prompter } from './prompter.js'
@@ -207,7 +208,7 @@ export async function askQuestions({
   const warnings: string[] = []
   const counted = countingPrompter(prompter, plannedQuestionCountOf({ project, existingConfig }))
   const packageManager = await askPackageManager(project, counted)
-  const chosen = existingConfig === undefined ? await askWhichStorybooks(project.storybooks, counted) : []
+  const chosen = existingConfig === undefined ? await askWhichStorybooks(project.storybooks, project.root, counted) : []
 
   counted.replan(plannedQuestionCountOf({ project, existingConfig, chosen }))
 
@@ -252,7 +253,7 @@ async function askStorybooks(
   for (const storybook of chosen) {
     const taken = answers.map(({ name }) => name)
 
-    answers.push(await askStorybook(storybook, taken, packageManager, workspace, prompter, warnings))
+    answers.push(await askStorybook(storybook, project.root, taken, packageManager, workspace, prompter, warnings))
   }
 
   return answers
@@ -264,13 +265,14 @@ async function askStorybooks(
  */
 async function askWhichStorybooks(
   storybooks: readonly DetectedStorybook[],
+  root: string,
   prompter: Prompter,
 ): Promise<readonly DetectedStorybook[]> {
   const choices = nonEmptyOf(
     storybooks.map(
       ({ configDir, packageName, defaultName }): Choice<string> => ({
         value: configDir,
-        label: configDir,
+        label: storybookFolderOf(configDir, root),
         hint: packageName ?? defaultName,
       }),
     ),
@@ -337,6 +339,7 @@ function sharedPortWarningsOf(storybooks: readonly StorybookAnswers[]): string[]
  */
 async function askStorybook(
   storybook: DetectedStorybook,
+  root: string,
   takenNames: readonly string[],
   packageManager: PackageManager,
   workspace: StartWorkspace,
@@ -344,7 +347,7 @@ async function askStorybook(
   warnings: string[],
 ): Promise<StorybookAnswers> {
   const { configDir, packageDir, manifestDir, manifest } = storybook
-  const name = await askName(storybook, takenNames, prompter)
+  const name = await askName(storybook, root, takenNames, prompter)
   const url = await askUrl(storybook, name, prompter)
   const urlPort = urlPortOf(new URL(url))
   const startCommand = await askStartCommand(storybook, name, urlPort, packageManager, workspace, prompter)
@@ -376,8 +379,13 @@ function startPortOf(storybook: DetectedStorybook, startCommand: string): number
 /**
  * Asks for the name of a Storybook.
  */
-function askName(storybook: DetectedStorybook, takenNames: readonly string[], prompter: Prompter): Promise<string> {
-  return prompter.text(`Name of the Storybook in ${storybook.configDir}`, {
+function askName(
+  storybook: DetectedStorybook,
+  root: string,
+  takenNames: readonly string[],
+  prompter: Prompter,
+): Promise<string> {
+  return prompter.text(['Name of the Storybook in ', { code: storybookFolderOf(storybook.configDir, root) }], {
     defaultValue: storybook.defaultName,
     hint: 'What the config and the report call this Storybook.',
     validate(value) {
@@ -411,7 +419,7 @@ function askUrl(storybook: DetectedStorybook, name: string, prompter: Prompter):
     )
   }
 
-  return prompter.text(`URL of ${name}`, {
+  return prompter.text(['URL of ', { code: name }], {
     defaultValue: `http://127.0.0.1:${portOfStart(start) ?? defaultStorybookPort}`,
     hint: 'Where visual-check opens it, locally and in CI. Use 127.0.0.1, not localhost.',
     validate(value) {
@@ -460,7 +468,7 @@ async function askStartCommand(
   const configArgs = storybook.configDir === defaultConfigDir ? [] : ['-c', storybook.configDir]
   const command = storybookCommandOf(packageManager, ['dev', '-p', String(urlPort), ...configArgs], workspace.yarnBerry)
 
-  return prompter.text(`Command that starts ${name}`, {
+  return prompter.text(['Command that starts ', { code: name }], {
     defaultValue: commandLineOf(command),
     hint: 'No script starts this Storybook. The next steps show this command.',
   })

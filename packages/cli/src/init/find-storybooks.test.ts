@@ -10,6 +10,7 @@ import {
   mainFileOnDiskIn,
   relativePathOf,
   storybookConfigDirsOf,
+  storybookFolderOf,
   takeUniqueName,
   workspaceFolderOf,
 } from './find-storybooks.js'
@@ -230,6 +231,27 @@ describe('workspaceFolderOf', () => {
 
   it('names a root with no name by its path', () => {
     expect(workspaceFolderOf(join('/', 'packages', 'ui'), '/')).toEqual([{ code: '../..' }])
+  })
+})
+
+describe('storybookFolderOf', () => {
+  it('names a .storybook folder by the folder holding it', () => {
+    expect(storybookFolderOf('apps/my-app/.storybook', '/work/acme')).toBe('apps/my-app')
+    expect(storybookFolderOf('ui/.storybook', '/work/acme')).toBe('ui')
+  })
+
+  it("names the root's own .storybook by the root folder's name", () => {
+    expect(storybookFolderOf('.storybook', '/work/acme-monorepo')).toBe('acme-monorepo')
+  })
+
+  it('leaves any other config folder as it is', () => {
+    expect(storybookFolderOf('apps/a/.storybook-mobile', '/work/acme')).toBe('apps/a/.storybook-mobile')
+    expect(storybookFolderOf('config/storybook', '/work/acme')).toBe('config/storybook')
+    expect(storybookFolderOf('.storybook-mobile', '/work/acme')).toBe('.storybook-mobile')
+  })
+
+  it("keeps .storybook for a root with no name, the file system's", () => {
+    expect(storybookFolderOf('.storybook', '/')).toBe('.storybook')
   })
 })
 

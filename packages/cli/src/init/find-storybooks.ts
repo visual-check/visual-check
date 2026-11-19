@@ -85,6 +85,19 @@ export function workspaceFolderOf(cwd: string, root: string): Segment[] {
 }
 
 /**
+ * Names a Storybook by its folder, which people know it by, not by its config folder: a config folder called
+ * `.storybook` is named by the folder holding it, `apps/my-app/.storybook` by `apps/my-app`, and the root's own by the
+ * root folder's name. Any other config folder, such as `config/storybook`, is named as it is.
+ */
+export function storybookFolderOf(configDir: string, root: string): string {
+  if (configDir === defaultConfigDir) {
+    return basename(root) || configDir
+  }
+
+  return posix.basename(configDir) === defaultConfigDir ? posix.dirname(configDir) : configDir
+}
+
+/**
  * Returns a comparator that orders paths with `first` first, then by code point.
  */
 export function orderWithFirst(first: string): (left: string, right: string) => number {

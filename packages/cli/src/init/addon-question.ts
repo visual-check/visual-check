@@ -176,7 +176,10 @@ async function askAddonTargets(fitting: readonly NamedStorybook[], prompter: Pro
 
   if (choices.length === 1) {
     const [{ value, label }] = choices
-    const add = await prompter.confirm(`Add the Storybook addon to ${label}?`, { defaultValue: true, hint: addonHint })
+    const add = await prompter.confirm(['Add the Storybook addon to ', { code: label }, '?'], {
+      defaultValue: true,
+      hint: addonHint,
+    })
 
     return add ? [value] : []
   }

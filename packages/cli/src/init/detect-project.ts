@@ -6,6 +6,7 @@ import {
   type ListFiles,
   mainFileOnDiskIn,
   storybookConfigDirsOf,
+  storybookFolderOf,
   takeUniqueName,
   workspaceFolderOf,
 } from './find-storybooks.js'
@@ -140,11 +141,12 @@ const denoFileNames = ['deno.json', 'deno.jsonc', 'deno.lock']
 /**
  * Words the hint for a Storybook `init` skips, because `folder` holds a lockfile of its own.
  */
-function nestedWorkspaceNoteOf(configDir: string, folder: string): string {
-  return (
-    `hint: init skips the Storybook in ${configDir}: ${folder} has its own lockfile, so it's a workspace of its own. ` +
-    'Run visual-check init there to set it up.'
-  )
+function nestedWorkspaceNoteOf(configDir: string, folder: string, root: string): Message {
+  return [
+    'hint: init skips the Storybook in ',
+    { code: storybookFolderOf(configDir, root) },
+    `: ${folder} has its own lockfile, so it's a workspace of its own. Run visual-check init there to set it up.`,
+  ]
 }
 
 /**
@@ -213,7 +215,7 @@ function storybooksOf(
   root: string,
   { rootPackage, packages }: ReturnType<typeof packagesOf>,
   files: readonly string[],
-): { storybooks: DetectedStorybook[]; notes: string[] } {
+): { storybooks: DetectedStorybook[]; notes: Message[] } {
   const packageDirs = packages.map(({ dir }) => dir)
   const calls = packages.flatMap(({ dir, calls: packageCalls }) =>
     packageCalls.map((call) => rootRelativeCallOf(dir, call)),
@@ -221,13 +223,13 @@ function storybooksOf(
   const context = { root, rootPackage, inferredTarget: nxStorybookPluginTargetOf(readJsonFile(join(root, 'nx.json'))) }
   const usedNames = new Set<string>()
   const storybooks: DetectedStorybook[] = []
-  const notes: string[] = []
+  const notes: Message[] = []
 
   for (const configDir of storybookConfigDirsOf(files, calls, mainFileOnDiskIn(root))) {
     const nested = nestedWorkspaceOf(root, configDir, packageDirs)
 
     if (nested !== undefined) {
-      notes.push(nestedWorkspaceNoteOf(configDir, nested))
+      notes.push(nestedWorkspaceNoteOf(configDir, nested, root))
       continue
     }
 

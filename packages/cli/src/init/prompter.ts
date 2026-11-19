@@ -32,7 +32,7 @@ export interface Prompter {
    * `options.validate` returns a message, the prompter shows it and asks again.
    */
   text(
-    message: string,
+    message: Message,
     options: {
       /**
        * What an empty answer takes.
@@ -52,7 +52,7 @@ export interface Prompter {
    * Asks a yes or no question, which starts on `options.defaultValue`.
    */
   confirm(
-    message: string,
+    message: Message,
     options: {
       /**
        * The side the question starts on.
@@ -69,7 +69,7 @@ export interface Prompter {
    * the value of the choice picked.
    */
   select<T extends string>(
-    message: string,
+    message: Message,
     options: {
       /**
        * The answers, in the order they show. There is at least one.
@@ -91,7 +91,7 @@ export interface Prompter {
    * `options.validate` returns a message, the prompter shows it and asks again.
    */
   checklist<T extends string>(
-    message: string,
+    message: Message,
     options: {
       /**
        * The answers, in the order they show. There is at least one.

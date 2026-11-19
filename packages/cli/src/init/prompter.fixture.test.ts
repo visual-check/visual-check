@@ -80,3 +80,14 @@ describe('scriptedPrompter confirm', () => {
     )
   })
 })
+
+describe('scriptedPrompter with a question of segments', () => {
+  it('records the question as plain text', async () => {
+    const prompter = scriptedPrompter(['', true])
+
+    await prompter.text(['URL of ', { code: 'web' }], { defaultValue: 'x' })
+    await prompter.confirm(['Add the Storybook addon to ', { code: 'web' }, '?'], { defaultValue: false })
+
+    expect(prompter.records.map(({ message }) => message)).toEqual(['URL of web', 'Add the Storybook addon to web?'])
+  })
+})

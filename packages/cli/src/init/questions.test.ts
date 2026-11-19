@@ -68,7 +68,7 @@ describe('askQuestions', () => {
     })
 
     expect(records).toEqual([
-      { kind: 'text', message: 'Name of the Storybook in .storybook', defaultValue: 'project', hint: hints.name },
+      { kind: 'text', message: 'Name of the Storybook in project', defaultValue: 'project', hint: hints.name },
       { kind: 'text', message: 'URL of project', defaultValue: 'http://127.0.0.1:6006', hint: hints.url },
       {
         kind: 'text',
@@ -112,6 +112,23 @@ describe('askQuestions', () => {
       ],
     })
     expect(warnings).toEqual([])
+  })
+
+  it('picks out the folder and the name in the Storybook questions, for the accent colour', async () => {
+    const prompter = defaultsPrompter()
+    const text = vi.spyOn(prompter, 'text')
+    const confirm = vi.spyOn(prompter, 'confirm')
+
+    await askQuestions({ project: projectOf({ manifest: { devDependencies: {} } }), prompter })
+
+    expect(text.mock.calls.map(([message]) => message).slice(0, 3)).toEqual([
+      ['Name of the Storybook in ', { code: 'project' }],
+      ['URL of ', { code: 'project' }],
+      ['Command that starts ', { code: 'project' }],
+    ])
+    expect(confirm.mock.calls.map(([message]) => message)).toEqual([
+      ['Add the Storybook addon to ', { code: 'project' }, '?'],
+    ])
   })
 
   it('takes a custom name, URL and start command', async () => {
@@ -673,8 +690,8 @@ describe('askQuestions', () => {
         hint: 'The ones ticked go in the config.',
       })
       expect(choices).toHaveBeenNthCalledWith(1, [
-        { value: 'packages/ui/.storybook', label: 'packages/ui/.storybook', hint: '@acme/ui' },
-        { value: 'packages/web/.storybook', label: 'packages/web/.storybook', hint: 'web' },
+        { value: 'packages/ui/.storybook', label: 'packages/ui', hint: '@acme/ui' },
+        { value: 'packages/web/.storybook', label: 'packages/web', hint: 'web' },
       ])
       expect(prompter.unused()).toEqual([])
     })

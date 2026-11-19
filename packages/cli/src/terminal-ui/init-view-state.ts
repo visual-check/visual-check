@@ -1,6 +1,6 @@
 import type { Choice } from '../init/prompter.js'
 import type { InitResult } from '../init/run-init.js'
-import type { Message } from '../init/segment.js'
+import { type Message, textOf } from '../init/segment.js'
 import type { StepOutcome } from '../init/setup-progress.js'
 import { emptyOutputTail, type OutputTail, outputTailOf } from './output-tail.js'
 
@@ -77,7 +77,7 @@ export type ShownLine =
       /**
        * The question.
        */
-      message: string
+      message: Message
       /**
        * The answer, as the person sees it.
        */
@@ -125,7 +125,7 @@ interface QuestionBase<T> {
   /**
    * The question.
    */
-  message: string
+  message: Message
   /**
    * The answer the question starts on.
    */
@@ -306,7 +306,9 @@ export function showQuestionProgress(state: ViewState, answered: number, total: 
  */
 export function askQuestion(state: ViewState, question: NewQuestion): ViewState {
   if (state.question !== undefined) {
-    throw new Error(`"${question.message}" can't be asked while "${state.question.message}" waits for its answer.`)
+    throw new Error(
+      `"${textOf(question.message)}" can't be asked while "${textOf(state.question.message)}" waits for its answer.`,
+    )
   }
 
   return { ...state, question: { ...question, id: state.nextId }, nextId: state.nextId + 1 }

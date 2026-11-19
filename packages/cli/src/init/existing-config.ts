@@ -5,9 +5,10 @@ import { loadConfig } from '../config/load-config.js'
 import { defaultBaselinesIn, type ResolvedConfig, type ResolvedStorybook } from '../config/resolve-config.js'
 import type { SetUpStorybook } from './closing-message.js'
 import type { DetectedProject, DetectedStorybook } from './detect-project.js'
-import { isInsideRoot, mainFileOnDiskIn, relativePathOf, takeUniqueName } from './find-storybooks.js'
+import { isInsideRoot, mainFileOnDiskIn, relativePathOf, storybookFolderOf, takeUniqueName } from './find-storybooks.js'
 import { commandLineOf, type PackageManager, storybookCommandOf } from './package-manager.js'
 import { defaultStorybookPort } from './questions.js'
+import type { Message } from './segment.js'
 import { configEntryOf, configStorybookOf } from './setup-files.js'
 import { defaultConfigDir } from './storybook-scripts.js'
 import { portOfStart, startCommandOf, startWorkspaceOf } from './storybook-start.js'
@@ -60,7 +61,7 @@ export interface ExistingConfig {
   /**
    * The hints and the warning about the config, a line each.
    */
-  notes: string[]
+  notes: Message[]
 }
 
 /**
@@ -101,7 +102,7 @@ function loadedConfigOf(cwd: string, project: DetectedProject, path: string, con
     config.storybooks.map(({ name, configDir }) => [relativePathOf(project.root, configDir), name]),
   )
   const storybooks: ConfigStorybookPlace[] = []
-  const notes: string[] = []
+  const notes: Message[] = []
 
   for (const { name, dir, configDir, baselines, url } of config.storybooks) {
     const leftAlone = leftAloneHintOf(cwd, project.root, path, { name, dir, configDir })
@@ -150,7 +151,7 @@ function missingStorybookHintsOf(
   project: DetectedProject,
   configPath: string,
   names: Record<string, string>,
-): string[] {
+): Message[] {
   const usedNames = new Set(Object.values(names))
 
   return project.storybooks
@@ -176,7 +177,7 @@ function missingStorybookHintOf(
   configPath: string,
   storybook: DetectedStorybook,
   name: string,
-): string {
+): Message {
   const entry = configEntryOf(
     configStorybookOf({
       name,
@@ -187,10 +188,11 @@ function missingStorybookHintOf(
     }),
   )
 
-  return (
-    `hint: ${relativePathOf(cwd, configPath)} lists no Storybook in ${storybook.configDir}. ` +
-    `To add it, put this under storybooks: ${entry}`
-  )
+  return [
+    `hint: ${relativePathOf(cwd, configPath)} lists no Storybook in `,
+    { code: storybookFolderOf(storybook.configDir, root) },
+    `. To add it, put this under storybooks: ${entry}`,
+  ]
 }
 
 /**

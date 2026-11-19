@@ -1,5 +1,5 @@
 import type { Choice, Prompter } from './prompter.js'
-import { textOf } from './segment.js'
+import { type Message, textOf } from './segment.js'
 
 /**
  * One thing a scripted prompter was asked or shown.
@@ -35,13 +35,13 @@ export type ScriptedAnswer = string | boolean | readonly string[]
  * @throws When the answer is not an array or `''`, or ticks a value no choice has.
  */
 function tickedBy<T extends string>(
-  message: string,
+  message: Message,
   answer: ScriptedAnswer,
   choices: readonly Choice<T>[],
   defaultValues: readonly T[],
 ): T[] {
   if (typeof answer === 'boolean' || (typeof answer === 'string' && answer !== '')) {
-    throw new Error(`"${message}" is a checklist, and the answer is "${answer}".`)
+    throw new Error(`"${textOf(message)}" is a checklist, and the answer is "${answer}".`)
   }
 
   const ticked: readonly string[] = answer === '' ? defaultValues : answer
@@ -49,7 +49,7 @@ function tickedBy<T extends string>(
   const unknown = ticked.find((value) => !offered.some((offer) => offer === value))
 
   if (unknown !== undefined) {
-    throw new Error(`"${message}" offers no choice "${unknown}".`)
+    throw new Error(`"${textOf(message)}" offers no choice "${unknown}".`)
   }
 
   return offered.filter((value) => ticked.includes(value))
@@ -76,13 +76,13 @@ export function scriptedPrompter(answers: readonly ScriptedAnswer[]): Prompter &
   /**
    * Takes the next answer.
    */
-  function take(message: string): ScriptedAnswer {
+  function take(message: Message): ScriptedAnswer {
     const answer = answers[next]
 
     next += 1
 
     if (answer === undefined) {
-      throw new Error(`The scripted prompter ran out of answers at "${message}".`)
+      throw new Error(`The scripted prompter ran out of answers at "${textOf(message)}".`)
     }
 
     return answer
@@ -91,11 +91,11 @@ export function scriptedPrompter(answers: readonly ScriptedAnswer[]): Prompter &
   /**
    * Takes the next answer, which must be a string.
    */
-  function takeString(message: string): string {
+  function takeString(message: Message): string {
     const answer = take(message)
 
     if (typeof answer !== 'string') {
-      throw new Error(`"${message}" takes a string, and the answer is ${answer}.`)
+      throw new Error(`"${textOf(message)}" takes a string, and the answer is ${answer}.`)
     }
 
     return answer
@@ -105,7 +105,7 @@ export function scriptedPrompter(answers: readonly ScriptedAnswer[]): Prompter &
     records,
     unused: () => answers.slice(next),
     text(message, { defaultValue, hint, validate }) {
-      records.push({ kind: 'text', message, defaultValue, ...(hint === undefined ? {} : { hint }) })
+      records.push({ kind: 'text', message: textOf(message), defaultValue, ...(hint === undefined ? {} : { hint }) })
 
       for (;;) {
         const answer = takeString(message).trim()
@@ -120,7 +120,7 @@ export function scriptedPrompter(answers: readonly ScriptedAnswer[]): Prompter &
       }
     },
     confirm(message, { defaultValue, hint }) {
-      records.push({ kind: 'confirm', message, defaultValue, ...(hint === undefined ? {} : { hint }) })
+      records.push({ kind: 'confirm', message: textOf(message), defaultValue, ...(hint === undefined ? {} : { hint }) })
 
       const answer = take(message)
 
@@ -129,19 +129,19 @@ export function scriptedPrompter(answers: readonly ScriptedAnswer[]): Prompter &
       }
 
       if (typeof answer !== 'boolean') {
-        throw new Error(`"${message}" is a yes or no question, and the answer is "${answer}".`)
+        throw new Error(`"${textOf(message)}" is a yes or no question, and the answer is "${answer}".`)
       }
 
       return Promise.resolve(answer)
     },
     select(message, { choices, defaultValue, hint }) {
-      records.push({ kind: 'select', message, defaultValue, ...(hint === undefined ? {} : { hint }) })
+      records.push({ kind: 'select', message: textOf(message), defaultValue, ...(hint === undefined ? {} : { hint }) })
 
       const answer = takeString(message)
       const chosen = choices.find(({ value }) => value === (answer === '' ? defaultValue : answer))
 
       if (chosen === undefined) {
-        throw new Error(`"${message}" offers no choice "${answer}".`)
+        throw new Error(`"${textOf(message)}" offers no choice "${answer}".`)
       }
 
       return Promise.resolve(chosen.value)
@@ -149,7 +149,7 @@ export function scriptedPrompter(answers: readonly ScriptedAnswer[]): Prompter &
     checklist(message, { choices, defaultValues, hint, validate }) {
       records.push({
         kind: 'checklist',
-        message,
+        message: textOf(message),
         defaultValue: defaultValues,
         ...(hint === undefined ? {} : { hint }),
       })

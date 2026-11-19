@@ -190,8 +190,8 @@ describe('runInit', () => {
         name: 'storybook 9.0.0',
         project: () => pnpmProject({ storybookVersion: '9.0.0' }),
         tools: {},
-        messages: [
-          'The Storybook in .storybook runs storybook 9.0.0, and visual-check needs 9.1 or later. Upgrade storybook, then run visual-check init again.',
+        messages: (root: string) => [
+          `The Storybook in ${basename(root)} runs storybook 9.0.0, and visual-check needs 9.1 or later. Upgrade storybook, then run visual-check init again.`,
         ],
       },
       {
@@ -211,8 +211,9 @@ describe('runInit', () => {
           "visual-check init found no package.json in the current folder or its parents. Run it in your project's folder.",
         ],
       },
-    ])('$name', async ({ project, tools: overrides, messages }) => {
+    ])('$name', async ({ project, tools: overrides, messages: expectedMessages }) => {
       const root = project()
+      const messages = typeof expectedMessages === 'function' ? expectedMessages(root) : expectedMessages
       const before = snapshotFiles(root)
       const prompter = scriptedPrompter([])
       const { tools, record } = toolsOf({ ...overrides, prompter })
@@ -232,7 +233,7 @@ describe('runInit', () => {
         'visual-check needs Node 22 or later, and this is Node 20.18.0. Upgrade Node, then run visual-check init again.',
         "visual-check doesn't support Deno, and this project has deno.lock. Run visual-check init in a Node project.",
         "visual-check init asks questions, and there's no terminal to ask them in. Run it in a terminal, or pass --yes to take every default.",
-        'The Storybook in .storybook runs storybook 9.0.0, and visual-check needs 9.1 or later. Upgrade storybook, then run visual-check init again.',
+        `The Storybook in ${basename(root)} runs storybook 9.0.0, and visual-check needs 9.1 or later. Upgrade storybook, then run visual-check init again.`,
         '',
       ])
     })
@@ -259,8 +260,7 @@ describe('runInit', () => {
       expect(result.stderr).toBe('')
       expect(prompter.records[0]).toEqual({
         kind: 'note',
-        message:
-          'Warning: .storybook runs storybook 12.0.0, newer than the versions visual-check is tested on (9.1 to 11).',
+        message: `Warning: ${basename(root)} runs storybook 12.0.0, newer than the versions visual-check is tested on (9.1 to 11).`,
       })
       expectWritten(root, result.stdout)
       expect(prompter.records.filter(({ kind }) => kind === 'checklist')).toEqual([])
@@ -486,15 +486,20 @@ describe('runInit', () => {
       manifest: { name: 'web-app', packageManager: 'pnpm@9.12.3', scripts: { storybook: 'storybook dev -p 6006' } },
       files: { '.storybook/main.ts': '' },
     })
-    const hint =
-      "hint: storybook isn't installed for .storybook, so init skips its addon. Install dependencies, then run init again."
+    const hintTextIn = (folder: string) =>
+      `hint: storybook isn't installed for ${basename(folder)}, so init skips its addon. Install dependencies, then run init again.`
+    const hint = [
+      "hint: storybook isn't installed for ",
+      { code: basename(root) },
+      ', so init skips its addon. Install dependencies, then run init again.',
+    ]
     const yes = toolsOf()
     const yesResult = await runInit(root, yes.tools)
 
     expect(yesResult).toEqual({
       exitCode: 0,
       stdout: pnpmClosingMessage,
-      stderr: `${hint}\n`,
+      stderr: `${hintTextIn(root)}\n`,
       messages: [hint],
       summary: pnpmSummary,
     })
@@ -508,7 +513,7 @@ describe('runInit', () => {
 
     await runInit(asked, toolsOf({ yes: false, interactive: true, prompter }).tools)
 
-    expect(prompter.records[0]).toEqual({ kind: 'note', message: hint })
+    expect(prompter.records[0]).toEqual({ kind: 'note', message: hintTextIn(asked) })
     expect(prompter.records.filter(({ kind }) => kind === 'checklist')).toEqual([])
     expect(prompter.unused()).toEqual([])
   })
@@ -1087,10 +1092,11 @@ export default defineConfig({
     const result = await runInit(root, toolsOf().tools)
 
     expect(result.exitCode).toBe(2)
-    expect(result.messages[0]).toBe(
-      "hint: init skips the Storybook in examples/.storybook: examples has its own lockfile, so it's a workspace of " +
-        'its own. Run visual-check init there to set it up.',
-    )
+    expect(result.messages[0]).toEqual([
+      'hint: init skips the Storybook in ',
+      { code: 'examples' },
+      ": examples has its own lockfile, so it's a workspace of its own. Run visual-check init there to set it up.",
+    ])
     expect(result.messages[1]).toMatch(/^visual-check init found no Storybook/)
   })
 })
