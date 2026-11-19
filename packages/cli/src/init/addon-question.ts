@@ -127,6 +127,13 @@ function skippedAddonNoteOf(name: string, version: string | undefined): string |
 }
 
 /**
+ * Whether the addon question offers a Storybook: it is on Storybook 10 and its package doesn't list the addon yet.
+ */
+export function takesAddon({ version, manifest }: DetectedStorybook): boolean {
+  return version !== undefined && majorOf(version) === addonStorybookMajor && !listsDependency(manifest, addonPackage)
+}
+
+/**
  * Asks which Storybooks get the addon, from a checklist with all ticked: each chosen, or in the existing config, that
  * is on Storybook 10 and whose package doesn't list the addon. Each on another known version gets a note first. Gives
  * the ones ticked, which may be none.
@@ -143,10 +150,7 @@ export async function askAddons(input: AddonQuestionInput): Promise<AddonAnswer[
     }
   }
 
-  const fitting = named.filter(
-    ({ storybook: { version, manifest } }) =>
-      version !== undefined && majorOf(version) === addonStorybookMajor && !listsDependency(manifest, addonPackage),
-  )
+  const fitting = named.filter(({ storybook }) => takesAddon(storybook))
   const choices = nonEmptyOf(
     fitting.map(({ storybook, name }): Choice<string> => ({ value: storybook.configDir, label: name })),
   )

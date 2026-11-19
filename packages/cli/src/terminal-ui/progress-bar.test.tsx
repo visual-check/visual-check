@@ -48,6 +48,12 @@ describe('ProgressBar', () => {
     expect(plainFrameOf(lastFrame())).toBe('━━━━━─────────────── 1/4')
   })
 
+  it('draws a label in place of the count', async () => {
+    const { lastFrame } = await renderSettled(<ProgressBar done={2} label="Question 3 of 9" total={9} width={9} />)
+
+    expect(plainFrameOf(lastFrame())).toBe('━━─────── Question 3 of 9')
+  })
+
   it('takes a width', async () => {
     const { lastFrame } = await renderSettled(<ProgressBar done={3} total={4} width={8} />)
 

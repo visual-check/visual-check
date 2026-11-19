@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { projectOf, scriptStartOf, storybookOf } from './detected-project.fixture.js'
 import { type PromptRecord, type ScriptedAnswer, scriptedPrompter } from './prompter.fixture.js'
 import { defaultsPrompter } from './prompter.js'
-import { askQuestions } from './questions.js'
+import { askQuestions, plannedQuestionCountOf } from './questions.js'
 
 /**
- * Asks the questions with scripted answers, and gives the answers, the warnings and what the prompter recorded.
+ * Asks the questions with scripted answers, and gives the answers, the warnings and what the prompter recorded. It
+ * checks the progress told before each question: one call per question asked, each with fewer answered than the
+ * total, and the last total the number of questions asked.
  */
 async function ask(
   scripted: ScriptedAnswer[],
@@ -15,13 +17,21 @@ async function ask(
   } = {},
 ) {
   const prompter = scriptedPrompter(scripted)
+  const questionProgress = vi.fn((answered: number, total: number) => {
+    expect(answered).toBeLessThan(total)
+  })
   const result = await askQuestions({
     project: projectOf(options.project),
-    prompter,
+    prompter: { ...prompter, questionProgress },
     existingConfig: options.existingConfig,
   })
+  const asked = prompter.records.filter(({ kind }) => kind !== 'invalid' && kind !== 'note').length
 
   expect(prompter.unused()).toEqual([])
+  expect(questionProgress.mock.calls.map(([answered]) => answered)).toEqual(
+    Array.from({ length: asked }, (_, index) => index),
+  )
+  expect(questionProgress.mock.calls.at(-1)?.[1] ?? 0).toBe(asked)
 
   return { ...result, records: prompter.records }
 }
@@ -825,5 +835,85 @@ describe('askQuestions', () => {
         )
       },
     )
+  })
+})
+
+describe('plannedQuestionCountOf', () => {
+  /**
+   * Three Storybooks: one on Storybook 10 started by a script, one on Storybook 10 with no start, one on Storybook 9
+   * with no start.
+   */
+  const started = storybookOf({ configDir: 'a/.storybook', defaultName: 'a', start: scriptStartOf('storybook', 6006) })
+  const unstarted = storybookOf({ configDir: 'b/.storybook', defaultName: 'b' })
+  const older = storybookOf({ configDir: 'c/.storybook', defaultName: 'c', version: '9.1.0' })
+  const storybooks = [started, unstarted, older]
+
+  it('counts a name and a URL for a lone Storybook started by a script, the two scripts and the addon', () => {
+    expect(plannedQuestionCountOf({ project: projectOf({ storybooks: [started] }) })).toBe(5)
+  })
+
+  it('counts the package manager only when nothing shows it', () => {
+    expect(plannedQuestionCountOf({ project: projectOf({ packageManager: undefined }) })).toBe(7)
+    expect(plannedQuestionCountOf({ project: projectOf() })).toBe(6)
+  })
+
+  it('counts the checklist and every Storybook, its start command when none is detected, before the checklist', () => {
+    expect(plannedQuestionCountOf({ project: projectOf({ storybooks }) })).toBe(1 + 2 + 3 + 3 + 2 + 1)
+  })
+
+  it('counts only the Storybooks ticked once the checklist is answered, and no addon when none takes it', () => {
+    const project = projectOf({ storybooks })
+
+    expect(plannedQuestionCountOf({ project, chosen: [started] })).toBe(1 + 2 + 2 + 1)
+    expect(plannedQuestionCountOf({ project, chosen: [older] })).toBe(1 + 3 + 2)
+  })
+
+  it('counts no script question for a script that already runs visual-check', () => {
+    const manifest = { scripts: { vt: 'visual-check test', vu: 'visual-check update' } }
+
+    expect(plannedQuestionCountOf({ project: projectOf({ manifest }) })).toBe(4)
+  })
+
+  it("counts only the scripts and the addon, for the config's Storybooks, with an existing config", () => {
+    const project = projectOf({ storybooks })
+
+    expect(plannedQuestionCountOf({ project, existingConfig: { names: { 'b/.storybook': 'b' } } })).toBe(3)
+    expect(plannedQuestionCountOf({ project, existingConfig: { names: { 'c/.storybook': 'c' } } })).toBe(2)
+  })
+
+  it('counts no addon for a Storybook whose package lists it already', () => {
+    const project = projectOf({
+      storybooks: [storybookOf({ manifest: { devDependencies: { '@visual-check/storybook-addon': '1.0.0' } } })],
+    })
+
+    expect(plannedQuestionCountOf({ project })).toBe(5)
+  })
+})
+
+describe('askQuestions with progress', () => {
+  it('tells the progress before each question, plans again once the checklist is answered, and counts a re-ask once', async () => {
+    const questionProgress = vi.fn()
+    const storybooks = [
+      storybookOf({ configDir: 'a/.storybook', defaultName: 'a', start: scriptStartOf('storybook', 6006) }),
+      storybookOf({ configDir: 'b/.storybook', defaultName: 'b' }),
+    ]
+
+    await askQuestions({
+      project: projectOf({ packageManager: undefined, storybooks }),
+      prompter: {
+        ...scriptedPrompter(['', ['a/.storybook'], 'Bad', '', '', '', '', []]),
+        questionProgress,
+      },
+    })
+
+    expect(questionProgress.mock.calls).toEqual([
+      [0, 10],
+      [1, 10],
+      [2, 7],
+      [3, 7],
+      [4, 7],
+      [5, 7],
+      [6, 7],
+    ])
   })
 })

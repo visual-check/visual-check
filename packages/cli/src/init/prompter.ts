@@ -116,6 +116,11 @@ export interface Prompter {
    * instead.
    */
   note(text: Message): void
+  /**
+   * Tells how far through the questions the person is, before each question: `answered` of the `total` planned. The
+   * total can change once an answer changes what is left to ask. A prompter that shows no progress leaves it out.
+   */
+  questionProgress?(answered: number, total: number): void
 }
 
 /**
@@ -155,6 +160,40 @@ export function defaultsPrompter(): Prompter & { notes: Message[] } {
       Promise.resolve(choices.map(({ value }) => value).filter((value) => defaultValues.includes(value))),
     note(text) {
       notes.push(text)
+    },
+  }
+}
+
+/**
+ * Wraps a prompter so that before each question it tells the prompter how many questions are answered of the total
+ * planned, starting with `planned`. A question its prompter asks again after a validation message counts once. Notes
+ * pass straight through. `replan` sets a new total, for the questions after.
+ */
+export function countingPrompter(prompter: Prompter, planned: number): Prompter & { replan: (total: number) => void } {
+  let answered = 0
+  let total = planned
+
+  /**
+   * Tells the progress, asks the question, and counts it once answered.
+   */
+  async function counted<T>(ask: () => Promise<T>): Promise<T> {
+    prompter.questionProgress?.(answered, total)
+
+    const answer = await ask()
+
+    answered += 1
+
+    return answer
+  }
+
+  return {
+    text: (message, options) => counted(() => prompter.text(message, options)),
+    confirm: (message, options) => counted(() => prompter.confirm(message, options)),
+    select: (message, options) => counted(() => prompter.select(message, options)),
+    checklist: (message, options) => counted(() => prompter.checklist(message, options)),
+    note: (text) => prompter.note(text),
+    replan(next) {
+      total = next
     },
   }
 }

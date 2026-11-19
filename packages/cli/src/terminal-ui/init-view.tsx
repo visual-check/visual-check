@@ -14,6 +14,7 @@ import {
   type NewQuestion,
   planSteps,
   settleQuestion,
+  showQuestionProgress,
   startStep,
 } from './init-view-state.js'
 import { colourEnabledOf, ThemeContext } from './theme.js'
@@ -23,6 +24,11 @@ import { colourEnabledOf, ThemeContext } from './theme.js'
  * the run.
  */
 export interface InitView extends Prompter {
+  /**
+   * Keeps how far through the questions the person is, which a bar above each question waiting shows, such as
+   * `Question 3 of 9`. With no question waiting, nothing shows it.
+   */
+  questionProgress(answered: number, total: number): void
   /**
    * Shows the setup steps after the questions, from the plan on: a progress bar with the time taken, then each step
    * pending, running with its command and the last three lines of its output, or ended with how long it took.
@@ -222,6 +228,9 @@ export function startInitView(options: InitViewOptions): InitView {
     },
     note(text) {
       store.update((state) => addNote(state, text))
+    },
+    questionProgress(answered, total) {
+      store.update((state) => showQuestionProgress(state, answered, total))
     },
     progress: {
       plan(titles) {

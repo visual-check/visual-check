@@ -29,6 +29,10 @@ interface ProgressBarProps {
    */
   total: number
   /**
+   * What follows the bar in place of the count, such as `Question 3 of 9`.
+   */
+  label?: string
+  /**
    * How many cells wide the bar is.
    */
   width?: number
@@ -49,16 +53,17 @@ export function progressCellsOf(done: number, total: number, width: number): Pro
 }
 
 /**
- * A bar of how many steps are done, in the accent colour, with the count after it: `━━━───── 3/8`.
+ * A bar of how many steps are done, in the accent colour, with the count after it, `━━━───── 3/8`, or the label in
+ * its place.
  */
-export function ProgressBar({ done, total, width = 20 }: ProgressBarProps): ReactNode {
+export function ProgressBar({ done, total, label = `${done}/${total}`, width = 20 }: ProgressBarProps): ReactNode {
   const cells = progressCellsOf(done, total, width)
 
   return (
     <Text>
       <ColouredText colour="accent">{'━'.repeat(cells.filled)}</ColouredText>
       <Text dimColor>{'─'.repeat(cells.empty)}</Text>
-      {` ${done}/${total}`}
+      {` ${label}`}
     </Text>
   )
 }

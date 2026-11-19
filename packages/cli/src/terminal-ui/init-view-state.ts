@@ -200,6 +200,20 @@ export type ActiveQuestion = NewQuestion & {
 }
 
 /**
+ * How far through the questions the person is.
+ */
+export interface QuestionProgress {
+  /**
+   * How many questions are answered.
+   */
+  answered: number
+  /**
+   * How many questions are planned in all.
+   */
+  total: number
+}
+
+/**
  * What the init view draws.
  */
 export interface ViewState {
@@ -211,6 +225,10 @@ export interface ViewState {
    * The question waiting for its answer, if any.
    */
   question: ActiveQuestion | undefined
+  /**
+   * How far through the questions the person is, once a question is planned. Shown only while a question waits.
+   */
+  questionProgress: QuestionProgress | undefined
   /**
    * The setup steps, in the order of the plan, while they run. None before the plan, nor once the run is finished, when
    * they are among the lines.
@@ -251,6 +269,7 @@ export function initialViewState(version: string): ViewState {
   return {
     lines: [{ id: 0, kind: 'header', version }],
     question: undefined,
+    questionProgress: undefined,
     steps: [],
     plannedAt: undefined,
     nextId: 1,
@@ -271,6 +290,13 @@ function withLines(state: ViewState, added: readonly ShownLine[]): ViewState {
  */
 export function addNote(state: ViewState, text: Message): ViewState {
   return withLines(state, [{ kind: 'note', text }])
+}
+
+/**
+ * Keeps how far through the questions the person is: `answered` of the `total` planned.
+ */
+export function showQuestionProgress(state: ViewState, answered: number, total: number): ViewState {
+  return { ...state, questionProgress: { answered, total } }
 }
 
 /**

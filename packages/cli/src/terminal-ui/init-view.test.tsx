@@ -342,8 +342,52 @@ describe('startInitView', () => {
     expect(frame()).toBe(header)
   })
 
+  it('shows how far through the questions the person is above the one waiting, and nothing once none waits', async () => {
+    const { view, stdin, stdout, frame } = await startView()
+
+    await act(async () => {
+      view.questionProgress(2, 4)
+    })
+
+    expect(frame()).toBe(header)
+
+    const { answer } = await asking(() => view.text('Name', { defaultValue: 'web' }))
+
+    expect(frame()).toBe(`${header}━━━━━━━━━━────────── Question 3 of 4\n? Name\n› web (default)`)
+    expect(stdout.lastFrame()).toContain(
+      '\u001b[36m━━━━━━━━━━\u001b[39m\u001b[2m──────────\u001b[22m Question 3 of 4\n',
+    )
+
+    await typeInto(stdin, keys.enter)
+
+    await expect(answer).resolves.toBe('web')
+    expect(frame()).toBe(`${header}✓ Name web\n`)
+  })
+
+  it('never counts past the total, and narrows the bar so the label fits a narrow terminal', async () => {
+    const { view, stdin, frame } = await startView({ columns: 25 })
+
+    await act(async () => {
+      view.questionProgress(4, 4)
+    })
+
+    const { answer } = await asking(() => view.text('Name', { defaultValue: 'web' }))
+
+    // The header wraps at 25 columns too, so only the question area is compared.
+    expect(frame().endsWith('\n━━━━━━━━━ Question 4 of 4\n? Name\n› web (default)')).toBe(true)
+
+    await typeInto(stdin, keys.enter)
+
+    await expect(answer).resolves.toBe('web')
+  })
+
   it('takes every default at once with --yes, shows each answered, and reads no input', async () => {
     const { view, stdin, frame } = await startView({ yes: true })
+
+    await act(async () => {
+      view.questionProgress(0, 4)
+    })
+
     const { answer: text } = await asking(() => view.text('Name', { defaultValue: 'web', validate: () => 'Never.' }))
     const { answer: select } = await asking(() =>
       view.select('Package manager', { choices: managers, defaultValue: 'yarn' }),
@@ -521,6 +565,7 @@ describe('startInitView', () => {
       select: (message, options) => stops.reached(view.select(message, options)),
       checklist: (message, options) => stops.reached(view.checklist(message, options)),
       note: (text) => view.note(text),
+      questionProgress: (answered, total) => view.questionProgress(answered, total),
     }
     const runCommand: InitTools['runCommand'] = (_command, args) => {
       if (!args.includes('--save-exact')) {
@@ -556,7 +601,8 @@ describe('startInitView', () => {
     await act(() => firstQuestion)
 
     expect(frame()).toBe(
-      `${header}? Name of the Storybook in .storybook\n  What the config and the report call this Storybook.\n› web-app (default)`,
+      `${header}──────────────────── Question 1 of 5\n` +
+        '? Name of the Storybook in .storybook\n  What the config and the report call this Storybook.\n› web-app (default)',
     )
 
     for (let answered = 0; answered < 5; answered += 1) {

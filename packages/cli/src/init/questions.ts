@@ -1,9 +1,9 @@
 import { findStorybookUrlProblem, serveStorybookFix } from '../config/find-storybook-url-problem.js'
-import { type AddonAnswer, askAddons } from './addon-question.js'
+import { type AddonAnswer, askAddons, takesAddon } from './addon-question.js'
 import type { DetectedProject, DetectedStorybook } from './detect-project.js'
 import { listOf, nonEmptyOf } from './list-of.js'
 import { commandLineOf, type Manifest, type PackageManager, scriptsOf, storybookCommandOf } from './package-manager.js'
-import type { Choice, Prompter } from './prompter.js'
+import { type Choice, countingPrompter, type Prompter } from './prompter.js'
 import { defaultConfigDir, storybookCallsOf } from './storybook-scripts.js'
 import { portOfStart, type StartWorkspace, startCommandOf, startWorkspaceOf } from './storybook-start.js'
 
@@ -152,9 +152,50 @@ const scriptHints = {
 } as const
 
 /**
+ * What `plannedQuestionCountOf` needs.
+ */
+interface QuestionPlanInput extends Omit<QuestionInput, 'prompter'> {
+  /**
+   * The Storybooks ticked, once the question which to set up is answered. Before, every Storybook counts as ticked, as
+   * the question starts.
+   */
+  chosen?: readonly DetectedStorybook[]
+}
+
+/**
+ * Counts the questions `askQuestions` plans to ask: the package manager when nothing shows it; with no config yet,
+ * which Storybooks to set up when there's more than one, then for each one ticked its name, its URL and, when nothing
+ * starts it, its start command; each script that no script already runs; and the addon when a Storybook takes it.
+ */
+export function plannedQuestionCountOf({
+  project,
+  existingConfig,
+  chosen = project.storybooks,
+}: QuestionPlanInput): number {
+  const scripts = scriptsOf(project.manifest)
+  const storybookQuestions =
+    existingConfig === undefined
+      ? (project.storybooks.length > 1 ? 1 : 0) +
+        chosen.reduce((count, { start }) => count + (start === undefined ? 3 : 2), 0)
+      : 0
+  const addonCandidates =
+    existingConfig === undefined
+      ? chosen
+      : project.storybooks.filter(({ configDir }) => Object.hasOwn(existingConfig.names, configDir))
+
+  return (
+    (project.packageManager === undefined ? 1 : 0) +
+    storybookQuestions +
+    (['test', 'update'] as const).filter((kind) => reusedScriptOf(scripts, kind) === undefined).length +
+    (addonCandidates.some(takesAddon) ? 1 : 0)
+  )
+}
+
+/**
  * Asks the questions of `init`, in order: the package manager, which Storybooks to set up, each of them, the script
  * names, and the addon. Gives the answers, and the warnings the answers call for. It prints nothing: hints go through
- * the prompter.
+ * the prompter. Before each question it tells the prompter how far through the planned questions the person is, and
+ * plans again once the Storybooks to set up are ticked.
  */
 export async function askQuestions({
   project,
@@ -162,11 +203,15 @@ export async function askQuestions({
   existingConfig,
 }: QuestionInput): Promise<{ answers: Answers; warnings: string[] }> {
   const warnings: string[] = []
-  const packageManager = await askPackageManager(project, prompter)
-  const storybooks =
-    existingConfig === undefined ? await askStorybooks(project, packageManager, prompter, warnings) : []
-  const scripts = await askScripts(project, prompter)
-  const addons = await askAddons({ project, answered: storybooks, existingConfig, prompter })
+  const counted = countingPrompter(prompter, plannedQuestionCountOf({ project, existingConfig }))
+  const packageManager = await askPackageManager(project, counted)
+  const chosen = existingConfig === undefined ? await askWhichStorybooks(project.storybooks, counted) : []
+
+  counted.replan(plannedQuestionCountOf({ project, existingConfig, chosen }))
+
+  const storybooks = await askStorybooks(project, chosen, packageManager, counted, warnings)
+  const scripts = await askScripts(project, counted)
+  const addons = await askAddons({ project, answered: storybooks, existingConfig, prompter: counted })
 
   return {
     answers: { packageManager, storybooks, scripts, addons },
@@ -190,11 +235,11 @@ function askPackageManager(project: DetectedProject, prompter: Prompter): Promis
 }
 
 /**
- * Asks which Storybooks to set up, when there's more than one, then about each one chosen in turn. The names already
- * answered are taken.
+ * Asks about each Storybook chosen in turn. The names already answered are taken.
  */
 async function askStorybooks(
   project: DetectedProject,
+  chosen: readonly DetectedStorybook[],
   packageManager: PackageManager,
   prompter: Prompter,
   warnings: string[],
@@ -202,7 +247,7 @@ async function askStorybooks(
   const answers: StorybookAnswers[] = []
   const workspace = startWorkspaceOf(project, packageManager)
 
-  for (const storybook of await askWhichStorybooks(project.storybooks, prompter)) {
+  for (const storybook of chosen) {
     const taken = answers.map(({ name }) => name)
 
     answers.push(await askStorybook(storybook, taken, packageManager, workspace, prompter, warnings))
