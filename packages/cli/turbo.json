@@ -2,6 +2,14 @@
   "$schema": "https://turborepo.dev/schema.json",
   "extends": ["//"],
   "tasks": {
-    "test:unit": { "dependsOn": ["^build", "build"] }
+    "test:unit": {
+      "dependsOn": ["^build", "build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/test-storybooks/storybook-*-react/package.json",
+        "$TURBO_ROOT$/test-storybooks/storybook-*-react/.storybook/**",
+        "$TURBO_ROOT$/pnpm-lock.yaml"
+      ]
+    }
   }
 }

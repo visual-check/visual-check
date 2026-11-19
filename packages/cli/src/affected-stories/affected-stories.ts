@@ -1,8 +1,10 @@
 import { realpath } from 'node:fs/promises'
+import { availableParallelism } from 'node:os'
 import { changedFileRuleOf } from './changed-file-rules.js'
 import type { FindReachedFiles } from './fallow-graph.js'
 import { changedFilesOf } from './git-changes.js'
 import { changedPackagesOf, groupChanges } from './group-changes.js'
+import { mapWithLimit } from './limited-map.js'
 import { packageFolderFinder } from './package-folder.js'
 import {
   type AffectedStorybook,
@@ -10,7 +12,8 @@ import {
   affectedStorybooksOf,
   type ChangeReach,
   type RequiredStorybookInput,
-  requiredStorybooksOf,
+  requiredStorybookTestOf,
+  requiredWhateverItsStoriesTestOf,
   whollyAffectedTestOf,
 } from './storybook-rules.js'
 
@@ -258,9 +261,11 @@ export async function affectedStorybooksIn(
 
 /**
  * Tells, for each Storybook, whether a local affected run requires it, from the traced changes, by the rules of
- * `requiredStorybooksOf`. A reach of `nothing` requires no Storybook, and `everything` every Storybook, both without
- * reading any globs. Otherwise `readStoriesMatchers` reads each Storybook's stories globs once, all at the same time,
- * from its real folders; a read that rejects counts as globs that can't be read.
+ * `requiredStorybookTestOf`. A reach of `nothing` requires no Storybook, and `everything` every Storybook, both without
+ * reading any globs. Otherwise `readStoriesMatchers` reads each Storybook's stories globs once, from its real folders,
+ * as many at the same time as the machine has CPUs, since a read may run a Node process; a read that rejects counts as
+ * globs that can't be read. It skips the read for a Storybook required whatever its stories, by the rules of
+ * `requiredWhateverItsStoriesTestOf`.
  *
  * @public
  */
@@ -283,15 +288,20 @@ export async function requiredStorybooksIn(
   const realStorybooks = await withRealPaths(
     storybooks.map(({ dir, configDir, baselines }) => ({ dir, configDir, baselines })),
   )
-  const withMatchers = await Promise.all(
-    realStorybooks.map(async (storybook) => ({
-      ...storybook,
-      // A reader that rejects despite its contract counts as one that can't read the globs.
-      storiesMatchers: await readStoriesMatchers({ dir: storybook.dir, configDir: storybook.configDir }).catch(
-        () => undefined,
-      ),
-    })),
-  )
+  const isRequiredWhateverItsStories = requiredWhateverItsStoriesTestOf(reach)
+  const isRequired = requiredStorybookTestOf(reach)
 
-  return requiredStorybooksOf(reach, withMatchers)
+  return await mapWithLimit(
+    availableParallelism(),
+    realStorybooks,
+    async (storybook) =>
+      isRequiredWhateverItsStories(storybook) ||
+      isRequired({
+        ...storybook,
+        // A reader that rejects despite its contract counts as one that can't read the globs.
+        storiesMatchers: await readStoriesMatchers({ dir: storybook.dir, configDir: storybook.configDir }).catch(
+          () => undefined,
+        ),
+      }),
+  )
 }

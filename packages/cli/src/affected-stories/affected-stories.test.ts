@@ -744,6 +744,21 @@ describe('traceChanges and affectedStorybooksIn in a monorepo', () => {
       expect(reader.reads).toEqual(storybooks.map(({ dir }) => dir))
     })
 
+    it('reads no globs of a Storybook required whatever its stories', async () => {
+      const reader = fakeReader()
+
+      expect(
+        await requiredBy(
+          {
+            'apps/web/.storybook/preview.ts': 'export default {}\n',
+            'apps/docs/.visual-check/baselines/intro--page.png': 'changed',
+          },
+          reader,
+        ),
+      ).toEqual([true, true])
+      expect(reader.reads).toEqual([])
+    })
+
     it("requires the Storybook whose globs can't be read", async () => {
       expect(
         await requiredBy({ 'packages/ui/src/button.tsx': 'changed\n' }, fakeReader({ matchers: undefined })),

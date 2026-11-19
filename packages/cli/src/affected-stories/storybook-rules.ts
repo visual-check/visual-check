@@ -294,7 +294,21 @@ function importPathOf(root: string, dir: string, file: string): string {
 }
 
 /**
- * Tells, for each Storybook, whether a local affected run requires it. A Storybook is required when:
+ * Gives the test of whether a local affected run requires a Storybook whatever its stories files: a change affects it
+ * as a whole by its folders alone, or a changed baseline sits in its baselines folder.
+ */
+export function requiredWhateverItsStoriesTestOf(
+  reach: ChangeReach,
+): (storybook: Pick<RequiredStorybookInput, 'dir' | 'configDir' | 'baselines'>) => boolean {
+  const isWhollyAffected = whollyAffectedTestOf(reach)
+
+  return (storybook) =>
+    isWhollyAffected(storybook, () => false) ||
+    reach.changedBaselines.some(({ folder }) => folder === storybook.baselines)
+}
+
+/**
+ * Gives the test of whether a local affected run requires a Storybook. A Storybook is required when:
  *
  * - its stories globs can't be read;
  * - a change affects it as a whole, as `affectedStorybooksOf` reads it, with its globs telling its stories files;
@@ -303,14 +317,15 @@ function importPathOf(root: string, dir: string, file: string): string {
  *
  * It reads no `index.json`, so the Storybooks it requires are a superset of those `affectedStorybooksOf` gives a story.
  */
-export function requiredStorybooksOf(reach: ChangeReach, storybooks: readonly RequiredStorybookInput[]): boolean[] {
+export function requiredStorybookTestOf(reach: ChangeReach): (storybook: RequiredStorybookInput) => boolean {
   const files = [...reach.changedFiles, ...reach.reached]
   const isWhollyAffected = whollyAffectedTestOf(reach)
+  const isRequiredWhateverItsStories = requiredWhateverItsStoriesTestOf(reach)
 
-  return storybooks.map((storybook) => {
+  return (storybook) => {
     const matchers = storybook.storiesMatchers
 
-    if (matchers === undefined) {
+    if (matchers === undefined || isRequiredWhateverItsStories(storybook)) {
       return true
     }
 
@@ -320,10 +335,13 @@ export function requiredStorybooksOf(reach: ChangeReach, storybooks: readonly Re
       return matchers.some((matcher) => matcher.test(importPath))
     }
 
-    return (
-      isWhollyAffected(storybook, isStoriesFile) ||
-      files.some(isStoriesFile) ||
-      reach.changedBaselines.some(({ folder }) => folder === storybook.baselines)
-    )
-  })
+    return isWhollyAffected(storybook, isStoriesFile) || files.some(isStoriesFile)
+  }
+}
+
+/**
+ * Tells, for each Storybook, whether a local affected run requires it, by the rules of `requiredStorybookTestOf`.
+ */
+export function requiredStorybooksOf(reach: ChangeReach, storybooks: readonly RequiredStorybookInput[]): boolean[] {
+  return storybooks.map(requiredStorybookTestOf(reach))
 }

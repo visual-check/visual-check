@@ -66,7 +66,7 @@ packages/cli/src/
   terminal-ui/          adapter: Ink and React: init's questions, steps and summary, and the live reporter
   docs-site/            the docs site's address, which every docs link starts with
   config/
-  storybook/            adapter: index.json, story URLs, the preview script and the test path
+  storybook/            adapter: index.json, story URLs, the preview script, the test path and main.*'s stories globs
   capture/
     driver/             the driver seam
       cdp/              adapter: raw CDP

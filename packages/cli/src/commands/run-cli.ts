@@ -34,6 +34,7 @@ import { reporterOf } from '../reporter/reporter-choice.js'
 import type { RunReporter } from '../reporter/run-event.js'
 import { appendStepSummary, StepSummaryError } from '../step-summary/step-summary.js'
 import type { Story } from '../storybook/read-stories.js'
+import { readStoriesMatchers } from '../storybook/stories-matchers.js'
 import { type BrowserPlace, browserPlaceOf } from './browser-route.js'
 import { checkStorybooks } from './check-storybooks.js'
 import { dockerProblemOf } from './docker-problem.js'
@@ -227,16 +228,11 @@ export interface RunCliOptions {
   findReachedFiles?: FindReachedFiles
   /**
    * Reads each Storybook's stories globs, which a local affected run asks once per Storybook in the run when a changed
-   * file is left to the rules. By default, for now, it reads none, so each Storybook counts as one whose globs can't
-   * be read. A test gives a fake.
+   * file is left to the rules. By default it loads each Storybook's `main.*` with the Storybook's own `storybook`
+   * package. A test gives a fake.
    */
   readStoriesMatchers?: ReadStoriesMatchers
 }
-
-/**
- * Reads no Storybook's stories globs, so each counts as one whose globs can't be read.
- */
-const cantReadStoriesMatchers: ReadStoriesMatchers = () => Promise.resolve(undefined)
 
 /**
  * Runs the CLI with the given arguments, environment and folder, and returns what it prints on each stream. Progress is
@@ -604,7 +600,7 @@ async function requiredStorybooksOfRun(
       configPath: config.path,
       affected: config.affected,
       findReachedFiles: context.cliOptions.findReachedFiles ?? findReachedFilesWithFallow,
-      readStoriesMatchers: context.cliOptions.readStoriesMatchers ?? cantReadStoriesMatchers,
+      readStoriesMatchers: context.cliOptions.readStoriesMatchers ?? readStoriesMatchers,
     })
   } catch (error) {
     if (error instanceof InvalidBaseError) {
