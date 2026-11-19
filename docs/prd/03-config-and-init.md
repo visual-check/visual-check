@@ -96,23 +96,30 @@ Rules for the keys:
 - **Workspace and packages:**
   - `pnpm-workspace.yaml`'s `packages`. Without that field, the repo is one package;
   - `package.json#workspaces` for npm, Yarn and Bun;
-  - `lerna.json`, Nx `project.json` files and `rush.json`.
+  - `lerna.json`, `nx.json` and `rush.json`. Lerna's globs and Nx's `project.json` folders add to the package manager's list. Nx also reads the package manager's workspaces and Lerna's globs.
 
   Turbo uses the package manager's workspaces.
 
-  Run inside a package, `init` works at the workspace root and says so.
+  Run inside a package, `init` works at the workspace root and says so. A workspace root without a `package.json`, such as Rush's, stops `init`: it needs the root's scripts and a place for the CLI.
 - **Package manager:** the `packageManager` or `devEngines.packageManager` field, then the lockfile.
   - npm, pnpm, Yarn 1 and Yarn 4 are supported. Bun works but isn't tested.
   - Yarn counts as Yarn 2 or later when there's a `.yarnrc.yml`, or the declared version is 2 or later.
   - With nothing found, `init` asks, with npm as the default.
 - **Storybooks:** `git ls-files` for `**/.storybook/main.{ts,js,mjs,cjs,mts,cts}`, plus any `-c <dir>` in scripts. That skips ignored worktrees and copies.
-  - Each is matched to its package.
-  - One under a nested workspace with its own lockfile is skipped with a note.
+  - Each is matched to the deepest package that holds it.
+  - One under a folder with its own lockfile that isn't a listed package is skipped with a note.
 - **Start command,** the first that exists:
   1. the package's `storybook` script, when it runs `storybook dev`;
-  2. the first script that runs `storybook dev` with a matching `-c`;
-  3. Nx's `storybook` target;
+  2. the first script that runs `storybook dev` with a matching `-c`, in the package or at the root;
+  3. an Nx target: `storybook` in `project.json`, or the target `@nx/storybook/plugin` infers in `nx.json` (its `serveStorybookTargetName`, else `storybook`);
   4. otherwise `init` asks.
+
+  The command runs from the workspace root:
+  - a package's script runs through the package manager's own workspace form when its list names the package: `pnpm --filter <name> run`, `npm run … --workspace <dir>`, `yarn workspace <name> run` or `bun run --filter`. Otherwise it's `cd <dir> && <pm> run …`;
+  - a root script keeps its `-c`;
+  - an Nx target runs as `nx run <project>:<target>`.
+
+  `init` runs the `storybook` binary itself with `yarn exec` on Yarn 2 or later and `npx --no-install` on Yarn 1, so a script named `storybook` can't shadow it.
 - **Port:** the script's `-p` or `--port`, or `SBCONFIG_PORT` or `PORT` set in it. With none, `init` asks and suggests adding `-p`. It never edits the script.
 - **URL:** `http://127.0.0.1:<port>`, never `localhost`.
 - **Docker:** through `docker info`.
@@ -121,16 +128,19 @@ Rules for the keys:
 ## `init`: the five questions
 
 1. **Which Storybooks to include.** A checklist with all ticked, shown only when there's more than one.
-2. **For each Storybook:** its name (the package name without its scope, or the folder name), its URL, and its start command when none was found.
+2. **For each Storybook:** its name, its URL, and its start command when none was found. The name is the package's name without its scope when the config folder is `.storybook` in a package, or sits directly in a package that isn't the root. Otherwise it's the config folder's name, or the name of the folder that holds `.storybook`. An Nx project without a `package.json` takes its `project.json` name, else its folder's name. A name already taken gets `-2`, `-3` and so on.
 3. **Script names,** `visual:check` and `visual:update` by default. A name another script has replaces that script, unless it starts a Storybook. A script that already runs `visual-check test` or `update` is reused, and when the default name is taken by the other script or by a script that starts Storybook, the suggestion is `visual:test` or `visual:update-baselines`.
 4. **"Install the agent skill?"**, yes by default.
-5. **"Add the Storybook addon?"** A checklist of the chosen Storybooks on 10, all ticked, or one item when there's only one. It's shown only when at least one is on 10. Storybook 9 and 11 entries are skipped with a note.
+5. **"Add the Storybook addon?"** A checklist of the chosen Storybooks on 10, all ticked, or one item when there's only one. It's shown only when at least one is on 10. Storybooks on another major are skipped with a note.
 
 Rules:
 
+- When two Storybooks use one port, `init` warns that they can't run together. It still writes.
 - It never asks about the platform, tolerance, workers or a CI URL. One `url` serves both environments.
 - It never writes `platform: 'host'`.
 - `init --yes` takes every default, the addon included.
+
+Yarn 4 refuses a package version published less than a day ago by default (`npmMinimalAgeGate`, 1440 minutes in Yarn 4.18, which the Setup check runs), so `yarn dlx @visual-check/cli init` can fail on a release day. Wait a day, or list `@visual-check/*` under `npmPreapprovedPackages` in `.yarnrc.yml`, as the Setup check does.
 
 ## `init`: terminal UI
 
@@ -154,8 +164,13 @@ Rules:
   - `<configDir>/visual-check.ts`, which exports `visualCheck = defineVisualCheck({ modes: {} })` and carries a commented example of a `mobile` mode at 375×667, scale 2, with touch, and a comment that shows how to spread `visualCheck` into the parameters in `preview`, which sets options for every story;
   - `<dir>/.visual-check/.gitignore`.
 - **The root `.visual-check/.gitignore`.**
-- **Dependencies,** as [Packages](01-packages.md) lists them. Under Rush it prints the install steps instead.
-- **The addon:** for each ticked Storybook it runs `storybook add @visual-check/storybook-addon@<cli version>` in that Storybook's package. If that fails, it warns, prints the command and carries on.
+- **Dependencies,** as [Packages](01-packages.md) lists them:
+  - `@visual-check/cli`, `@visual-check/storybook` and `@visual-check/storybook-addon` at the CLI's exact version (`--save-exact`, or `--exact` for Yarn and Bun);
+  - `@visual-check/chromium` at the CLI's peer range, in an add of its own at the root;
+  - the CLI and the browser go to the workspace root, and `@visual-check/storybook` and the addon to each Storybook's package, which is the nearest one with a `package.json`;
+  - at a root that is a workspace, pnpm adds with `-w` and Yarn 1 with `-W`. npm adds to a listed package from the root with `--workspace <dir>`; the others add from the package's folder;
+  - under Rush it prints the install steps instead of running them.
+- **The addon:** for each ticked Storybook it adds the addon at the CLI's exact version, runs `storybook add @visual-check/storybook-addon@<cli version> --skip-install` in that Storybook's package, then sets the spec in `package.json` back to the exact version, because `storybook add` rewrites it to a `^` range. If the add fails, it warns, prints the command and carries on.
 - **The two npm scripts.** The summary names the scripts it replaced, not what they ran.
 - **The agent skill** ([Agent skill](16-agent-skill.md)).
 
@@ -179,6 +194,7 @@ It exits 2 and writes nothing when:
 - no Storybook is found;
 - a Storybook is below 9.1;
 - the project uses Deno;
+- the workspace root has no `package.json`;
 - there's no terminal and no `--yes`.
 
 It warns and still writes when:

@@ -11,7 +11,7 @@ This repo's CI checks the code, runs the built CLI against the repo's own small 
 | Code                 | Linux, Node 24       | Biome, typecheck, Fallow, unit tests                                                                                   |
 | Node 22              | Linux, Node 22       | Unit tests and one end-to-end run, because 22 is the minimum                                                           |
 | Own Storybooks       | Linux                | The built CLI against this repo's test Storybooks (below)                                                              |
-| Setup                | Linux                | `init` under each package manager (below)                                                                              |
+| Setup                | Linux                | `init` under each package manager, and on a monorepo (below)                                                           |
 | Test apps            | Linux and Windows    | test-apps' reusable workflow, on the packed packages ([Test apps](17-test-apps.md))                                    |
 | macOS without Docker | macOS, Apple Silicon | `init`, affected stories, baseline files, starting and stopping Storybook, the no-Docker error, and one `host` capture |
 | Ubuntu `host`        | Linux                | One `host` capture, where Chromium's sandbox can't start and visual-check relaunches without it                        |
@@ -53,7 +53,7 @@ What CI checks there:
 ## Setup under each package manager
 
 - On a tiny Storybook, for each of npm, pnpm, Yarn 1 and Yarn 4: pack the packages, run `init --yes`, install, then run one `update` and one `test`. The packed packages come from a local registry, because `init` installs by version and that version isn't on npm yet.
-- A second fixture is a monorepo with two Storybooks on one port, where `init` must warn.
+- A second fixture is a monorepo with two Storybooks on one port, where `init` must warn. It runs under the same four package managers, so `storybook add` with an exact version in a monorepo is covered there.
 
 ## Other tests this repo needs
 
@@ -73,7 +73,6 @@ These rest on source reading, or on measurements made with Playwright before the
 - the cost of searching a large page for remote content;
 - loading every stories file on a cold dev server;
 - noise at 2 workers on the migration target's CI, which once saw about 1% pixel differences there;
-- `storybook add` with an exact version, in a monorepo, under each package manager;
 - installing `@visual-check/storybook` with no React, Vue or Angular present;
 - the Angular port on Angular 18 to 20;
 - Storybook 11's own animation pause followed by visual-check's end state;
