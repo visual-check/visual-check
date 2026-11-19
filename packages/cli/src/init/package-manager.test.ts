@@ -6,6 +6,7 @@ import {
   commandLineOf,
   listsDependency,
   lockfileNames,
+  nodeLinkerOf,
   nonEmptyTextOf,
   nxCommandOf,
   type PackageManager,
@@ -15,6 +16,7 @@ import {
   scriptsOf,
   storybookCommandOf,
   yarnBerryOf,
+  yarnPnpOf,
 } from './package-manager.js'
 
 describe('packageManagerOf', () => {
@@ -240,6 +242,46 @@ describe('yarnBerryOf', () => {
 
   it('returns false when nothing shows Yarn 2 or later', () => {
     expect(yarnBerryOf({ packageManager: 7, devEngines: 'yarn@4' }, false)).toBe(false)
+  })
+})
+
+describe('nodeLinkerOf', () => {
+  it.each([
+    ['nodeLinker: node-modules\n', 'node-modules'],
+    ['yarnPath: .yarn/releases/yarn.cjs\nnodeLinker: "pnp" # the default\n', 'pnp'],
+    ["nodeLinker: 'pnpm'", 'pnpm'],
+  ])('reads %j', (yarnrc, expected) => {
+    expect(nodeLinkerOf(yarnrc)).toBe(expected)
+  })
+
+  it.each(['', 'yarnPath: .yarn/releases/yarn.cjs\n', 'packageExtensions:\n  nodeLinker: pnp\n'])(
+    'gives undefined without a top-level nodeLinker in %j',
+    (yarnrc) => {
+      expect(nodeLinkerOf(yarnrc)).toBeUndefined()
+    },
+  )
+})
+
+describe('yarnPnpOf', () => {
+  const clues = { hasPnpFile: false, nodeLinker: undefined, yarnBerry: true, hasNodeModules: true }
+
+  it('follows a nodeLinker that is set, whatever the files', () => {
+    expect(yarnPnpOf({ ...clues, nodeLinker: 'pnp' })).toBe(true)
+    expect(yarnPnpOf({ ...clues, nodeLinker: 'node-modules', hasPnpFile: true, hasNodeModules: false })).toBe(false)
+    expect(yarnPnpOf({ ...clues, nodeLinker: 'pnpm', hasNodeModules: false })).toBe(false)
+  })
+
+  it("counts Plug'n'Play's loader file", () => {
+    expect(yarnPnpOf({ ...clues, hasPnpFile: true })).toBe(true)
+  })
+
+  it("takes Yarn 2 or later's default, Plug'n'Play, when no node_modules folder shows otherwise", () => {
+    expect(yarnPnpOf({ ...clues, hasNodeModules: false })).toBe(true)
+    expect(yarnPnpOf(clues)).toBe(false)
+  })
+
+  it('never counts Yarn 1 without the loader file', () => {
+    expect(yarnPnpOf({ ...clues, yarnBerry: false, hasNodeModules: false })).toBe(false)
   })
 })
 

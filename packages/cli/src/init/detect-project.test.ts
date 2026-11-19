@@ -615,4 +615,17 @@ describe('detectProject in a workspace', () => {
 
     expect(await detectProject(root, listProjectFiles)).toMatchObject({ packageManager: 'yarn', yarnBerry: true })
   })
+
+  it.each([
+    ['its loader file', { 'yarn.lock': '', '.pnp.cjs': '' }, true],
+    ["Yarn 4's default, with no node_modules", { 'yarn.lock': '', '.yarnrc.yml': '' }, true],
+    ['nodeLinker: pnp', { 'yarn.lock': '', '.yarnrc.yml': 'nodeLinker: pnp\n', 'node_modules/.keep': '' }, true],
+    ['nodeLinker: node-modules', { 'yarn.lock': '', '.yarnrc.yml': 'nodeLinker: node-modules\n' }, false],
+    ['Yarn 1 with no node_modules', { 'yarn.lock': '' }, false],
+    ['pnpm with a .pnp.cjs', { 'pnpm-lock.yaml': '', '.pnp.cjs': '' }, false],
+  ])("reads Yarn Plug'n'Play from %s", async (_, files, yarnPnp) => {
+    const root = createProject({ 'package.json': json({ name: 'app' }), ...files })
+
+    expect((await detectProject(root, listProjectFiles))?.yarnPnp).toBe(yarnPnp)
+  })
 })

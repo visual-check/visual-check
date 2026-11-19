@@ -170,7 +170,7 @@ Yarn 4 refuses a package version published less than a day ago by default (`npmM
   - the CLI and the browser go to the workspace root, and `@visual-check/storybook` and the addon to each Storybook's package, which is the nearest one with a `package.json`;
   - at a root that is a workspace, pnpm adds with `-w` and Yarn 1 with `-W`. npm adds to a listed package from the root with `--workspace <dir>`; the others add from the package's folder;
   - under Rush it prints the install steps instead of running them.
-- **The addon:** for each ticked Storybook it adds the addon at the CLI's exact version, runs `storybook add @visual-check/storybook-addon@<cli version> --skip-install` in that Storybook's package, then sets the spec in `package.json` back to the exact version, because `storybook add` rewrites it to a `^` range. If the add fails, it warns, prints the command and carries on.
+- **The addon:** for each ticked Storybook it adds the addon at the CLI's exact version, runs `storybook add @visual-check/storybook-addon@<cli version> --skip-install` in that Storybook's package, then sets the spec in `package.json` back to the exact version, because `storybook add` rewrites it to a `^` range. If the add fails, it warns, prints the command and carries on. Under Yarn Plug'n'Play (a `.pnp.cjs` or `.pnp.js`, `nodeLinker: pnp`, or Yarn 2 or later with no `nodeLinker` and no `node_modules`), `init` can't read Storybook's version, so it skips the addon, with one hint to set `nodeLinker: node-modules`.
 - **The two npm scripts.** The summary names the scripts it replaced, not what they ran.
 - **The agent skill** ([Agent skill](16-agent-skill.md)).
 

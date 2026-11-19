@@ -154,15 +154,25 @@ function storybookProblemsOf(project: DetectedProject): string[] {
 }
 
 /**
+ * The hint for a project on Yarn Plug'n'Play, where no Storybook's version can be read, so `init` skips the addon.
+ */
+const yarnPnpNote =
+  "hint: init can't read Storybook's version under Yarn Plug'n'Play, so it skips the addon. To have init add it, " +
+  'set nodeLinker: node-modules in .yarnrc.yml, run yarn install, then run init again.'
+
+/**
  * Lists the notes about Storybook versions that don't stop `init`: a warning for a version above the tested ones, a
- * hint for a Storybook that isn't installed, so has no version.
+ * hint for a Storybook that isn't installed, so has no version. Under Yarn Plug'n'Play, one hint covers every Storybook
+ * without a version, since none can be read there.
  */
 export function versionNotesOf(project: DetectedProject): string[] {
-  return project.storybooks.flatMap(({ configDir, version }) => {
+  const notes = project.storybooks.flatMap(({ configDir, version }) => {
     if (version === undefined) {
       return [
-        `hint: storybook isn't installed for ${configDir}, so init skips its addon. ` +
-          'Install dependencies, then run init again.',
+        project.yarnPnp
+          ? yarnPnpNote
+          : `hint: storybook isn't installed for ${configDir}, so init skips its addon. ` +
+            'Install dependencies, then run init again.',
       ]
     }
 
@@ -175,6 +185,8 @@ export function versionNotesOf(project: DetectedProject): string[] {
 
     return []
   })
+
+  return [...new Set(notes)]
 }
 
 /**

@@ -12,13 +12,15 @@ import {
 import {
   lockfileNames,
   type Manifest,
+  nodeLinkerOf,
   nonEmptyTextOf,
   type PackageManager,
   packageManagerOf,
+  yarnPnpOf,
 } from './package-manager.js'
 import { startScriptOf } from './storybook-scripts.js'
 import { nxProjectNameOf, nxStartOf, nxStorybookPluginTargetOf, type StorybookStart } from './storybook-start.js'
-import { findWorkspace, readJsonFile, type Workspace } from './workspace.js'
+import { findWorkspace, readJsonFile, readTextFile, type Workspace } from './workspace.js'
 import {
   nestedWorkspaceOf,
   packageOf,
@@ -106,6 +108,10 @@ export interface DetectedProject {
    * Whether the root shows Yarn 2 or later. It means something only when the package manager is Yarn.
    */
   yarnBerry: boolean
+  /**
+   * Whether Yarn is the package manager and installs with Plug'n'Play, so no Storybook's version can be read.
+   */
+  yarnPnp: boolean
   /**
    * The Deno file found in the root, or `undefined` for none.
    */
@@ -253,6 +259,31 @@ function storybooksOf(
 }
 
 /**
+ * Returns whether the project at `root` is on Yarn with Plug'n'Play, from its `.yarnrc.yml`, its loader file and its
+ * `node_modules` folder.
+ */
+function yarnPnpIn(root: string, packageManager: PackageManager | undefined, yarnBerry: boolean): boolean {
+  if (packageManager !== 'yarn') {
+    return false
+  }
+
+  let nodeLinker: string | undefined
+
+  try {
+    nodeLinker = nodeLinkerOf(readTextFile(join(root, '.yarnrc.yml')))
+  } catch {
+    nodeLinker = undefined
+  }
+
+  return yarnPnpOf({
+    hasPnpFile: ['.pnp.cjs', '.pnp.js'].some((name) => existsSync(join(root, name))),
+    nodeLinker,
+    yarnBerry,
+    hasNodeModules: existsSync(join(root, 'node_modules')),
+  })
+}
+
+/**
  * Words the hint that `init` works at a workspace root above `startDir`, the folder it runs in. A lone package gets
  * none: there, `init` has always worked at the nearest `package.json`.
  */
@@ -267,9 +298,9 @@ function workspaceRootNotesOf(startDir: string, workspace: Workspace): string[] 
 }
 
 /**
- * Detects the project `init` sets up: the workspace `cwd` is in, its package manager, a Deno file and its Storybooks,
- * each matched to its package. Returns `undefined` when there's neither a workspace nor a `package.json` from `cwd` up
- * to the repo root.
+ * Detects the project `init` sets up: the workspace `cwd` is in, its package manager, whether Yarn uses Plug'n'Play, a
+ * Deno file and its Storybooks, each matched to its package. Returns `undefined` when there's neither a workspace nor
+ * a `package.json` from `cwd` up to the repo root.
  */
 export async function detectProject(cwd: string, listFiles: ListFiles): Promise<DetectedProject | undefined> {
   const startDir = resolve(cwd)
@@ -284,6 +315,7 @@ export async function detectProject(cwd: string, listFiles: ListFiles): Promise<
   const { manifest, hasManifest, manifestProblem } = packages.rootPackage
   const lockfiles = lockfileNames.filter((name) => existsSync(join(root, name)))
   const { storybooks, notes } = storybooksOf(root, packages, workspace.files)
+  const packageManager = workspace.packageManager ?? packageManagerOf(manifest, lockfiles)
 
   return {
     root,
@@ -291,8 +323,9 @@ export async function detectProject(cwd: string, listFiles: ListFiles): Promise<
     manifestPath: join(root, 'package.json'),
     hasManifest,
     manifestProblem,
-    packageManager: workspace.packageManager ?? packageManagerOf(manifest, lockfiles),
+    packageManager,
     yarnBerry: workspace.yarnBerry,
+    yarnPnp: yarnPnpIn(root, packageManager, workspace.yarnBerry),
     denoFile: denoFileNames.find((name) => existsSync(join(root, name))),
     workspace: { kind, packageDirs, packageManagerLists },
     storybooks,

@@ -48,6 +48,7 @@ export function projectOf(overrides: Partial<DetectedProject> = {}): DetectedPro
     manifestProblem: undefined,
     packageManager: 'pnpm',
     yarnBerry: false,
+    yarnPnp: false,
     denoFile: undefined,
     workspace: { kind: 'single', packageDirs: ['.'], packageManagerLists: { pnpm: undefined, workspaces: undefined } },
     storybooks: [storybookOf()],

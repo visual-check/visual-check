@@ -179,6 +179,25 @@ describe('versionNotesOf', () => {
       "hint: storybook isn't installed for .storybook, so init skips its addon. Install dependencies, then run init again.",
     ])
   })
+
+  it("gives one hint about Yarn Plug'n'Play for every Storybook whose version it can't read", () => {
+    const project = projectOf({
+      packageManager: 'yarn',
+      yarnBerry: true,
+      yarnPnp: true,
+      storybooks: [
+        storybookOf({ version: undefined }),
+        storybookOf({ configDir: 'docs/.storybook', version: '12.0.0' }),
+        storybookOf({ configDir: 'web/.storybook', version: undefined }),
+      ],
+    })
+
+    expect(versionNotesOf(project)).toEqual([
+      "hint: init can't read Storybook's version under Yarn Plug'n'Play, so it skips the addon. To have init add it, " +
+        'set nodeLinker: node-modules in .yarnrc.yml, run yarn install, then run init again.',
+      'Warning: docs/.storybook runs storybook 12.0.0, newer than the versions visual-check is tested on (9.1 to 11).',
+    ])
+  })
 })
 
 describe('dockerWarningOf', () => {

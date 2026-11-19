@@ -219,6 +219,46 @@ export function yarnBerryOf(manifest: Manifest, hasYarnrcYml: boolean): boolean 
 }
 
 /**
+ * Reads the top-level `nodeLinker` of a `.yarnrc.yml`, which says how Yarn 2 and later install: `pnp`,
+ * `node-modules` or `pnpm`. Gives `undefined` when it sets none.
+ */
+export function nodeLinkerOf(yarnrc: string): string | undefined {
+  return /^nodeLinker:[ \t]*["']?([\w-]+)/m.exec(yarnrc)?.[1]
+}
+
+/**
+ * Returns whether Yarn installs with Plug'n'Play, which leaves no `node_modules` to read versions from. A `nodeLinker`
+ * that is set decides. Else Plug'n'Play's loader file shows it, or under Yarn 2 and later, whose default it is, no
+ * `node_modules` folder in the root.
+ */
+export function yarnPnpOf(clues: {
+  /**
+   * Whether the root holds Plug'n'Play's loader, `.pnp.cjs` or `.pnp.js`.
+   */
+  hasPnpFile: boolean
+  /**
+   * The `.yarnrc.yml`'s `nodeLinker`, or `undefined` when it sets none.
+   */
+  nodeLinker: string | undefined
+  /**
+   * Whether Yarn is Yarn 2 or later.
+   */
+  yarnBerry: boolean
+  /**
+   * Whether the root holds a `node_modules` folder.
+   */
+  hasNodeModules: boolean
+}): boolean {
+  const { hasPnpFile, nodeLinker, yarnBerry, hasNodeModules } = clues
+
+  if (nodeLinker !== undefined) {
+    return nodeLinker === 'pnp'
+  }
+
+  return hasPnpFile || (yarnBerry && !hasNodeModules)
+}
+
+/**
  * The `rush.json` fields that name the package manager and its version, in the order `init` tries them.
  */
 const rushVersionFields: readonly (readonly [string, PackageManager])[] = [
