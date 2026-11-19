@@ -328,7 +328,7 @@ describe('detectProject in a workspace', () => {
 
     expect(project?.root).toBe(root)
     expect(project?.notes).toEqual([
-      'hint: init sets up the workspace at ../.., where the config goes.',
+      'hint: init sets up the workspace at ../.., where the config goes and the next steps run.',
       "hint: init skips the Storybook in examples/.storybook: examples has its own lockfile, so it's a workspace of " +
         'its own. Run visual-check init there to set it up.',
     ])

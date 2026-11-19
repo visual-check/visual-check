@@ -136,11 +136,12 @@ describe('runInit', () => {
     expect(record.fallowRoots).toEqual([root])
   })
 
-  it('shows the paths relative to a subfolder it runs in', async () => {
+  it('says to run the next steps from the project root when it runs in a subfolder, with the paths relative to it', async () => {
     const root = pnpmProject({ files: { 'src/a.ts': '' } })
     const result = await runInit(join(root, 'src'), toolsOf().tools)
 
-    expect(result.stdout).toContain('To set options for every story, see ../.storybook/visual-check.ts.\n')
+    expect(result.stdout).toContain('visual-check is set up. Next, from ..:\n')
+    expect(result.stdout).toContain('To set options for every story, see .storybook/visual-check.ts.\n')
   })
 
   describe('each check that stops it writes nothing and runs nothing', () => {
@@ -783,7 +784,9 @@ describe('runInit in a workspace', () => {
     const result = await runInit(join(root, 'packages/ui'), tools)
 
     expect(result.exitCode).toBe(0)
-    expect(result.messages[0]).toBe('hint: init sets up the workspace at ../.., where the config goes.')
+    expect(result.messages[0]).toBe(
+      'hint: init sets up the workspace at ../.., where the config goes and the next steps run.',
+    )
     expect(existsSync(join(root, 'visual-check.config.ts'))).toBe(true)
     expect(existsSync(join(root, 'packages/ui/visual-check.config.ts'))).toBe(false)
     expect(readText(root, 'packages/ui/.storybook/visual-check.ts')).toBe(modesFile)
@@ -801,6 +804,9 @@ describe('runInit in a workspace', () => {
         cwd: join(root, 'packages/ui'),
       },
     ])
+    expect(result.stdout).toContain('visual-check is set up. Next, from ../..:\n')
+    expect(result.stdout).toContain('packages/ui/.storybook/visual-check.ts')
+    expect(result.summary?.nextSteps?.runFrom).toBe('../..')
   })
 
   /**
@@ -1052,7 +1058,7 @@ export default defineConfig({
 
     expect(result).toMatchObject({ exitCode: 2, stdout: '' })
     expect(result.messages).toEqual([
-      'hint: init sets up the workspace at ../.., where the config goes.',
+      'hint: init sets up the workspace at ../.., where the config goes and the next steps run.',
       'visual-check init needs a package.json at the root of this Rush workspace, for its scripts and the CLI. ' +
         'Add a private one, then run visual-check init again.',
     ])

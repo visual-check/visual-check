@@ -26,6 +26,7 @@ const nextSteps: NextSteps = {
     [{ command: 'pnpm visual:check', text: ['Check the stories against the baselines'] }],
     [{ text: ['Commit the changes, baselines included'] }],
   ],
+  runFrom: undefined,
   modesFiles: ['.storybook/visual-check.ts'],
   ciUrl: 'https://visual-check.vercel.app/docs/ci',
 }
@@ -68,6 +69,28 @@ Next
   2  pnpm visual:update   Write the first baselines
   3  pnpm visual:check    Check the stories against the baselines
   4  Commit the changes, baselines included
+
+To set options for every story, see .storybook/visual-check.ts.
+To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
+  })
+
+  it('names the workspace root to run the steps from, in accent, when init runs in a package', async () => {
+    const { lastFrame } = await renderSettledAt(
+      <Summary
+        result={{
+          ...resultWith(0, []),
+          summary: { nextSteps: { ...nextSteps, steps: nextSteps.steps.slice(0, 1), runFrom: '../..' } },
+        }}
+      />,
+      160,
+    )
+
+    expect(lastFrame()).toContain('\u001b[1mNext, from \u001b[36m../..\u001b[39m\u001b[22m\n')
+    expect(plainFrameOf(lastFrame())).toBe(`
+✓ visual-check is set up
+
+Next, from ../..
+  1  pnpm storybook   Start Storybook, and keep it running
 
 To set options for every story, see .storybook/visual-check.ts.
 To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
@@ -334,6 +357,7 @@ https://visual-check.vercel.app/docs/ci.`)
           ...resultWith(0, []),
           summary: {
             nextSteps: {
+              ...nextSteps,
               steps: [
                 [
                   {
@@ -347,7 +371,6 @@ https://visual-check.vercel.app/docs/ci.`)
                 ...nextSteps.steps.slice(1),
               ],
               modesFiles: [],
-              ciUrl: nextSteps.ciUrl,
             },
           },
         }}
@@ -403,7 +426,7 @@ https://visual-check.vercel.app/docs/ci.`)
           ...resultWith(0, [
             "Warning: Fallow couldn't check the imports: Fallow broke.\nIt could not read tsconfig.json.",
           ]),
-          summary: { nextSteps: { steps: [], modesFiles: [], ciUrl: nextSteps.ciUrl } },
+          summary: { nextSteps: { ...nextSteps, steps: [], modesFiles: [] } },
         }}
       />,
     )

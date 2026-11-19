@@ -72,8 +72,13 @@ export interface NextSteps {
    */
   steps: NextStepRow[][]
   /**
-   * Each set-up Storybook's `visual-check.ts`, where options for every story go, relative to the folder `init` runs
-   * in, once each, in the order of the Storybooks.
+   * The workspace root relative to the folder `init` runs in, where the steps run and the paths start, or `undefined`
+   * when `init` runs in the root.
+   */
+  runFrom: string | undefined
+  /**
+   * Each set-up Storybook's `visual-check.ts`, where options for every story go, relative to the workspace root, once
+   * each, in the order of the Storybooks.
    */
   modesFiles: string[]
   /**
@@ -87,9 +92,13 @@ export interface NextSteps {
  */
 interface ClosingMessageInput {
   /**
-   * The folder `init` runs in. Paths are shown relative to it.
+   * The folder `init` runs in. Below the root, the steps say to run them from the root.
    */
   cwd: string
+  /**
+   * The absolute workspace root, where the commands run. Paths are shown relative to it.
+   */
+  root: string
   /**
    * The package manager of the project.
    */
@@ -188,7 +197,7 @@ export function fitsCommandColumn(command: string, width: number): boolean {
  * Returns the first step: start the Storybook, or a row per Storybook, each with its own command. With none set up,
  * when the config holds none `init` could set up, it's to add one, as the hints say.
  */
-function startStepOf({ cwd, configPath, storybooks }: ClosingMessageInput): NextStepRow[] {
+function startStepOf({ root, configPath, storybooks }: ClosingMessageInput): NextStepRow[] {
   const [first, ...others] = storybooks
 
   if (first === undefined) {
@@ -196,7 +205,7 @@ function startStepOf({ cwd, configPath, storybooks }: ClosingMessageInput): Next
       {
         text: [
           'Add your Storybook to ',
-          { code: relativePathOf(cwd, configPath) },
+          { code: relativePathOf(root, configPath) },
           ', as the hints say, then start it',
         ],
       },
@@ -211,6 +220,15 @@ function startStepOf({ cwd, configPath, storybooks }: ClosingMessageInput): Next
     command: startCommand,
     text: [`Start ${name}, and keep it running`],
   }))
+}
+
+/**
+ * Returns the heading of the steps: `Next`, and, when `init` runs below the workspace root, the root to run them from.
+ *
+ * @public
+ */
+export function nextHeadingOf(runFrom: string | undefined): Segment[] {
+  return runFrom === undefined ? ['Next'] : ['Next, from ', { code: runFrom }]
 }
 
 /**
@@ -234,12 +252,12 @@ export function ciLineOf(url: string): Segment[] {
 /**
  * Returns what the closing message tells: the steps to a first passing run, each `visual-check.ts` where options for
  * every story go, and the docs page that tells how to run visual-check in CI. The step that writes the first baselines
- * is left out when no Storybook needs them. Paths and URLs in the text are code segments. It says nothing about remote
- * content.
+ * is left out when no Storybook needs them. The commands and paths are the workspace root's, so below the root it's
+ * named to run them from. Paths and URLs in the text are code segments. It says nothing about remote content.
  */
 export function nextStepsOf(input: ClosingMessageInput): NextSteps {
-  const { cwd, packageManager, storybooks, scripts, needsBaselines } = input
-  const modesFiles = storybooks.map(({ configDir }) => relativePathOf(cwd, join(configDir, 'visual-check.ts')))
+  const { cwd, root, packageManager, storybooks, scripts, needsBaselines } = input
+  const modesFiles = storybooks.map(({ configDir }) => relativePathOf(root, join(configDir, 'visual-check.ts')))
 
   return {
     steps: [
@@ -255,6 +273,7 @@ export function nextStepsOf(input: ClosingMessageInput): NextSteps {
       ],
       [{ text: ['Commit the changes, baselines included'] }],
     ],
+    runFrom: cwd === root ? undefined : relativePathOf(cwd, root),
     modesFiles: [...new Set(modesFiles)],
     ciUrl: docsUrlOf('ci'),
   }
@@ -289,11 +308,11 @@ function stepLinesOf(rows: readonly NextStepRow[], number: number, commandWidth:
  * Returns the message `init` ends with, as plain text: the next steps numbered, each command in a column of its own,
  * then where options for every story go, when a Storybook was set up, and the docs link for CI.
  */
-export function closingMessageTextOf({ steps, modesFiles, ciUrl }: NextSteps): string {
+export function closingMessageTextOf({ steps, runFrom, modesFiles, ciUrl }: NextSteps): string {
   const commandWidth = commandColumnWidthOf(steps)
 
   return [
-    'visual-check is set up. Next:',
+    `visual-check is set up. ${textOf(nextHeadingOf(runFrom))}:`,
     ...steps.flatMap((rows, index) => stepLinesOf(rows, index + 1, commandWidth)),
     '',
     ...(modesFiles.length === 0 ? [] : [textOf(modesLineOf(modesFiles))]),

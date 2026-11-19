@@ -261,7 +261,9 @@ function workspaceRootNotesOf(startDir: string, workspace: Workspace): string[] 
     return []
   }
 
-  return [`hint: init sets up the workspace at ${relativePathOf(startDir, workspace.root)}, where the config goes.`]
+  const root = relativePathOf(startDir, workspace.root)
+
+  return [`hint: init sets up the workspace at ${root}, where the config goes and the next steps run.`]
 }
 
 /**

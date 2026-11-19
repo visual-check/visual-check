@@ -7,6 +7,7 @@ import {
   modesLineOf,
   type NextStepRow,
   type NextSteps,
+  nextHeadingOf,
   type Segment,
 } from '../init/closing-message.js'
 import type { ManualInstall } from '../init/install.js'
@@ -282,9 +283,10 @@ function StepRow({ row, numberLabel, commandWidth, columns }: StepRowProps): Rea
 }
 
 /**
- * Draws what to do next: the numbered steps, each command in a column of its own, then, dim, where options for every
- * story go and the docs page for CI. Commands, paths and URLs take the accent colour. In a terminal too narrow for the
- * commands' column and 20 columns of text beside it, every command takes a line of its own, with its text under it.
+ * Draws what to do next: the heading, which names the workspace root to run the steps from when `init` runs below it,
+ * the numbered steps, each command in a column of its own, then, dim, where options for every story go and the docs
+ * page for CI. Commands, paths and URLs take the accent colour. In a terminal too narrow for the commands' column and
+ * 20 columns of text beside it, every command takes a line of its own, with its text under it.
  */
 function NextStepsView({ nextSteps }: NextStepsViewProps): ReactNode {
   const { columns } = useWindowSize()
@@ -294,7 +296,9 @@ function NextStepsView({ nextSteps }: NextStepsViewProps): ReactNode {
   return (
     <>
       <Box marginTop={1}>
-        <Text bold>Next</Text>
+        <Text bold>
+          <WrappedSegments segments={nextHeadingOf(nextSteps.runFrom)} width={columns} />
+        </Text>
       </Box>
       {/* The steps and their rows never change, so where each one is tells it apart, and gives the step its number. */}
       {Array.from(nextSteps.steps.entries()).flatMap(([position, rows]) =>

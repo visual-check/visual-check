@@ -219,6 +219,8 @@ Each step is a command and what it does, the commands in a column of their own. 
 
 Then a line pointing to each `visual-check.ts` for options for every story (its comment shows how to spread it into `preview`), and a docs link for CI. Before the closing message, a line names any scripts `init` replaced. It lists no files written and says nothing about remote content.
 
+The commands and paths are the workspace root's. Run below the root, the heading names it to run them from, as in `Next, from ../..:`, and so do Rush's printed install steps.
+
 ## Sources
 
 - [Config file shape and init wizard][38], [Storybook target modes][15], [Storybook addon][41], [Playwright peer dependency and Chromium version][45], [Reading per-story options][46], [Storybook 9 floor and Storybook 11][48], [Failure report format][39], [Agent skill shape][20], [Container runtimes on Windows][36], [Affected stories rules][14].

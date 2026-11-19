@@ -5,6 +5,7 @@ import {
   commandColumnWidthOf,
   fitsCommandColumn,
   modesLineOf,
+  nextHeadingOf,
   nextStepsOf,
   replacedScriptsLineOf,
   type SetUpStorybook,
@@ -44,6 +45,7 @@ const defaultScripts = { test: { name: 'visual:check', add: true }, update: { na
 function inputOf(overrides: Partial<Parameters<typeof nextStepsOf>[0]> = {}): Parameters<typeof nextStepsOf>[0] {
   return {
     cwd: '/project',
+    root: '/project',
     packageManager: 'pnpm',
     configPath: '/project/visual-check.config.ts',
     storybooks: [webApp],
@@ -86,6 +88,7 @@ describe('nextStepsOf', () => {
         [{ command: 'pnpm run visual:check', text: ['Check the stories against the baselines'] }],
         [{ text: ['Commit the changes, baselines included'] }],
       ],
+      runFrom: undefined,
       modesFiles: ['.storybook/visual-check.ts'],
       ciUrl: 'https://visual-check.vercel.app/docs/ci',
     })
@@ -126,13 +129,14 @@ describe('nextStepsOf', () => {
     expect(nextSteps.modesFiles).toEqual([])
   })
 
-  it('shows the paths relative to a subfolder init runs in', () => {
-    const nextSteps = nextStepsOf(inputOf({ cwd: '/project/src' }))
+  it('names the root to run the steps from, with the paths relative to it, when init runs in a package', () => {
+    const nextSteps = nextStepsOf(inputOf({ cwd: '/project/packages/ui' }))
 
-    expect(nextSteps.modesFiles).toEqual(['../.storybook/visual-check.ts'])
-    expect(nextStepsOf(inputOf({ cwd: '/project/src', storybooks: [] })).steps[0]?.[0]?.text).toEqual([
+    expect(nextSteps.runFrom).toBe('../..')
+    expect(nextSteps.modesFiles).toEqual(['.storybook/visual-check.ts'])
+    expect(nextStepsOf(inputOf({ cwd: '/project/packages/ui', storybooks: [] })).steps[0]?.[0]?.text).toEqual([
       'Add your Storybook to ',
-      { code: '../visual-check.config.ts' },
+      { code: 'visual-check.config.ts' },
       ', as the hints say, then start it',
     ])
   })
@@ -224,6 +228,16 @@ describe('modesLineOf', () => {
       { code: 'c.ts' },
       '.',
     ])
+  })
+})
+
+describe('nextHeadingOf', () => {
+  it('gives Next in the root', () => {
+    expect(nextHeadingOf(undefined)).toEqual(['Next'])
+  })
+
+  it('names the root to run the steps from below it, as code', () => {
+    expect(nextHeadingOf('../..')).toEqual(['Next, from ', { code: '../..' }])
   })
 })
 
@@ -319,6 +333,27 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
   3. pnpm run visual:check    Check the stories against the baselines
   4. Commit the changes, baselines included
 
+To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
+`)
+  })
+
+  it('says to run the steps from the root when init runs in a package, with the paths relative to it', () => {
+    const ui = {
+      ...docs,
+      dir: '/project/packages/ui',
+      configDir: '/project/packages/ui/.storybook',
+      startCommand: 'pnpm --filter ui run storybook',
+    }
+
+    expect(
+      closingMessageOf(inputOf({ cwd: '/project/packages/ui', storybooks: [ui] })),
+    ).toBe(`visual-check is set up. Next, from ../..:
+  1. pnpm --filter ui run storybook   Start Storybook, and keep it running
+  2. pnpm run visual:update           Write the first baselines
+  3. pnpm run visual:check            Check the stories against the baselines
+  4. Commit the changes, baselines included
+
+To set options for every story, see packages/ui/.storybook/visual-check.ts.
 To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
 `)
   })

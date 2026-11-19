@@ -466,6 +466,10 @@ export interface ManualInstall {
  */
 interface RushInstallInput extends AddContext {
   /**
+   * The folder `init` runs in. Below the root, the heading says to run the commands from the root.
+   */
+  cwd: string
+  /**
    * The dependencies to add, the root's exact ones and its browser first.
    */
   installs: readonly DependenciesToAdd[]
@@ -493,9 +497,10 @@ function copyableCommandLineOf({ command, args }: CommandLine): string {
  * 3. `rush add --exact --skip-update` in each project's folder, which also sets the addon back to its exact version;
  * 4. one `rush update`, which installs them all.
  *
- * Gives `undefined` when there's nothing to add.
+ * The commands run from the workspace root, which the heading names when `init` runs below it. Gives `undefined` when
+ * there's nothing to add.
  */
-export function rushInstallOf({ installs, addonSteps, ...context }: RushInstallInput): ManualInstall | undefined {
+export function rushInstallOf({ cwd, installs, addonSteps, ...context }: RushInstallInput): ManualInstall | undefined {
   const { root } = context
 
   if (installs.length === 0) {
@@ -518,11 +523,13 @@ export function rushInstallOf({ installs, addonSteps, ...context }: RushInstallI
     return commandInFolderOf(root, install.dir, rushAdd)
   })
 
+  const what =
+    addonSteps.length === 0
+      ? "Install visual-check's packages yourself"
+      : "Add the Storybook addon and install visual-check's packages yourself"
+
   return {
-    heading:
-      addonSteps.length === 0
-        ? "Install visual-check's packages yourself:"
-        : "Add the Storybook addon and install visual-check's packages yourself:",
+    heading: cwd === root ? `${what}:` : `${what}, from ${relativePathOf(cwd, root)}:`,
     commands: [...addonCommands, ...addCommands, 'rush update'],
   }
 }

@@ -648,6 +648,7 @@ describe('rushInstallOf', () => {
     packageManager: 'pnpm' as const,
     yarnBerry: false,
     root: '/p',
+    cwd: '/p',
     packageManagerLists: { pnpm: undefined, workspaces: undefined },
   }
   const installs = [
@@ -717,6 +718,20 @@ describe('rushInstallOf', () => {
       heading: "Install visual-check's packages yourself:",
       commands: ['pnpm add --save-dev --save-exact @visual-check/cli@1.0.0', 'rush update'],
     })
+  })
+
+  it('names the root to run the commands from, which stay relative to it, when init runs in a project', () => {
+    const manualInstall = rushInstallOf({ ...context, cwd: '/p/libs/ui', installs, addonSteps })
+
+    expect(manualInstall?.heading).toBe(
+      "Add the Storybook addon and install visual-check's packages yourself, from ../..:",
+    )
+    expect(manualInstall?.commands[0]).toBe(
+      'cd libs/ui && pnpm exec storybook add @visual-check/storybook-addon@1.0.0 --yes --skip-install -c docs',
+    )
+    expect(
+      rushInstallOf({ ...context, cwd: '/p/libs/ui', installs: installs.slice(0, 1), addonSteps: [] })?.heading,
+    ).toBe("Install visual-check's packages yourself, from ../..:")
   })
 
   it('gives nothing when there is nothing to add', () => {

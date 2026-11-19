@@ -118,6 +118,7 @@ export const pnpmNextSteps: NextSteps = {
     [{ command: 'pnpm run visual:check', text: ['Check the stories against the baselines'] }],
     [{ text: ['Commit the changes, baselines included'] }],
   ],
+  runFrom: undefined,
   modesFiles: ['.storybook/visual-check.ts'],
   ciUrl: 'https://visual-check.vercel.app/docs/ci',
 }

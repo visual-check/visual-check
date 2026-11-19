@@ -334,7 +334,7 @@ interface InstallPlan {
  * ticked. Under Rush, which installs through its own `rush add` and `rush update`, `init` runs none of it and prints
  * the steps instead.
  */
-function installPlanOf(project: DetectedProject, setup: Setup, tools: InitTools): InstallPlan {
+function installPlanOf(cwd: string, project: DetectedProject, setup: Setup, tools: InitTools): InstallPlan {
   const { root, yarnBerry, workspace } = project
   const { packageManager, addons } = setup.answers
   const { cliVersion } = tools
@@ -350,7 +350,7 @@ function installPlanOf(project: DetectedProject, setup: Setup, tools: InitTools)
   const context = { packageManager, yarnBerry, root, packageManagerLists: workspace.packageManagerLists }
 
   if (workspace.kind === 'rush') {
-    return { installSteps: [], addonSteps: [], manualInstall: rushInstallOf({ ...context, installs, addonSteps }) }
+    return { installSteps: [], addonSteps: [], manualInstall: rushInstallOf({ ...context, cwd, installs, addonSteps }) }
   }
 
   return { installSteps: installStepsOf({ ...context, installs }), addonSteps, manualInstall: undefined }
@@ -366,7 +366,7 @@ function installPlanOf(project: DetectedProject, setup: Setup, tools: InitTools)
 async function applySetup(cwd: string, project: DetectedProject, setup: Setup, tools: InitTools): Promise<InitResult> {
   const { packageManager, scripts } = setup.answers
   const { runCommand, progress } = tools
-  const { installSteps, addonSteps, manualInstall } = installPlanOf(project, setup, tools)
+  const { installSteps, addonSteps, manualInstall } = installPlanOf(cwd, project, setup, tools)
 
   progress.plan([
     writeFilesTitle,
@@ -403,6 +403,7 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
 
   const nextSteps = nextStepsOf({
     cwd,
+    root: project.root,
     packageManager,
     configPath: setup.configPath,
     storybooks: setup.storybooks,
