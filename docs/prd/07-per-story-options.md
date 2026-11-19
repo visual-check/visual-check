@@ -127,13 +127,14 @@ Every story's merged options are checked before any capture. Each of these exits
 - Storybook's `extract()` is never called, and MDX docs files never load.
 - Options are read in the browser that captures. Nothing is cached between runs, because `index.json` doesn't change when a file's options do.
 
-| Run                               | Stories files it loads |
-| --------------------------------- | ---------------------- |
-| `test` or `update`, any selection | All of them            |
-| `test --consistency`              | All of them            |
-| `test --shard k/n`                | Only its own           |
+| Run                                    | Stories files it loads                                              |
+| -------------------------------------- | ------------------------------------------------------------------- |
+| `test` or `update`, local and affected | All of those in its required Storybooks, none when it requires none |
+| `test` or `update`, any other run      | All of them                                                         |
+| `test --consistency`                   | All of them                                                         |
+| `test --shard k/n`                     | Only its own                                                        |
 
-- Because the consistency check covers every story, a local run of affected stories still loads every file. On a cold dev server, that compiles them all once.
+- Because the consistency check covers every story of the Storybooks in the run, a local run of affected stories still loads every file of its required Storybooks ([Affected stories](11-affected-stories.md#required-storybooks)). On a cold dev server, that compiles them all once.
 
 ## Not in v1
 

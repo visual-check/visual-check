@@ -34,7 +34,8 @@ The CLI has three commands with fixed names: `init`, `test` and `update`. It con
 - `--all`, `--affected` and `--filter` are exclusive. Two of them together exit 2.
 - `test --consistency` takes none of the three.
 - With `--shard` and no selection flag, a run covers all stories even when `CI` is unset.
-- Selection narrows what's captured. The consistency check still covers every story ([Sharding and the consistency check](12-sharding-and-consistency.md)).
+- A local affected run covers only its required Storybooks, with a note naming the others ([Affected stories](11-affected-stories.md#required-storybooks)). Every other run covers every Storybook in it.
+- Selection narrows what's captured. The consistency check still covers every story of the Storybooks in the run ([Sharding and the consistency check](12-sharding-and-consistency.md)).
 - The rules for affected stories are in [Affected stories](11-affected-stories.md).
 
 ## Other flags
@@ -77,7 +78,7 @@ Each message names what failed and the fix.
 
 - Nothing answers at `<url>/index.json`. The run fails at once, with no wait and no retry, naming the Storybook and its URL.
 - One of several Storybooks is down. The message suggests `--storybook`.
-- A Storybook is down even when there are no changed files.
+- A Storybook the run requires is down. A local affected run requires only the Storybooks its changes reach, and none when no changed file counts; every other run requires every Storybook in it.
 - `index.json` fails, or the preview fails to load. On a dev server, a stories file that doesn't parse breaks `index.json`.
 - `index.json` lists a stories file that isn't on disk.
 - A Storybook is below 9.1.

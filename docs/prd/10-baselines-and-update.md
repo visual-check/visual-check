@@ -48,8 +48,8 @@ All names are known before anything is captured, so these are checked first:
 
 - A baseline within tolerance stays untouched. There's no `--force`: to rewrite a baseline, delete the file and run `update`.
 - A snapshot that fails and then passes on its second load is flaky, not failing. Its baseline stays untouched too.
-- `--storybook` narrows all three rows. `--filter` and affected stories narrow only the first.
-- So a consistency check passes straight after an `update` that wrote everything.
+- `--storybook` narrows all three rows. So does a local affected run's narrowing to its required Storybooks, with a note naming the ones left out ([Affected stories](11-affected-stories.md#required-storybooks)). `--filter` and the affected-story selection within those Storybooks narrow only the first.
+- So a consistency check over the same Storybooks passes straight after an `update` that wrote everything.
 - The baselines of a stories file that fails to load are never orphans and are never deleted.
 - `update` loads every stories file, as `test` does.
 - The addon's Update is the one exception to "within tolerance stays untouched" ([Storybook addon](15-storybook-addon.md)).

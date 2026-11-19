@@ -8,7 +8,7 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
 
 - It compares the baselines that the current stories and their options call for with the files in each baselines folder.
 - It needs the browser and a served Storybook, because options live in Storybook parameters. It loads every stories file and captures nothing.
-- **It covers every story that isn't disabled,** whatever `--filter` or affected stories select. Only `--storybook` narrows it.
+- **It covers every story that isn't disabled,** whatever `--filter` or affected stories select. `--storybook` narrows it, and so does a local affected run, to its required Storybooks, with a note naming the ones left out ([ADR 0011](../adr/0011-a-local-affected-run-checks-only-its-required-storybooks.md)). `test --consistency` takes no selection, so locally too it covers every Storybook in the run.
 - A stories file that fails to load fails the check, naming the file and its error. That file's baselines are never reported as orphans.
 
 When it runs:
