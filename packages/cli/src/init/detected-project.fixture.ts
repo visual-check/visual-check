@@ -50,7 +50,7 @@ export function projectOf(overrides: Partial<DetectedProject> = {}): DetectedPro
     yarnBerry: false,
     yarnPnp: false,
     denoFile: undefined,
-    workspace: { kind: 'single', packageDirs: ['.'], packageManagerLists: { pnpm: undefined, workspaces: undefined } },
+    workspace: { kind: 'single', packageManagerLists: { pnpm: undefined, workspaces: undefined } },
     storybooks: [storybookOf()],
     notes: [],
     ...overrides,

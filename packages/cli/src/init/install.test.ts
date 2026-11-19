@@ -403,6 +403,31 @@ describe('installDependencies', () => {
       'pnpm add --save-dev --save-exact @visual-check/cli@0.0.0 failed with exit code 1. Run it yourself in ../.., then run visual-check init again.',
     )
   })
+
+  it('quotes a spec holding ^ in the problem, as a person copies it', async () => {
+    const { progress, calls: progressCalls } = recordingProgress()
+    const problem = await installDependencies({
+      steps: [
+        {
+          title: "Install visual-check's packages",
+          dir: '/p',
+          commandLine: { command: 'pnpm', args: ['add', '--save-dev', '@visual-check/chromium@^157.0.0'] },
+        },
+      ],
+      cwd: '/p',
+      ...fakeRunCommand([1]),
+      progress,
+    })
+
+    expect(problem).toBe(
+      'pnpm add --save-dev "@visual-check/chromium@^157.0.0" failed with exit code 1. Run it yourself, then run visual-check init again.',
+    )
+    expect(progressCalls[0]).toEqual([
+      'start',
+      "Install visual-check's packages",
+      'pnpm add --save-dev @visual-check/chromium@^157.0.0',
+    ])
+  })
 })
 
 describe('addonStepsOf', () => {

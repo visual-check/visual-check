@@ -276,7 +276,6 @@ describe('detectProject in a workspace', () => {
       yarnBerry: false,
       workspace: {
         kind: 'pnpm',
-        packageDirs: ['.', 'packages/ui', 'packages/web'],
         packageManagerLists: { pnpm: ['packages/ui', 'packages/web'], workspaces: undefined },
       },
       notes: [],
@@ -396,7 +395,6 @@ describe('detectProject in a workspace', () => {
 
     expect(project?.workspace).toEqual({
       kind: 'nx',
-      packageDirs: ['.', 'libs/ui'],
       packageManagerLists: { pnpm: undefined, workspaces: undefined },
     })
     expect(project?.storybooks).toMatchObject([
@@ -430,7 +428,6 @@ describe('detectProject in a workspace', () => {
       packageManager: 'pnpm',
       workspace: {
         kind: 'rush',
-        packageDirs: ['libs/ui'],
         packageManagerLists: { pnpm: undefined, workspaces: undefined },
       },
     })

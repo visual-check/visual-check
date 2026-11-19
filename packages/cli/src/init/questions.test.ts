@@ -636,7 +636,6 @@ describe('askQuestions', () => {
     const project = {
       workspace: {
         kind: 'pnpm' as const,
-        packageDirs: ['.', 'packages/ui', 'packages/web'],
         packageManagerLists: { pnpm: ['packages/ui', 'packages/web'], workspaces: undefined },
       },
     }
@@ -707,7 +706,6 @@ describe('askQuestions', () => {
         project: projectOf({
           workspace: {
             kind: 'nx',
-            packageDirs: ['.', 'packages/ui'],
             packageManagerLists: { pnpm: undefined, workspaces: ['packages/ui', 'packages/web'] },
           },
           storybooks,
@@ -727,7 +725,6 @@ describe('askQuestions', () => {
           packageManager: 'npm',
           workspace: {
             kind: 'nx',
-            packageDirs: ['.', 'packages/ui', 'packages/web'],
             packageManagerLists: { pnpm: undefined, workspaces: ['packages/ui', 'packages/web'] },
           },
           storybooks,
@@ -747,7 +744,6 @@ describe('askQuestions', () => {
           packageManager: 'npm',
           workspace: {
             kind: 'nx',
-            packageDirs: ['.', 'packages/ui', 'packages/web'],
             packageManagerLists: { pnpm: undefined, workspaces: ['packages/ui'] },
           },
           storybooks,

@@ -277,8 +277,8 @@ interface InstallDependenciesInput {
 }
 
 /**
- * Runs each add command in its folder, in order. Stops at the first one that fails and returns the problem, which names
- * the folder to run it in, or returns `undefined` when all succeed.
+ * Runs each add command in its folder, in order. Stops at the first one that fails and returns the problem, which gives
+ * the command as a person copies it and names the folder to run it in, or returns `undefined` when all succeed.
  */
 export async function installDependencies(input: InstallDependenciesInput): Promise<string | undefined> {
   const { steps, cwd, runCommand, progress } = input
@@ -295,7 +295,7 @@ export async function installDependencies(input: InstallDependenciesInput): Prom
 
     if (exitCode !== 0) {
       return (
-        `${shown} failed with exit code ${exitCode}. ` +
+        `${copyableCommandLineOf(commandLine)} failed with exit code ${exitCode}. ` +
         `Run it yourself${inFolderTextOf(cwd, dir)}, then run visual-check init again.`
       )
     }

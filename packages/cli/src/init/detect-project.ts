@@ -117,9 +117,9 @@ export interface DetectedProject {
    */
   denoFile: string | undefined
   /**
-   * What lists the workspace's packages, their folders relative to the root, and the lists a package manager reads.
+   * What lists the workspace's packages, and the lists a package manager reads.
    */
-  workspace: Pick<Workspace, 'kind' | 'packageDirs' | 'packageManagerLists'>
+  workspace: Pick<Workspace, 'kind' | 'packageManagerLists'>
   /**
    * The Storybooks, `.storybook` first, then by path.
    */
@@ -327,7 +327,7 @@ export async function detectProject(cwd: string, listFiles: ListFiles): Promise<
     yarnBerry: workspace.yarnBerry,
     yarnPnp: yarnPnpIn(root, packageManager, workspace.yarnBerry),
     denoFile: denoFileNames.find((name) => existsSync(join(root, name))),
-    workspace: { kind, packageDirs, packageManagerLists },
+    workspace: { kind, packageManagerLists },
     storybooks,
     notes: [...workspaceRootNotesOf(startDir, workspace), ...notes],
   }

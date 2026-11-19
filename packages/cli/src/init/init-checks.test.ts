@@ -43,7 +43,6 @@ describe('blockingProblemsOf', () => {
       denoFile: 'deno.json',
       workspace: {
         kind: 'rush',
-        packageDirs: ['libs/ui'],
         packageManagerLists: { pnpm: undefined, workspaces: undefined },
       },
     })
@@ -60,7 +59,6 @@ describe('blockingProblemsOf', () => {
       hasManifest: false,
       workspace: {
         kind: 'pnpm',
-        packageDirs: ['libs/ui'],
         packageManagerLists: { pnpm: ['libs/ui'], workspaces: undefined },
       },
     })
