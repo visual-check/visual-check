@@ -56,17 +56,13 @@ export type AffectedStorybook =
     }
 
 /**
- * What `affectedStorybooksOf` reads.
+ * What the changed files reach, as the rules read it, before any Storybook's stories are read.
  */
-interface AffectedStorybooksInput {
+export interface ChangeReach {
   /**
    * The project root that `reached` and `changedFiles` are relative to, an absolute path.
    */
   root: string
-  /**
-   * The Storybooks.
-   */
-  storybooks: readonly AffectedStorybookInput[]
   /**
    * The graph files reached walking back from the changed files, relative to the root, `/`-separated.
    */
@@ -168,10 +164,10 @@ function pathsOf(root: string, storybook: AffectedStorybookInput): StorybookPath
  */
 function reachesChangedPackage(
   paths: StorybookPaths,
-  input: AffectedStorybooksInput,
+  reach: ChangeReach,
   configFoldersReachedFromPackages: ReadonlySet<string>,
 ): boolean {
-  const { changedPackages, reachedFromPackages } = input
+  const { changedPackages, reachedFromPackages } = reach
 
   if (changedPackages.size === 0) {
     return false
@@ -210,10 +206,13 @@ function storyIdsOfBaselines(
  *
  * Otherwise its reached stories files are affected, plus the stories a changed baseline in its baselines folder names.
  */
-export function affectedStorybooksOf(input: AffectedStorybooksInput): AffectedStorybook[] {
-  const { root, storybooks, reached } = input
-  const configFolders = foldersWithConfigFilesOf(input.changedFiles, reached)
-  const configFoldersReachedFromPackages = foldersWithConfigFilesOf(input.reachedFromPackages)
+export function affectedStorybooksOf(
+  reach: ChangeReach,
+  storybooks: readonly AffectedStorybookInput[],
+): AffectedStorybook[] {
+  const { root, reached } = reach
+  const configFolders = foldersWithConfigFilesOf(reach.changedFiles, reached)
+  const configFoldersReachedFromPackages = foldersWithConfigFilesOf(reach.reachedFromPackages)
 
   return storybooks.map((storybook): AffectedStorybook => {
     const paths = pathsOf(root, storybook)
@@ -222,7 +221,7 @@ export function affectedStorybooksOf(input: AffectedStorybooksInput): AffectedSt
       isOutsideRoot(paths.folder) ||
       isOutsideRoot(paths.configFolder) ||
       configFolders.has(paths.configFolder) ||
-      reachesChangedPackage(paths, input, configFoldersReachedFromPackages)
+      reachesChangedPackage(paths, reach, configFoldersReachedFromPackages)
     ) {
       return { all: true }
     }
@@ -234,7 +233,7 @@ export function affectedStorybooksOf(input: AffectedStorybooksInput): AffectedSt
     return {
       all: false,
       storiesFiles: new Set(storiesFiles),
-      storyIds: new Set(storyIdsOfBaselines(storybook, input.changedBaselines)),
+      storyIds: new Set(storyIdsOfBaselines(storybook, reach.changedBaselines)),
     }
   })
 }

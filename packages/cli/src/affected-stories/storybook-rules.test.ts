@@ -31,13 +31,15 @@ const rootStorybook: AffectedStorybookInput = {
  * Gives the stories files the rules select in the root Storybook, given the reached and the changed files.
  */
 function affectedIn(reached: readonly string[], changedFiles: readonly string[] = reached): AffectedStorybook[] {
-  return affectedStorybooksOf({
-    root,
-    storybooks: [rootStorybook],
-    reached: new Set(reached),
-    changedFiles,
-    ...noPackages,
-  })
+  return affectedStorybooksOf(
+    {
+      root,
+      reached: new Set(reached),
+      changedFiles,
+      ...noPackages,
+    },
+    [rootStorybook],
+  )
 }
 
 /**
@@ -139,13 +141,15 @@ describe('affectedStorybooksOf', () => {
     }
 
     expect(
-      affectedStorybooksOf({
-        root,
-        storybooks: [outside, rootStorybook],
-        reached: new Set(['src/card.stories.tsx']),
-        changedFiles: ['src/card.stories.tsx'],
-        ...noPackages,
-      }),
+      affectedStorybooksOf(
+        {
+          root,
+          reached: new Set(['src/card.stories.tsx']),
+          changedFiles: ['src/card.stories.tsx'],
+          ...noPackages,
+        },
+        [outside, rootStorybook],
+      ),
     ).toEqual([{ all: true }, some('./src/card.stories.tsx')])
   })
 
@@ -158,13 +162,15 @@ describe('affectedStorybooksOf', () => {
     }
 
     expect(
-      affectedStorybooksOf({
-        root,
-        storybooks: [outside, rootStorybook],
-        reached: new Set(['src/card.stories.tsx']),
-        changedFiles: ['src/card.stories.tsx'],
-        ...noPackages,
-      }),
+      affectedStorybooksOf(
+        {
+          root,
+          reached: new Set(['src/card.stories.tsx']),
+          changedFiles: ['src/card.stories.tsx'],
+          ...noPackages,
+        },
+        [outside, rootStorybook],
+      ),
     ).toEqual([{ all: true }, some('./src/card.stories.tsx')])
   })
 
@@ -177,13 +183,15 @@ describe('affectedStorybooksOf', () => {
     }
 
     expect(
-      affectedStorybooksOf({
-        root,
-        storybooks: [storybook],
-        reached: new Set(['preview.ts']),
-        changedFiles: [],
-        ...noPackages,
-      }),
+      affectedStorybooksOf(
+        {
+          root,
+          reached: new Set(['preview.ts']),
+          changedFiles: [],
+          ...noPackages,
+        },
+        [storybook],
+      ),
     ).toEqual([{ all: true }])
   })
 
@@ -212,13 +220,15 @@ describe('affectedStorybooksOf', () => {
      * Gives the stories files the rules select in both Storybooks.
      */
     function affectedInBoth(reached: readonly string[], changedFiles: readonly string[] = reached) {
-      return affectedStorybooksOf({
-        root,
-        storybooks: [web, ui],
-        reached: new Set(reached),
-        changedFiles,
-        ...noPackages,
-      })
+      return affectedStorybooksOf(
+        {
+          root,
+          reached: new Set(reached),
+          changedFiles,
+          ...noPackages,
+        },
+        [web, ui],
+      )
     }
 
     it('selects the stories files of each Storybook from the root-relative paths', () => {
@@ -247,13 +257,15 @@ describe('affectedStorybooksOf', () => {
       }
 
       expect(
-        affectedStorybooksOf({
-          root,
-          storybooks: [docs],
-          reached: new Set(['packages/docs/src/intro.stories.tsx', 'src/other.stories.tsx']),
-          changedFiles: ['packages/docs/src/intro.stories.tsx'],
-          ...noPackages,
-        }),
+        affectedStorybooksOf(
+          {
+            root,
+            reached: new Set(['packages/docs/src/intro.stories.tsx', 'src/other.stories.tsx']),
+            changedFiles: ['packages/docs/src/intro.stories.tsx'],
+            ...noPackages,
+          },
+          [docs],
+        ),
       ).toEqual([some('src/intro.stories.tsx')])
     })
 
@@ -261,15 +273,17 @@ describe('affectedStorybooksOf', () => {
      * Gives the stories the rules select in both Storybooks when the packages changed reach `reachedFromPackages`.
      */
     function affectedByPackages(changedPackages: string[], reachedFromPackages: string[]) {
-      return affectedStorybooksOf({
-        root,
-        storybooks: [web, ui],
-        reached: new Set(),
-        changedFiles: [],
-        ...noPackages,
-        changedPackages: new Set(changedPackages),
-        reachedFromPackages: new Set(reachedFromPackages),
-      })
+      return affectedStorybooksOf(
+        {
+          root,
+          reached: new Set(),
+          changedFiles: [],
+          ...noPackages,
+          changedPackages: new Set(changedPackages),
+          reachedFromPackages: new Set(reachedFromPackages),
+        },
+        [web, ui],
+      )
     }
 
     it('selects every story of a Storybook inside a changed package', () => {
@@ -310,14 +324,16 @@ describe('affectedStorybooksOf', () => {
       ]
 
       expect(
-        affectedStorybooksOf({
-          root,
-          storybooks: withIds,
-          reached: new Set(),
-          changedFiles: [],
-          ...noPackages,
-          changedBaselines: [{ folder: join(root, 'packages/web/baselines'), stem: 'page--a.dark' }],
-        }),
+        affectedStorybooksOf(
+          {
+            root,
+            reached: new Set(),
+            changedFiles: [],
+            ...noPackages,
+            changedBaselines: [{ folder: join(root, 'packages/web/baselines'), stem: 'page--a.dark' }],
+          },
+          withIds,
+        ),
       ).toEqual([{ all: false, storiesFiles: new Set(), storyIds: new Set(['page--a']) }, some()])
     })
 

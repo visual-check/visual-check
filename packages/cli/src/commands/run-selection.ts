@@ -1,4 +1,4 @@
-import { type AffectedStories, workOutAffectedStories } from '../affected-stories/affected-stories.js'
+import { affectedStorybooksIn, type TracedChanges, traceChanges } from '../affected-stories/affected-stories.js'
 import type { FindReachedFiles } from '../affected-stories/fallow-graph.js'
 import type { AffectedStorybook } from '../affected-stories/storybook-rules.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
@@ -133,7 +133,7 @@ const allHint = 'Run with --all to cover every story.'
  * stories files plus its affected stories by ID.
  */
 function choiceOf(affected: AffectedStorybook | undefined): StoryChoice {
-  // workOutAffectedStories gives one entry per Storybook, so `undefined` never comes.
+  // affectedStorybooksIn gives one entry per Storybook, so `undefined` never comes.
   if (affected === undefined || affected.all) {
     return { kind: 'all' }
   }
@@ -146,8 +146,11 @@ function choiceOf(affected: AffectedStorybook | undefined): StoryChoice {
  * changed since the base, or that no changed file affects a story, each with a hint at `--all`. Gives none for a run
  * that selected a story or fell back.
  */
-export function emptySelectionNotesOf(affected: AffectedStories, selections: readonly StorybookSelection[]): string[] {
-  const { base, changedFiles, fallback } = affected
+export function emptySelectionNotesOf(
+  traced: Pick<TracedChanges, 'base' | 'changedFiles' | 'fallback'>,
+  selections: readonly StorybookSelection[],
+): string[] {
+  const { base, changedFiles, fallback } = traced
 
   if (fallback !== null || base === null || changedFiles === null) {
     return []
@@ -207,32 +210,36 @@ export async function workOutRunSelection(input: RunSelectionInput): Promise<Run
     }
   }
 
-  const affected = await workOutAffectedStories({
+  const traced = await traceChanges({
     baseRef: input.baseRef,
     environment: input.environment,
     cwd: input.cwd,
-    storybooks: storybooks.map(({ storybook, stories }) => ({
+    storybooks: storybooks.map(({ storybook }) => storybook),
+    baselinesFolders: input.baselinesFolders,
+    configPath: input.configPath,
+    affected: input.affected,
+    findReachedFiles: input.findReachedFiles,
+  })
+  const affected = await affectedStorybooksIn(
+    traced,
+    storybooks.map(({ storybook, stories }) => ({
       dir: storybook.dir,
       configDir: storybook.configDir,
       storiesFiles: [...new Set(stories.map((story) => story.importPath))],
       baselines: storybook.baselines,
       storyIds: stories.map((story) => story.id),
     })),
-    baselinesFolders: input.baselinesFolders,
-    configPath: input.configPath,
-    affected: input.affected,
-    findReachedFiles: input.findReachedFiles,
-  })
+  )
   const selections = storybooks.map((storybook, index) => ({
     ...storybook,
-    stories: selectStories(storybook.stories, choiceOf(affected.storybooks[index])),
+    stories: selectStories(storybook.stories, choiceOf(affected[index])),
     allStories: storybook.stories,
   }))
 
   return {
     selections,
-    report: { by: 'affected', base: affected.base, changedFiles: affected.changedFiles, fallback: affected.fallback },
-    warning: fallbackWarningOf(affected.fallback),
-    notes: emptySelectionNotesOf(affected, selections),
+    report: { by: 'affected', base: traced.base, changedFiles: traced.changedFiles, fallback: traced.fallback },
+    warning: fallbackWarningOf(traced.fallback),
+    notes: emptySelectionNotesOf(traced, selections),
   }
 }

@@ -1,7 +1,7 @@
-import { rmSync, symlinkSync } from 'node:fs'
+import { realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { workOutAffectedStories } from './affected-stories.js'
+import { affectedStorybooksIn, traceChanges } from './affected-stories.js'
 import type { CantAnswer, FindReachedFiles, ReachedFiles } from './fallow-graph.js'
 import { InvalidBaseError } from './git-changes.js'
 import { commit, git, isolateGit, makeFolder, makeRepo, removeRepos, writeFiles } from './git-repo.fixture.js'
@@ -9,9 +9,21 @@ import type { ImportGraph } from './import-graph.js'
 import type { AffectedStorybook, AffectedStorybookInput } from './storybook-rules.js'
 import { filesReachedFrom, filesReachedFromFolders } from './walk-back.js'
 
-// The tests of `workOutAffectedStories` run git several times each, which a machine busy with the other test files can
+// The tests of `traceChanges` run git several times each, which a machine busy with the other test files can
 // slow to seconds.
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 })
+
+/**
+ * Traces the changes, then works out each Storybook's affected stories from them, as a run does.
+ */
+async function affectedStoriesOf(
+  options: Parameters<typeof traceChanges>[0] & { storybooks: readonly AffectedStorybookInput[] },
+) {
+  const traced = await traceChanges(options)
+  const { base, changedFiles, fallback } = traced
+
+  return { base, changedFiles, fallback, storybooks: await affectedStorybooksIn(traced, options.storybooks) }
+}
 
 /**
  * Gives the result that selects these stories files.
@@ -34,7 +46,7 @@ function fakeFindReachedFiles(result: ReachedFiles | CantAnswer) {
   return { calls, findReachedFiles }
 }
 
-describe('workOutAffectedStories', () => {
+describe('traceChanges and affectedStorybooksIn', () => {
   /**
    * A repository on branch `work`, one commit after `main`.
    */
@@ -78,7 +90,7 @@ describe('workOutAffectedStories', () => {
    * Works out the affected stories in `cwd` with no `--base` and no environment, unless given.
    */
   function workOut(findReachedFiles: FindReachedFiles, options: { cwd?: string; baseRef?: string } = {}) {
-    return workOutAffectedStories({
+    return affectedStoriesOf({
       baseRef: options.baseRef,
       environment: {},
       cwd: options.cwd ?? repo,
@@ -176,9 +188,135 @@ describe('workOutAffectedStories', () => {
 
     await expect(workOut(fake.findReachedFiles, { baseRef: 'nope' })).rejects.toThrow(InvalidBaseError)
   })
+
+  describe("traceChanges' reach", () => {
+    /**
+     * Traces the changes in the repository with the `affected.ignore` globs given, or none.
+     */
+    function trace(findReachedFiles: FindReachedFiles, options: { cwd?: string; ignore?: string[] } = {}) {
+      return traceChanges({
+        baseRef: undefined,
+        environment: {},
+        cwd: options.cwd ?? repo,
+        storybooks: [storybook],
+        baselinesFolders: [storybook.baselines],
+        configPath: join(repo, 'visual-check.config.ts'),
+        affected: { selectAll: [], ignore: options.ignore ?? [] },
+        findReachedFiles,
+      })
+    }
+
+    /**
+     * A fake `FindReachedFiles` whose answer reaches nothing.
+     */
+    function reachingNothing() {
+      return fakeFindReachedFiles({ reached: new Set(), reachedFromFolders: () => new Set() })
+    }
+
+    it('is nothing when no file changed', async () => {
+      const fake = reachingNothing()
+
+      expect(await trace(fake.findReachedFiles)).toEqual({ base, changedFiles: 0, fallback: null, reach: 'nothing' })
+      expect(fake.calls).toEqual([])
+    })
+
+    it('is nothing when every changed file is ignored', async () => {
+      commit(repo, { 'docs/a.md': 'a\n', 'docs/b.md': 'b\n' })
+
+      const fake = reachingNothing()
+
+      expect(await trace(fake.findReachedFiles, { ignore: ['docs/**'] })).toEqual({
+        base,
+        changedFiles: 2,
+        fallback: null,
+        reach: 'nothing',
+      })
+      expect(fake.calls).toEqual([])
+    })
+
+    it.each([
+      ['the config file', 'visual-check.config.ts'],
+      ['a lockfile', 'pnpm-lock.yaml'],
+    ])('is everything for %s, without asking the graph', async (_name, file) => {
+      commit(repo, { [file]: 'changed\n' })
+
+      const fake = reachingNothing()
+
+      expect(await trace(fake.findReachedFiles)).toEqual({ base, changedFiles: 1, fallback: null, reach: 'everything' })
+      expect(fake.calls).toEqual([])
+    })
+
+    it("is everything, with the fallback, when git can't answer", async () => {
+      const fake = reachingNothing()
+
+      expect(await trace(fake.findReachedFiles, { cwd: makeFolder() })).toEqual({
+        base: null,
+        changedFiles: null,
+        fallback: "the folder isn't in a git repository",
+        reach: 'everything',
+      })
+      expect(fake.calls).toEqual([])
+    })
+
+    it("is everything, with the fallback, when the graph can't answer", async () => {
+      commit(repo, { 'src/button.tsx': 'export const Button = 2\n' })
+
+      const fake = fakeFindReachedFiles({ cantAnswer: 'Fallow failed: boom' })
+
+      expect(await trace(fake.findReachedFiles)).toEqual({
+        base,
+        changedFiles: 1,
+        fallback: 'Fallow failed: boom',
+        reach: 'everything',
+      })
+    })
+
+    it('reaches nothing through the graph, without asking it, when only a changed baseline counts', async () => {
+      commit(repo, { '.visual-check/baselines/button--primary.png': 'png' })
+
+      const fake = reachingNothing()
+      const root = realpathSync(repo)
+
+      expect(await trace(fake.findReachedFiles)).toEqual({
+        base,
+        changedFiles: 1,
+        fallback: null,
+        reach: {
+          root,
+          changedFiles: [],
+          changedBaselines: [{ folder: join(root, '.visual-check/baselines'), stem: 'button--primary' }],
+          reached: new Set(),
+          changedPackages: new Set(),
+          reachedFromPackages: new Set(),
+        },
+      })
+      expect(fake.calls).toEqual([])
+    })
+
+    it("reaches nothing through the graph, without asking it, when the Storybook's preview.ts changed", async () => {
+      commit(repo, { '.storybook/preview.ts': 'export default {}\n' })
+
+      const fake = reachingNothing()
+
+      expect(await trace(fake.findReachedFiles)).toEqual({
+        base,
+        changedFiles: 1,
+        fallback: null,
+        reach: {
+          root: realpathSync(repo),
+          changedFiles: ['.storybook/preview.ts'],
+          changedBaselines: [],
+          reached: new Set(),
+          changedPackages: new Set(),
+          reachedFromPackages: new Set(),
+        },
+      })
+      expect(fake.calls).toEqual([])
+    })
+  })
 })
 
-describe('workOutAffectedStories in a monorepo', () => {
+describe('traceChanges and affectedStorybooksIn in a monorepo', () => {
   /**
    * A repository on branch `work`, one commit after `main`: a root package, `packages/ui`, `packages/theme`, and the
    * Storybooks of `apps/web`, which imports `packages/ui`, and `apps/docs`, which imports `packages/theme`.
@@ -278,7 +416,7 @@ describe('workOutAffectedStories in a monorepo', () => {
 
     const graph = fakeGraph()
     const inRun = run.storybooks ?? storybooks
-    const result = await workOutAffectedStories({
+    const result = await affectedStoriesOf({
       baseRef: undefined,
       environment: {},
       cwd: repo,
@@ -496,7 +634,7 @@ describe('workOutAffectedStories in a monorepo', () => {
   it('reads the globs relative to the config file folder', async () => {
     writeFiles(repo, { 'apps/web/notes/a.txt': 'changed\n' })
 
-    const atRoot = await workOutAffectedStories({
+    const atRoot = await affectedStoriesOf({
       baseRef: undefined,
       environment: {},
       cwd: repo,
@@ -506,7 +644,7 @@ describe('workOutAffectedStories in a monorepo', () => {
       affected: { selectAll: ['notes/**'], ignore: [] },
       findReachedFiles: fakeGraph().findReachedFiles,
     })
-    const result = await workOutAffectedStories({
+    const result = await affectedStoriesOf({
       baseRef: undefined,
       environment: {},
       cwd: repo,

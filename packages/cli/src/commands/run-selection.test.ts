@@ -84,19 +84,19 @@ describe('emptySelectionNotesOf', () => {
   const base = '0123456789abcdef0123456789abcdef01234567'
 
   it('says no file changed since the base, by its short SHA, and hints at --all', () => {
-    expect(emptySelectionNotesOf({ base, changedFiles: 0, fallback: null, storybooks: [] }, nothing)).toEqual([
+    expect(emptySelectionNotesOf({ base, changedFiles: 0, fallback: null }, nothing)).toEqual([
       'No files changed since 0123456, so no story is affected. Run with --all to cover every story.',
     ])
   })
 
   it('says the one changed file affects no story', () => {
-    expect(emptySelectionNotesOf({ base, changedFiles: 1, fallback: null, storybooks: [] }, nothing)).toEqual([
+    expect(emptySelectionNotesOf({ base, changedFiles: 1, fallback: null }, nothing)).toEqual([
       'The changed file affects no story. Run with --all to cover every story.',
     ])
   })
 
   it('counts the changed files when none affects a story', () => {
-    expect(emptySelectionNotesOf({ base, changedFiles: 3, fallback: null, storybooks: [] }, nothing)).toEqual([
+    expect(emptySelectionNotesOf({ base, changedFiles: 3, fallback: null }, nothing)).toEqual([
       'None of the 3 changed files affects a story. Run with --all to cover every story.',
     ])
   })
@@ -105,13 +105,11 @@ describe('emptySelectionNotesOf', () => {
     const other = { ...storybook, name: 'docs' }
     const selections = [...nothing, { storybook: other, version: '10.0.0', stories, allStories: stories }]
 
-    expect(emptySelectionNotesOf({ base, changedFiles: 3, fallback: null, storybooks: [] }, selections)).toEqual([])
+    expect(emptySelectionNotesOf({ base, changedFiles: 3, fallback: null }, selections)).toEqual([])
   })
 
   it('gives no note when the run fell back to every story', () => {
-    expect(
-      emptySelectionNotesOf({ base, changedFiles: 3, fallback: 'Fallow failed', storybooks: [] }, nothing),
-    ).toEqual([])
+    expect(emptySelectionNotesOf({ base, changedFiles: 3, fallback: 'Fallow failed' }, nothing)).toEqual([])
   })
 })
 
