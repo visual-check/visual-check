@@ -5,9 +5,9 @@ import {
   defaultNameOf,
   type ListFiles,
   mainFileOnDiskIn,
-  relativePathOf,
   storybookConfigDirsOf,
   takeUniqueName,
+  workspaceFolderOf,
 } from './find-storybooks.js'
 import {
   lockfileNames,
@@ -18,6 +18,7 @@ import {
   packageManagerOf,
   yarnPnpOf,
 } from './package-manager.js'
+import type { Message } from './segment.js'
 import { startScriptOf } from './storybook-scripts.js'
 import { nxProjectNameOf, nxStartOf, nxStorybookPluginTargetOf, type StorybookStart } from './storybook-start.js'
 import { findWorkspace, readJsonFile, readTextFile, type Workspace } from './workspace.js'
@@ -126,9 +127,9 @@ export interface DetectedProject {
   storybooks: DetectedStorybook[]
   /**
    * The hints about what detection found, a line each, in order: that `init` works at a workspace root above the
-   * folder it runs in, then each Storybook it skips.
+   * folder it runs in, which names the root's folder, then each Storybook it skips.
    */
-  notes: string[]
+  notes: Message[]
 }
 
 /**
@@ -287,14 +288,18 @@ function yarnPnpIn(root: string, packageManager: PackageManager | undefined, yar
  * Words the hint that `init` works at a workspace root above `startDir`, the folder it runs in. A lone package gets
  * none: there, `init` has always worked at the nearest `package.json`.
  */
-function workspaceRootNotesOf(startDir: string, workspace: Workspace): string[] {
+function workspaceRootNotesOf(startDir: string, workspace: Workspace): Message[] {
   if (workspace.kind === 'single' || workspace.root === startDir) {
     return []
   }
 
-  const root = relativePathOf(startDir, workspace.root)
-
-  return [`hint: init sets up the workspace at ${root}, where the config goes and the next steps run.`]
+  return [
+    [
+      'hint: init sets up the workspace in ',
+      ...workspaceFolderOf(startDir, workspace.root),
+      ', where the config goes and the next steps run.',
+    ],
+  ]
 }
 
 /**

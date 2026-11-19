@@ -30,6 +30,7 @@ import {
 import { InputEndedError, type Prompter } from './prompter.js'
 import { type Answers, askQuestions } from './questions.js'
 import type { RunCommand } from './run-command.js'
+import { type Message, textOf } from './segment.js'
 import {
   configSourceOf,
   configStorybookOf,
@@ -82,7 +83,7 @@ export interface InitTools {
    * them printed on stderr, in order, before the warnings the answers call for. The terminal UI shows them as they
    * come, and has no `notes`.
    */
-  prompter: Prompter & { notes?: readonly string[] }
+  prompter: Prompter & { notes?: readonly Message[] }
   /**
    * Asks Docker what its engine has. `init` asks once, only to warn when Docker can't run the browser.
    */
@@ -126,10 +127,10 @@ export interface InitResult {
    */
   stderr: string
   /**
-   * The problems, hints and warnings, in the order they arose. A message can span lines, so the terminal UI shows these
-   * rather than split `stderr`.
+   * The problems, hints and warnings, in the order they arose. A message can span lines, and its segments pick out what
+   * it names, so the terminal UI shows these rather than split `stderr`.
    */
-  messages: readonly string[]
+  messages: readonly Message[]
   /**
    * What the terminal UI sums the run up with, once `init` has written: the scripts it replaced, and the next steps
    * when it got to the end. A run that stopped before it wrote has none.
@@ -183,7 +184,7 @@ interface Setup {
   /**
    * The hints and warnings for stderr so far, a line each, in the order they arose.
    */
-  notes: string[]
+  notes: Message[]
 }
 
 /**
@@ -276,7 +277,7 @@ function setupOf(
   project: DetectedProject,
   answers: Answers,
   existing: ExistingConfig | undefined,
-  notes: string[],
+  notes: Message[],
 ): Setup {
   if (existing !== undefined) {
     return {
@@ -530,15 +531,16 @@ function linesOf(lines: readonly string[]): string {
 }
 
 /**
- * Builds a result with its messages, which stderr holds a line each, or more for a message that spans lines.
+ * Builds a result with its messages, which stderr holds as plain text, a line each, or more for a message that spans
+ * lines.
  */
-function resultOf(exitCode: number, stdout: string, messages: readonly string[]): InitResult {
-  return { exitCode, stdout, stderr: linesOf(messages), messages }
+function resultOf(exitCode: number, stdout: string, messages: readonly Message[]): InitResult {
+  return { exitCode, stdout, stderr: linesOf(messages.map(textOf)), messages }
 }
 
 /**
  * Builds the result for problems that stop `init`: each on its own line on stderr, exit code 2.
  */
-function failureOf(problems: readonly string[]): InitResult {
+function failureOf(problems: readonly Message[]): InitResult {
   return resultOf(2, '', problems)
 }

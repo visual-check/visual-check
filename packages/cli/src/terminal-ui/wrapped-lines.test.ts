@@ -67,6 +67,13 @@ describe('wrappedSegmentLinesOf', () => {
     ])
   })
 
+  it('keeps an aside as an aside, apart from the code and the words around it', () => {
+    expect(wrappedSegmentLinesOf(['from ', { code: 'acme' }, ' ', { aside: '(../..)' }, ':'], 9)).toEqual([
+      ['from ', { code: 'acme' }],
+      [{ aside: '(../..)' }, ':'],
+    ])
+  })
+
   it('breaks at the last space that fits, drops it, and starts the next line with no space', () => {
     expect(
       wrappedSegmentLinesOf(

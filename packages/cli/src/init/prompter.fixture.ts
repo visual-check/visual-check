@@ -1,4 +1,5 @@
 import type { Choice, Prompter } from './prompter.js'
+import { textOf } from './segment.js'
 
 /**
  * One thing a scripted prompter was asked or shown.
@@ -10,7 +11,7 @@ export interface PromptRecord {
    */
   kind: 'text' | 'confirm' | 'select' | 'checklist' | 'invalid' | 'note'
   /**
-   * The question, the validation message or the note.
+   * The question, the validation message or the note, as plain text.
    */
   message: string
   /**
@@ -161,7 +162,7 @@ export function scriptedPrompter(answers: readonly ScriptedAnswer[]): Prompter &
       }
     },
     note(text) {
-      records.push({ kind: 'note', message: text })
+      records.push({ kind: 'note', message: textOf(text) })
     },
   }
 }

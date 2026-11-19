@@ -11,6 +11,7 @@ import {
   relativePathOf,
   storybookConfigDirsOf,
   takeUniqueName,
+  workspaceFolderOf,
 } from './find-storybooks.js'
 import { storybookCallsOf } from './storybook-scripts.js'
 
@@ -200,6 +201,35 @@ describe('relativePathOf', () => {
 
   it('climbs out of the folder with ..', () => {
     expect(relativePathOf('/project/src', '/project/visual-check.config.ts')).toBe('../visual-check.config.ts')
+  })
+})
+
+describe('workspaceFolderOf', () => {
+  it("names the root by its folder's name, as code", () => {
+    expect(workspaceFolderOf('/work/acme-monorepo/packages/ui', '/work/acme-monorepo')).toEqual([
+      { code: 'acme-monorepo' },
+    ])
+  })
+
+  it('adds the path to the root as an aside when a folder below it has its name', () => {
+    expect(workspaceFolderOf('/work/acme/apps/acme', '/work/acme')).toEqual([
+      { code: 'acme' },
+      ' ',
+      { aside: '(../..)' },
+    ])
+    expect(workspaceFolderOf('/work/acme/acme/src', '/work/acme')).toEqual([
+      { code: 'acme' },
+      ' ',
+      { aside: '(../..)' },
+    ])
+  })
+
+  it('takes only whole folder names as the same name', () => {
+    expect(workspaceFolderOf('/work/acme/apps/acme-web', '/work/acme')).toEqual([{ code: 'acme' }])
+  })
+
+  it('names a root with no name by its path', () => {
+    expect(workspaceFolderOf(join('/', 'packages', 'ui'), '/')).toEqual([{ code: '../..' }])
   })
 })
 

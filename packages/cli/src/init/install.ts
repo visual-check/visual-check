@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { type AddonAnswer, addonPackage } from './addon-question.js'
-import { relativePathOf } from './find-storybooks.js'
+import { relativePathOf, workspaceFolderOf } from './find-storybooks.js'
 import {
   addDevDependenciesCommandOf,
   type CommandLine,
@@ -12,6 +12,7 @@ import {
   storybookCommandOf,
 } from './package-manager.js'
 import type { RunCommand } from './run-command.js'
+import { type Segment, textOf } from './segment.js'
 import { pinDependency } from './setup-files.js'
 import { runStep, type SetupProgress } from './setup-progress.js'
 import { defaultConfigDir } from './storybook-scripts.js'
@@ -452,9 +453,9 @@ export async function addAddons(input: AddAddonsInput): Promise<string[]> {
  */
 export interface ManualInstall {
   /**
-   * The line before the commands.
+   * The line before the commands, which names the workspace root to run them from when `init` runs below it.
    */
-  heading: string
+  heading: Segment[]
   /**
    * The commands, in order, each run from the workspace root.
    */
@@ -529,7 +530,7 @@ export function rushInstallOf({ cwd, installs, addonSteps, ...context }: RushIns
       : "Add the Storybook addon and install visual-check's packages yourself"
 
   return {
-    heading: cwd === root ? `${what}:` : `${what}, from ${relativePathOf(cwd, root)}:`,
+    heading: cwd === root ? [`${what}:`] : [`${what}, from `, ...workspaceFolderOf(cwd, root), ':'],
     commands: [...addonCommands, ...addCommands, 'rush update'],
   }
 }
@@ -538,5 +539,5 @@ export function rushInstallOf({ cwd, installs, addonSteps, ...context }: RushIns
  * Returns the install steps as plain text: the heading, then each command on its own line, indented.
  */
 export function manualInstallTextOf({ heading, commands }: ManualInstall): string {
-  return [heading, ...commands.map((command) => `  ${command}`)].join('\n')
+  return [textOf(heading), ...commands.map((command) => `  ${command}`)].join('\n')
 }

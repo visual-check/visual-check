@@ -1,3 +1,5 @@
+import type { Message } from './segment.js'
+
 /**
  * One answer a select or checklist question offers.
  *
@@ -113,7 +115,7 @@ export interface Prompter {
    * Shows a line before or between the questions, such as a hint or a warning. The defaults prompter collects it
    * instead.
    */
-  note(text: string): void
+  note(text: Message): void
 }
 
 /**
@@ -141,8 +143,8 @@ export class InputEndedError extends Error {
  *
  * @public
  */
-export function defaultsPrompter(): Prompter & { notes: string[] } {
-  const notes: string[] = []
+export function defaultsPrompter(): Prompter & { notes: Message[] } {
+  const notes: Message[] = []
 
   return {
     notes,

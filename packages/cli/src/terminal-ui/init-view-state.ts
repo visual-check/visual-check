@@ -1,5 +1,6 @@
 import type { Choice } from '../init/prompter.js'
 import type { InitResult } from '../init/run-init.js'
+import type { Message } from '../init/segment.js'
 import type { StepOutcome } from '../init/setup-progress.js'
 import { emptyOutputTail, type OutputTail, outputTailOf } from './output-tail.js'
 
@@ -66,7 +67,7 @@ export type ShownLine =
       /**
        * The note.
        */
-      text: string
+      text: Message
     }
   | {
       /**
@@ -268,7 +269,7 @@ function withLines(state: ViewState, added: readonly ShownLine[]): ViewState {
 /**
  * Adds a note.
  */
-export function addNote(state: ViewState, text: string): ViewState {
+export function addNote(state: ViewState, text: Message): ViewState {
   return withLines(state, [{ kind: 'note', text }])
 }
 

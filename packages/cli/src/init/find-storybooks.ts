@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { basename, join, posix, relative, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { isFile } from '../config/find-config.js'
+import type { Segment } from './segment.js'
 import { configDirOf, defaultConfigDir, type StorybookCall } from './storybook-scripts.js'
 
 /**
@@ -63,6 +64,24 @@ export async function listProjectFiles(root: string): Promise<string[]> {
  */
 export function relativePathOf(from: string, path: string): string {
   return relative(from, path).split(sep).join('/') || '.'
+}
+
+/**
+ * Names the workspace root by its folder's name, such as `acme-monorepo`, for a person working in `cwd` below it. When
+ * a folder from `cwd` up to the root has that name too, the name alone could mean that folder, so the root's path from
+ * `cwd` follows as an aside: `acme (../..)`. A root with no name, the file system's, is named by its path alone.
+ */
+export function workspaceFolderOf(cwd: string, root: string): Segment[] {
+  const name = basename(root)
+  const path = relativePathOf(cwd, root)
+
+  if (name === '') {
+    return [{ code: path }]
+  }
+
+  return relative(root, cwd).split(sep).includes(name)
+    ? [{ code: name }, ' ', { aside: `(${path})` }]
+    : [{ code: name }]
 }
 
 /**

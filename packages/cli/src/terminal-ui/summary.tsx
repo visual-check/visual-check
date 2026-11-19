@@ -1,5 +1,5 @@
 import { Box, Text, useWindowSize } from 'ink'
-import { Fragment, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import {
   ciLineOf,
   commandColumnWidthOf,
@@ -8,14 +8,14 @@ import {
   type NextStepRow,
   type NextSteps,
   nextHeadingOf,
-  type Segment,
 } from '../init/closing-message.js'
 import type { ManualInstall } from '../init/install.js'
 import type { InitResult } from '../init/run-init.js'
+import type { Message } from '../init/segment.js'
 import { ColouredText } from './coloured-text.js'
 import { MessageLine } from './message-line.js'
 import { glyphs } from './theme.js'
-import { wrappedSegmentLinesOf } from './wrapped-lines.js'
+import { WrappedSegments } from './wrapped-segments.js'
 import { WrappedText } from './wrapped-text.js'
 
 /**
@@ -51,7 +51,7 @@ interface MessageLinesProps {
   /**
    * The result's messages, in order.
    */
-  messages: readonly string[]
+  messages: readonly Message[]
 }
 
 /**
@@ -123,61 +123,6 @@ interface StepNumberProps {
 }
 
 /**
- * What `SegmentsText` takes.
- */
-interface SegmentsTextProps {
-  /**
-   * The segments to draw, in order.
-   */
-  segments: readonly Segment[]
-}
-
-/**
- * What `WrappedSegments` takes.
- */
-interface WrappedSegmentsProps {
-  /**
-   * The segments to draw, in order.
-   */
-  segments: readonly Segment[]
-  /**
-   * How many columns the lines may take.
-   */
-  width: number
-}
-
-/**
- * Draws a line of segments inside a `<Text>`: the words as they are, and each command, path or URL in the accent
- * colour.
- */
-function SegmentsText({ segments }: SegmentsTextProps): ReactNode {
-  // The segments never change, so where each one is tells it apart.
-  return Array.from(segments.entries(), ([position, segment]) =>
-    typeof segment === 'string' ? (
-      <Fragment key={position}>{segment}</Fragment>
-    ) : (
-      <ColouredText colour="accent" key={position}>
-        {segment.code}
-      </ColouredText>
-    ),
-  )
-}
-
-/**
- * Draws a line of segments inside a `<Text>`, broken into lines that fit `width` columns, so Ink never wraps it itself
- * and no line starts with the space it broke at. Each command, path or URL takes the accent colour.
- */
-function WrappedSegments({ segments, width }: WrappedSegmentsProps): ReactNode {
-  // The lines never change, so where each one is tells it apart.
-  return Array.from(wrappedSegmentLinesOf(segments, width).entries(), ([position, line]) => (
-    <Fragment key={position}>
-      {position === 0 ? '' : '\n'}
-      <SegmentsText segments={line} />
-    </Fragment>
-  ))
-}
-
-/**
  * Draws each of the result's messages: a warning or a hint as a note, and anything else as a problem.
  */
 function MessageLines({ messages }: MessageLinesProps): ReactNode {
@@ -204,8 +149,8 @@ function ReplacedLine({ text }: ReplacedLineProps): ReactNode {
 }
 
 /**
- * Draws the install steps a person runs under Rush: the heading, then each command on its own line, indented, in the
- * accent colour. A long command wraps under its own first letter.
+ * Draws the install steps a person runs under Rush: the heading, whose workspace folder takes the accent colour, then
+ * each command on its own line, indented, in the accent colour. A long command wraps under its own first letter.
  */
 function ManualInstallView({ manualInstall }: ManualInstallViewProps): ReactNode {
   const { columns } = useWindowSize()
@@ -213,7 +158,7 @@ function ManualInstallView({ manualInstall }: ManualInstallViewProps): ReactNode
   return (
     <Box flexDirection="column" marginTop={1}>
       <Text>
-        <WrappedSegments segments={[manualInstall.heading]} width={columns} />
+        <WrappedSegments segments={manualInstall.heading} width={columns} />
       </Text>
       {/* The commands never change, so where each one is tells it apart. */}
       {Array.from(manualInstall.commands.entries(), ([position, command]) => (
@@ -314,12 +259,12 @@ function NextStepsView({ nextSteps }: NextStepsViewProps): ReactNode {
       )}
       <Box flexDirection="column" marginTop={1}>
         {nextSteps.modesFiles.length === 0 ? null : (
-          <Text dimColor>
-            <WrappedSegments segments={modesLineOf(nextSteps.modesFiles)} width={columns} />
+          <Text>
+            <WrappedSegments dim segments={modesLineOf(nextSteps.modesFiles)} width={columns} />
           </Text>
         )}
-        <Text dimColor>
-          <WrappedSegments segments={ciLineOf(nextSteps.ciUrl)} width={columns} />
+        <Text>
+          <WrappedSegments dim segments={ciLineOf(nextSteps.ciUrl)} width={columns} />
         </Text>
       </Box>
     </>

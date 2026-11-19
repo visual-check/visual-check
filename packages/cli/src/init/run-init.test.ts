@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ContainerError, DockerMissingError } from '../container/container-error.js'
 import { closingMessageTextOf } from './closing-message.js'
@@ -140,7 +140,7 @@ describe('runInit', () => {
     const root = pnpmProject({ files: { 'src/a.ts': '' } })
     const result = await runInit(join(root, 'src'), toolsOf().tools)
 
-    expect(result.stdout).toContain('visual-check is set up. Next, from ..:\n')
+    expect(result.stdout).toContain(`visual-check is set up. Next, from ${basename(root)}:\n`)
     expect(result.stdout).toContain('To set options for every story, see .storybook/visual-check.ts.\n')
   })
 
@@ -784,8 +784,13 @@ describe('runInit in a workspace', () => {
     const result = await runInit(join(root, 'packages/ui'), tools)
 
     expect(result.exitCode).toBe(0)
-    expect(result.messages[0]).toBe(
-      'hint: init sets up the workspace at ../.., where the config goes and the next steps run.',
+    expect(result.messages[0]).toEqual([
+      'hint: init sets up the workspace in ',
+      { code: basename(root) },
+      ', where the config goes and the next steps run.',
+    ])
+    expect(result.stderr).toContain(
+      `hint: init sets up the workspace in ${basename(root)}, where the config goes and the next steps run.\n`,
     )
     expect(existsSync(join(root, 'visual-check.config.ts'))).toBe(true)
     expect(existsSync(join(root, 'packages/ui/visual-check.config.ts'))).toBe(false)
@@ -804,9 +809,9 @@ describe('runInit in a workspace', () => {
         cwd: join(root, 'packages/ui'),
       },
     ])
-    expect(result.stdout).toContain('visual-check is set up. Next, from ../..:\n')
+    expect(result.stdout).toContain(`visual-check is set up. Next, from ${basename(root)}:\n`)
     expect(result.stdout).toContain('packages/ui/.storybook/visual-check.ts')
-    expect(result.summary?.nextSteps?.runFrom).toBe('../..')
+    expect(result.summary?.nextSteps?.runFrom).toEqual([{ code: basename(root) }])
   })
 
   /**
@@ -958,8 +963,9 @@ export default defineConfig({
     })
     const { tools, record } = toolsOf()
     const result = await runInit(root, tools)
+    const heading = "Add the Storybook addon and install visual-check's packages yourself:"
     const manualInstall = {
-      heading: "Add the Storybook addon and install visual-check's packages yourself:",
+      heading: [heading],
       commands: [
         `cd libs/ui && pnpm exec storybook add @visual-check/storybook-addon@${cliVersion} --yes --skip-install`,
         `pnpm add --save-dev --save-exact @visual-check/cli@${cliVersion}`,
@@ -975,7 +981,7 @@ export default defineConfig({
     expect(record.progress[0]).toEqual(['plan', ['Write the files and scripts', 'Check for unlisted dependencies']])
     expect(result.summary?.manualInstall).toEqual(manualInstall)
     expect(result.stdout).toBe(
-      `${manualInstall.heading}\n${manualInstall.commands.map((command) => `  ${command}\n`).join('')}\n` +
+      `${heading}\n${manualInstall.commands.map((command) => `  ${command}\n`).join('')}\n` +
         closingMessageTextOf(result.summary?.nextSteps ?? pnpmNextSteps),
     )
     expect(readText(root, 'libs/ui/.storybook/visual-check.ts')).toBe(modesFile)
@@ -1058,7 +1064,11 @@ export default defineConfig({
 
     expect(result).toMatchObject({ exitCode: 2, stdout: '' })
     expect(result.messages).toEqual([
-      'hint: init sets up the workspace at ../.., where the config goes and the next steps run.',
+      [
+        'hint: init sets up the workspace in ',
+        { code: basename(root) },
+        ', where the config goes and the next steps run.',
+      ],
       'visual-check init needs a package.json at the root of this Rush workspace, for its scripts and the CLI. ' +
         'Add a private one, then run visual-check init again.',
     ])

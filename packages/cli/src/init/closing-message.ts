@@ -1,9 +1,10 @@
 import { join } from 'node:path'
 import { docsUrlOf } from '../docs-site/docs-url.js'
-import { relativePathOf } from './find-storybooks.js'
+import { relativePathOf, workspaceFolderOf } from './find-storybooks.js'
 import { listOf } from './list-of.js'
 import { type PackageManager, runScriptCommandOf } from './package-manager.js'
 import type { Answers } from './questions.js'
+import { type Segment, textOf } from './segment.js'
 
 /**
  * A Storybook `init` set up, with what the closing message says about it.
@@ -32,20 +33,6 @@ export interface SetUpStorybook {
 }
 
 /**
- * A piece of a line of the closing message: plain words, or a command, path or URL, which the terminal UI picks out.
- *
- * @public
- */
-export type Segment =
-  | string
-  | {
-      /**
-       * The command, path or URL.
-       */
-      code: string
-    }
-
-/**
  * A row of a next step: the command to run, when there's one, and what it does, or what to do when there's none.
  *
  * @public
@@ -72,10 +59,10 @@ export interface NextSteps {
    */
   steps: NextStepRow[][]
   /**
-   * The workspace root relative to the folder `init` runs in, where the steps run and the paths start, or `undefined`
+   * The workspace root, where the steps run and the paths start, named for the folder `init` runs in, or `undefined`
    * when `init` runs in the root.
    */
-  runFrom: string | undefined
+  runFrom: Segment[] | undefined
   /**
    * Each set-up Storybook's `visual-check.ts`, where options for every story go, relative to the workspace root, once
    * each, in the order of the Storybooks.
@@ -162,13 +149,6 @@ function codeListOf(items: readonly string[]): Segment[] {
 }
 
 /**
- * Joins segments into plain text.
- */
-function textOf(segments: readonly Segment[]): string {
-  return segments.map((segment) => (typeof segment === 'string' ? segment : segment.code)).join('')
-}
-
-/**
  * Returns how many columns the commands of the steps take: the longest command of at most 32 characters, then a gap. A
  * row without a command starts its text where the commands start, so with no such command at all, it's 0.
  *
@@ -227,8 +207,8 @@ function startStepOf({ root, configPath, storybooks }: ClosingMessageInput): Nex
  *
  * @public
  */
-export function nextHeadingOf(runFrom: string | undefined): Segment[] {
-  return runFrom === undefined ? ['Next'] : ['Next, from ', { code: runFrom }]
+export function nextHeadingOf(runFrom: readonly Segment[] | undefined): Segment[] {
+  return runFrom === undefined ? ['Next'] : ['Next, from ', ...runFrom]
 }
 
 /**
@@ -273,7 +253,7 @@ export function nextStepsOf(input: ClosingMessageInput): NextSteps {
       ],
       [{ text: ['Commit the changes, baselines included'] }],
     ],
-    runFrom: cwd === root ? undefined : relativePathOf(cwd, root),
+    runFrom: cwd === root ? undefined : workspaceFolderOf(cwd, root),
     modesFiles: [...new Set(modesFiles)],
     ciUrl: docsUrlOf('ci'),
   }

@@ -129,10 +129,10 @@ describe('nextStepsOf', () => {
     expect(nextSteps.modesFiles).toEqual([])
   })
 
-  it('names the root to run the steps from, with the paths relative to it, when init runs in a package', () => {
+  it("names the root's folder to run the steps from, with the paths relative to it, when init runs in a package", () => {
     const nextSteps = nextStepsOf(inputOf({ cwd: '/project/packages/ui' }))
 
-    expect(nextSteps.runFrom).toBe('../..')
+    expect(nextSteps.runFrom).toEqual([{ code: 'project' }])
     expect(nextSteps.modesFiles).toEqual(['.storybook/visual-check.ts'])
     expect(nextStepsOf(inputOf({ cwd: '/project/packages/ui', storybooks: [] })).steps[0]?.[0]?.text).toEqual([
       'Add your Storybook to ',
@@ -236,8 +236,13 @@ describe('nextHeadingOf', () => {
     expect(nextHeadingOf(undefined)).toEqual(['Next'])
   })
 
-  it('names the root to run the steps from below it, as code', () => {
-    expect(nextHeadingOf('../..')).toEqual(['Next, from ', { code: '../..' }])
+  it('names the root to run the steps from below it, as it is named', () => {
+    expect(nextHeadingOf([{ code: 'acme' }, ' ', { aside: '(../..)' }])).toEqual([
+      'Next, from ',
+      { code: 'acme' },
+      ' ',
+      { aside: '(../..)' },
+    ])
   })
 })
 
@@ -347,7 +352,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
 
     expect(
       closingMessageOf(inputOf({ cwd: '/project/packages/ui', storybooks: [ui] })),
-    ).toBe(`visual-check is set up. Next, from ../..:
+    ).toBe(`visual-check is set up. Next, from project:
   1. pnpm --filter ui run storybook   Start Storybook, and keep it running
   2. pnpm run visual:update           Write the first baselines
   3. pnpm run visual:check            Check the stories against the baselines

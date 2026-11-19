@@ -100,7 +100,7 @@ Rules for the keys:
 
   Turbo uses the package manager's workspaces.
 
-  Run inside a package, `init` works at the workspace root and says so. A workspace root without a `package.json`, such as Rush's, stops `init`: it needs the root's scripts and a place for the CLI.
+  Run inside a package, `init` works at the workspace root and says so, naming the root's folder: `init sets up the workspace in acme-monorepo, where the config goes and the next steps run.` A workspace root without a `package.json`, such as Rush's, stops `init`: it needs the root's scripts and a place for the CLI.
 - **Package manager:** `rush.json`'s `pnpmVersion`, `npmVersion` or `yarnVersion`, then the `packageManager` or `devEngines.packageManager` field, then the lockfile.
   - npm, pnpm, Yarn 1 and Yarn 4 are supported. Bun works but isn't tested.
   - Yarn counts as Yarn 2 or later when there's a `.yarnrc.yml`, `yarn.lock` opens with Yarn 2's `__metadata:` entry, or the declared version is 2 or later.
@@ -221,7 +221,7 @@ Each step is a command and what it does, the commands in a column of their own. 
 
 Then a line pointing to each `visual-check.ts` for options for every story (its comment shows how to spread it into `preview`), and a docs link for CI. Before the closing message, a line names any scripts `init` replaced. It lists no files written and says nothing about remote content.
 
-The commands and paths are the workspace root's. Run below the root, the heading names it to run them from, as in `Next, from ../..:`, and so do Rush's printed install steps.
+The commands and paths are the workspace root's. Run below the root, the heading names the root's folder to run them from, as in `Next, from acme-monorepo:`, and so do Rush's printed install steps. When a folder between has the root's name too, the path to the root follows, dim: `acme (../..)`. The terminal UI shows the folder in the accent colour.
 
 ## Sources
 

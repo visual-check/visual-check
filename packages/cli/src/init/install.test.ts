@@ -703,7 +703,7 @@ describe('rushInstallOf', () => {
 
   it('runs storybook add first, then adds the root with its package manager and each project with rush add', () => {
     expect(rushInstallOf({ ...context, installs, addonSteps })).toEqual({
-      heading: "Add the Storybook addon and install visual-check's packages yourself:",
+      heading: ["Add the Storybook addon and install visual-check's packages yourself:"],
       commands: [
         'cd libs/ui && pnpm exec storybook add @visual-check/storybook-addon@1.0.0 --yes --skip-install -c docs',
         'pnpm add --save-dev --save-exact @visual-check/cli@1.0.0',
@@ -740,23 +740,25 @@ describe('rushInstallOf', () => {
 
   it('leaves the addon out of the heading when no Storybook gets it', () => {
     expect(rushInstallOf({ ...context, installs: installs.slice(0, 1), addonSteps: [] })).toEqual({
-      heading: "Install visual-check's packages yourself:",
+      heading: ["Install visual-check's packages yourself:"],
       commands: ['pnpm add --save-dev --save-exact @visual-check/cli@1.0.0', 'rush update'],
     })
   })
 
-  it('names the root to run the commands from, which stay relative to it, when init runs in a project', () => {
+  it("names the root's folder to run the commands from, which stay relative to it, when init runs in a project", () => {
     const manualInstall = rushInstallOf({ ...context, cwd: '/p/libs/ui', installs, addonSteps })
 
-    expect(manualInstall?.heading).toBe(
-      "Add the Storybook addon and install visual-check's packages yourself, from ../..:",
-    )
+    expect(manualInstall?.heading).toEqual([
+      "Add the Storybook addon and install visual-check's packages yourself, from ",
+      { code: 'p' },
+      ':',
+    ])
     expect(manualInstall?.commands[0]).toBe(
       'cd libs/ui && pnpm exec storybook add @visual-check/storybook-addon@1.0.0 --yes --skip-install -c docs',
     )
     expect(
       rushInstallOf({ ...context, cwd: '/p/libs/ui', installs: installs.slice(0, 1), addonSteps: [] })?.heading,
-    ).toBe("Install visual-check's packages yourself, from ../..:")
+    ).toEqual(["Install visual-check's packages yourself, from ", { code: 'p' }, ':'])
   })
 
   it('gives nothing when there is nothing to add', () => {
@@ -765,9 +767,12 @@ describe('rushInstallOf', () => {
 })
 
 describe('manualInstallTextOf', () => {
-  it('gives the heading, then each command indented on its own line', () => {
-    expect(manualInstallTextOf({ heading: 'Install:', commands: ['rush add -p a', 'rush update'] })).toBe(
-      'Install:\n  rush add -p a\n  rush update',
-    )
+  it('gives the heading as plain text, then each command indented on its own line', () => {
+    expect(
+      manualInstallTextOf({
+        heading: ['Install, from ', { code: 'p' }, ':'],
+        commands: ['rush add -p a', 'rush update'],
+      }),
+    ).toBe('Install, from p:\n  rush add -p a\n  rush update')
   })
 })
