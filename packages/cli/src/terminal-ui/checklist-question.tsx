@@ -44,7 +44,7 @@ interface ChecklistState {
 /**
  * The keys a checklist question answers to, drawn dim under the choices.
  */
-const legend = "<space> to tick, 'a' for all, <enter> to confirm"
+const legend = "<space> to tick, 'a' to toggle all/none, <enter> to confirm"
 
 /**
  * Asks the person to tick any of a list. ↑/↓ or k/j move the pointer, wrapping round at the ends, Space ticks or

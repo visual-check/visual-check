@@ -48,7 +48,7 @@ describe('ChecklistQuestion', () => {
     const { lastFrame } = await renderQuestion(['docs', 'ui'], { hint: 'Pick some.' })
 
     expect(plainFrameOf(lastFrame())).toBe(
-      "? Storybooks\n  Pick some.\n❯ ◯ web\n  ◉ docs · apps/docs\n  ◉ ui\n  <space> to tick, 'a' for all, <enter> to confirm",
+      "? Storybooks\n  Pick some.\n❯ ◯ web\n  ◉ docs · apps/docs\n  ◉ ui\n  <space> to tick, 'a' to toggle all/none, <enter> to confirm",
     )
   })
 
@@ -60,7 +60,7 @@ describe('ChecklistQuestion', () => {
         '\u001b[36m❯ ◯ web\u001b[39m\n' +
         '  ◉ docs\u001b[2m · apps/docs\u001b[22m\n' +
         '  ◯ ui\n' +
-        "\u001b[2m  <space> to tick, 'a' for all, <enter> to confirm\u001b[22m",
+        "\u001b[2m  <space> to tick, 'a' to toggle all/none, <enter> to confirm\u001b[22m",
     )
   })
 
@@ -78,7 +78,7 @@ describe('ChecklistQuestion', () => {
     )
 
     expect(lastFrame()).toBe(
-      "? \u001b[1mStorybooks\u001b[22m\n❯ ◉ web\n  ◯ docs\u001b[2m · apps/docs\u001b[22m\n  ◯ ui\n\u001b[2m  <space> to tick, 'a' for all, <enter> to confirm\u001b[22m",
+      "? \u001b[1mStorybooks\u001b[22m\n❯ ◉ web\n  ◯ docs\u001b[2m · apps/docs\u001b[22m\n  ◯ ui\n\u001b[2m  <space> to tick, 'a' to toggle all/none, <enter> to confirm\u001b[22m",
     )
   })
 
@@ -107,7 +107,7 @@ describe('ChecklistQuestion', () => {
     await press(stdin, key)
 
     expect(plainFrameOf(lastFrame())).toBe(
-      "? Storybooks\n  ◯ web\n❯ ◯ docs · apps/docs\n  ◯ ui\n  <space> to tick, 'a' for all, <enter> to confirm",
+      "? Storybooks\n  ◯ web\n❯ ◯ docs · apps/docs\n  ◯ ui\n  <space> to tick, 'a' to toggle all/none, <enter> to confirm",
     )
   })
 
@@ -120,7 +120,7 @@ describe('ChecklistQuestion', () => {
     await press(stdin, key)
 
     expect(plainFrameOf(lastFrame())).toBe(
-      "? Storybooks\n  ◯ web\n  ◯ docs · apps/docs\n❯ ◯ ui\n  <space> to tick, 'a' for all, <enter> to confirm",
+      "? Storybooks\n  ◯ web\n  ◯ docs · apps/docs\n❯ ◯ ui\n  <space> to tick, 'a' to toggle all/none, <enter> to confirm",
     )
   })
 
@@ -130,7 +130,7 @@ describe('ChecklistQuestion', () => {
     await press(stdin, keys.down, keys.down, keys.down)
 
     expect(plainFrameOf(lastFrame())).toBe(
-      "? Storybooks\n❯ ◯ web\n  ◯ docs · apps/docs\n  ◯ ui\n  <space> to tick, 'a' for all, <enter> to confirm",
+      "? Storybooks\n❯ ◯ web\n  ◯ docs · apps/docs\n  ◯ ui\n  <space> to tick, 'a' to toggle all/none, <enter> to confirm",
     )
   })
 
@@ -140,7 +140,7 @@ describe('ChecklistQuestion', () => {
     await press(stdin, ' ', keys.down, ' ')
 
     expect(plainFrameOf(lastFrame())).toBe(
-      "? Storybooks\n  ◯ web\n❯ ◉ docs · apps/docs\n  ◯ ui\n  <space> to tick, 'a' for all, <enter> to confirm",
+      "? Storybooks\n  ◯ web\n❯ ◉ docs · apps/docs\n  ◯ ui\n  <space> to tick, 'a' to toggle all/none, <enter> to confirm",
     )
 
     await press(stdin, keys.enter)
@@ -154,13 +154,13 @@ describe('ChecklistQuestion', () => {
     await press(stdin, 'a')
 
     expect(plainFrameOf(lastFrame())).toBe(
-      "? Storybooks\n❯ ◉ web\n  ◉ docs · apps/docs\n  ◉ ui\n  <space> to tick, 'a' for all, <enter> to confirm",
+      "? Storybooks\n❯ ◉ web\n  ◉ docs · apps/docs\n  ◉ ui\n  <space> to tick, 'a' to toggle all/none, <enter> to confirm",
     )
 
     await press(stdin, 'a')
 
     expect(plainFrameOf(lastFrame())).toBe(
-      "? Storybooks\n❯ ◯ web\n  ◯ docs · apps/docs\n  ◯ ui\n  <space> to tick, 'a' for all, <enter> to confirm",
+      "? Storybooks\n❯ ◯ web\n  ◯ docs · apps/docs\n  ◯ ui\n  <space> to tick, 'a' to toggle all/none, <enter> to confirm",
     )
   })
 
@@ -187,7 +187,7 @@ describe('ChecklistQuestion', () => {
     await press(stdin, keys.enter)
 
     expect(plainFrameOf(lastFrame())).toBe(
-      "? Storybooks\n❯ ◯ web\n  ◯ docs · apps/docs\n  ◯ ui\n  <space> to tick, 'a' for all, <enter> to confirm\n✕ Pick at least one.",
+      "? Storybooks\n❯ ◯ web\n  ◯ docs · apps/docs\n  ◯ ui\n  <space> to tick, 'a' to toggle all/none, <enter> to confirm\n✕ Pick at least one.",
     )
     expect(onSubmit).not.toHaveBeenCalled()
   })
@@ -206,7 +206,7 @@ describe('ChecklistQuestion', () => {
     await press(stdin, keys.enter, keys.down)
 
     expect(plainFrameOf(lastFrame())).toBe(
-      "? Storybooks\n  ◯ web\n❯ ◯ docs · apps/docs\n  ◯ ui\n  <space> to tick, 'a' for all, <enter> to confirm\n✕ Nope.",
+      "? Storybooks\n  ◯ web\n❯ ◯ docs · apps/docs\n  ◯ ui\n  <space> to tick, 'a' to toggle all/none, <enter> to confirm\n✕ Nope.",
     )
   })
 
@@ -217,7 +217,7 @@ describe('ChecklistQuestion', () => {
     await press(stdin, keys.enter, ' ')
 
     expect(plainFrameOf(lastFrame())).toBe(
-      "? Storybooks\n❯ ◉ web\n  ◯ docs · apps/docs\n  ◯ ui\n  <space> to tick, 'a' for all, <enter> to confirm",
+      "? Storybooks\n❯ ◉ web\n  ◯ docs · apps/docs\n  ◯ ui\n  <space> to tick, 'a' to toggle all/none, <enter> to confirm",
     )
 
     await press(stdin, keys.enter)
@@ -246,7 +246,7 @@ describe('ChecklistQuestion', () => {
     const { lastFrame } = await renderQuestion([])
 
     expect(lastFrame()?.split('\n').at(-1)).toBe(
-      "\u001b[2m  <space> to tick, 'a' for all, <enter> to confirm\u001b[22m",
+      "\u001b[2m  <space> to tick, 'a' to toggle all/none, <enter> to confirm\u001b[22m",
     )
   })
 
@@ -256,7 +256,7 @@ describe('ChecklistQuestion', () => {
     await press(stdin, keys.ctrlK)
 
     expect(plainFrameOf(lastFrame())).toBe(
-      "? Storybooks\n❯ ◯ web\n  ◯ docs · apps/docs\n  ◯ ui\n  <space> to tick, 'a' for all, <enter> to confirm",
+      "? Storybooks\n❯ ◯ web\n  ◯ docs · apps/docs\n  ◯ ui\n  <space> to tick, 'a' to toggle all/none, <enter> to confirm",
     )
   })
 
@@ -266,7 +266,7 @@ describe('ChecklistQuestion', () => {
     await press(stdin, keys.metaJ)
 
     expect(plainFrameOf(lastFrame())).toBe(
-      "? Storybooks\n❯ ◯ web\n  ◯ docs · apps/docs\n  ◯ ui\n  <space> to tick, 'a' for all, <enter> to confirm",
+      "? Storybooks\n❯ ◯ web\n  ◯ docs · apps/docs\n  ◯ ui\n  <space> to tick, 'a' to toggle all/none, <enter> to confirm",
     )
   })
 
