@@ -127,9 +127,9 @@ function isInPackage(folder: string, packageFolders: ReadonlySet<string>): boole
 }
 
 /**
- * A Storybook's paths, relative to the root, `/`-separated.
+ * A Storybook's folders, relative to the root, `/`-separated.
  */
-interface StorybookPaths {
+interface StorybookFolders {
   /**
    * The Storybook's folder, `.` for the root.
    */
@@ -138,34 +138,27 @@ interface StorybookPaths {
    * The Storybook's config folder, `.` for the root.
    */
   configFolder: string
-  /**
-   * The import path of each stories file, by the file's path.
-   */
-  storiesFiles: Map<string, string>
 }
 
 /**
- * Gives a Storybook's paths relative to the root.
+ * Gives the import path of each of a Storybook's stories files, by the file's path relative to the root.
  */
-function pathsOf(root: string, storybook: AffectedStorybookInput): StorybookPaths {
-  return {
-    folder: rootRelative(root, storybook.dir) || '.',
-    configFolder: rootRelative(root, storybook.configDir) || '.',
-    storiesFiles: new Map(
-      storybook.storiesFiles.map((importPath) => [rootRelative(root, resolve(storybook.dir, importPath)), importPath]),
-    ),
-  }
+function storiesFilesOf(root: string, storybook: AffectedStorybookInput): Map<string, string> {
+  return new Map(
+    storybook.storiesFiles.map((importPath) => [rootRelative(root, resolve(storybook.dir, importPath)), importPath]),
+  )
 }
 
 /**
  * Tells whether a Storybook's graph reaches a changed package: the root is one, its folder is inside one, or
- * `reachedFromPackages` holds one of its stories files or, by `configFoldersReachedFromPackages`, a `preview*` or
- * `main*` file directly in its config folder.
+ * `reachedFromPackages` holds one of its stories files, as `isStoriesFile` tells, or, by
+ * `configFoldersReachedFromPackages`, a `preview*` or `main*` file directly in its config folder.
  */
 function reachesChangedPackage(
-  paths: StorybookPaths,
+  folders: StorybookFolders,
   reach: ChangeReach,
   configFoldersReachedFromPackages: ReadonlySet<string>,
+  isStoriesFile: (rootRelativePath: string) => boolean,
 ): boolean {
   const { changedPackages, reachedFromPackages } = reach
 
@@ -174,10 +167,43 @@ function reachesChangedPackage(
   }
 
   return (
-    isInPackage(paths.folder, changedPackages) ||
-    configFoldersReachedFromPackages.has(paths.configFolder) ||
-    [...paths.storiesFiles.keys()].some((path) => reachedFromPackages.has(path))
+    isInPackage(folders.folder, changedPackages) ||
+    configFoldersReachedFromPackages.has(folders.configFolder) ||
+    [...reachedFromPackages].some(isStoriesFile)
   )
+}
+
+/**
+ * Tells whether a change affects a Storybook as a whole, whatever stories it has. `isStoriesFile` tells whether a
+ * root-relative path is one of its stories files.
+ */
+type IsWhollyAffected = (
+  storybook: Pick<AffectedStorybookInput, 'dir' | 'configDir'>,
+  isStoriesFile: (rootRelativePath: string) => boolean,
+) => boolean
+
+/**
+ * Gives the test of whether the change affects a Storybook as a whole: its folder or config folder is outside the
+ * root, a changed or reached `preview*` or `main*` file sits directly in its config folder, or its graph reaches a
+ * changed package. It reads the change's config folders once, whatever the number of Storybooks it tests.
+ */
+export function whollyAffectedTestOf(reach: ChangeReach): IsWhollyAffected {
+  const configFolders = foldersWithConfigFilesOf(reach.changedFiles, reach.reached)
+  const configFoldersReachedFromPackages = foldersWithConfigFilesOf(reach.reachedFromPackages)
+
+  return (storybook, isStoriesFile) => {
+    const folders: StorybookFolders = {
+      folder: rootRelative(reach.root, storybook.dir) || '.',
+      configFolder: rootRelative(reach.root, storybook.configDir) || '.',
+    }
+
+    return (
+      isOutsideRoot(folders.folder) ||
+      isOutsideRoot(folders.configFolder) ||
+      configFolders.has(folders.configFolder) ||
+      reachesChangedPackage(folders, reach, configFoldersReachedFromPackages, isStoriesFile)
+    )
+  }
 }
 
 /**
@@ -211,29 +237,93 @@ export function affectedStorybooksOf(
   storybooks: readonly AffectedStorybookInput[],
 ): AffectedStorybook[] {
   const { root, reached } = reach
-  const configFolders = foldersWithConfigFilesOf(reach.changedFiles, reached)
-  const configFoldersReachedFromPackages = foldersWithConfigFilesOf(reach.reachedFromPackages)
+  const isWhollyAffected = whollyAffectedTestOf(reach)
 
   return storybooks.map((storybook): AffectedStorybook => {
-    const paths = pathsOf(root, storybook)
+    const storiesFiles = storiesFilesOf(root, storybook)
 
-    if (
-      isOutsideRoot(paths.folder) ||
-      isOutsideRoot(paths.configFolder) ||
-      configFolders.has(paths.configFolder) ||
-      reachesChangedPackage(paths, reach, configFoldersReachedFromPackages)
-    ) {
+    if (isWhollyAffected(storybook, (path) => storiesFiles.has(path))) {
       return { all: true }
     }
 
-    const storiesFiles = [...paths.storiesFiles]
-      .filter(([path]) => reached.has(path))
-      .map(([, importPath]) => importPath)
+    const affectedFiles = [...storiesFiles].filter(([path]) => reached.has(path)).map(([, importPath]) => importPath)
 
     return {
       all: false,
-      storiesFiles: new Set(storiesFiles),
+      storiesFiles: new Set(affectedFiles),
       storyIds: new Set(storyIdsOfBaselines(storybook, reach.changedBaselines)),
     }
+  })
+}
+
+/**
+ * A Storybook, as the required Storybook rules read it, before its stories are read.
+ */
+export interface RequiredStorybookInput {
+  /**
+   * The folder the Storybook runs in, an absolute path.
+   */
+  dir: string
+  /**
+   * The Storybook's config folder, an absolute path.
+   */
+  configDir: string
+  /**
+   * The folder that holds the Storybook's baselines, an absolute path.
+   */
+  baselines: string
+  /**
+   * The regular expressions the Storybook matches its stories files' import paths with, from its `stories` globs, or
+   * `undefined` when they can't be read.
+   */
+  storiesMatchers: readonly RegExp[] | undefined
+}
+
+/**
+ * Gives a root-relative file's path as Storybook writes an import path: relative to the Storybook's folder, starting
+ * with `./` or `../`.
+ */
+function importPathOf(root: string, dir: string, file: string): string {
+  const path = rootRelative(dir, resolve(root, file))
+
+  if (path === '..' || path.startsWith('../')) {
+    return path
+  }
+
+  return `./${path}`
+}
+
+/**
+ * Tells, for each Storybook, whether a local affected run requires it. A Storybook is required when:
+ *
+ * - its stories globs can't be read;
+ * - a change affects it as a whole, as `affectedStorybooksOf` reads it, with its globs telling its stories files;
+ * - a changed or reached file matches its globs, deleted, renamed and `.mdx` files included;
+ * - a changed baseline sits in its baselines folder.
+ *
+ * It reads no `index.json`, so the Storybooks it requires are a superset of those `affectedStorybooksOf` gives a story.
+ */
+export function requiredStorybooksOf(reach: ChangeReach, storybooks: readonly RequiredStorybookInput[]): boolean[] {
+  const files = [...reach.changedFiles, ...reach.reached]
+  const isWhollyAffected = whollyAffectedTestOf(reach)
+
+  return storybooks.map((storybook) => {
+    const matchers = storybook.storiesMatchers
+
+    if (matchers === undefined) {
+      return true
+    }
+
+    const isStoriesFile = (file: string): boolean => {
+      const importPath = importPathOf(reach.root, storybook.dir, file)
+
+      return matchers.some((matcher) => matcher.test(importPath))
+    }
+
+    return (
+      isWhollyAffected(storybook, isStoriesFile) ||
+      files.some(isStoriesFile) ||
+      reach.changedBaselines.some(({ folder }) => folder === storybook.baselines)
+    )
   })
 }

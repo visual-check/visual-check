@@ -1,7 +1,13 @@
-import { affectedStorybooksIn, type TracedChanges, traceChanges } from '../affected-stories/affected-stories.js'
+import {
+  affectedStorybooksIn,
+  type ReadStoriesMatchers,
+  requiredStorybooksIn,
+  type TracedChanges,
+  traceChanges,
+} from '../affected-stories/affected-stories.js'
 import type { FindReachedFiles } from '../affected-stories/fallow-graph.js'
 import type { AffectedStorybook } from '../affected-stories/storybook-rules.js'
-import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
+import { listNames, type ResolvedConfig, type ResolvedStorybook } from '../config/resolve-config.js'
 import type { ReportSelection } from '../report/report-document.js'
 import type { Story } from '../storybook/read-stories.js'
 import type { Selection } from './parse-command-line.js'
@@ -59,13 +65,17 @@ interface IndexedStorybook {
 }
 
 /**
- * What `workOutRunSelection` reads.
+ * What `workOutRequiredStorybooks` reads.
  */
-interface RunSelectionInput {
+interface RequiredStorybooksInput {
   /**
    * The selection the run takes, with `default` already turned into `affected` or `all`.
    */
   selection: Selection
+  /**
+   * Whether the `CI` environment variable says the run is in CI.
+   */
+  ci: boolean
   /**
    * The ref `--base` names, or `undefined` when the flag isn't given.
    */
@@ -79,9 +89,9 @@ interface RunSelectionInput {
    */
   cwd: string
   /**
-   * Each Storybook in the run, in config order, with every story its `index.json` lists.
+   * Each Storybook in the run, in config order.
    */
-  storybooks: readonly IndexedStorybook[]
+  storybooks: readonly ResolvedStorybook[]
   /**
    * The baselines folder of every Storybook in the config, those the run leaves out included, absolute paths.
    */
@@ -98,6 +108,48 @@ interface RunSelectionInput {
    * Finds the files the changed files reach.
    */
   findReachedFiles: FindReachedFiles
+  /**
+   * Reads a Storybook's stories globs.
+   */
+  readStoriesMatchers: ReadStoriesMatchers
+}
+
+/**
+ * The Storybooks a run requires, worked out before any of them is reached.
+ *
+ * @public
+ */
+export interface RequiredStorybooks {
+  /**
+   * The Storybooks the run reaches, checks and covers, in config order.
+   */
+  required: ResolvedStorybook[]
+  /**
+   * The Storybooks in the run that it leaves out, since no changed file reaches them, in config order.
+   */
+  leftOut: ResolvedStorybook[]
+  /**
+   * The changes traced since the base, set exactly when the selection is `affected`.
+   */
+  traced: TracedChanges | undefined
+}
+
+/**
+ * What `workOutRunSelection` reads.
+ */
+interface RunSelectionInput {
+  /**
+   * The selection the run takes, with `default` already turned into `affected` or `all`.
+   */
+  selection: Selection
+  /**
+   * Each required Storybook, in config order, with every story its `index.json` lists.
+   */
+  storybooks: readonly IndexedStorybook[]
+  /**
+   * The changes traced since the base, and the Storybooks the run leaves out.
+   */
+  required: Pick<RequiredStorybooks, 'traced' | 'leftOut'>
 }
 
 /**
@@ -118,7 +170,8 @@ export interface RunSelection {
    */
   warning: string
   /**
-   * The notes printed after the header: that no story is affected, with a hint at `--all`, or none.
+   * The notes printed after the header: that no story is affected, with a hint at `--all`, then the Storybooks the
+   * run leaves out, or none.
    */
   notes: string[]
 }
@@ -183,19 +236,74 @@ export function fallbackWarningOf(fallback: string | null): string {
 }
 
 /**
- * Works out the stories a run takes in each Storybook. `all` keeps every story and `filter` the stories whose ID it
- * matches. `affected` finds the changed files since the base and what they reach, once for every Storybook in the run,
- * reads them with the config file's `affected` globs, and keeps the affected stories: the stories of the affected
- * stories files and the stories of the changed baselines, or every story of a Storybook a change reaches as a whole;
- * when that can't be worked out, it keeps every story, with a warning that says why. An affected run that keeps no
- * story at all gets a note that hints at `--all`.
+ * Gives the note that names the Storybooks a run leaves out, since no changed file reaches them, or none.
+ */
+export function leftOutNotesOf(leftOut: readonly { name: string }[]): string[] {
+  const names = leftOut.map(({ name }) => name)
+
+  if (names.length === 0) {
+    return []
+  }
+
+  if (names.length === 1) {
+    return [`Storybook ${listNames(names)} is left out, since no changed file reaches it.`]
+  }
+
+  return [`Storybooks ${listNames(names)} are left out, since no changed file reaches them.`]
+}
+
+/**
+ * Works out the Storybooks a run requires, before any of them is reached. A run that doesn't cover the affected
+ * stories, or does in CI, requires every Storybook in it. A local affected run traces the changed files since the
+ * base once, then requires only the Storybooks `requiredStorybooksIn` says, reading their stories globs with
+ * `readStoriesMatchers`, and leaves the others out. An affected run, in CI or not, gives the traced changes.
  *
  * @throws {InvalidBaseError} When `--base` names no commit in the repository.
  */
+export async function workOutRequiredStorybooks(input: RequiredStorybooksInput): Promise<RequiredStorybooks> {
+  const { storybooks } = input
+
+  if (input.selection.kind !== 'affected') {
+    return { required: [...storybooks], leftOut: [], traced: undefined }
+  }
+
+  const traced = await traceChanges({
+    baseRef: input.baseRef,
+    environment: input.environment,
+    cwd: input.cwd,
+    storybooks,
+    baselinesFolders: input.baselinesFolders,
+    configPath: input.configPath,
+    affected: input.affected,
+    findReachedFiles: input.findReachedFiles,
+  })
+
+  if (input.ci) {
+    return { required: [...storybooks], leftOut: [], traced }
+  }
+
+  const flags = await requiredStorybooksIn(traced, storybooks, input.readStoriesMatchers)
+
+  return {
+    required: storybooks.filter((_storybook, index) => flags[index]),
+    leftOut: storybooks.filter((_storybook, index) => !flags[index]),
+    traced,
+  }
+}
+
+/**
+ * Works out the stories a run takes in each required Storybook. `all` keeps every story and `filter` the stories whose
+ * ID it matches. `affected` reads the traced changes with the config file's `affected` globs, and keeps the affected
+ * stories: the stories of the affected stories files and the stories of the changed baselines, or every story of a
+ * Storybook a change reaches as a whole; when that can't be worked out, it keeps every story, with a warning that
+ * says why. An affected run that keeps no story at all gets a note that hints at `--all`, and one that leaves
+ * Storybooks out a note that names them.
+ */
 export async function workOutRunSelection(input: RunSelectionInput): Promise<RunSelection> {
   const { selection, storybooks } = input
+  const { traced, leftOut } = input.required
 
-  if (selection.kind !== 'affected') {
+  if (traced === undefined) {
     const choice: StoryChoice = selection.kind === 'filter' ? selection : { kind: 'all' }
 
     return {
@@ -210,16 +318,6 @@ export async function workOutRunSelection(input: RunSelectionInput): Promise<Run
     }
   }
 
-  const traced = await traceChanges({
-    baseRef: input.baseRef,
-    environment: input.environment,
-    cwd: input.cwd,
-    storybooks: storybooks.map(({ storybook }) => storybook),
-    baselinesFolders: input.baselinesFolders,
-    configPath: input.configPath,
-    affected: input.affected,
-    findReachedFiles: input.findReachedFiles,
-  })
   const affected = await affectedStorybooksIn(
     traced,
     storybooks.map(({ storybook, stories }) => ({
@@ -240,6 +338,6 @@ export async function workOutRunSelection(input: RunSelectionInput): Promise<Run
     selections,
     report: { by: 'affected', base: traced.base, changedFiles: traced.changedFiles, fallback: traced.fallback },
     warning: fallbackWarningOf(traced.fallback),
-    notes: emptySelectionNotesOf(traced, selections),
+    notes: [...emptySelectionNotesOf(traced, selections), ...leftOutNotesOf(leftOut)],
   }
 }

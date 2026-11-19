@@ -1,7 +1,12 @@
 import { realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { affectedStorybooksIn, traceChanges } from './affected-stories.js'
+import {
+  affectedStorybooksIn,
+  type ReadStoriesMatchers,
+  requiredStorybooksIn,
+  traceChanges,
+} from './affected-stories.js'
 import type { CantAnswer, FindReachedFiles, ReachedFiles } from './fallow-graph.js'
 import { InvalidBaseError } from './git-changes.js'
 import { commit, git, isolateGit, makeFolder, makeRepo, removeRepos, writeFiles } from './git-repo.fixture.js'
@@ -657,5 +662,126 @@ describe('traceChanges and affectedStorybooksIn in a monorepo', () => {
 
     expect(atRoot.storybooks).toEqual([some(), some()])
     expect(result.storybooks).toEqual([{ all: true }, { all: true }])
+  })
+
+  describe('requiredStorybooksIn', () => {
+    /**
+     * The matcher of `./src/*.stories.tsx`.
+     */
+    const ownStories = /^\.\/src\/[^/]+\.stories\.tsx$/
+
+    /**
+     * A fake `ReadStoriesMatchers` that records the folders it reads, and gives docs the matchers given and web the
+     * matcher of its own stories.
+     */
+    function fakeReader(docs: { matchers: readonly RegExp[] | undefined } = { matchers: [ownStories] }) {
+      const reads: string[] = []
+      const readStoriesMatchers: ReadStoriesMatchers = async ({ dir }) => {
+        reads.push(dir)
+
+        return dir.endsWith('docs') ? docs.matchers : [ownStories]
+      }
+
+      return { reads, readStoriesMatchers }
+    }
+
+    /**
+     * Writes the changes, then tells which Storybooks they require, with the `affected.ignore` globs, the graph and
+     * the Storybooks given, else none, the fake graph and both Storybooks.
+     */
+    async function requiredBy(
+      changes: Record<string, string>,
+      reader: ReturnType<typeof fakeReader>,
+      options: { ignore?: string[]; findReachedFiles?: FindReachedFiles; storybooks?: AffectedStorybookInput[] } = {},
+    ) {
+      writeFiles(repo, changes)
+
+      const inRun = options.storybooks ?? storybooks
+      const traced = await traceChanges({
+        baseRef: undefined,
+        environment: {},
+        cwd: repo,
+        storybooks: inRun,
+        baselinesFolders: storybooks.map(({ baselines }) => baselines),
+        configPath: join(repo, 'visual-check.config.ts'),
+        affected: { selectAll: [], ignore: options.ignore ?? [] },
+        findReachedFiles: options.findReachedFiles ?? fakeGraph().findReachedFiles,
+      })
+
+      return await requiredStorybooksIn(traced, inRun, reader.readStoriesMatchers)
+    }
+
+    it('requires no Storybook, reading no globs, when no file changed or every changed file is ignored', async () => {
+      const reader = fakeReader()
+
+      expect(await requiredBy({}, reader)).toEqual([false, false])
+      expect(await requiredBy({ 'README.md': 'Changed.\n' }, reader, { ignore: ['README.md'] })).toEqual([false, false])
+      expect(reader.reads).toEqual([])
+    })
+
+    it('requires every Storybook, reading no globs, for a lockfile', async () => {
+      const reader = fakeReader()
+
+      expect(await requiredBy({ 'pnpm-lock.yaml': 'changed\n' }, reader)).toEqual([true, true])
+      expect(reader.reads).toEqual([])
+    })
+
+    it("requires every Storybook, reading no globs, when the graph can't answer", async () => {
+      const reader = fakeReader()
+      const findReachedFiles = fakeFindReachedFiles({ cantAnswer: 'Fallow failed' }).findReachedFiles
+
+      expect(await requiredBy({ 'packages/ui/src/button.tsx': 'changed\n' }, reader, { findReachedFiles })).toEqual([
+        true,
+        true,
+      ])
+      expect(reader.reads).toEqual([])
+    })
+
+    it("requires only the Storybook whose globs match what a change reaches, reading each one's globs once", async () => {
+      const reader = fakeReader()
+
+      expect(await requiredBy({ 'packages/ui/src/button.tsx': 'changed\n' }, reader)).toEqual([true, false])
+      expect(reader.reads).toEqual(storybooks.map(({ dir }) => dir))
+    })
+
+    it("requires the Storybook whose globs can't be read", async () => {
+      expect(
+        await requiredBy({ 'packages/ui/src/button.tsx': 'changed\n' }, fakeReader({ matchers: undefined })),
+      ).toEqual([true, true])
+    })
+
+    it('reads the globs from the real folders of a Storybook given through a symlink', async () => {
+      const link = join(makeFolder(), 'link')
+
+      symlinkSync(repo, link)
+
+      const reader = fakeReader()
+      const linked = storybooks.map((storybook) => ({
+        ...storybook,
+        dir: storybook.dir.replace(repo, link),
+        configDir: storybook.configDir.replace(repo, link),
+      }))
+
+      expect(await requiredBy({ 'packages/ui/src/button.tsx': 'changed\n' }, reader, { storybooks: linked })).toEqual([
+        true,
+        false,
+      ])
+      expect(reader.reads).toEqual(['web', 'docs'].map((name) => join(realpathSync(repo), 'apps', name)))
+    })
+
+    it("requires the Storybook whose globs reader rejects, as one whose globs can't be read", async () => {
+      const reader = fakeReader()
+      const readStoriesMatchers: ReadStoriesMatchers = async (storybook) => {
+        if (storybook.dir.endsWith('docs')) {
+          throw new Error('The reader failed.')
+        }
+
+        return await reader.readStoriesMatchers(storybook)
+      }
+
+      expect(
+        await requiredBy({ 'packages/ui/src/button.tsx': 'changed\n' }, { ...reader, readStoriesMatchers }),
+      ).toEqual([true, true])
+    })
   })
 })

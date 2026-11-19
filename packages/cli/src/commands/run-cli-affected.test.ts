@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FindReachedFiles } from '../affected-stories/fallow-graph.js'
@@ -368,18 +368,19 @@ describe('runCli covering the affected stories', () => {
     })
   })
 
-  it('captures nothing when no file changed, hints at --all, and still exits 1 on a missing baseline', async () => {
+  it('leaves the Storybook out and checks nothing when no file changed, though a baseline is missing', async () => {
     const { project, head } = await createAffectedRun({ baselines: ['button--primary', 'card--primary'] })
     const graph = fakeGraph()
     const { options, record } = fakeBrowser()
     const result = await runCli(['test'], {}, project, { ...options, findReachedFiles: graph.findReachedFiles })
     const lines = result.stdout.split('\n')
 
-    expect(result.exitCode).toBe(1)
+    expect(result.exitCode).toBe(0)
     expect(lines[1]).toBe(
       `No files changed since ${head.slice(0, 7)}, so no story is affected. Run with --all to cover every story.`,
     )
-    expect(lines).toContain(missingLineOf('web', 'badge--primary'))
+    expect(lines[2]).toBe('Storybook web is left out, since no changed file reaches it.')
+    expect(lines).not.toContain(missingLineOf('web', 'badge--primary'))
     expect(record.captures).toEqual([])
     expect(graph.calls).toEqual([])
     expect(readReport(project).selection).toEqual({ by: 'affected', base: head, changedFiles: 0, fallback: null })
@@ -400,13 +401,12 @@ describe('runCli covering the affected stories', () => {
     expect(record.captures).toEqual([])
   })
 
-  it('writes every missing baseline and deletes every orphan in update when no file changed, rewriting nothing', async () => {
+  it('leaves the Storybook out of update when no file changed, writing and deleting nothing', async () => {
     const { project, head } = await createAffectedRun({
       baselines: ['button--primary', 'card--primary', 'old--story'],
     })
     const folder = join(project, '.visual-check', 'baselines')
-    // The button now renders differently, which update would write, were it selected.
-    const { options, record } = fakeBrowser({ 'button--primary': { snapshot: otherSnapshot } })
+    const { options, record } = fakeBrowser()
     const result = await runCli(['update', '--reporter', 'json'], {}, project, {
       ...options,
       findReachedFiles: fakeGraph().findReachedFiles,
@@ -414,12 +414,14 @@ describe('runCli covering the affected stories', () => {
     const document = JSON.parse(result.stdout) as UpdateReport
 
     expect(result.exitCode).toBe(0)
-    expect(result.stderr.split('\n')[1]).toBe(
+    expect(result.stderr.split('\n').slice(1, 3)).toEqual([
       `No files changed since ${head.slice(0, 7)}, so no story is affected. Run with --all to cover every story.`,
-    )
-    expect(capturedIdsOf(record)).toEqual(['badge--primary'])
-    expect(document.counts).toEqual({ written: 1, deleted: 1, kept: 0, broken: 0, flaky: 0 })
-    expect(new Uint8Array(readFileSync(join(folder, 'button--primary.png')))).toEqual(defaultRunSnapshot)
+      'Storybook web is left out, since no changed file reaches it.',
+    ])
+    expect(record.captures).toEqual([])
+    expect(document.counts).toEqual({ written: 0, deleted: 0, kept: 0, broken: 0, flaky: 0 })
+    expect(existsSync(join(folder, 'badge--primary.png'))).toBe(false)
+    expect(existsSync(join(folder, 'old--story.png'))).toBe(true)
     expect(document.selection).toEqual({ by: 'affected', base: head, changedFiles: 0, fallback: null })
   })
 

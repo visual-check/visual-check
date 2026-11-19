@@ -9,6 +9,9 @@ import {
   type AffectedStorybookInput,
   affectedStorybooksOf,
   type ChangeReach,
+  type RequiredStorybookInput,
+  requiredStorybooksOf,
+  whollyAffectedTestOf,
 } from './storybook-rules.js'
 
 /**
@@ -32,10 +35,21 @@ export interface TracedChanges {
   /**
    * What the changed files reach: `nothing` when no changed file counts (none changed, or `affected.ignore` matches
    * every one); `everything` when one selects every story of every Storybook, or git or the graph can't answer;
-   * otherwise what the rules read.
+   * otherwise what the rules read. Read it with the Storybooks it was traced for: when each of them is affected as a
+   * whole by its folders alone, the graph isn't asked, so `reached` is empty.
    */
   reach: 'nothing' | 'everything' | ChangeReach
 }
+
+/**
+ * Reads, without starting it, the regular expressions a Storybook matches its stories files' import paths with, from
+ * its `stories` globs. Gives `undefined` when they can't be read, and never rejects.
+ *
+ * @public
+ */
+export type ReadStoriesMatchers = (
+  storybook: Pick<RequiredStorybookInput, 'dir' | 'configDir'>,
+) => Promise<readonly RegExp[] | undefined>
 
 /**
  * What `traceChanges` reads.
@@ -188,10 +202,14 @@ export async function traceChanges(options: TraceChangesOptions): Promise<Traced
     changedPackages: changedPackagesOf(packageScoped, undefined),
     reachedFromPackages: new Set(),
   }
-  // Before the graph answers, only the Storybooks' folders count, so no stories are needed.
-  const storybooksWithoutStories = realStorybooks.map((storybook) => ({ ...storybook, storiesFiles: [], storyIds: [] }))
 
-  if (graphFiles.length === 0 || affectedStorybooksOf(beforeGraph, storybooksWithoutStories).every(({ all }) => all)) {
+  // Before the graph answers, nothing reaches a stories file, so only the Storybooks' folders count.
+  const isWhollyAffectedBeforeGraph = whollyAffectedTestOf(beforeGraph)
+
+  if (
+    graphFiles.length === 0 ||
+    realStorybooks.every((storybook) => isWhollyAffectedBeforeGraph(storybook, () => false))
+  ) {
     return traced(beforeGraph)
   }
 
@@ -236,4 +254,44 @@ export async function affectedStorybooksIn(
   }
 
   return affectedStorybooksOf(traced.reach, await withRealPaths(storybooks))
+}
+
+/**
+ * Tells, for each Storybook, whether a local affected run requires it, from the traced changes, by the rules of
+ * `requiredStorybooksOf`. A reach of `nothing` requires no Storybook, and `everything` every Storybook, both without
+ * reading any globs. Otherwise `readStoriesMatchers` reads each Storybook's stories globs once, all at the same time,
+ * from its real folders; a read that rejects counts as globs that can't be read.
+ *
+ * @public
+ */
+export async function requiredStorybooksIn(
+  traced: TracedChanges,
+  storybooks: readonly Pick<RequiredStorybookInput, 'dir' | 'configDir' | 'baselines'>[],
+  readStoriesMatchers: ReadStoriesMatchers,
+): Promise<boolean[]> {
+  const { reach } = traced
+
+  if (reach === 'nothing') {
+    return storybooks.map(() => false)
+  }
+
+  if (reach === 'everything') {
+    return storybooks.map(() => true)
+  }
+
+  // The globs are read from the real folders, which the rules compare the changed files with.
+  const realStorybooks = await withRealPaths(
+    storybooks.map(({ dir, configDir, baselines }) => ({ dir, configDir, baselines })),
+  )
+  const withMatchers = await Promise.all(
+    realStorybooks.map(async (storybook) => ({
+      ...storybook,
+      // A reader that rejects despite its contract counts as one that can't read the globs.
+      storiesMatchers: await readStoriesMatchers({ dir: storybook.dir, configDir: storybook.configDir }).catch(
+        () => undefined,
+      ),
+    })),
+  )
+
+  return requiredStorybooksOf(reach, withMatchers)
 }
