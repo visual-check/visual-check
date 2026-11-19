@@ -480,10 +480,8 @@ async function askStartCommand(
  */
 async function askScripts(project: DetectedProject, prompter: Prompter): Promise<Answers['scripts']> {
   const scripts = scriptsOf(project.manifest)
-  // The scripts are the root's, so only a start script the root's package.json holds can clash with them.
-  const startScripts = project.storybooks.flatMap(({ start }) =>
-    start?.kind === 'script' && start.packageDir === project.root ? [start.call.script] : [],
-  )
+  // The root and each Storybook's package get scripts of these names, so no start script may have one.
+  const startScripts = project.storybooks.flatMap(({ start }) => (start?.kind === 'script' ? [start.call.script] : []))
   const reusedTest = reusedScriptOf(scripts, 'test')
   const reusedUpdate = reusedScriptOf(scripts, 'update')
   const test = reusedTest ?? (await askScript('test', scripts, startScripts, reusedUpdate?.name, prompter))

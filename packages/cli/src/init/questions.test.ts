@@ -485,14 +485,14 @@ describe('askQuestions', () => {
     },
   )
 
-  it("keeps the default script names when only another package's script with that name starts Storybook", async () => {
+  it("never takes the name of a package's script that starts its Storybook, since the package gets the scripts too", async () => {
     const start = scriptStartOf('visual:check', 6006, '/project/packages/ui')
     const { answers } = await askQuestions({
       project: projectOf({ storybooks: [storybookOf({ packageDir: '/project/packages/ui', start })] }),
       prompter: defaultsPrompter(),
     })
 
-    expect(answers.scripts.test).toEqual({ name: 'visual:check', add: true })
+    expect(answers.scripts.test).toEqual({ name: 'visual:test', add: true })
   })
 
   it("starts a Storybook with Nx's target, and suggests the URL on its port", async () => {

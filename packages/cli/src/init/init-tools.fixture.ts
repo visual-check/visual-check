@@ -120,6 +120,7 @@ export const pnpmNextSteps: NextSteps = {
   ],
   runFrom: undefined,
   modesFiles: ['.storybook/visual-check.ts'],
+  packageFolders: [],
   ciUrl: 'https://visual-check.vercel.app/docs/ci',
 }
 

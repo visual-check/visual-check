@@ -443,6 +443,23 @@ export function storybookCommandOf(
 }
 
 /**
+ * Returns the line a workspace package's script runs a binary the workspace root installed with, such as
+ * `visual-check test --storybook ui`. npm, pnpm, Yarn 1 and Bun put the root's binaries on the `PATH` of a package's
+ * script. Yarn 2 and later put only the package's own there, so the script runs it with `yarn run -T`, which looks in
+ * the root.
+ */
+export function rootBinScriptOf(
+  packageManager: PackageManager,
+  bin: string,
+  args: readonly string[],
+  yarnBerry: boolean,
+): string {
+  const line = [bin, ...args].join(' ')
+
+  return packageManager === 'yarn' && yarnBerry ? `yarn run -T ${line}` : line
+}
+
+/**
  * The command that runs the project's `nx` binary with `args`, such as `['run', 'ui:storybook']`. `yarnBerry` says
  * whether Yarn is Yarn 2 or later.
  */

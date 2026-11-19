@@ -12,6 +12,7 @@ import {
   nxCommandOf,
   type PackageManager,
   packageManagerOf,
+  rootBinScriptOf,
   runScriptCommandOf,
   rushPackageManagerOf,
   scriptsOf,
@@ -174,6 +175,21 @@ describe('nxCommandOf', () => {
   ] as const)('runs nx under %s, Yarn 2 or later: %s', (packageManager, yarnBerry, command) => {
     expect(commandLineOf(nxCommandOf(packageManager, ['run', 'ui:storybook'], yarnBerry))).toBe(command)
   })
+})
+
+describe('rootBinScriptOf', () => {
+  it.each([
+    ['npm', false, 'visual-check test --storybook ui'],
+    ['pnpm', false, 'visual-check test --storybook ui'],
+    ['yarn', false, 'visual-check test --storybook ui'],
+    ['yarn', true, 'yarn run -T visual-check test --storybook ui'],
+    ['bun', false, 'visual-check test --storybook ui'],
+  ] as const)(
+    'runs the root binary from a package script under %s, Yarn 2 or later: %s',
+    (packageManager, yarnBerry, script) => {
+      expect(rootBinScriptOf(packageManager, 'visual-check', ['test', '--storybook', 'ui'], yarnBerry)).toBe(script)
+    },
+  )
 })
 
 describe('scriptsOf', () => {

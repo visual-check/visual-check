@@ -7,6 +7,7 @@ import {
   modesLineOf,
   nextHeadingOf,
   nextStepsOf,
+  packageScriptsLineOf,
   replacedScriptsLineOf,
   type SetUpStorybook,
 } from './closing-message.js'
@@ -50,6 +51,7 @@ function inputOf(overrides: Partial<Parameters<typeof nextStepsOf>[0]> = {}): Pa
     configPath: '/project/visual-check.config.ts',
     storybooks: [webApp],
     scripts: defaultScripts,
+    packageDirs: [],
     needsBaselines: true,
     ...overrides,
   }
@@ -65,17 +67,35 @@ function closingMessageOf(input: Parameters<typeof nextStepsOf>[0]): string {
 describe('replacedScriptsLineOf', () => {
   it('gives no line when no script was replaced', () => {
     expect(replacedScriptsLineOf([])).toBe(undefined)
+    expect(replacedScriptsLineOf([{ manifest: 'package.json', names: [] }])).toBe(undefined)
   })
 
   it('names one script in the singular', () => {
-    expect(replacedScriptsLineOf(['visual:check'])).toBe('Replaced the script visual:check in package.json.')
+    expect(replacedScriptsLineOf([{ manifest: 'package.json', names: ['visual:check'] }])).toBe(
+      'Replaced the script visual:check in package.json.',
+    )
   })
 
   it('names several scripts in one line', () => {
-    expect(replacedScriptsLineOf(['visual:check', 'visual:update'])).toBe(
+    expect(replacedScriptsLineOf([{ manifest: 'package.json', names: ['visual:check', 'visual:update'] }])).toBe(
       'Replaced the scripts visual:check and visual:update in package.json.',
     )
-    expect(replacedScriptsLineOf(['a', 'b', 'c'])).toBe('Replaced the scripts a, b and c in package.json.')
+    expect(replacedScriptsLineOf([{ manifest: 'package.json', names: ['a', 'b', 'c'] }])).toBe(
+      'Replaced the scripts a, b and c in package.json.',
+    )
+  })
+
+  it("names each package.json's scripts, leaving out one with none replaced", () => {
+    const replaced = [
+      { manifest: 'package.json', names: [] },
+      { manifest: 'apps/a/package.json', names: ['visual:check'] },
+      { manifest: 'apps/b/package.json', names: ['visual:check', 'visual:update'] },
+    ]
+
+    expect(replacedScriptsLineOf(replaced)).toBe(
+      'Replaced the scripts visual:check in apps/a/package.json, and visual:check and visual:update in ' +
+        'apps/b/package.json.',
+    )
   })
 })
 
@@ -90,8 +110,15 @@ describe('nextStepsOf', () => {
       ],
       runFrom: undefined,
       modesFiles: ['.storybook/visual-check.ts'],
+      packageFolders: [],
       ciUrl: 'https://visual-check.vercel.app/docs/ci',
     })
+  })
+
+  it('names the packages whose scripts check only their Storybook, relative to the root', () => {
+    const nextSteps = nextStepsOf(inputOf({ cwd: '/project/docs', packageDirs: ['/project/docs', '/project/ui'] }))
+
+    expect(nextSteps.packageFolders).toEqual(['docs', 'ui'])
   })
 
   it('leaves out writing the first baselines when every Storybook has them', () => {
@@ -231,6 +258,18 @@ describe('modesLineOf', () => {
   })
 })
 
+describe('packageScriptsLineOf', () => {
+  it('names the packages whose scripts check only their Storybook, each as code', () => {
+    expect(packageScriptsLineOf(['apps/a', 'apps/b'])).toEqual([
+      'To check only one Storybook, run the scripts in its package: ',
+      { code: 'apps/a' },
+      ' and ',
+      { code: 'apps/b' },
+      '.',
+    ])
+  })
+})
+
 describe('nextHeadingOf', () => {
   it('gives Next in the root', () => {
     expect(nextHeadingOf(undefined)).toEqual(['Next'])
@@ -289,6 +328,14 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
   4. Commit the changes, baselines included
 
 To set options for every story, see .storybook/visual-check.ts and docs/.storybook/visual-check.ts.
+To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
+`)
+  })
+
+  it('names the packages whose scripts check only their Storybook, before the CI line', () => {
+    expect(closingMessageOf(inputOf({ storybooks: [webApp, docs], packageDirs: ['/project/docs'] }))).toContain(`
+To set options for every story, see .storybook/visual-check.ts and docs/.storybook/visual-check.ts.
+To check only one Storybook, run the scripts in its package: docs.
 To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
 `)
   })

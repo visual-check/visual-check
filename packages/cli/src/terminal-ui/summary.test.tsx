@@ -28,6 +28,7 @@ const nextSteps: NextSteps = {
   ],
   runFrom: undefined,
   modesFiles: ['.storybook/visual-check.ts'],
+  packageFolders: [],
   ciUrl: 'https://visual-check.vercel.app/docs/ci',
 }
 
@@ -95,6 +96,29 @@ Next, from acme-monorepo
   1  pnpm storybook   Start Storybook, and keep it running
 
 To set options for every story, see .storybook/visual-check.ts.
+To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
+  })
+
+  it('names the packages whose scripts check only their Storybook, dim, with each folder in accent', async () => {
+    const { lastFrame } = await renderSettledAt(
+      <Summary
+        result={{
+          ...resultWith(0, []),
+          summary: {
+            nextSteps: { ...nextSteps, steps: nextSteps.steps.slice(0, 1), packageFolders: ['apps/a', 'apps/b'] },
+          },
+        }}
+      />,
+      160,
+    )
+
+    expect(lastFrame()).toContain(
+      '\u001b[2mTo check only one Storybook, run the scripts in its package: \u001b[22m\u001b[36mapps/a\u001b[39m' +
+        '\u001b[2m and \u001b[22m\u001b[36mapps/b\u001b[39m\u001b[2m.\u001b[22m\n',
+    )
+    expect(plainFrameOf(lastFrame())).toContain(`
+To set options for every story, see .storybook/visual-check.ts.
+To check only one Storybook, run the scripts in its package: apps/a and apps/b.
 To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
   })
 

@@ -7,12 +7,13 @@ import {
   closingMessageTextOf,
   type NextSteps,
   nextStepsOf,
+  type ReplacedScripts,
   replacedScriptsLineOf,
   type SetUpStorybook,
 } from './closing-message.js'
 import { type DetectedProject, type DetectedStorybook, detectProject } from './detect-project.js'
 import { type ExistingConfig, existingConfigOf, existingStorybooksOf } from './existing-config.js'
-import type { ListFiles } from './find-storybooks.js'
+import { type ListFiles, relativePathOf } from './find-storybooks.js'
 import { blockingProblemsOf, dockerWarningOf, versionNotesOf } from './init-checks.js'
 import {
   type AddonStep,
@@ -27,6 +28,7 @@ import {
   manualInstallTextOf,
   rushInstallOf,
 } from './install.js'
+import { type PackageScripts, packageScriptsOf } from './package-scripts.js'
 import { InputEndedError, type Prompter } from './prompter.js'
 import { type Answers, askQuestions } from './questions.js'
 import type { RunCommand } from './run-command.js'
@@ -45,6 +47,7 @@ import {
   fallowFailureWarningOf,
   unlistedDependenciesWarningOf,
 } from './unlisted-dependencies.js'
+import { packageManagerListOf } from './workspace.js'
 
 /**
  * What `runInit` needs besides the folder it runs in: the flags, what it runs on, the prompter, and the tools that
@@ -118,7 +121,7 @@ export interface InitResult {
    */
   exitCode: number
   /**
-   * Text for standard output: the line that names the scripts replaced in `package.json`, when there are any, then
+   * Text for standard output: the line that names the scripts replaced in each `package.json`, when there are any, then
    * under Rush the install steps to run, then the closing message, which a failed install leaves out.
    */
   stdout: string
@@ -143,7 +146,7 @@ export interface InitResult {
  */
 interface InitSummary {
   /**
-   * The line that names the scripts `init` replaced in `package.json`, when it replaced any.
+   * The line that names the scripts `init` replaced in each `package.json`, when it replaced any.
    */
   replacedLine?: string
   /**
@@ -368,6 +371,14 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
   const { packageManager, scripts } = setup.answers
   const { runCommand, progress } = tools
   const { installSteps, addonSteps, manualInstall } = installPlanOf(cwd, project, setup, tools)
+  const packageScripts = packageScriptsOf({
+    root: project.root,
+    storybooks: setup.storybooks,
+    scriptNames: { test: scripts.test.name, update: scripts.update.name },
+    packageManager,
+    yarnBerry: project.yarnBerry,
+    listedPackageDirs: packageManagerListOf(project.workspace.packageManagerLists, packageManager),
+  })
 
   progress.plan([
     writeFilesTitle,
@@ -379,7 +390,7 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
   const replacedScripts = await runStep(
     progress,
     { title: writeFilesTitle },
-    () => writeSetupFiles(project, setup),
+    () => writeSetupFiles(project, setup, packageScripts),
     () => 'done',
   )
   const replacedLine = replacedScriptsLineOf(replacedScripts)
@@ -409,6 +420,7 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
     configPath: setup.configPath,
     storybooks: setup.storybooks,
     scripts,
+    packageDirs: packageScripts.map(({ dir }) => dir),
     needsBaselines: await needsBaselinesOf(setup.storybooks),
   })
   const stdout = [
@@ -471,10 +483,14 @@ async function dockerNotesOf(probeDocker: ProbeDocker, os: NodeJS.Platform): Pro
 
 /**
  * Writes each file that's missing: the config when there was none, each Storybook's `visual-check.ts` and
- * `.visual-check/.gitignore`, and the config folder's `.visual-check/.gitignore`. Then sets the scripts. Gives the names
- * of the scripts it replaced. An existing file is never touched.
+ * `.visual-check/.gitignore`, and the config folder's `.visual-check/.gitignore`. Then sets the root's scripts and each
+ * package's own. Gives the scripts it replaced, by `package.json`. An existing file is never touched.
  */
-function writeSetupFiles(project: DetectedProject, setup: Setup): string[] {
+function writeSetupFiles(
+  project: DetectedProject,
+  setup: Setup,
+  packageScripts: readonly PackageScripts[],
+): ReplacedScripts[] {
   const { answers, configPath, configSource, storybooks } = setup
   const contents: (readonly [string, string])[] = [
     ...(configSource === undefined ? [] : [[configPath, configSource] as const]),
@@ -489,7 +505,15 @@ function writeSetupFiles(project: DetectedProject, setup: Setup): string[] {
     writeIfMissing(path, content)
   }
 
-  return setScripts(project.manifestPath, scriptsToSetOf(answers.scripts))
+  const manifests = [
+    { path: project.manifestPath, scripts: scriptsToSetOf(answers.scripts) },
+    ...packageScripts.map(({ dir, scripts }) => ({ path: join(dir, 'package.json'), scripts })),
+  ]
+
+  return manifests.map(({ path, scripts }) => ({
+    manifest: relativePathOf(project.root, path),
+    names: setScripts(path, scripts),
+  }))
 }
 
 /**

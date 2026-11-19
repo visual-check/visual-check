@@ -468,6 +468,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
             [{ text: ['Commit the changes, baselines included'] }],
           ],
           modesFiles: [],
+          packageFolders: [],
           ciUrl: 'https://visual-check.vercel.app/docs/ci',
         },
       },

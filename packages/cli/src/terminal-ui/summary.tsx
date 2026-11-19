@@ -8,6 +8,7 @@ import {
   type NextStepRow,
   type NextSteps,
   nextHeadingOf,
+  packageScriptsLineOf,
 } from '../init/closing-message.js'
 import type { ManualInstall } from '../init/install.js'
 import type { InitResult } from '../init/run-init.js'
@@ -261,6 +262,11 @@ function NextStepsView({ nextSteps }: NextStepsViewProps): ReactNode {
         {nextSteps.modesFiles.length === 0 ? null : (
           <Text>
             <WrappedSegments dim segments={modesLineOf(nextSteps.modesFiles)} width={columns} />
+          </Text>
+        )}
+        {nextSteps.packageFolders.length === 0 ? null : (
+          <Text>
+            <WrappedSegments dim segments={packageScriptsLineOf(nextSteps.packageFolders)} width={columns} />
           </Text>
         )}
         <Text>

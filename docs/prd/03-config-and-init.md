@@ -78,7 +78,7 @@ Rules for the keys:
 
 - One config at the workspace root lists every Storybook. A run gives one report and one exit code.
 - A config inside a package still works through the search, but `init` never writes one there.
-- The CLI never narrows a run by the folder it's started from. A package's own script is `visual-check test --storybook <name>`.
+- The CLI never narrows a run by the folder it's started from. A package's own script is `visual-check test --storybook <name>`, which `init` writes in each Storybook's package.
 
 ## Folders
 
@@ -131,7 +131,7 @@ Rules for the keys:
 2. **For each Storybook:** its name, its URL, and its start command when none was found. The name is the package's name without its scope when the config folder is `.storybook` in a package, or sits directly in a package that isn't the root. Otherwise it's the config folder's name, or the name of the folder that holds `.storybook`. An Nx project without a `package.json` takes its `project.json` name, else its folder's name. A name already taken gets `-2`, `-3` and so on.
 
    The questions and notes call a Storybook by its folder, not its config folder: `Name of the Storybook in apps/my-app` for `apps/my-app/.storybook`, and the root folder's own name, such as `acme-monorepo`, for a `.storybook` at the root. Any other config folder, such as `config/storybook`, shows as it is. Then the questions ask `URL of <name>` and `Command that starts <name>`. The folder and the name show in the accent colour.
-3. **Script names,** `visual:check` and `visual:update` by default. A name another script has replaces that script, unless it starts a Storybook. A script that already runs `visual-check test` or `update` is reused, and when the default name is taken by the other script or by a script that starts Storybook, the suggestion is `visual:test` or `visual:update-baselines`.
+3. **Script names,** `visual:check` and `visual:update` by default. A name another script has replaces that script, unless it starts a Storybook, in the root or in a Storybook's package, which get scripts of the same names. A script that already runs `visual-check test` or `update` is reused, and when the default name is taken by the other script or by a script that starts Storybook, the suggestion is `visual:test` or `visual:update-baselines`.
 4. **"Install the agent skill?"**, yes by default.
 5. **"Add the Storybook addon?"** A checklist of the chosen Storybooks on 10, all ticked. When only one is on 10, it's a yes or no question instead, `Add the Storybook addon to <name>?`, yes by default. It's shown only when at least one is on 10. Storybooks on another major are skipped with a note.
 
@@ -152,7 +152,7 @@ Yarn 4 refuses a package version published less than a day ago by default (`npmM
   - the running step turns the spinner and counts its time up each second, with its command and the last three lines of its output under it, dim;
   - a step that ended shows `✓`, `▲` or `✕` in the accent, caution or danger colour, and how long it took. A failed step keeps the last 15 lines of its output, and the steps after it end dim after `−`, marked skipped.
 - It ends with the steps as they ended, printed once, then a summary:
-  - **Set up:** `✓ visual-check is set up`, a dim line naming any scripts it replaced, the warnings, then the numbered next steps, each a command and what it does, the commands in a column of their own in the accent colour. A command over 32 characters takes a line of its own, with its text under the other rows' text. In a terminal too narrow for the column and 20 columns of text beside it, every command takes a line of its own, with its text under it. Then, dim, where to set options for every story and the line pointing to the CI docs, with paths and URLs in the accent colour. The words match the plain closing message; the headings differ. It lists no files written.
+  - **Set up:** `✓ visual-check is set up`, a dim line naming any scripts it replaced, the warnings, then the numbered next steps, each a command and what it does, the commands in a column of their own in the accent colour. A command over 32 characters takes a line of its own, with its text under the other rows' text. In a terminal too narrow for the column and 20 columns of text beside it, every command takes a line of its own, with its text under it. Then, dim, where to set options for every story, the packages whose own scripts check only their Storybook, and the line pointing to the CI docs, with paths and URLs in the accent colour. The words match the plain closing message; the headings differ. It lists no files written.
   - **The install failed:** the line naming any scripts it replaced, then the problem after `✕`.
   - **Stopped before writing:** the warnings and hints, then why it stopped after `✕`.
 - Elsewhere it prints plain text.
@@ -175,7 +175,14 @@ Yarn 4 refuses a package version published less than a day ago by default (`npmM
   - if a package manager's add fails, including the one that adds the addon, `init` stops with exit 2 and names the command to run;
   - under Rush it prints the install steps instead of running them.
 - **The addon:** for each ticked Storybook it adds the addon at the CLI's exact version, runs `storybook add @visual-check/storybook-addon@<cli version> --skip-install` in that Storybook's package, then sets the spec in `package.json` back to the exact version, because `storybook add` rewrites it to a `^` range. If `storybook add` fails, it warns, prints the command and carries on. Under Yarn Plug'n'Play (a `.pnp.cjs` or `.pnp.js`, `nodeLinker: pnp`, or Yarn 2 or later with no `nodeLinker` and no `node_modules`), `init` can't read Storybook's version, so it skips the addon, with one hint to set `nodeLinker: node-modules`.
-- **The two npm scripts.** The summary names the scripts it replaced, not what they ran.
+- **The npm scripts.** The root's `package.json` gets the two scripts, `visual-check test` and `visual-check update`, which run every Storybook.
+
+  Each Storybook's package gets the same two names, narrowed to its Storybook: `visual-check test --storybook <name>` and `visual-check update --storybook <name>`. Run in `apps/a`, `pnpm run visual:check` checks only `a`. A package with several Storybooks gets a pair for each, named with a suffix: `visual:check:<name>` and `visual:update:<name>`.
+  - The CLI is installed at the root. npm, pnpm, Yarn 1 and Bun put the root's binaries on a package script's `PATH`; Yarn 2 and later don't, so there the scripts run `yarn run -T visual-check …`. Bun is untested.
+  - Only a package the package manager's own list names gets scripts. A Storybook at the root has only the root's. A package only Nx, Lerna or Rush lists gets none, since its scripts can't find the root's CLI.
+  - A package's script with the same name is replaced, as at the root. Run again, `init` finds the scripts as it wrote them and changes nothing.
+
+  The summary names the scripts it replaced, by `package.json`, not what they ran.
 - **The agent skill** ([Agent skill](16-agent-skill.md)).
 
 What it never does:
@@ -221,7 +228,7 @@ Each step is a command and what it does, the commands in a column of their own. 
 3. `visual:check` checks the stories against them.
 4. Commit the changes, baselines included.
 
-Then a line pointing to each `visual-check.ts` for options for every story (its comment shows how to spread it into `preview`), and a docs link for CI. Before the closing message, a line names any scripts `init` replaced. It lists no files written and says nothing about remote content.
+Then a line pointing to each `visual-check.ts` for options for every story (its comment shows how to spread it into `preview`), a line naming the packages whose own scripts check only their Storybook, when there are any (`To check only one Storybook, run the scripts in its package: apps/a and apps/b.`), and a docs link for CI. Before the closing message, a line names any scripts `init` replaced, with the `package.json` of each. It lists no files written and says nothing about remote content.
 
 The commands and paths are the workspace root's. Run below the root, the heading names the root's folder to run them from, as in `Next, from acme-monorepo:`, and so do Rush's printed install steps. When a folder between has the root's name too, the path to the root follows, dim: `acme (../..)`. The terminal UI shows the folder in the accent colour.
 

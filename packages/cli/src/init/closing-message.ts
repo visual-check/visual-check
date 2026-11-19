@@ -69,9 +69,28 @@ export interface NextSteps {
    */
   modesFiles: string[]
   /**
+   * The workspace packages whose own scripts check only their Storybooks, relative to the workspace root, in the order
+   * of the Storybooks.
+   */
+  packageFolders: string[]
+  /**
    * The docs page that tells how to run visual-check in CI.
    */
   ciUrl: string
+}
+
+/**
+ * The scripts `init` replaced in one `package.json`.
+ */
+export interface ReplacedScripts {
+  /**
+   * The path of the `package.json`, relative to the workspace root.
+   */
+  manifest: string
+  /**
+   * The names of the scripts it replaced there, in order.
+   */
+  names: string[]
 }
 
 /**
@@ -103,6 +122,10 @@ interface ClosingMessageInput {
    */
   scripts: Answers['scripts']
   /**
+   * The absolute folders of the workspace packages whose own scripts check only their Storybooks.
+   */
+  packageDirs: readonly string[]
+  /**
    * Whether a Storybook has no baselines yet, so the steps include writing the first ones.
    */
   needsBaselines: boolean
@@ -121,18 +144,22 @@ const commandGap = 3
 const longestColumnCommand = 32
 
 /**
- * Returns the line that names the scripts `init` replaced in `package.json`, or `undefined` when it replaced none.
+ * Returns the line that names the scripts `init` replaced, by the `package.json` it replaced them in, or `undefined`
+ * when it replaced none. A `package.json` with none replaced is left out.
  */
-export function replacedScriptsLineOf(names: readonly string[]): string | undefined {
-  if (names.length === 0) {
+export function replacedScriptsLineOf(replaced: readonly ReplacedScripts[]): string | undefined {
+  const groups = replaced.filter(({ names }) => names.length > 0)
+  const count = groups.reduce((total, { names }) => total + names.length, 0)
+
+  if (count === 0) {
     return undefined
   }
 
-  if (names.length === 1) {
-    return `Replaced the script ${names[0]} in package.json.`
-  }
+  const where = groups.map(({ manifest, names }) => `${listOf(names)} in ${manifest}`)
+  // Each group may hold `and` already, so a comma sets the last group apart.
+  const joined = where.length > 1 ? `${where.slice(0, -1).join(', ')}, and ${where.at(-1)}` : where.join('')
 
-  return `Replaced the scripts ${listOf(names)} in package.json.`
+  return `Replaced the ${count === 1 ? 'script' : 'scripts'} ${joined}.`
 }
 
 /**
@@ -221,6 +248,15 @@ export function modesLineOf(files: readonly string[]): Segment[] {
 }
 
 /**
+ * Returns the line that names the workspace packages whose own scripts check only their Storybooks.
+ *
+ * @public
+ */
+export function packageScriptsLineOf(folders: readonly string[]): Segment[] {
+  return ['To check only one Storybook, run the scripts in its package: ', ...codeListOf(folders), '.']
+}
+
+/**
  * Returns the line that points to the docs page about running visual-check in CI.
  *
  * @public
@@ -231,12 +267,13 @@ export function ciLineOf(url: string): Segment[] {
 
 /**
  * Returns what the closing message tells: the steps to a first passing run, each `visual-check.ts` where options for
- * every story go, and the docs page that tells how to run visual-check in CI. The step that writes the first baselines
- * is left out when no Storybook needs them. The commands and paths are the workspace root's, so below the root it's
- * named to run them from. Paths and URLs in the text are code segments. It says nothing about remote content.
+ * every story go, the packages whose own scripts check only their Storybooks, and the docs page that tells how to run
+ * visual-check in CI. The step that writes the first baselines is left out when no Storybook needs them. The commands
+ * and paths are the workspace root's, so below the root it's named to run them from. Paths and URLs in the text are
+ * code segments. It says nothing about remote content.
  */
 export function nextStepsOf(input: ClosingMessageInput): NextSteps {
-  const { cwd, root, packageManager, storybooks, scripts, needsBaselines } = input
+  const { cwd, root, packageManager, storybooks, scripts, packageDirs, needsBaselines } = input
   const modesFiles = storybooks.map(({ configDir }) => relativePathOf(root, join(configDir, 'visual-check.ts')))
 
   return {
@@ -255,6 +292,7 @@ export function nextStepsOf(input: ClosingMessageInput): NextSteps {
     ],
     runFrom: cwd === root ? undefined : workspaceFolderOf(cwd, root),
     modesFiles: [...new Set(modesFiles)],
+    packageFolders: packageDirs.map((dir) => relativePathOf(root, dir)),
     ciUrl: docsUrlOf('ci'),
   }
 }
@@ -286,9 +324,10 @@ function stepLinesOf(rows: readonly NextStepRow[], number: number, commandWidth:
 
 /**
  * Returns the message `init` ends with, as plain text: the next steps numbered, each command in a column of its own,
- * then where options for every story go, when a Storybook was set up, and the docs link for CI.
+ * then where options for every story go, when a Storybook was set up, the packages whose own scripts check only their
+ * Storybooks, when there are any, and the docs link for CI.
  */
-export function closingMessageTextOf({ steps, runFrom, modesFiles, ciUrl }: NextSteps): string {
+export function closingMessageTextOf({ steps, runFrom, modesFiles, packageFolders, ciUrl }: NextSteps): string {
   const commandWidth = commandColumnWidthOf(steps)
 
   return [
@@ -296,6 +335,7 @@ export function closingMessageTextOf({ steps, runFrom, modesFiles, ciUrl }: Next
     ...steps.flatMap((rows, index) => stepLinesOf(rows, index + 1, commandWidth)),
     '',
     ...(modesFiles.length === 0 ? [] : [textOf(modesLineOf(modesFiles))]),
+    ...(packageFolders.length === 0 ? [] : [textOf(packageScriptsLineOf(packageFolders))]),
     textOf(ciLineOf(ciUrl)),
     '',
   ].join('\n')
