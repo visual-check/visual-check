@@ -59,7 +59,7 @@ Top level:
 | `shard`           | `{ index, total }`, or `null`                                                                                                                                   |
 | `selection`       | How stories were picked: `{ by, base, changedFiles, fallback }`, where `by` is `"affected"`, `"all"` or `"filter"` ([Affected stories](11-affected-stories.md)) |
 | `reportDir`       | Relative to the config folder                                                                                                                                   |
-| `storybooks`      | `[{ name, url }]`                                                                                                                                               |
+| `storybooks`      | `[{ name, url }]`. In a local affected run, only its required Storybooks ([Affected stories](11-affected-stories.md#required-storybooks))                       |
 | `counts`          | For `test`: `{ passed, flaky, differs, broken, missing, orphan }`. For `update`: `{ written, deleted, kept, broken, flaky }`                                    |
 | `snapshots`       | The entries                                                                                                                                                     |
 | `warnings`        | From `update`: `{ kind: "real-requests" \| "remote-content", host, stories, message }`                                                                          |
@@ -148,6 +148,7 @@ Both `log` and `live` end with the same block:
 
 - **Remote content:** a failure that differs only inside remote content carries a hint that names the hosts, shows the mask line and links the docs page.
 - **No changed files:** a hint about `--all`.
+- **Storybooks left out:** in a local affected run, a note after the header names the Storybooks no changed file reaches, which the run never reaches ([Affected stories](11-affected-stories.md#required-storybooks)).
 - **Selection couldn't be worked out:** a warning that every story was selected.
 - **Browser exited mid-run:** the run's stderr says so, says that visual-check relaunches it once for the rest of the run (or that no story left needed it), and prints the browser's last output. On exit 2 it comes before the stop message.
 - **Storybook's test path is off:** one warning per Storybook at the end of the run.

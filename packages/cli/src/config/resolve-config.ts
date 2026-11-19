@@ -198,8 +198,10 @@ function pickSide<T extends string | number>(value: T | LocalAndCi<T> | undefine
 
 /**
  * Lists names as prose: `a`, `a and b`, `a, b and c`.
+ *
+ * @public
  */
-function listNames(names: string[]): string {
+export function listNames(names: string[]): string {
   return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : (names[0] ?? '')
 }
 

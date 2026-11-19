@@ -35,7 +35,7 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
 ## The runner script
 
 - It runs the CLI from `setup.json` with the caller's command and flags, plus `--reporter json`.
-- **When the CLI exits 2 because Storybooks are unreachable,** which the JSON's `error.storybooks` says, it:
+- **When the CLI exits 2 because Storybooks are unreachable,** which the JSON's `error.storybooks` says, it handles only those. In a local affected run that list holds only the required Storybooks that are down ([Affected stories](11-affected-stories.md#required-storybooks)). It:
   1. starts each one's command, adding `--ci --exact-port`, after `--` under npm. On Windows it starts the command through a shell;
   2. polls `<url>/index.json` for up to 180 s;
   3. runs the CLI again.

@@ -136,7 +136,7 @@ Readiness and stories
 Visual diff and baselines
 
 - A percent budget rounds down, the neighbourhood filter stays off, and the visual diff uses the logo's magenta and cyan.
-- `update` makes two stability checks, with a majority of three loads. It writes every missing baseline and deletes every orphan, whatever is selected. On Windows it warns about paths over 260 characters.
+- `update` makes two stability checks, with a majority of three loads. It writes every missing baseline and deletes every orphan of the Storybooks in the run, whatever is selected. On Windows it warns about paths over 260 characters.
 - Images are compared in a pool of half the CPUs, at least 1 and at most 4.
 - A baseline name that's too long is shortened with a hash. Two snapshots that map to one file exit 2.
 - Any edit to visual-check's config selects every story.

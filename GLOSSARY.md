@@ -128,6 +128,10 @@ _Avoid_: Changes, change set, diff files
 The stories whose rendering the changed files can alter. When that can't be determined, every story counts as affected.
 _Avoid_: Diff stories, relevant stories
 
+**Required Storybook**:
+A Storybook a local affected run needs: one whose stories globs match a changed or reached file, one a changed file affects as a whole, one with a changed baseline in its baselines folder, or one whose globs can't be read. The run reaches, checks and covers only those.
+_Avoid_: Needed Storybook, affected Storybook
+
 **Browser**:
 What a snapshot is rendered in: one exact Chromium build, which the project chooses.
 _Avoid_: Browser engine, Safari

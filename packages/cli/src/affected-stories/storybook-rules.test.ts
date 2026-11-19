@@ -1,6 +1,13 @@
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { type AffectedStorybook, type AffectedStorybookInput, affectedStorybooksOf } from './storybook-rules.js'
+import {
+  type AffectedStorybook,
+  type AffectedStorybookInput,
+  affectedStorybooksOf,
+  type ChangeReach,
+  type RequiredStorybookInput,
+  requiredStorybooksOf,
+} from './storybook-rules.js'
 
 /**
  * The project root the rules tests use. Never read from disk.
@@ -31,13 +38,15 @@ const rootStorybook: AffectedStorybookInput = {
  * Gives the stories files the rules select in the root Storybook, given the reached and the changed files.
  */
 function affectedIn(reached: readonly string[], changedFiles: readonly string[] = reached): AffectedStorybook[] {
-  return affectedStorybooksOf({
-    root,
-    storybooks: [rootStorybook],
-    reached: new Set(reached),
-    changedFiles,
-    ...noPackages,
-  })
+  return affectedStorybooksOf(
+    {
+      root,
+      reached: new Set(reached),
+      changedFiles,
+      ...noPackages,
+    },
+    [rootStorybook],
+  )
 }
 
 /**
@@ -139,13 +148,15 @@ describe('affectedStorybooksOf', () => {
     }
 
     expect(
-      affectedStorybooksOf({
-        root,
-        storybooks: [outside, rootStorybook],
-        reached: new Set(['src/card.stories.tsx']),
-        changedFiles: ['src/card.stories.tsx'],
-        ...noPackages,
-      }),
+      affectedStorybooksOf(
+        {
+          root,
+          reached: new Set(['src/card.stories.tsx']),
+          changedFiles: ['src/card.stories.tsx'],
+          ...noPackages,
+        },
+        [outside, rootStorybook],
+      ),
     ).toEqual([{ all: true }, some('./src/card.stories.tsx')])
   })
 
@@ -158,13 +169,15 @@ describe('affectedStorybooksOf', () => {
     }
 
     expect(
-      affectedStorybooksOf({
-        root,
-        storybooks: [outside, rootStorybook],
-        reached: new Set(['src/card.stories.tsx']),
-        changedFiles: ['src/card.stories.tsx'],
-        ...noPackages,
-      }),
+      affectedStorybooksOf(
+        {
+          root,
+          reached: new Set(['src/card.stories.tsx']),
+          changedFiles: ['src/card.stories.tsx'],
+          ...noPackages,
+        },
+        [outside, rootStorybook],
+      ),
     ).toEqual([{ all: true }, some('./src/card.stories.tsx')])
   })
 
@@ -177,13 +190,15 @@ describe('affectedStorybooksOf', () => {
     }
 
     expect(
-      affectedStorybooksOf({
-        root,
-        storybooks: [storybook],
-        reached: new Set(['preview.ts']),
-        changedFiles: [],
-        ...noPackages,
-      }),
+      affectedStorybooksOf(
+        {
+          root,
+          reached: new Set(['preview.ts']),
+          changedFiles: [],
+          ...noPackages,
+        },
+        [storybook],
+      ),
     ).toEqual([{ all: true }])
   })
 
@@ -212,13 +227,15 @@ describe('affectedStorybooksOf', () => {
      * Gives the stories files the rules select in both Storybooks.
      */
     function affectedInBoth(reached: readonly string[], changedFiles: readonly string[] = reached) {
-      return affectedStorybooksOf({
-        root,
-        storybooks: [web, ui],
-        reached: new Set(reached),
-        changedFiles,
-        ...noPackages,
-      })
+      return affectedStorybooksOf(
+        {
+          root,
+          reached: new Set(reached),
+          changedFiles,
+          ...noPackages,
+        },
+        [web, ui],
+      )
     }
 
     it('selects the stories files of each Storybook from the root-relative paths', () => {
@@ -247,13 +264,15 @@ describe('affectedStorybooksOf', () => {
       }
 
       expect(
-        affectedStorybooksOf({
-          root,
-          storybooks: [docs],
-          reached: new Set(['packages/docs/src/intro.stories.tsx', 'src/other.stories.tsx']),
-          changedFiles: ['packages/docs/src/intro.stories.tsx'],
-          ...noPackages,
-        }),
+        affectedStorybooksOf(
+          {
+            root,
+            reached: new Set(['packages/docs/src/intro.stories.tsx', 'src/other.stories.tsx']),
+            changedFiles: ['packages/docs/src/intro.stories.tsx'],
+            ...noPackages,
+          },
+          [docs],
+        ),
       ).toEqual([some('src/intro.stories.tsx')])
     })
 
@@ -261,15 +280,17 @@ describe('affectedStorybooksOf', () => {
      * Gives the stories the rules select in both Storybooks when the packages changed reach `reachedFromPackages`.
      */
     function affectedByPackages(changedPackages: string[], reachedFromPackages: string[]) {
-      return affectedStorybooksOf({
-        root,
-        storybooks: [web, ui],
-        reached: new Set(),
-        changedFiles: [],
-        ...noPackages,
-        changedPackages: new Set(changedPackages),
-        reachedFromPackages: new Set(reachedFromPackages),
-      })
+      return affectedStorybooksOf(
+        {
+          root,
+          reached: new Set(),
+          changedFiles: [],
+          ...noPackages,
+          changedPackages: new Set(changedPackages),
+          reachedFromPackages: new Set(reachedFromPackages),
+        },
+        [web, ui],
+      )
     }
 
     it('selects every story of a Storybook inside a changed package', () => {
@@ -310,19 +331,113 @@ describe('affectedStorybooksOf', () => {
       ]
 
       expect(
-        affectedStorybooksOf({
-          root,
-          storybooks: withIds,
-          reached: new Set(),
-          changedFiles: [],
-          ...noPackages,
-          changedBaselines: [{ folder: join(root, 'packages/web/baselines'), stem: 'page--a.dark' }],
-        }),
+        affectedStorybooksOf(
+          {
+            root,
+            reached: new Set(),
+            changedFiles: [],
+            ...noPackages,
+            changedBaselines: [{ folder: join(root, 'packages/web/baselines'), stem: 'page--a.dark' }],
+          },
+          withIds,
+        ),
       ).toEqual([{ all: false, storiesFiles: new Set(), storyIds: new Set(['page--a']) }, some()])
     })
 
     it("does not count another Storybook's config folder", () => {
       expect(affectedInBoth(['packages/ui/.storybook/preview.tsx'])).toEqual([some(), some()])
     })
+  })
+})
+
+describe('requiredStorybooksOf', () => {
+  /**
+   * A Storybook at the project root, whose globs read `./src/*.stories.tsx`.
+   */
+  const atRoot: RequiredStorybookInput = {
+    dir: root,
+    configDir: join(root, '.storybook'),
+    baselines: join(root, '.visual-check/baselines'),
+    storiesMatchers: [/^\.\/src\/[^/]+\.stories\.tsx$/],
+  }
+
+  /**
+   * A Storybook in `apps/web`, whose globs read its own `./src/*.stories.tsx` and `packages/ui`'s.
+   */
+  const web: RequiredStorybookInput = {
+    dir: join(root, 'apps/web'),
+    configDir: join(root, 'apps/web/.storybook'),
+    baselines: join(root, 'apps/web/.visual-check/baselines'),
+    storiesMatchers: [/^\.\/src\/[^/]+\.stories\.tsx$/, /^\.\.\/\.\.\/packages\/ui\/src\/[^/]+\.stories\.tsx$/],
+  }
+
+  /**
+   * Tells which of the root and `apps/web` Storybooks the change requires.
+   */
+  function requiredBy(change: Partial<ChangeReach>, storybooks = [atRoot, web]): boolean[] {
+    return requiredStorybooksOf({ root, reached: new Set(), changedFiles: [], ...noPackages, ...change }, storybooks)
+  }
+
+  it('requires the Storybook whose globs match a reached file', () => {
+    expect(
+      requiredBy({ reached: new Set(['apps/web/src/page.stories.tsx']), changedFiles: ['apps/web/src/page.tsx'] }),
+    ).toEqual([false, true])
+  })
+
+  it('requires the Storybook whose globs match a reached file in another package, by a ../ import path', () => {
+    expect(
+      requiredBy({
+        reached: new Set(['packages/ui/src/button.stories.tsx']),
+        changedFiles: ['packages/ui/src/button.tsx'],
+      }),
+    ).toEqual([false, true])
+  })
+
+  it('requires the Storybook whose globs match a changed file the graph does not hold: deleted, or .mdx', () => {
+    const withMdx: RequiredStorybookInput = { ...atRoot, storiesMatchers: [/^\.\/src\/[^/]+\.mdx$/] }
+
+    expect(requiredBy({ changedFiles: ['apps/web/src/old.stories.tsx'] })).toEqual([false, true])
+    expect(requiredBy({ changedFiles: ['src/intro.mdx'] }, [withMdx, web])).toEqual([true, false])
+  })
+
+  it("requires the Storybook whose globs can't be read, whatever changed", () => {
+    expect(requiredBy({ changedFiles: ['README.md'] }, [{ ...atRoot, storiesMatchers: undefined }, web])).toEqual([
+      true,
+      false,
+    ])
+  })
+
+  it('requires the Storybook whose baselines folder holds a changed baseline, and not another', () => {
+    expect(requiredBy({ changedBaselines: [{ folder: web.baselines, stem: 'page--default' }] })).toEqual([false, true])
+  })
+
+  it.each([
+    ['changed', { changedFiles: ['apps/web/.storybook/preview.ts'] }],
+    ['reached', { reached: new Set(['apps/web/.storybook/preview.ts']), changedFiles: ['apps/web/src/theme.ts'] }],
+  ])('requires the Storybook whose preview.ts is %s', (_name, change) => {
+    expect(requiredBy(change)).toEqual([false, true])
+  })
+
+  it('requires the Storybook a changed package reaches through a file its globs match', () => {
+    const change = {
+      changedPackages: new Set(['packages/ui']),
+      reachedFromPackages: new Set(['packages/ui/src/index.ts', 'packages/ui/src/button.stories.tsx']),
+    }
+
+    expect(requiredBy(change)).toEqual([false, true])
+  })
+
+  it('requires the Storybook inside a changed package, and every Storybook when the root package changed', () => {
+    expect(requiredBy({ changedPackages: new Set(['apps/web']) })).toEqual([false, true])
+    expect(requiredBy({ changedPackages: new Set(['.']) })).toEqual([true, true])
+  })
+
+  it('requires the Storybook whose folder is outside the root', () => {
+    expect(requiredBy({ changedFiles: ['README.md'] }, [{ ...atRoot, dir: '/elsewhere' }, web])).toEqual([true, false])
+  })
+
+  it('does not require a Storybook for a reached file no glob matches, nor for an unrelated changed file', () => {
+    expect(requiredBy({ reached: new Set(['src/button.tsx', 'apps/web/src/page.tsx']) })).toEqual([false, false])
+    expect(requiredBy({ changedFiles: ['README.md'] })).toEqual([false, false])
   })
 })

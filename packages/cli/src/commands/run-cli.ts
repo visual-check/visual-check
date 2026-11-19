@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { availableParallelism, totalmem } from 'node:os'
 import { dirname, resolve } from 'node:path'
+import type { ReadStoriesMatchers, TracedChanges } from '../affected-stories/affected-stories.js'
 import { type FindReachedFiles, findReachedFilesWithFallow } from '../affected-stories/fallow-graph.js'
 import { InvalidBaseError } from '../affected-stories/git-changes.js'
 import { checkBrowserPackage } from '../browser/browser-package.js'
@@ -33,6 +34,7 @@ import { reporterOf } from '../reporter/reporter-choice.js'
 import type { RunReporter } from '../reporter/run-event.js'
 import { appendStepSummary, StepSummaryError } from '../step-summary/step-summary.js'
 import type { Story } from '../storybook/read-stories.js'
+import { readStoriesMatchers } from '../storybook/stories-matchers.js'
 import { type BrowserPlace, browserPlaceOf } from './browser-route.js'
 import { checkStorybooks } from './check-storybooks.js'
 import { dockerProblemOf } from './docker-problem.js'
@@ -41,7 +43,13 @@ import { parseCommandLine, type RunOptions, UsageError } from './parse-command-l
 import { readImageFit } from './read-image-fit.js'
 import { type RunOutput, reportLineOf, runOutputOf } from './run-output.js'
 import { type TestReportFacts, testReportFor, updateReportFor } from './run-report.js'
-import { effectiveSelectionOf, type RunSelection, workOutRunSelection } from './run-selection.js'
+import {
+  effectiveSelectionOf,
+  type RequiredStorybooks,
+  type RunSelection,
+  workOutRequiredStorybooks,
+  workOutRunSelection,
+} from './run-selection.js'
 import { runSnapshots, type SnapshotRunResult } from './run-snapshots.js'
 import { reportProblemOf } from './stop-message.js'
 import { crashedBy, type RunStop, stoppedBy, stoppedTestOf, stoppedUpdateOf, usageFailureOf } from './stopped-run.js'
@@ -218,6 +226,12 @@ export interface RunCliOptions {
    * runs Fallow. A test gives a fake.
    */
   findReachedFiles?: FindReachedFiles
+  /**
+   * Reads each Storybook's stories globs, which a local affected run asks once per Storybook in the run when a changed
+   * file is left to the rules. By default it loads each Storybook's `main.*` with the Storybook's own `storybook`
+   * package. A test gives a fake.
+   */
+  readStoriesMatchers?: ReadStoriesMatchers
 }
 
 /**
@@ -272,19 +286,23 @@ export async function runCli(
  * installed and readable, the config is found, valid and usable, the browser has a place to run (inside visual-check's
  * image when its marker fits the browser package and the platform, else on the host for `platform: 'host'` when Chrome
  * for Testing builds for the machine, else in a container), Docker answers `docker info` with a running engine of Linux
- * containers when the browser runs in a container, every Storybook in the run has a supported `storybook` version
- * installed, and every Storybook in the run answers with an index. In a container, the browser reaches a Storybook by
+ * containers when the browser runs in a container, every required Storybook has a supported `storybook` version
+ * installed, and every required Storybook answers with an index. In a container, the browser reaches a Storybook by
  * the route the five rules give, from the container the CLI runs in, Docker's engine and the OS. Then it reads and
- * checks the per-story options of every story each Storybook's index lists, whatever the selection.
+ * checks the per-story options of every story each required Storybook's index lists, whatever the selection.
  *
  * With no selection flag, a run covers the affected stories, unless the `CI` environment variable says it's in CI or
- * it's a shard, when it covers every story without reading git or the graph. Affected stories are worked out once for
- * every Storybook in the run, before anything is captured: when git or the graph can't answer, the run covers every
- * story, with a warning on stderr that says why; when no story is affected, a note after the header says so and
- * hints at `--all`; and a `--base` that names no commit stops the run with exit 2. The report's `selection` says what
- * picked the stories, with the base, the number of changed files and why it fell back.
+ * it's a shard, when it covers every story without reading git or the graph. A run that covers the affected stories
+ * traces the changed files once, before any Storybook is reached; a `--base` that names no commit stops it there with
+ * exit 2. Locally, it then requires only the Storybooks a changed file reaches, and a note after the header names the
+ * ones it leaves out, which it never reaches; with no changed file that counts, it requires none and exits 0. Any
+ * other run, an affected one in CI included, requires every Storybook in it. Affected stories are then worked out for
+ * every required Storybook, before anything is captured: when git or the graph can't answer, the run covers every
+ * story, with a warning on stderr that says why; when no story is affected, a note after the header says so and hints
+ * at `--all`. The report's `selection` says what picked the stories, with the base, the number of changed files and
+ * why it fell back.
  *
- * `test` then runs the consistency check of every Storybook in the run, reports each missing baseline, each story whose
+ * `test` then runs the consistency check of every required Storybook, reports each missing baseline, each story whose
  * stories file failed to load and each orphan it finds, whatever the selection, and exits 1 when it finds any. Locally,
  * and in CI when it finds nothing, it captures the selected stories that aren't disabled. When the `CI` environment
  * variable says the run is in CI, a `test` whose check finds anything prints the check's findings and exits 1 without
@@ -292,7 +310,7 @@ export async function runCli(
  * and exits 0 when it finds nothing, else 1. `test --shard k/n` takes only its share of the stories files, worked out
  * from each Storybook's index and baselines folder, and runs no consistency check. `update` captures the selected
  * stories that aren't disabled and the snapshots outside the selection whose baselines are missing, then deletes the
- * orphans of the Storybooks in the run. A finished `update` ends stderr with a warning for the hosts its stories send
+ * orphans of the required Storybooks. A finished `update` ends stderr with a warning for the hosts its stories send
  * real network requests to and the hosts whose remote content they show, grouped by host with the first story IDs of
  * each. The config's `silenceHosts` leaves hosts out. `test` never watches requests. The warning never changes the exit
  * code.
@@ -500,8 +518,8 @@ async function loadedConfigOf(context: RunContext): Promise<{ config: ResolvedCo
 }
 
 /**
- * Runs `test` or `update` once its config is loaded: clears the report folder for `test`, places the browser, checks
- * the Storybooks, then takes the snapshots.
+ * Runs `test` or `update` once its config is loaded: clears the report folder for `test`, places the browser, works
+ * out the Storybooks the run requires and checks them, then takes the snapshots.
  *
  * @throws {Error} Any error besides the problems that stop the run with exit 2.
  */
@@ -524,7 +542,13 @@ async function configuredOutcomeOf(
     return stoppedBy(placement.problem, inRun)
   }
 
-  const checks = await checkStorybooks(config.storybooks, context.cwd)
+  const required = await requiredStorybooksOfRun(context, config)
+
+  if ('stopped' in required) {
+    return required
+  }
+
+  const checks = await checkStorybooks(required.required, context.cwd)
   const warnings = checks.warnings.map((warning) => `${warning}\n`).join('')
 
   if ('problems' in checks) {
@@ -533,6 +557,7 @@ async function configuredOutcomeOf(
     return {
       stopped: {
         ...inRun,
+        storybooks: required.required,
         stdout: '',
         stderr: `${warnings}${problems}`,
         message: problems,
@@ -547,7 +572,43 @@ async function configuredOutcomeOf(
     placement,
     storybooks: checks.storybooks,
     warnings,
+    traced: required.traced,
+    leftOut: required.leftOut,
   })
+}
+
+/**
+ * Works out the Storybooks the run requires, as `workOutRequiredStorybooks` says, finding what the changed files reach
+ * with the caller's `findReachedFiles`, else with Fallow, and reading the stories globs with the caller's
+ * `readStoriesMatchers`. Gives the stop of a `--base` that names no commit.
+ *
+ * @throws {Error} Any error besides an `InvalidBaseError`.
+ */
+async function requiredStorybooksOfRun(
+  context: RunContext,
+  config: ResolvedConfig,
+): Promise<RequiredStorybooks | { stopped: RunStop }> {
+  try {
+    return await workOutRequiredStorybooks({
+      selection: context.options.selection,
+      ci: context.ci,
+      baseRef: context.options.baseRef,
+      environment: context.environment,
+      cwd: context.cwd,
+      storybooks: config.storybooks,
+      baselinesFolders: config.baselinesFolders,
+      configPath: config.path,
+      affected: config.affected,
+      findReachedFiles: context.cliOptions.findReachedFiles ?? findReachedFilesWithFallow,
+      readStoriesMatchers: context.cliOptions.readStoriesMatchers ?? readStoriesMatchers,
+    })
+  } catch (error) {
+    if (error instanceof InvalidBaseError) {
+      return stoppedBy(`${error.message}\n`, { configPath: config.path, storybooks: config.storybooks })
+    }
+
+    throw error
+  }
 }
 
 /**
@@ -568,13 +629,21 @@ interface CheckedRun {
    */
   placement: { place: BrowserPlace; host: BrowserHost }
   /**
-   * Each Storybook in the run, in config order, with its version and stories.
+   * Each Storybook the run requires, in config order, with its version and stories.
    */
   storybooks: { storybook: ResolvedStorybook; version: string | undefined; stories: Story[] }[]
   /**
    * The warnings the checks printed, each on its own line.
    */
   warnings: string
+  /**
+   * The changes traced since the base, set exactly when the run covers the affected stories.
+   */
+  traced: TracedChanges | undefined
+  /**
+   * The Storybooks in the run that it leaves out, since no changed file reaches them, in config order.
+   */
+  leftOut: ResolvedStorybook[]
 }
 
 /**
@@ -589,22 +658,22 @@ async function snapshotsOutcomeOf(
   config: ResolvedConfig,
   checked: CheckedRun,
 ): Promise<RunOutcome> {
-  const selected = await runSelectionOf(context, config, checked)
-
-  if ('stopped' in selected) {
-    return selected
-  }
+  const selection = await workOutRunSelection({
+    selection: context.options.selection,
+    storybooks: checked.storybooks,
+    required: checked,
+  })
 
   try {
-    return await selectedOutcomeOf(context, config, checked, selected.selection)
+    return await selectedOutcomeOf(context, config, checked, selection)
   } catch (error) {
     // A bug once the stories are worked out still leaves test's error report with how the run picked them.
     return crashedBy(error, {
       stdout: '',
-      stderr: `${checked.warnings}${selected.selection.warning}`,
+      stderr: `${checked.warnings}${selection.warning}`,
       configPath: config.path,
-      storybooks: config.storybooks,
-      selection: selected.selection.report,
+      storybooks: checked.storybooks.map(({ storybook }) => storybook),
+      selection: selection.report,
     })
   }
 }
@@ -665,7 +734,7 @@ async function selectedOutcomeOf(
         message: result.stopMessage,
         // The report folder that failed can't take an error report either.
         configPath: result.reportFailed ? undefined : config.path,
-        storybooks: config.storybooks,
+        storybooks: checked.storybooks.map(({ storybook }) => storybook),
         unreachable: [],
         selection: selection.report,
       },
@@ -698,52 +767,6 @@ async function selectedOutcomeOf(
     { ...facts, consistencyOnly: options.consistency, shard: options.shard },
     result.checkedOnly,
   )
-}
-
-/**
- * Works out the stories the run takes in each Storybook, as `workOutRunSelection` says, finding what the changed files
- * reach with the caller's `findReachedFiles`, else with Fallow. Gives the stop of a `--base` that names no commit, with
- * the checks' warnings before the problem on stderr.
- *
- * @throws {Error} Any error besides an `InvalidBaseError`.
- */
-async function runSelectionOf(
-  context: RunContext,
-  config: ResolvedConfig,
-  checked: CheckedRun,
-): Promise<{ selection: RunSelection } | { stopped: RunStop }> {
-  try {
-    return {
-      selection: await workOutRunSelection({
-        selection: context.options.selection,
-        baseRef: context.options.baseRef,
-        environment: context.environment,
-        cwd: context.cwd,
-        storybooks: checked.storybooks,
-        baselinesFolders: config.baselinesFolders,
-        configPath: config.path,
-        affected: config.affected,
-        findReachedFiles: context.cliOptions.findReachedFiles ?? findReachedFilesWithFallow,
-      }),
-    }
-  } catch (error) {
-    if (error instanceof InvalidBaseError) {
-      const problem = `${error.message}\n`
-
-      return {
-        stopped: {
-          stdout: '',
-          stderr: `${checked.warnings}${problem}`,
-          message: problem,
-          configPath: config.path,
-          storybooks: config.storybooks,
-          unreachable: [],
-        },
-      }
-    }
-
-    throw error
-  }
 }
 
 /**

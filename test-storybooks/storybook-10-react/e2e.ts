@@ -23,8 +23,9 @@
 // changed, which a checkout of one commit can tell too. They change a stories file or a helper of this package's
 // stories while the CLI runs, and put back its exact bytes after, also on SIGINT or SIGTERM. The working tree's own
 // changes must affect no story. Their server lists every story, and their baselines folder holds a baseline for every
-// snapshot, so the consistency check finds nothing and `test` captures the selected stories alone. They share the
-// cache as the host cases do, but it needn't start empty.
+// snapshot, so the consistency check finds nothing and `test` captures the selected stories alone. Four more run
+// `test` with a config of the three test Storybooks, at URLs nothing answers at, and check which Storybooks it leaves
+// out or names in the report's error. They share the cache as the host cases do, but it needn't start empty.
 //
 // With `--arm64` it runs one case, with TEST_STORYBOOK_IMAGE naming an arm64 build of the browser image: `test` with
 // the platform `linux/arm64` and the default tolerance gives the expected outcomes against the committed baselines,
@@ -1123,6 +1124,24 @@ interface HostRun {
    * cache folder.
    */
   environment: NodeJS.ProcessEnv
+}
+
+/**
+ * A config with the three test Storybooks, each at a URL nothing answers at, that the affected stories cases run with.
+ */
+interface ThreeStorybooks {
+  /**
+   * The path of the config, which sets `platform: 'host'`.
+   */
+  config: string
+  /**
+   * The folder the config is in, beside which `test` writes its report.
+   */
+  folder: string
+  /**
+   * Each Storybook's name and URL, in config order, as the report's `error.storybooks` names them.
+   */
+  storybooks: { name: string; url: string }[]
 }
 
 /**
@@ -3704,18 +3723,34 @@ function noAffectedStoryNoteOf(base: string, changedFiles: number): string {
 }
 
 /**
- * Gives the problem when the line after a run's header isn't this one, or none.
+ * The note `test` prints after its header, after the note about an empty affected selection when there is one, when an
+ * affected run leaves out these Storybooks. It mirrors the CLI's note (`packages/cli/src/commands/run-selection.ts`),
+ * which the e2e can't import.
  */
-function noteProblems(run: CliRun, note: string): string[] {
-  const line = run.stdout.split('\n')[1]
+function leftOutNoteOf(names: string[]): string {
+  const listed = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : (names[0] ?? '')
 
-  return line === note ? [] : [`the line after test's header is "${line ?? ''}", expected "${note}"`]
+  if (names.length === 1) {
+    return `Storybook ${listed} is left out, since no changed file reaches it.`
+  }
+
+  return `Storybooks ${listed} are left out, since no changed file reaches them.`
+}
+
+/**
+ * Gives the problem when the line of a run's stdout at this index, 1 for the line after its header, isn't this note,
+ * or none.
+ */
+function noteProblems(run: CliRun, note: string, index = 1): string[] {
+  const line = run.stdout.split('\n')[index]
+
+  return line === note ? [] : [`line ${index + 1} of test's stdout is "${line ?? ''}", expected "${note}"`]
 }
 
 /**
  * With the working tree as it is, `test --base HEAD` exits 0 with no snapshot line, the note after its header says no
- * story is affected and counts the files git says changed, and its report selects by the affected stories from
- * `HEAD`, with that count and no fallback.
+ * story is affected and counts the files git says changed, the next one says the Storybook `react` is left out, and its
+ * report selects by the affected stories from `HEAD`, with that count and no fallback.
  */
 async function checkNoChange(host: HostRun, folder: string): Promise<string[]> {
   const base = headSha()
@@ -3726,6 +3761,7 @@ async function checkNoChange(host: HostRun, folder: string): Promise<string[]> {
     ...exitCodeProblems('test', run, 0),
     ...selectedKeysProblems(run, []),
     ...noteProblems(run, noAffectedStoryNoteOf(base, changedFiles)),
+    ...noteProblems(run, leftOutNoteOf(['react']), 2),
     ...reportLineProblems(run, folder),
     ...reportProblems(folder, (report) => affectedSelectionProblems(report, base, changedFiles)),
   ]
@@ -3753,15 +3789,124 @@ async function checkChangedFile(host: HostRun, folder: string, path: string, key
 }
 
 /**
- * The affected stories cases, in order: no change, then the host story's stories file changed, then the helper that
- * only some stories files import changed.
+ * Gives the URL of a port on this machine that nothing listens on: one the system gave a server that is closed again.
  */
-function affectedCases(host: HostRun, folder: string, expected: Outcomes): Case[] {
+async function unusedUrl(): Promise<string> {
+  const server = createServer()
+
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+
+  const { port } = server.address() as AddressInfo
+
+  await new Promise((resolve) => server.close(resolve))
+
+  return `http://127.0.0.1:${port}`
+}
+
+/**
+ * Writes a config with `platform: 'host'` and the three test Storybooks, `storybook-9`, `storybook-10` and
+ * `storybook-11`, each with its own folder as `dir`, its baselines in a new folder and a URL nothing answers at, into a
+ * new folder inside the temporary one, so its report goes apart from the host config's. Storybook 9.1 and 11 take
+ * their stories from this package's stories folder, so their stories globs point into another package.
+ */
+async function writeThreeStorybooksConfig(folder: string): Promise<ThreeStorybooks> {
+  const configFolder = join(folder, 'three')
+  const storybooks: ThreeStorybooks['storybooks'] = []
+  const settings: Record<string, { url: string; dir: string; baselines: string }> = {}
+
+  mkdirSync(configFolder, { recursive: true })
+
+  for (const version of [9, 10, 11]) {
+    const name = `storybook-${version}`
+    const url = await unusedUrl()
+
+    storybooks.push({ name, url })
+    settings[name] = {
+      url,
+      dir: join(dirname(packageDir), `storybook-${version}-react`),
+      baselines: join(configFolder, 'baselines', name),
+    }
+  }
+
+  const config = join(configFolder, 'visual-check.config.mjs')
+
+  writeFileSync(config, `export default ${JSON.stringify({ storybooks: settings, platform: 'host' }, null, 2)}\n`)
+
+  return { config, folder: configFolder, storybooks }
+}
+
+/**
+ * Runs `test` with no selection flag and `--base HEAD`, with the three Storybooks' config, so it requires only the
+ * Storybooks the working tree's changes reach.
+ */
+async function testThreeStorybooks(host: HostRun, three: ThreeStorybooks): Promise<CliRun> {
+  return await runCli(['test', '--base', 'HEAD', '--config', three.config], host.environment)
+}
+
+/**
+ * With the working tree as it is, `test --base HEAD` with the three Storybooks exits 0 with no snapshot line, the note
+ * after its header says no story is affected, the next one says all three Storybooks are left out, and its report has
+ * no error, since it reached none of them.
+ */
+async function checkThreeNoChange(host: HostRun, three: ThreeStorybooks): Promise<string[]> {
+  const base = headSha()
+  const changedFiles = changedFileCount()
+  const run = await testThreeStorybooks(host, three)
+
+  return [
+    ...exitCodeProblems('test', run, 0),
+    ...selectedKeysProblems(run, []),
+    ...noteProblems(run, noAffectedStoryNoteOf(base, changedFiles)),
+    ...noteProblems(run, leftOutNoteOf(three.storybooks.map(({ name }) => name)), 2),
+    ...reportProblems(three.folder, (report) =>
+      problemUnless(report.error === null, `error is ${JSON.stringify(report.error)}, expected null`),
+    ),
+  ]
+}
+
+/**
+ * With the change line added to the file at `path`, `test --base HEAD` with the three Storybooks exits 2 before any
+ * capture, with no snapshot line and no report entry, and its report's `error.storybooks` names exactly these
+ * Storybooks, in config order with their URLs: the ones the change reaches, since nothing answers at any of them.
+ */
+async function checkThreeChangedFile(
+  host: HostRun,
+  three: ThreeStorybooks,
+  path: string,
+  names: string[],
+): Promise<string[]> {
+  return await withChangedFile(path, async () => {
+    const run = await testThreeStorybooks(host, three)
+    const expected = three.storybooks.filter(({ name }) => names.includes(name))
+
+    return [
+      ...exitCodeProblems('test', run, 2),
+      ...selectedKeysProblems(run, []),
+      ...reportProblems(three.folder, (report) => [
+        ...problemUnless(
+          isDeepStrictEqual(report.error?.storybooks, expected),
+          `error.storybooks is ${JSON.stringify(report.error?.storybooks)}, expected ${JSON.stringify(expected)}`,
+        ),
+        ...problemUnless(
+          report.snapshots.length === 0,
+          `the report has ${report.snapshots.length} entries, expected none`,
+        ),
+      ]),
+    ]
+  })
+}
+
+/**
+ * The affected stories cases, in order: no change, then the host story's stories file changed, then the helper that
+ * only some stories files import changed, then the same with the three Storybooks: no change, the host story's stories
+ * file changed, then Storybook 9.1's `main.ts` changed, then Storybook 11's.
+ */
+function affectedCases(host: HostRun, folder: string, three: ThreeStorybooks, expected: Outcomes): Case[] {
   const storiesFiles = readStoriesFiles()
 
   return [
     {
-      name: 'no change: test --base HEAD exits 0 capturing nothing, its note says no story is affected and counts the files git says changed, its report selects by the affected stories from HEAD with that count and no fallback',
+      name: 'no change: test --base HEAD exits 0 capturing nothing, its note says no story is affected and counts the files git says changed, the next says react is left out, its report selects by the affected stories from HEAD with that count and no fallback',
       run: () => checkNoChange(host, folder),
     },
     {
@@ -3783,23 +3928,53 @@ function affectedCases(host: HostRun, folder: string, expected: Outcomes): Case[
         return await checkChangedFile(host, folder, join(helperFolder, affectedHelper.name), keys)
       },
     },
+    {
+      name: 'three Storybooks, no change: test --base HEAD exits 0 capturing nothing, its notes say no story is affected and storybook-9, storybook-10 and storybook-11 are left out, its report has no error',
+      run: () => checkThreeNoChange(host, three),
+    },
+    {
+      name: `three Storybooks, stories file changed: with a line added to ${hostStoryId}'s stories file, test --base HEAD exits 2 and error.storybooks names all three, storybook-9 and storybook-11 through their stories globs into this package`,
+      run: async () => {
+        const storiesFile = resolvePath(packageDir, storiesFileOf(storiesFiles, hostStoryId))
+        const names = three.storybooks.map(({ name }) => name)
+
+        return await checkThreeChangedFile(host, three, storiesFile, names)
+      },
+    },
+    {
+      name: "three Storybooks, Storybook 9.1's main.ts changed: test --base HEAD exits 2 and error.storybooks names storybook-9 alone",
+      run: async () => {
+        const mainConfig = join(dirname(packageDir), 'storybook-9-react', '.storybook', 'main.ts')
+
+        return await checkThreeChangedFile(host, three, mainConfig, ['storybook-9'])
+      },
+    },
+    {
+      name: "three Storybooks, Storybook 11's main.ts changed: test --base HEAD exits 2 and error.storybooks names storybook-11 alone, so Storybook 9.1's and 10's globs were read",
+      run: async () => {
+        const mainConfig = join(dirname(packageDir), 'storybook-11-react', '.storybook', 'main.ts')
+
+        return await checkThreeChangedFile(host, three, mainConfig, ['storybook-11'])
+      },
+    },
   ]
 }
 
 /**
  * Runs the affected stories cases and resolves with whether all of them passed. They share one server, whose
  * `index.json` lists every story but the stories of the file that fails to load, and a temporary folder, which holds
- * their config, a baseline for every expected snapshot and their report, and their cache when the caller doesn't name
- * one.
+ * their config, a baseline for every expected snapshot and their report, the three Storybooks' config and its report,
+ * and their cache when the caller doesn't name one.
  */
 async function runAffectedCases(expected: Outcomes): Promise<boolean> {
   return await withStorybookServer({}, (server) =>
-    withTemporaryFolder((folder) => {
+    withTemporaryFolder(async (folder) => {
       const host = hostRunOf(folder, server.url)
+      const three = await writeThreeStorybooksConfig(folder)
 
       writeEveryBaseline(folder, expected)
 
-      return runCases(affectedCases(host, folder, expected))
+      return await runCases(affectedCases(host, folder, three, expected))
     }),
   )
 }

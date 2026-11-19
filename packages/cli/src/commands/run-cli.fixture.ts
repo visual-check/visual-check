@@ -77,7 +77,8 @@ export const noMarker: RunCliOptions = { imageMarkerPath: absentMarkerPath }
  * Docker Desktop's, Linux on x64, and no container around the run, so no test runs the real `docker` or reads the
  * machine it runs on. `update` captures a page again at once, so no test waits a second for it. The clock stands
  * still, so every `test`'s counts end with ` · 0 ms`. Asking for the import graph fails the run, so no test runs the
- * real Fallow: a test of affected stories gives its own.
+ * real Fallow: a test of affected stories gives its own. No Storybook's stories globs can be read, so each Storybook a
+ * changed file is left for stays required: a test of required Storybooks gives its own reader.
  */
 export const hostOptions = {
   probeDocker: async () => ({ cpus: 4, memoryBytes: 16 * 2 ** 30, desktop: false }),
@@ -90,6 +91,7 @@ export const hostOptions = {
   recaptureDelayMs: 0,
   now: () => 0,
   findReachedFiles: () => Promise.reject(new Error('The run asked for the import graph.')),
+  readStoriesMatchers: () => Promise.resolve(undefined),
 } satisfies RunCliOptions
 
 /**

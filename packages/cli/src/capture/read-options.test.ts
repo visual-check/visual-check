@@ -3,7 +3,7 @@ import { optionsReadAnswer } from '../storybook/options-read.fixture.js'
 import { optionsReadExpression, type StoriesFile } from '../storybook/options-read.js'
 import { minimumText, newestSupportedMajor } from '../storybook/storybook-version.js'
 import { type CaptureSettings, pageSetupOf } from './capture-session.js'
-import { BrowserExitedError, PageTimeoutError } from './driver/driver.js'
+import { BrowserExitedError, PageNavigatedAwayError, PageTimeoutError } from './driver/driver.js'
 import { FakeDriver, type FakePageBehaviour } from './fake-driver.fixture.js'
 import { type OptionsRequest, readStoryOptions } from './read-options.js'
 
@@ -280,6 +280,45 @@ describe('readStoryOptions', () => {
 
     expect(read).toEqual({
       problem: `visual-check couldn't load Storybook web's preview at ${request.previewUrl}: net::ERR_CONNECTION_REFUSED. Check that Storybook is running there, or restart it.`,
+    })
+    expect(driver.methods()).toEqual(['1:goto', '1:close'])
+  })
+
+  it('loads the preview again on a fresh page when it reloads itself while loading, as Vite does once it has optimized new dependencies', async () => {
+    const reload = async (): Promise<never> => {
+      throw new PageNavigatedAwayError(request.previewUrl, 'The page navigated to itself before it loaded.')
+    }
+    const driver = new FakeDriver({ pages: [{ goto: reload }, { goto: reload }] })
+    const read = await readStoryOptions(driver, settings, request)
+
+    expect(read).toHaveProperty('files')
+    expect(driver.methods()).toEqual(['1:goto', '1:close', '2:goto', '2:close', '3:goto', '3:evaluate', '3:close'])
+    expect(driver.setups).toHaveLength(3)
+  })
+
+  it('gives the load problem when the preview still reloads itself after 2 retries', async () => {
+    const message = `The page navigated to ${request.previewUrl} before ${request.previewUrl} loaded.`
+    const reload = async (): Promise<never> => {
+      throw new PageNavigatedAwayError(request.previewUrl, message)
+    }
+    const driver = new FakeDriver({ pages: [{ goto: reload }, { goto: reload }, { goto: reload }] })
+
+    expect(await readStoryOptions(driver, settings, request)).toEqual({
+      problem: `visual-check couldn't load Storybook web's preview at ${request.previewUrl}: ${message} Check that Storybook is running there, or restart it.`,
+    })
+    expect(driver.methods()).toEqual(['1:goto', '1:close', '2:goto', '2:close', '3:goto', '3:close'])
+  })
+
+  it('gives the load problem at once when the preview navigates to another URL while loading', async () => {
+    const elsewhere = 'http://127.0.0.1:6006/login'
+    const { driver, read } = await readWith({
+      goto: async () => {
+        throw new PageNavigatedAwayError(elsewhere, `The page navigated to ${elsewhere} before it loaded.`)
+      },
+    })
+
+    expect(read).toEqual({
+      problem: `visual-check couldn't load Storybook web's preview at ${request.previewUrl}: The page navigated to ${elsewhere} before it loaded. Check that Storybook is running there, or restart it.`,
     })
     expect(driver.methods()).toEqual(['1:goto', '1:close'])
   })
