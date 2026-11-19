@@ -1,0 +1,258 @@
+import { describe, expect, it } from 'vitest'
+import type { PackageManager } from './package-manager.js'
+import {
+  type NxStartInput,
+  nxProjectNameOf,
+  nxStartOf,
+  nxStorybookPluginTargetOf,
+  portOfStart,
+  type StartWorkspace,
+  type StorybookStart,
+  startCommandOf,
+  startWorkspaceOf,
+} from './storybook-start.js'
+import type { PackageManagerLists } from './workspace.js'
+
+/**
+ * A `project.json` named `name`, if given, whose `storybook` target has `options`.
+ */
+function projectJson(options: Record<string, unknown>, name?: string): Record<string, unknown> {
+  return { name, targets: { storybook: { executor: '@nx/storybook:storybook', options } } }
+}
+
+/**
+ * What `nxStartOf` reads for the `.storybook` of the package `libs/ui`, which has no `package.json` and no Storybook
+ * plugin, with `overrides`.
+ */
+function inputOf(overrides: Partial<NxStartInput>): NxStartInput {
+  return {
+    projectJson: undefined,
+    packageName: undefined,
+    hasManifest: false,
+    folderName: 'ui',
+    packageDir: 'libs/ui',
+    configDir: 'libs/ui/.storybook',
+    inferredTarget: undefined,
+    ...overrides,
+  }
+}
+
+describe('nxStartOf', () => {
+  it('reads the project name and port of the storybook target', () => {
+    expect(nxStartOf(inputOf({ projectJson: projectJson({ port: 4400 }, 'ui-lib') }))).toEqual({
+      kind: 'nx',
+      project: 'ui-lib',
+      target: 'storybook',
+      port: 4400,
+    })
+  })
+
+  it("takes the package's name, then the folder name, when project.json has none", () => {
+    const json = projectJson({})
+
+    expect(nxStartOf(inputOf({ projectJson: json, packageName: '@acme/ui' }))).toMatchObject({ project: '@acme/ui' })
+    expect(nxStartOf(inputOf({ projectJson: json }))).toMatchObject({ project: 'ui' })
+  })
+
+  it.each([0, 70000, 6006.5, '6006'])('has no port for %j', (port) => {
+    expect(nxStartOf(inputOf({ projectJson: projectJson({ port }) }))).toMatchObject({ kind: 'nx', port: undefined })
+  })
+
+  it('serves the config folder its configDir option names, relative to the root', () => {
+    const json = projectJson({ configDir: './libs/ui/docs/.storybook/' })
+
+    expect(nxStartOf(inputOf({ projectJson: json, configDir: 'libs/ui/docs/.storybook' }))).toMatchObject({
+      kind: 'nx',
+    })
+    expect(nxStartOf(inputOf({ projectJson: json }))).toBeUndefined()
+  })
+
+  it("serves the package's .storybook without a configDir option", () => {
+    const json = projectJson({})
+
+    expect(nxStartOf(inputOf({ projectJson: json }))).toMatchObject({ kind: 'nx' })
+    expect(nxStartOf(inputOf({ projectJson: json, configDir: 'libs/ui/docs/.storybook' }))).toBeUndefined()
+    expect(
+      nxStartOf(inputOf({ projectJson: json, folderName: 'web', packageDir: '.', configDir: '.storybook' })),
+    ).toMatchObject({ project: 'web' })
+  })
+
+  it.each([
+    ['no project.json', undefined],
+    ['no targets', { name: 'ui' }],
+    ['no storybook target', { name: 'ui', targets: { build: {} } }],
+    ['a storybook target that is not an object', { name: 'ui', targets: { storybook: 'x' } }],
+  ])('gives nothing for %s without the Storybook plugin', (_, json) => {
+    expect(nxStartOf(inputOf({ projectJson: json }))).toBeUndefined()
+  })
+
+  it('takes a storybook target without options', () => {
+    expect(nxStartOf(inputOf({ projectJson: { targets: { storybook: {} } } }))).toEqual({
+      kind: 'nx',
+      project: 'ui',
+      target: 'storybook',
+      port: undefined,
+    })
+  })
+
+  it("infers the plugin's target for a project's .storybook", () => {
+    const inferred = { kind: 'nx', project: 'ui', target: 'sb', port: undefined }
+
+    expect(nxStartOf(inputOf({ projectJson: { name: 'ui' }, inferredTarget: 'sb' }))).toEqual(inferred)
+    expect(nxStartOf(inputOf({ hasManifest: true, packageName: 'ui', inferredTarget: 'sb' }))).toEqual(inferred)
+  })
+
+  it('infers no target for a folder that is no project, or another config folder', () => {
+    expect(nxStartOf(inputOf({ inferredTarget: 'storybook' }))).toBeUndefined()
+    expect(
+      nxStartOf(inputOf({ hasManifest: true, inferredTarget: 'storybook', configDir: 'libs/ui/docs/.storybook' })),
+    ).toBeUndefined()
+  })
+
+  it('takes the storybook target over the inferred one', () => {
+    expect(nxStartOf(inputOf({ projectJson: projectJson({ port: 4400 }), inferredTarget: 'sb' }))).toMatchObject({
+      target: 'storybook',
+      port: 4400,
+    })
+  })
+})
+
+describe('nxProjectNameOf', () => {
+  it("gives project.json's name, or undefined when it names none", () => {
+    expect(nxProjectNameOf({ name: 'ui' })).toBe('ui')
+    expect(nxProjectNameOf({ name: '' })).toBeUndefined()
+    expect(nxProjectNameOf({})).toBeUndefined()
+    expect(nxProjectNameOf(undefined)).toBeUndefined()
+  })
+})
+
+describe('nxStorybookPluginTargetOf', () => {
+  it.each([
+    ['the plugin by name', { plugins: ['@nx/storybook/plugin'] }, 'storybook'],
+    ['the plugin with no options', { plugins: [{ plugin: '@nx/storybook/plugin' }] }, 'storybook'],
+    [
+      'the plugin with a target name',
+      { plugins: [{ plugin: '@nx/storybook/plugin', options: { serveStorybookTargetName: 'sb' } }] },
+      'sb',
+    ],
+    ['other plugins', { plugins: ['@nx/vite/plugin', { plugin: '@nx/jest/plugin' }] }, undefined],
+    ['no plugins', {}, undefined],
+    ['no nx.json', undefined, undefined],
+  ])('reads %s', (_, nxJson, target) => {
+    expect(nxStorybookPluginTargetOf(nxJson)).toBe(target)
+  })
+})
+
+describe('portOfStart', () => {
+  it('gives the port of a script call or an Nx target', () => {
+    const call = { script: 'sb', subcommand: 'dev' as const, configDir: undefined, port: 6007 }
+
+    expect(portOfStart({ kind: 'script', call, packageDir: '/project', packageName: undefined })).toBe(6007)
+    expect(portOfStart({ kind: 'nx', project: 'ui', target: 'storybook', port: 4400 })).toBe(4400)
+    expect(portOfStart(undefined)).toBeUndefined()
+  })
+})
+
+describe('startWorkspaceOf', () => {
+  it.each<[PackageManager, PackageManagerLists, string[]]>([
+    ['pnpm', { pnpm: ['a'], workspaces: ['b'] }, ['a']],
+    ['pnpm', { pnpm: undefined, workspaces: ['b'] }, []],
+    ['npm', { pnpm: ['a'], workspaces: ['b'] }, ['b']],
+    ['yarn', { pnpm: undefined, workspaces: ['b'] }, ['b']],
+    ['bun', { pnpm: undefined, workspaces: ['b'] }, ['b']],
+    ['npm', { pnpm: ['a'], workspaces: undefined }, []],
+    ['yarn', { pnpm: undefined, workspaces: undefined }, []],
+  ])('gives the packages %s reads from the lists %j', (packageManager, packageManagerLists, listed) => {
+    const project = { root: '/p', yarnBerry: false, workspace: { packageManagerLists } }
+
+    expect(startWorkspaceOf(project, packageManager)).toEqual({
+      root: '/p',
+      listedPackageDirs: listed,
+      yarnBerry: false,
+    })
+  })
+})
+
+describe('startCommandOf', () => {
+  /**
+   * Builds the start of a Storybook whose `sb` script is in the package in `packageDir`, named `packageName`.
+   */
+  function startIn(packageDir: string, packageName: string | undefined): StorybookStart {
+    const call = { script: 'sb', subcommand: 'dev' as const, configDir: undefined, port: 6006 }
+
+    return { kind: 'script', call, packageDir, packageName }
+  }
+
+  /**
+   * The workspace at `/p`, whose packages `packages/ui` and `libs/ui` the package manager's own list names when
+   * `listed`.
+   */
+  function workspaceOf(listed: boolean): StartWorkspace {
+    return { root: '/p', listedPackageDirs: listed ? ['packages/ui', 'libs/ui'] : [], yarnBerry: false }
+  }
+
+  it.each<[StorybookStart, string]>([
+    [startIn('/p', 'app'), 'npm run sb'],
+    [{ kind: 'nx', project: 'ui', target: 'storybook', port: undefined }, 'npx nx run ui:storybook'],
+    [{ kind: 'nx', project: 'ui', target: 'sb', port: undefined }, 'npx nx run ui:sb'],
+  ])('words %j under npm', (start, command) => {
+    expect(startCommandOf(start, 'npm', workspaceOf(true))).toBe(command)
+  })
+
+  it.each<[boolean, string]>([
+    [false, 'npx --no-install nx run ui:storybook'],
+    [true, 'yarn exec nx run ui:storybook'],
+  ])('runs an Nx target through the nx binary under Yarn, Yarn 2 or later: %s', (yarnBerry, command) => {
+    const start: StorybookStart = { kind: 'nx', project: 'ui', target: 'storybook', port: undefined }
+
+    expect(startCommandOf(start, 'yarn', { ...workspaceOf(true), yarnBerry })).toBe(command)
+  })
+
+  it.each<[PackageManager, boolean, string]>([
+    ['pnpm', true, 'pnpm run sb'],
+    ['npm', true, 'npm run sb'],
+    ['yarn', true, 'yarn run sb'],
+    ['bun', true, 'bun run sb'],
+    ['pnpm', false, 'pnpm run sb'],
+  ])('runs a root script as is under %s, listed: %s', (packageManager, listed, command) => {
+    expect(startCommandOf(startIn('/p', 'app'), packageManager, workspaceOf(listed))).toBe(command)
+  })
+
+  it.each<[PackageManager, string]>([
+    ['pnpm', 'pnpm --filter @acme/ui run sb'],
+    ['npm', 'npm run sb --workspace packages/ui'],
+    ['yarn', 'yarn workspace @acme/ui run sb'],
+    ['bun', 'bun run --filter @acme/ui sb'],
+  ])("runs a named package's script through %s's workspace support", (packageManager, command) => {
+    expect(startCommandOf(startIn('/p/packages/ui', '@acme/ui'), packageManager, workspaceOf(true))).toBe(command)
+  })
+
+  it.each<[PackageManager, string]>([
+    ['pnpm', 'pnpm --filter ./packages/ui run sb'],
+    ['npm', 'npm run sb --workspace packages/ui'],
+    ['yarn', 'cd packages/ui && yarn run sb'],
+    ['bun', 'bun run --filter ./packages/ui sb'],
+  ])('picks a package with no name by its folder under %s, or goes into it under Yarn', (packageManager, command) => {
+    expect(startCommandOf(startIn('/p/packages/ui', undefined), packageManager, workspaceOf(true))).toBe(command)
+  })
+
+  it.each<PackageManager>(['pnpm', 'npm', 'yarn', 'bun'])(
+    "goes into the package's folder under %s when its own list names another package only",
+    (packageManager) => {
+      const workspace = { root: '/p', listedPackageDirs: ['packages/ui'], yarnBerry: false }
+
+      expect(startCommandOf(startIn('/p/libs/ui', '@acme/ui'), packageManager, workspace)).toBe(
+        `cd libs/ui && ${packageManager} run sb`,
+      )
+    },
+  )
+
+  it.each<PackageManager>(['pnpm', 'npm', 'yarn', 'bun'])(
+    "goes into the package's folder under %s when its own list doesn't name the packages",
+    (packageManager) => {
+      expect(startCommandOf(startIn('/p/libs/ui', '@acme/ui'), packageManager, workspaceOf(false))).toBe(
+        `cd libs/ui && ${packageManager} run sb`,
+      )
+    },
+  )
+})

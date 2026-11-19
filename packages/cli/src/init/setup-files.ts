@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { isJsonObject } from './package-manager.js'
+import { relativePathOf } from './find-storybooks.js'
+import { dependencyFields, isJsonObject } from './package-manager.js'
 
 /**
  * The content of each `.visual-check/.gitignore`: ignore everything except the baselines and this file.
@@ -44,6 +45,42 @@ export interface ConfigStorybook {
    * Storybook's config folder, relative to `dir`. Left out when it is `'.storybook'`.
    */
   configDir?: string
+}
+
+/**
+ * Builds the config entry of a Storybook from where it is: its package folder becomes `dir`, relative to the config's
+ * folder, and its config folder becomes `configDir`, relative to that package folder.
+ */
+export function configStorybookOf(place: {
+  /**
+   * The Storybook's name.
+   */
+  name: string
+  /**
+   * The URL the Storybook is served at.
+   */
+  url: string
+  /**
+   * The absolute folder that holds the config.
+   */
+  configFolder: string
+  /**
+   * The absolute folder of the Storybook's package.
+   */
+  packageDir: string
+  /**
+   * The absolute path of Storybook's config folder.
+   */
+  configDir: string
+}): ConfigStorybook {
+  const { name, url, configFolder, packageDir, configDir } = place
+
+  return {
+    name,
+    url,
+    dir: relativePathOf(configFolder, packageDir),
+    configDir: relativePathOf(packageDir, configDir),
+  }
 }
 
 /**
@@ -163,19 +200,60 @@ function ownScriptsOf(manifest: Record<string, unknown>, manifestPath: string): 
 }
 
 /**
+ * Reads a `package.json` as its text and its parsed object. Throws when it can't be read or isn't a JSON object, with
+ * `use` saying what `init` meant to do, as in `can't ${use}`.
+ */
+function readManifestFile(manifestPath: string, use: string): { text: string; manifest: Record<string, unknown> } {
+  const text = readFileSync(manifestPath, 'utf8')
+  const manifest: unknown = JSON.parse(text)
+
+  if (!isJsonObject(manifest)) {
+    throw new Error(`${manifestPath} is not a JSON object, so init can't ${use}.`)
+  }
+
+  return { text, manifest }
+}
+
+/**
+ * Writes a changed manifest back to the `package.json` `text` was read from, the way that text is written: its
+ * indentation, its line endings (LF or CRLF) and its trailing newline (or lack of one). Key order stays as it is.
+ */
+function writeManifestFile(manifestPath: string, text: string, manifest: Record<string, unknown>): void {
+  const json = JSON.stringify(manifest, null, indentationOf(text)) + (text.endsWith('\n') ? '\n' : '')
+
+  writeFileSync(manifestPath, text.includes('\r\n') ? json.replaceAll('\n', '\r\n') : json)
+}
+
+/**
+ * Sets a dependency a `package.json` lists to `version`, in the field that lists it, when it's at another spec, such as
+ * `^1.2.3`. A dependency it doesn't list is left out, and an unchanged file isn't written. The file keeps its
+ * indentation, line endings, key order and trailing newline. Throws when the file can't be read or isn't a JSON object.
+ */
+export function pinDependency(manifestPath: string, name: string, version: string): void {
+  const { text, manifest } = readManifestFile(manifestPath, `pin ${name}`)
+
+  for (const field of dependencyFields) {
+    const listed = manifest[field]
+
+    if (isJsonObject(listed) && Object.hasOwn(listed, name)) {
+      if (listed[name] !== version) {
+        listed[name] = version
+        writeManifestFile(manifestPath, text, manifest)
+      }
+
+      return
+    }
+  }
+}
+
+/**
  * Sets the scripts of a `package.json`: adds the missing ones and replaces the ones that run something else. Gives the
  * names of the scripts it replaced, in the given order. The file keeps its indentation, its line endings (LF or CRLF),
  * its key order and its trailing newline (or lack of one). When nothing changes, the file isn't written. Throws when
  * the file isn't a JSON object or its `scripts` isn't one.
  */
 export function setScripts(manifestPath: string, scripts: Record<string, string>): string[] {
-  const text = readFileSync(manifestPath, 'utf8')
-  const manifest: unknown = JSON.parse(text)
-
-  if (!isJsonObject(manifest)) {
-    throw new Error(`${manifestPath} is not a JSON object, so init can't add scripts to it.`)
-  }
-
+  const { text, manifest } = readManifestFile(manifestPath, 'add scripts to it')
   const existing = ownScriptsOf(manifest, manifestPath) ?? {}
   const changed = Object.keys(scripts).filter(
     (name) => !Object.hasOwn(existing, name) || existing[name] !== scripts[name],
@@ -186,9 +264,7 @@ export function setScripts(manifestPath: string, scripts: Record<string, string>
   }
 
   manifest.scripts = { ...existing, ...scripts }
-  const json = JSON.stringify(manifest, null, indentationOf(text)) + (text.endsWith('\n') ? '\n' : '')
-
-  writeFileSync(manifestPath, text.includes('\r\n') ? json.replaceAll('\n', '\r\n') : json)
+  writeManifestFile(manifestPath, text, manifest)
 
   return changed.filter((name) => Object.hasOwn(existing, name))
 }

@@ -1,5 +1,6 @@
 import { Text } from 'ink'
 import type { ReactNode } from 'react'
+import { type Message, textOf } from '../init/segment.js'
 import { ColouredText } from './coloured-text.js'
 import { glyphs } from './theme.js'
 
@@ -10,7 +11,7 @@ interface AnsweredLineProps {
   /**
    * The question that was asked.
    */
-  message: string
+  message: Message
   /**
    * The answer, as the person sees it.
    */
@@ -23,7 +24,7 @@ interface AnsweredLineProps {
 export function AnsweredLine({ message, answer }: AnsweredLineProps): ReactNode {
   return (
     <Text>
-      <ColouredText colour="accent">{glyphs.passed}</ColouredText> <Text dimColor>{message}</Text>{' '}
+      <ColouredText colour="accent">{glyphs.passed}</ColouredText> <Text dimColor>{textOf(message)}</Text>{' '}
       <ColouredText colour="accent">{answer}</ColouredText>
     </Text>
   )

@@ -1,27 +1,37 @@
 import { describe, expect, it, vi } from 'vitest'
-import { projectOf, storybookOf } from './detected-project.fixture.js'
-import { type PromptRecord, scriptedPrompter } from './prompter.fixture.js'
+import { projectOf, scriptStartOf, storybookOf } from './detected-project.fixture.js'
+import { type PromptRecord, type ScriptedAnswer, scriptedPrompter } from './prompter.fixture.js'
 import { defaultsPrompter } from './prompter.js'
-import { askQuestions } from './questions.js'
+import { askQuestions, plannedQuestionCountOf } from './questions.js'
 
 /**
- * Asks the questions with scripted answers, and gives the answers, the warnings and what the prompter recorded.
+ * Asks the questions with scripted answers, and gives the answers, the warnings and what the prompter recorded. It
+ * checks the progress told before each question: one call per question asked, each with fewer answered than the
+ * total, and the last total the number of questions asked.
  */
 async function ask(
-  scripted: (string | boolean)[],
+  scripted: ScriptedAnswer[],
   options: {
     project?: Parameters<typeof projectOf>[0]
     existingConfig?: { names: Record<string, string> }
   } = {},
 ) {
   const prompter = scriptedPrompter(scripted)
+  const questionProgress = vi.fn((answered: number, total: number) => {
+    expect(answered).toBeLessThan(total)
+  })
   const result = await askQuestions({
     project: projectOf(options.project),
-    prompter,
+    prompter: { ...prompter, questionProgress },
     existingConfig: options.existingConfig,
   })
+  const asked = prompter.records.filter(({ kind }) => kind !== 'invalid' && kind !== 'note').length
 
   expect(prompter.unused()).toEqual([])
+  expect(questionProgress.mock.calls.map(([answered]) => answered)).toEqual(
+    Array.from({ length: asked }, (_, index) => index),
+  )
+  expect(questionProgress.mock.calls.at(-1)?.[1] ?? 0).toBe(asked)
 
   return { ...result, records: prompter.records }
 }
@@ -40,6 +50,11 @@ const hints = {
 }
 
 /**
+ * Where the root Storybook of `projectOf` is: its package, which its dependencies go in too.
+ */
+const rootPlace = { packageDir: '/project', manifestDir: '/project', manifest: {} }
+
+/**
  * Lists the messages of the records of one kind.
  */
 function messagesOf(records: PromptRecord[], kind: PromptRecord['kind']): string[] {
@@ -48,12 +63,12 @@ function messagesOf(records: PromptRecord[], kind: PromptRecord['kind']): string
 
 describe('askQuestions', () => {
   it('asks the questions with their defaults for a project without a start script', async () => {
-    const { answers, warnings, records } = await ask(['', '', '', '', '', true], {
+    const { answers, warnings, records } = await ask(['', '', '', '', '', ''], {
       project: { manifest: { devDependencies: {} } },
     })
 
     expect(records).toEqual([
-      { kind: 'text', message: 'Name of the Storybook in .storybook', defaultValue: 'project', hint: hints.name },
+      { kind: 'text', message: 'Name of the Storybook in project', defaultValue: 'project', hint: hints.name },
       { kind: 'text', message: 'URL of project', defaultValue: 'http://127.0.0.1:6006', hint: hints.url },
       {
         kind: 'text',
@@ -73,7 +88,12 @@ describe('askQuestions', () => {
         defaultValue: 'visual:update',
         hint: hints.updateScript,
       },
-      { kind: 'confirm', message: 'Add the Storybook addon to project?', defaultValue: true, hint: hints.addon },
+      {
+        kind: 'confirm',
+        message: 'Add the Storybook addon to project?',
+        defaultValue: true,
+        hint: hints.addon,
+      },
     ])
     expect(answers).toEqual({
       packageManager: 'pnpm',
@@ -83,19 +103,39 @@ describe('askQuestions', () => {
           name: 'project',
           url: 'http://127.0.0.1:6006',
           startCommand: 'pnpm exec storybook dev -p 6006',
+          ...rootPlace,
         },
       ],
       scripts: { test: { name: 'visual:check', add: true }, update: { name: 'visual:update', add: true } },
-      addons: [{ configDir: '.storybook', name: 'project' }],
+      addons: [
+        { configDir: '.storybook', name: 'project', packageDir: '/project', manifestDir: '/project', manifest: {} },
+      ],
     })
     expect(warnings).toEqual([])
+  })
+
+  it('picks out the folder and the name in the Storybook questions, for the accent colour', async () => {
+    const prompter = defaultsPrompter()
+    const text = vi.spyOn(prompter, 'text')
+    const confirm = vi.spyOn(prompter, 'confirm')
+
+    await askQuestions({ project: projectOf({ manifest: { devDependencies: {} } }), prompter })
+
+    expect(text.mock.calls.map(([message]) => message).slice(0, 3)).toEqual([
+      ['Name of the Storybook in ', { code: 'project' }],
+      ['URL of ', { code: 'project' }],
+      ['Command that starts ', { code: 'project' }],
+    ])
+    expect(confirm.mock.calls.map(([message]) => message)).toEqual([
+      ['Add the Storybook addon to ', { code: 'project' }, '?'],
+    ])
   })
 
   it('takes a custom name, URL and start command', async () => {
     const { answers } = await ask(['web', 'https://sb.test:7000', 'make sb', 'vt', 'vu', false])
 
     expect(answers.storybooks).toEqual([
-      { configDir: '.storybook', name: 'web', url: 'https://sb.test:7000', startCommand: 'make sb' },
+      { configDir: '.storybook', name: 'web', url: 'https://sb.test:7000', startCommand: 'make sb', ...rootPlace },
     ])
     expect(answers.scripts).toEqual({ test: { name: 'vt', add: true }, update: { name: 'vu', add: true } })
     expect(answers.addons).toEqual([])
@@ -109,7 +149,7 @@ describe('askQuestions', () => {
   })
 
   it('asks again after a name that another Storybook has', async () => {
-    const { answers, records } = await ask(['a', '', '', 'a', 'b', '', '', '', '', false, false], {
+    const { answers, records } = await ask(['', 'a', '', '', 'a', 'b', '', '', '', '', []], {
       project: {
         storybooks: [
           storybookOf({ defaultName: 'a' }),
@@ -165,9 +205,9 @@ describe('askQuestions', () => {
   })
 
   it('runs the start script without asking, and defaults to its port', async () => {
-    const startScript = { script: 'storybook', subcommand: 'dev' as const, configDir: undefined, port: 6100 }
+    const start = scriptStartOf('storybook', 6100)
     const { answers, records, warnings } = await ask(['', '', '', '', false], {
-      project: { storybooks: [storybookOf({ startScript })] },
+      project: { storybooks: [storybookOf({ start })] },
     })
 
     expect(records.map(({ message }) => message)).not.toContain('Command that starts project')
@@ -181,10 +221,25 @@ describe('askQuestions', () => {
     expect(warnings).toEqual([])
   })
 
+  it('hints at an Nx target that sets no port, and suggests the default port', async () => {
+    const start = { kind: 'nx' as const, project: 'ui', target: 'sb', port: undefined }
+    const { answers, records } = await ask(['', '', '', '', false], {
+      project: { storybooks: [storybookOf({ start })] },
+    })
+
+    expect(messagesOf(records, 'note')).toEqual([
+      "hint: The ui:sb target sets no port. Set its port option to 6006, so Storybook always starts on the port in project's URL.",
+    ])
+    expect(answers.storybooks[0]).toMatchObject({
+      url: 'http://127.0.0.1:6006',
+      startCommand: 'pnpm exec nx run ui:sb',
+    })
+  })
+
   it('hints at a start script that sets no port', async () => {
-    const startScript = { script: 'sb', subcommand: 'dev' as const, configDir: undefined, port: undefined }
+    const start = scriptStartOf('sb', undefined)
     const { records, warnings } = await ask(['', '', '', '', false], {
-      project: { storybooks: [storybookOf({ startScript })] },
+      project: { storybooks: [storybookOf({ start })] },
     })
 
     expect(messagesOf(records, 'note')).toEqual([
@@ -200,9 +255,9 @@ describe('askQuestions', () => {
   })
 
   it('warns when the URL port differs from the start script port', async () => {
-    const startScript = { script: 'storybook', subcommand: 'dev' as const, configDir: undefined, port: 6100 }
+    const start = scriptStartOf('storybook', 6100)
     const { warnings } = await ask(['', 'http://127.0.0.1:6006', '', '', false], {
-      project: { storybooks: [storybookOf({ startScript })] },
+      project: { storybooks: [storybookOf({ start })] },
     })
 
     expect(warnings).toEqual([
@@ -231,9 +286,9 @@ describe('askQuestions', () => {
   })
 
   it('counts the port of an https URL without one as 443', async () => {
-    const startScript = { script: 'storybook', subcommand: 'dev' as const, configDir: undefined, port: 6006 }
+    const start = scriptStartOf('storybook', 6006)
     const { warnings } = await ask(['', 'https://sb.test', '', '', false], {
-      project: { storybooks: [storybookOf({ startScript })] },
+      project: { storybooks: [storybookOf({ start })] },
     })
 
     expect(warnings).toEqual([
@@ -279,13 +334,13 @@ describe('askQuestions', () => {
 
     expect(messagesOf(records, 'select')).toEqual(['Package manager'])
     expect(answers.packageManager).toBe('yarn')
-    expect(answers.storybooks[0]?.startCommand).toBe('yarn storybook dev -p 6006')
+    expect(answers.storybooks[0]?.startCommand).toBe('npx --no-install storybook dev -p 6006')
   })
 
   it('runs the start script with the package manager answered', async () => {
-    const startScript = { script: 'storybook', subcommand: 'dev' as const, configDir: undefined, port: 6006 }
+    const start = scriptStartOf('storybook', 6006)
     const { answers } = await ask(['', '', '', '', '', false], {
-      project: { packageManager: undefined, storybooks: [storybookOf({ startScript })] },
+      project: { packageManager: undefined, storybooks: [storybookOf({ start })] },
     })
 
     expect(answers.storybooks[0]?.startCommand).toBe('npm run storybook')
@@ -394,11 +449,11 @@ describe('askQuestions', () => {
   })
 
   it('suggests visual:test when the script named visual:check starts Storybook, and says nothing of replacing it', async () => {
-    const startScript = { script: 'visual:check', subcommand: 'dev' as const, configDir: undefined, port: 6006 }
+    const start = scriptStartOf('visual:check', 6006)
     const { answers, records } = await ask(['', '', '', '', false], {
       project: {
         manifest: { scripts: { 'visual:check': 'storybook dev -p 6006' } },
-        storybooks: [storybookOf({ startScript })],
+        storybooks: [storybookOf({ start })],
       },
     })
     const testQuestion = records.find(({ message }) => message.endsWith('visual-check test'))
@@ -417,11 +472,11 @@ describe('askQuestions', () => {
   ])(
     'never takes the name of a script that starts Storybook with the defaults prompter: %s',
     async (script, expected) => {
-      const startScript = { script, subcommand: 'dev' as const, configDir: undefined, port: 6006 }
+      const start = scriptStartOf(script, 6006)
       const { answers } = await askQuestions({
         project: projectOf({
           manifest: { scripts: { [script]: 'storybook dev -p 6006' } },
-          storybooks: [storybookOf({ startScript })],
+          storybooks: [storybookOf({ start })],
         }),
         prompter: defaultsPrompter(),
       })
@@ -430,16 +485,58 @@ describe('askQuestions', () => {
     },
   )
 
+  it("never takes the name of a package's script that starts its Storybook, since the package gets the scripts too", async () => {
+    const start = scriptStartOf('visual:check', 6006, '/project/packages/ui')
+    const { answers } = await askQuestions({
+      project: projectOf({ storybooks: [storybookOf({ packageDir: '/project/packages/ui', start })] }),
+      prompter: defaultsPrompter(),
+    })
+
+    expect(answers.scripts.test).toEqual({ name: 'visual:test', add: true })
+  })
+
+  it("starts a Storybook with Nx's target, and suggests the URL on its port", async () => {
+    const { answers } = await askQuestions({
+      project: projectOf({
+        storybooks: [storybookOf({ start: { kind: 'nx', project: 'ui', target: 'storybook', port: 4400 } })],
+      }),
+      prompter: defaultsPrompter(),
+    })
+
+    expect(answers.storybooks).toEqual([
+      {
+        configDir: '.storybook',
+        name: 'project',
+        url: 'http://127.0.0.1:4400',
+        startCommand: 'pnpm exec nx run ui:storybook',
+        ...rootPlace,
+      },
+    ])
+  })
+
   it('asks again after a script name that starts Storybook or has a space', async () => {
-    const startScript = { script: 'storybook', subcommand: 'dev' as const, configDir: undefined, port: 6006 }
+    const start = scriptStartOf('storybook', 6006)
     const { answers, records } = await ask(['', '', 'storybook', 'a b', 'vt', '', false], {
-      project: { storybooks: [storybookOf({ startScript })] },
+      project: { storybooks: [storybookOf({ start })] },
     })
 
     expect(messagesOf(records, 'invalid')).toEqual([
       'The storybook script starts Storybook. Pick another name.',
       "A script name can't hold spaces.",
     ])
+    expect(answers.scripts.test).toEqual({ name: 'vt', add: true })
+  })
+
+  it("refuses the name of a root script that starts a package's Storybook", async () => {
+    const start = scriptStartOf('sb:ui', 6006, '/project')
+    const { answers, records } = await ask(['', '', 'sb:ui', 'vt', '', false], {
+      project: {
+        manifest: { scripts: { 'sb:ui': 'storybook dev -c packages/ui/.storybook -p 6006' } },
+        storybooks: [storybookOf({ configDir: 'packages/ui/.storybook', packageDir: '/project/packages/ui', start })],
+      },
+    })
+
+    expect(messagesOf(records, 'invalid')).toEqual(['The sb:ui script starts Storybook. Pick another name.'])
     expect(answers.scripts.test).toEqual({ name: 'vt', add: true })
   })
 
@@ -450,46 +547,29 @@ describe('askQuestions', () => {
     expect(answers.scripts.update).toEqual({ name: 'other', add: true })
   })
 
-  it.each([
-    ['9.1.0', 0],
-    ['10.0.0', 1],
-    ['11.0.0', 0],
-    [undefined, 0],
-  ])('asks about the addon for Storybook %s: %s question', async (version, questions) => {
-    const { records } = await ask(questions === 1 ? ['', '', '', '', '', true] : ['', '', '', '', ''], {
-      project: { storybooks: [storybookOf({ version })] },
-    })
-
-    expect(records.filter(({ kind }) => kind === 'confirm')).toHaveLength(questions)
-  })
-
-  it.each(['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'])(
-    'skips the addon question when %s lists it',
-    async (field) => {
-      const manifest = { [field]: { '@visual-check/storybook-addon': '^1.0.0' } }
-      const { answers, records } = await ask(['', '', '', '', ''], { project: { manifest } })
-
-      expect(records.filter(({ kind }) => kind === 'confirm')).toEqual([])
-      expect(answers.addons).toEqual([])
-    },
-  )
-
-  it('asks only about the Storybooks with the addon missing, and keeps the yes answers', async () => {
-    const { answers, records } = await ask(['', '', '', 'b', '', '', '', '', true, false], {
+  it('offers the addon to the Storybooks answered, and keeps the ones ticked', async () => {
+    const { answers, records } = await ask(['', '', '', '', '', '', '', ['docs/.storybook']], {
       project: {
         storybooks: [
-          storybookOf({ defaultName: 'a' }),
-          storybookOf({ configDir: 'docs/.storybook', defaultName: 'b' }),
+          storybookOf({ defaultName: 'a', start: scriptStartOf('sb', 6006) }),
+          storybookOf({ configDir: 'docs/.storybook', defaultName: 'b', start: scriptStartOf('sb', 6007) }),
         ],
       },
     })
 
-    expect(messagesOf(records, 'confirm')).toEqual(['Add the Storybook addon to a?', 'Add the Storybook addon to b?'])
-    expect(answers.addons).toEqual([{ configDir: '.storybook', name: 'a' }])
+    expect(records.at(-1)).toEqual({
+      kind: 'checklist',
+      message: 'Add the Storybook addon to',
+      defaultValue: ['.storybook', 'docs/.storybook'],
+      hint: hints.addon,
+    })
+    expect(answers.addons).toEqual([
+      { configDir: 'docs/.storybook', name: 'b', packageDir: '/project', manifestDir: '/project', manifest: {} },
+    ])
   })
 
-  it('asks no Storybook question with an existing config, and names the addon question after the config', async () => {
-    const { answers, records } = await ask(['', '', true], { existingConfig: { names: { '.storybook': 'web' } } })
+  it('asks no Storybook question with an existing config, and names the addon choice after the config', async () => {
+    const { answers, records } = await ask(['', '', ''], { existingConfig: { names: { '.storybook': 'web' } } })
 
     expect(answers.storybooks).toEqual([])
     expect(records.map(({ message }) => message)).toEqual([
@@ -497,23 +577,15 @@ describe('askQuestions', () => {
       'Name of the script that runs visual-check update',
       'Add the Storybook addon to web?',
     ])
-    expect(answers.addons).toEqual([{ configDir: '.storybook', name: 'web' }])
-  })
-
-  it('asks the addon question only for the Storybooks of an existing config', async () => {
-    const { answers, records } = await ask(['', '', true], {
-      existingConfig: { names: { 'docs/.storybook': 'docs' } },
-      project: { storybooks: [storybookOf(), storybookOf({ configDir: 'docs/.storybook', defaultName: 'docs-x' })] },
-    })
-
-    expect(messagesOf(records, 'confirm')).toEqual(['Add the Storybook addon to docs?'])
-    expect(answers.addons).toEqual([{ configDir: 'docs/.storybook', name: 'docs' }])
+    expect(answers.addons).toEqual([
+      { configDir: '.storybook', name: 'web', packageDir: '/project', manifestDir: '/project', manifest: {} },
+    ])
   })
 
   it('does not warn about an explicit default port that matches the start script', async () => {
-    const startScript = { script: 'storybook', subcommand: 'dev' as const, configDir: undefined, port: 80 }
+    const start = scriptStartOf('storybook', 80)
     const { warnings } = await ask(['', 'http://127.0.0.1:80', '', '', false], {
-      project: { storybooks: [storybookOf({ startScript })] },
+      project: { storybooks: [storybookOf({ start })] },
     })
 
     expect(warnings).toEqual([])
@@ -541,23 +613,325 @@ describe('askQuestions', () => {
 
   it('gives the defaults with the defaults prompter', async () => {
     const prompter = defaultsPrompter()
-    const startScript = { script: 'sb', subcommand: 'dev' as const, configDir: undefined, port: undefined }
+    const start = scriptStartOf('sb', undefined)
     const { answers, warnings } = await askQuestions({
-      project: projectOf({ storybooks: [storybookOf({ startScript })] }),
+      project: projectOf({ storybooks: [storybookOf({ start })] }),
       prompter,
     })
 
     expect(answers).toEqual({
       packageManager: 'pnpm',
       storybooks: [
-        { configDir: '.storybook', name: 'project', url: 'http://127.0.0.1:6006', startCommand: 'pnpm run sb' },
+        {
+          configDir: '.storybook',
+          name: 'project',
+          url: 'http://127.0.0.1:6006',
+          startCommand: 'pnpm run sb',
+          ...rootPlace,
+        },
       ],
       scripts: { test: { name: 'visual:check', add: true }, update: { name: 'visual:update', add: true } },
-      addons: [{ configDir: '.storybook', name: 'project' }],
+      addons: [
+        { configDir: '.storybook', name: 'project', packageDir: '/project', manifestDir: '/project', manifest: {} },
+      ],
     })
     expect(warnings).toEqual([])
     expect(prompter.notes).toEqual([
       "hint: The sb script sets no port. Add -p 6006 to it, so Storybook always starts on the port in project's URL.",
+    ])
+  })
+
+  describe('with more than one Storybook', () => {
+    /**
+     * Two Storybooks in two packages of a pnpm workspace, each started by its package's `storybook` script.
+     */
+    const storybooks = [
+      storybookOf({
+        configDir: 'packages/ui/.storybook',
+        packageDir: '/project/packages/ui',
+        packageName: '@acme/ui',
+        defaultName: 'ui',
+        start: scriptStartOf('storybook', 6006, '/project/packages/ui', '@acme/ui'),
+      }),
+      storybookOf({
+        configDir: 'packages/web/.storybook',
+        packageDir: '/project/packages/web',
+        defaultName: 'web',
+        start: scriptStartOf('storybook', 6007, '/project/packages/web', undefined),
+      }),
+    ]
+    const project = {
+      workspace: {
+        kind: 'pnpm' as const,
+        packageManagerLists: { pnpm: ['packages/ui', 'packages/web'], workspaces: undefined },
+      },
+    }
+
+    it('asks which to set up first, from a checklist with all ticked', async () => {
+      const choices = vi.fn()
+      const prompter = scriptedPrompter(['', '', '', '', '', '', '', []])
+
+      await askQuestions({
+        project: projectOf({ ...project, storybooks }),
+        prompter: {
+          ...prompter,
+          checklist(message, options) {
+            choices(options.choices)
+
+            return prompter.checklist(message, options)
+          },
+        },
+      })
+
+      expect(prompter.records[0]).toEqual({
+        kind: 'checklist',
+        message: 'Storybooks to set up',
+        defaultValue: ['packages/ui/.storybook', 'packages/web/.storybook'],
+        hint: 'The ones ticked go in the config.',
+      })
+      expect(choices).toHaveBeenNthCalledWith(1, [
+        { value: 'packages/ui/.storybook', label: 'packages/ui', hint: '@acme/ui' },
+        { value: 'packages/web/.storybook', label: 'packages/web', hint: 'web' },
+      ])
+      expect(prompter.unused()).toEqual([])
+    })
+
+    it('asks again when none is ticked, then asks only about the ones ticked', async () => {
+      const { answers, records } = await ask([[], ['packages/web/.storybook'], '', '', '', '', ''], {
+        project: { ...project, storybooks },
+      })
+
+      expect(messagesOf(records, 'invalid')).toEqual(['Tick at least one Storybook.'])
+      expect(answers.storybooks).toEqual([
+        {
+          configDir: 'packages/web/.storybook',
+          name: 'web',
+          url: 'http://127.0.0.1:6007',
+          startCommand: 'pnpm --filter ./packages/web run storybook',
+          packageDir: '/project/packages/web',
+          manifestDir: '/project/packages/web',
+          manifest: {},
+        },
+      ])
+      expect(records.filter(({ kind }) => kind === 'checklist').map(({ defaultValue }) => defaultValue)).toEqual([
+        ['packages/ui/.storybook', 'packages/web/.storybook'],
+      ])
+      expect(messagesOf(records, 'confirm')).toEqual(['Add the Storybook addon to web?'])
+      expect(answers.addons).toEqual([
+        {
+          configDir: 'packages/web/.storybook',
+          name: 'web',
+          packageDir: '/project/packages/web',
+          manifestDir: '/project/packages/web',
+          manifest: {},
+        },
+      ])
+    })
+
+    it("goes into a package's folder to start it when the package manager's own list doesn't name the packages", async () => {
+      const { answers } = await askQuestions({
+        project: projectOf({
+          workspace: {
+            kind: 'nx',
+            packageManagerLists: { pnpm: undefined, workspaces: ['packages/ui', 'packages/web'] },
+          },
+          storybooks,
+        }),
+        prompter: defaultsPrompter(),
+      })
+
+      expect(answers.storybooks.map(({ startCommand }) => startCommand)).toEqual([
+        'cd packages/ui && pnpm run storybook',
+        'cd packages/web && pnpm run storybook',
+      ])
+    })
+
+    it('starts a package of an Nx workspace through the package manager when its own list names the package', async () => {
+      const { answers } = await askQuestions({
+        project: projectOf({
+          packageManager: 'npm',
+          workspace: {
+            kind: 'nx',
+            packageManagerLists: { pnpm: undefined, workspaces: ['packages/ui', 'packages/web'] },
+          },
+          storybooks,
+        }),
+        prompter: defaultsPrompter(),
+      })
+
+      expect(answers.storybooks.map(({ startCommand }) => startCommand)).toEqual([
+        'npm run storybook --workspace packages/ui',
+        'npm run storybook --workspace packages/web',
+      ])
+    })
+
+    it("goes into the folder of a package only Nx finds, while one the package manager's list names runs through it", async () => {
+      const { answers } = await askQuestions({
+        project: projectOf({
+          packageManager: 'npm',
+          workspace: {
+            kind: 'nx',
+            packageManagerLists: { pnpm: undefined, workspaces: ['packages/ui'] },
+          },
+          storybooks,
+        }),
+        prompter: defaultsPrompter(),
+      })
+
+      expect(answers.storybooks.map(({ startCommand }) => startCommand)).toEqual([
+        'npm run storybook --workspace packages/ui',
+        'cd packages/web && npm run storybook',
+      ])
+    })
+
+    it('sets up every Storybook with the defaults prompter, each started from the root', async () => {
+      const { answers, warnings } = await askQuestions({
+        project: projectOf({ ...project, storybooks }),
+        prompter: defaultsPrompter(),
+      })
+
+      expect(answers.storybooks.map(({ name, startCommand }) => [name, startCommand])).toEqual([
+        ['ui', 'pnpm --filter @acme/ui run storybook'],
+        ['web', 'pnpm --filter ./packages/web run storybook'],
+      ])
+      expect(warnings).toEqual([])
+    })
+
+    it('asks no checklist with an existing config', async () => {
+      const { records } = await ask(['', '', true], {
+        project: { ...project, storybooks },
+        existingConfig: { names: { 'packages/ui/.storybook': 'ui' } },
+      })
+
+      expect(messagesOf(records, 'checklist')).toEqual([])
+      expect(messagesOf(records, 'confirm')).toEqual(['Add the Storybook addon to ui?'])
+    })
+
+    it('warns once when two Storybooks share a port', async () => {
+      const { warnings } = await ask(['', '', '', '', 'http://127.0.0.1:6006', '', '', []], {
+        project: { ...project, storybooks },
+      })
+
+      expect(warnings).toEqual([
+        "Warning: web's URL, http://127.0.0.1:6006, has port 6006, and its start command, pnpm --filter ./packages/web run storybook, starts Storybook on port 6007.",
+        "Warning: ui and web both use port 6006, so they can't run at the same time. Give each Storybook its own port.",
+      ])
+    })
+
+    it('warns once per port that three Storybooks or more share, and not across hosts', async () => {
+      const storybooks = [
+        storybookOf({ configDir: 'a/.storybook', defaultName: 'a' }),
+        storybookOf({ configDir: 'b/.storybook', defaultName: 'b' }),
+        storybookOf({ configDir: 'c/.storybook', defaultName: 'c' }),
+        storybookOf({ configDir: 'd/.storybook', defaultName: 'd' }),
+        storybookOf({ configDir: 'e/.storybook', defaultName: 'e' }),
+      ]
+      const { warnings } = await ask(
+        [
+          ...['', '', '', ''],
+          ...['', '', ''],
+          ...['', '', ''],
+          ...['', 'http://sb.test:6006', ''],
+          ...['', 'https://127.0.0.1', ''],
+          ...['', '', []],
+        ],
+        { project: { storybooks } },
+      )
+
+      expect(warnings).toEqual([
+        "Warning: a, b and c all use port 6006, so they can't run at the same time. Give each Storybook its own port.",
+      ])
+    })
+
+    it.each(['http://localhost:6006', 'http://[::1]:6006', 'http://0.0.0.0:6006', 'http://127.0.0.2:6006'])(
+      'counts %s and 127.0.0.1 as one host',
+      async (url) => {
+        const { warnings } = await ask(['', '', '', '', url, '', '', []], { project: { ...project, storybooks } })
+
+        expect(warnings.at(-1)).toBe(
+          "Warning: ui and web both use port 6006, so they can't run at the same time. Give each Storybook its own port.",
+        )
+      },
+    )
+  })
+})
+
+describe('plannedQuestionCountOf', () => {
+  /**
+   * Three Storybooks: one on Storybook 10 started by a script, one on Storybook 10 with no start, one on Storybook 9
+   * with no start.
+   */
+  const started = storybookOf({ configDir: 'a/.storybook', defaultName: 'a', start: scriptStartOf('storybook', 6006) })
+  const unstarted = storybookOf({ configDir: 'b/.storybook', defaultName: 'b' })
+  const older = storybookOf({ configDir: 'c/.storybook', defaultName: 'c', version: '9.1.0' })
+  const storybooks = [started, unstarted, older]
+
+  it('counts a name and a URL for a lone Storybook started by a script, the two scripts and the addon', () => {
+    expect(plannedQuestionCountOf({ project: projectOf({ storybooks: [started] }) })).toBe(5)
+  })
+
+  it('counts the package manager only when nothing shows it', () => {
+    expect(plannedQuestionCountOf({ project: projectOf({ packageManager: undefined }) })).toBe(7)
+    expect(plannedQuestionCountOf({ project: projectOf() })).toBe(6)
+  })
+
+  it('counts the checklist and every Storybook, its start command when none is detected, before the checklist', () => {
+    expect(plannedQuestionCountOf({ project: projectOf({ storybooks }) })).toBe(1 + 2 + 3 + 3 + 2 + 1)
+  })
+
+  it('counts only the Storybooks ticked once the checklist is answered, and no addon when none takes it', () => {
+    const project = projectOf({ storybooks })
+
+    expect(plannedQuestionCountOf({ project, chosen: [started] })).toBe(1 + 2 + 2 + 1)
+    expect(plannedQuestionCountOf({ project, chosen: [older] })).toBe(1 + 3 + 2)
+  })
+
+  it('counts no script question for a script that already runs visual-check', () => {
+    const manifest = { scripts: { vt: 'visual-check test', vu: 'visual-check update' } }
+
+    expect(plannedQuestionCountOf({ project: projectOf({ manifest }) })).toBe(4)
+  })
+
+  it("counts only the scripts and the addon, for the config's Storybooks, with an existing config", () => {
+    const project = projectOf({ storybooks })
+
+    expect(plannedQuestionCountOf({ project, existingConfig: { names: { 'b/.storybook': 'b' } } })).toBe(3)
+    expect(plannedQuestionCountOf({ project, existingConfig: { names: { 'c/.storybook': 'c' } } })).toBe(2)
+  })
+
+  it('counts no addon for a Storybook whose package lists it already', () => {
+    const project = projectOf({
+      storybooks: [storybookOf({ manifest: { devDependencies: { '@visual-check/storybook-addon': '1.0.0' } } })],
+    })
+
+    expect(plannedQuestionCountOf({ project })).toBe(5)
+  })
+})
+
+describe('askQuestions with progress', () => {
+  it('tells the progress before each question, plans again once the checklist is answered, and counts a re-ask once', async () => {
+    const questionProgress = vi.fn()
+    const storybooks = [
+      storybookOf({ configDir: 'a/.storybook', defaultName: 'a', start: scriptStartOf('storybook', 6006) }),
+      storybookOf({ configDir: 'b/.storybook', defaultName: 'b' }),
+    ]
+
+    await askQuestions({
+      project: projectOf({ packageManager: undefined, storybooks }),
+      prompter: {
+        ...scriptedPrompter(['', ['a/.storybook'], 'Bad', '', '', '', '', false]),
+        questionProgress,
+      },
+    })
+
+    expect(questionProgress.mock.calls).toEqual([
+      [0, 10],
+      [1, 10],
+      [2, 7],
+      [3, 7],
+      [4, 7],
+      [5, 7],
+      [6, 7],
     ])
   })
 })

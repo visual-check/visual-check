@@ -26,27 +26,32 @@ export function isFile(path: string): boolean {
 }
 
 /**
+ * Returns `folder`, an absolute folder, and its parents, nearest first. The list stops after the folder that holds
+ * `.git` (a folder, or a file in a worktree or a submodule), or at the filesystem root.
+ *
+ * @public
+ */
+export function foldersUp(folder: string): string[] {
+  const parent = dirname(folder)
+
+  if (parent === folder || existsSync(join(folder, '.git'))) {
+    return [folder]
+  }
+
+  return [folder, ...foldersUp(parent)]
+}
+
+/**
  * Returns the absolute path of the config nearest to `startDirectory`, an absolute folder: the first of
- * `configFileNames` that is a file in `startDirectory`, then in each parent. The search stops after the folder that
- * holds `.git` (a folder, or a file in a worktree or a submodule), or at the filesystem root. Returns `undefined` when
+ * `configFileNames` that is a file in `startDirectory`, then in each parent `foldersUp` gives. Returns `undefined` when
  * it finds none.
  *
  * @public
  */
 export function findConfig(startDirectory: string): string | undefined {
-  const found = configFileNames.map((name) => join(startDirectory, name)).find((path) => isFile(path))
-
-  if (found !== undefined) {
-    return found
-  }
-
-  const parent = dirname(startDirectory)
-
-  if (parent === startDirectory || existsSync(join(startDirectory, '.git'))) {
-    return undefined
-  }
-
-  return findConfig(parent)
+  return foldersUp(startDirectory)
+    .flatMap((folder) => configFileNames.map((name) => join(folder, name)))
+    .find((path) => isFile(path))
 }
 
 /**

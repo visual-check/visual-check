@@ -37,6 +37,38 @@ describe('blockingProblemsOf', () => {
     ])
   })
 
+  it('asks for a package.json at the root of a Rush workspace, before the other problems', () => {
+    const project = projectOf({
+      hasManifest: false,
+      denoFile: 'deno.json',
+      workspace: {
+        kind: 'rush',
+        packageManagerLists: { pnpm: undefined, workspaces: undefined },
+      },
+    })
+
+    expect(blockingProblemsOf({ ...fine, project })).toEqual([
+      'visual-check init needs a package.json at the root of this Rush workspace, for its scripts and the CLI. ' +
+        'Add a private one, then run visual-check init again.',
+      "visual-check doesn't support Deno, and this project has deno.json. Run visual-check init in a Node project.",
+    ])
+  })
+
+  it('asks for a package.json at the root of any other workspace without one', () => {
+    const project = projectOf({
+      hasManifest: false,
+      workspace: {
+        kind: 'pnpm',
+        packageManagerLists: { pnpm: ['libs/ui'], workspaces: undefined },
+      },
+    })
+
+    expect(blockingProblemsOf({ ...fine, project })).toEqual([
+      'visual-check init needs a package.json at the root of this workspace, for its scripts and the CLI. ' +
+        'Add a private one, then run visual-check init again.',
+    ])
+  })
+
   it("names a package.json it can't read, relative to the folder it runs in", () => {
     const project = projectOf({ manifestProblem: 'the file must hold a JSON object' })
 
@@ -45,6 +77,24 @@ describe('blockingProblemsOf', () => {
     ])
     expect(blockingProblemsOf({ ...fine, cwd: '/project/docs', project })).toEqual([
       "visual-check init can't read ../package.json: the file must hold a JSON object. Fix it, then run visual-check init again.",
+    ])
+  })
+
+  it("names each Storybook package's package.json it can't read, once, after the root's", () => {
+    const uiProblem = { manifestDir: '/project/packages/ui', manifestProblem: 'Unexpected token' }
+    const project = projectOf({
+      manifestProblem: 'the file must hold a JSON object',
+      storybooks: [
+        storybookOf({ manifestProblem: 'the file must hold a JSON object' }),
+        storybookOf({ configDir: 'packages/ui/.storybook', ...uiProblem }),
+        storybookOf({ configDir: 'packages/ui/docs/.storybook', ...uiProblem }),
+        storybookOf({ configDir: 'packages/web/.storybook', manifestDir: '/project/packages/web' }),
+      ],
+    })
+
+    expect(blockingProblemsOf({ ...fine, cwd: '/project/packages/ui', project })).toEqual([
+      "visual-check init can't read ../../package.json: the file must hold a JSON object. Fix it, then run visual-check init again.",
+      "visual-check init can't read package.json: Unexpected token. Fix it, then run visual-check init again.",
     ])
   })
 
@@ -75,8 +125,8 @@ describe('blockingProblemsOf', () => {
     })
 
     expect(blockingProblemsOf({ ...fine, project })).toEqual([
-      'The Storybook in .storybook runs storybook 9.0.0, and visual-check needs 9.1 or later. Upgrade storybook, then run visual-check init again.',
-      'The Storybook in docs/.storybook runs storybook 8.6.0, and visual-check needs 9.1 or later. Upgrade storybook, then run visual-check init again.',
+      'The Storybook in project runs storybook 9.0.0, and visual-check needs 9.1 or later. Upgrade storybook, then run visual-check init again.',
+      'The Storybook in docs runs storybook 8.6.0, and visual-check needs 9.1 or later. Upgrade storybook, then run visual-check init again.',
     ])
   })
 
@@ -96,7 +146,7 @@ describe('blockingProblemsOf', () => {
 
     expect(blockingProblemsOf({ ...base, project })).toEqual([
       ...common,
-      'The Storybook in .storybook runs storybook 9.0.0, and visual-check needs 9.1 or later. Upgrade storybook, then run visual-check init again.',
+      'The Storybook in project runs storybook 9.0.0, and visual-check needs 9.1 or later. Upgrade storybook, then run visual-check init again.',
     ])
     expect(blockingProblemsOf({ ...base, project: { ...project, storybooks: [] } })).toEqual([
       ...common,
@@ -118,13 +168,44 @@ describe('versionNotesOf', () => {
 
   it('warns of a version above the tested ones', () => {
     expect(versionNotesOf(projectOf({ storybooks: [storybookOf({ version: '12.0.0' })] }))).toEqual([
-      'Warning: .storybook runs storybook 12.0.0, newer than the versions visual-check is tested on (9.1 to 11).',
+      [
+        'Warning: ',
+        { code: 'project' },
+        ' runs storybook 12.0.0, newer than the versions visual-check is tested on (9.1 to 11).',
+      ],
     ])
   })
 
   it('hints at installing dependencies when storybook is missing', () => {
     expect(versionNotesOf(projectOf({ storybooks: [storybookOf({ version: undefined })] }))).toEqual([
-      "hint: storybook isn't installed for .storybook, so init skips its addon. Install dependencies, then run init again.",
+      [
+        "hint: storybook isn't installed for ",
+        { code: 'project' },
+        ', so init skips its addon. Install dependencies, then run init again.',
+      ],
+    ])
+  })
+
+  it("gives one hint about Yarn Plug'n'Play for every Storybook whose version it can't read", () => {
+    const project = projectOf({
+      packageManager: 'yarn',
+      yarnBerry: true,
+      yarnPnp: true,
+      storybooks: [
+        storybookOf({ version: undefined }),
+        storybookOf({ configDir: 'docs/.storybook', version: '12.0.0' }),
+        storybookOf({ configDir: 'web/.storybook', version: undefined }),
+      ],
+    })
+
+    expect(versionNotesOf(project)).toEqual([
+      "hint: init can't read Storybook's version under Yarn Plug'n'Play, so it skips the addon. To have init add it, " +
+        'set nodeLinker: node-modules in .yarnrc.yml, run yarn install, then run init again.',
+      [
+        'Warning: ',
+        { code: 'docs' },
+        ' runs storybook 12.0.0, newer than the versions visual-check is tested on (9.1 to 11).',
+      ],
     ])
   })
 })

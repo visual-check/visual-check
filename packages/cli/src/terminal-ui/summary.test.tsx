@@ -26,7 +26,9 @@ const nextSteps: NextSteps = {
     [{ command: 'pnpm visual:check', text: ['Check the stories against the baselines'] }],
     [{ text: ['Commit the changes, baselines included'] }],
   ],
+  runFrom: undefined,
   modesFiles: ['.storybook/visual-check.ts'],
+  packageFolders: [],
   ciUrl: 'https://visual-check.vercel.app/docs/ci',
 }
 
@@ -71,6 +73,111 @@ Next
 
 To set options for every story, see .storybook/visual-check.ts.
 To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
+  })
+
+  it("names the workspace root's folder to run the steps from, in accent, when init runs in a package", async () => {
+    const { lastFrame } = await renderSettledAt(
+      <Summary
+        result={{
+          ...resultWith(0, []),
+          summary: {
+            nextSteps: { ...nextSteps, steps: nextSteps.steps.slice(0, 1), runFrom: [{ code: 'acme-monorepo' }] },
+          },
+        }}
+      />,
+      160,
+    )
+
+    expect(lastFrame()).toContain('\u001b[1mNext, from \u001b[36macme-monorepo\u001b[39m\u001b[22m\n')
+    expect(plainFrameOf(lastFrame())).toBe(`
+✓ visual-check is set up
+
+Next, from acme-monorepo
+  1  pnpm storybook   Start Storybook, and keep it running
+
+To set options for every story, see .storybook/visual-check.ts.
+To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
+  })
+
+  it('names the packages whose scripts check only their Storybook, dim, with each folder in accent', async () => {
+    const { lastFrame } = await renderSettledAt(
+      <Summary
+        result={{
+          ...resultWith(0, []),
+          summary: {
+            nextSteps: { ...nextSteps, steps: nextSteps.steps.slice(0, 1), packageFolders: ['apps/a', 'apps/b'] },
+          },
+        }}
+      />,
+      160,
+    )
+
+    expect(lastFrame()).toContain(
+      '\u001b[2mTo check only one Storybook, run the scripts in its package: \u001b[22m\u001b[36mapps/a\u001b[39m' +
+        '\u001b[2m and \u001b[22m\u001b[36mapps/b\u001b[39m\u001b[2m.\u001b[22m\n',
+    )
+    expect(plainFrameOf(lastFrame())).toContain(`
+To set options for every story, see .storybook/visual-check.ts.
+To check only one Storybook, run the scripts in its package: apps/a and apps/b.
+To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
+  })
+
+  it('shows the install steps to run under Rush between the warnings and the next steps', async () => {
+    const manualInstall = {
+      heading: ["Install visual-check's packages yourself, then add the addon:"],
+      commands: [
+        'cd . && rush add --dev --exact --skip-update -p @visual-check/cli@1.0.0',
+        'rush update',
+        'cd libs/ui && pnpm exec storybook add @visual-check/storybook-addon@1.0.0 --yes --skip-install',
+      ],
+    }
+    const { lastFrame } = await renderSettledAt(
+      <Summary result={{ ...resultWith(0, [fallowWarning]), summary: { manualInstall, nextSteps } }} />,
+      160,
+    )
+
+    expect(plainFrameOf(lastFrame())).toBe(`
+✓ visual-check is set up
+▲ package.json doesn't list tailwindcss, imported in src/app/(landings)/bingo/landing-page.globals.css. visual-check can't tell which stories it affects.
+
+Install visual-check's packages yourself, then add the addon:
+  cd . && rush add --dev --exact --skip-update -p @visual-check/cli@1.0.0
+  rush update
+  cd libs/ui && pnpm exec storybook add @visual-check/storybook-addon@1.0.0 --yes --skip-install
+
+Next
+  1  pnpm storybook       Start Storybook, and keep it running
+  2  pnpm visual:update   Write the first baselines
+  3  pnpm visual:check    Check the stories against the baselines
+  4  Commit the changes, baselines included
+
+To set options for every story, see .storybook/visual-check.ts.
+To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.`)
+  })
+
+  it("names the workspace root's folder in the Rush heading in accent, with an aside dim", async () => {
+    const manualInstall = {
+      heading: ["Install visual-check's packages yourself, from ", { code: 'acme' }, ' ', { aside: '(../..)' }, ':'],
+      commands: ['rush update'],
+    }
+    const { lastFrame } = await renderSettledAt(
+      <Summary result={{ ...resultWith(0, []), summary: { manualInstall } }} />,
+      160,
+    )
+
+    expect(lastFrame()).toContain(
+      "Install visual-check's packages yourself, from \u001b[36macme\u001b[39m \u001b[2m(../..)\u001b[22m:\n",
+    )
+  })
+
+  it('draws a hint that names a folder in a run that stopped, with the folder in accent', async () => {
+    const hint = ['hint: init sets up the workspace in ', { code: 'acme' }, ', where the config goes.']
+    const { lastFrame } = await renderSettled(
+      <Summary result={{ exitCode: 2, stdout: '', stderr: '', messages: [hint, 'Stopped.'] }} />,
+    )
+
+    expect(lastFrame()).toContain('\u001b[2minit sets up the workspace in \u001b[22m\u001b[36macme\u001b[39m')
+    expect(plainFrameOf(lastFrame())).toBe('· init sets up the workspace in acme, where the config goes.\n✕ Stopped.')
   })
 
   it('puts each Storybook on a row of its own, its command in the same column, and wraps text under itself', async () => {
@@ -301,6 +408,7 @@ https://visual-check.vercel.app/docs/ci.`)
           ...resultWith(0, []),
           summary: {
             nextSteps: {
+              ...nextSteps,
               steps: [
                 [
                   {
@@ -314,7 +422,6 @@ https://visual-check.vercel.app/docs/ci.`)
                 ...nextSteps.steps.slice(1),
               ],
               modesFiles: [],
-              ciUrl: nextSteps.ciUrl,
             },
           },
         }}
@@ -339,7 +446,7 @@ To run visual-check in CI, see
 https://visual-check.vercel.app/docs/ci.`)
   })
 
-  it('draws the heading in bold accent, the replaced line dim, the commands in accent, and the last lines dim', async () => {
+  it('draws the heading in bold accent, the replaced line dim, the commands in accent, the last lines dim but their paths and URLs in accent', async () => {
     const { lastFrame } = await renderSettledAt(
       <Summary
         result={{
@@ -358,8 +465,10 @@ https://visual-check.vercel.app/docs/ci.`)
         '  \u001b[2mReplaced the script vc in package.json.\u001b[22m\n' +
         '\n\u001b[1mNext\u001b[22m\n' +
         '  1  \u001b[36mpnpm storybook\u001b[39m   Start Storybook, and keep it running\n' +
-        '\n\u001b[2mTo set options for every story, see \u001b[36m.storybook/visual-check.ts\u001b[39m.\u001b[22m\n' +
-        '\u001b[2mTo run visual-check in CI, see \u001b[36mhttps://visual-check.vercel.app/docs/ci\u001b[39m.\u001b[22m',
+        '\n\u001b[2mTo set options for every story, see \u001b[22m\u001b[36m.storybook/visual-check.ts\u001b[39m' +
+        '\u001b[2m.\u001b[22m\n' +
+        '\u001b[2mTo run visual-check in CI, see \u001b[22m\u001b[36mhttps://visual-check.vercel.app/docs/ci\u001b[39m' +
+        '\u001b[2m.\u001b[22m',
     )
   })
 
@@ -370,7 +479,7 @@ https://visual-check.vercel.app/docs/ci.`)
           ...resultWith(0, [
             "Warning: Fallow couldn't check the imports: Fallow broke.\nIt could not read tsconfig.json.",
           ]),
-          summary: { nextSteps: { steps: [], modesFiles: [], ciUrl: nextSteps.ciUrl } },
+          summary: { nextSteps: { ...nextSteps, steps: [], modesFiles: [] } },
         }}
       />,
     )

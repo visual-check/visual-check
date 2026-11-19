@@ -1,7 +1,7 @@
-import type { Segment } from '../init/closing-message.js'
+import { kindOf, type Segment, type SegmentKind, segmentOf, segmentTextOf } from '../init/segment.js'
 
 /**
- * A character of a line of segments, with whether it belongs to a command, path or URL.
+ * A character of a line of segments, with the kind of segment it belongs to.
  */
 interface SegmentCharacter {
   /**
@@ -9,9 +9,9 @@ interface SegmentCharacter {
    */
   character: string
   /**
-   * Whether it belongs to a code segment.
+   * The kind of segment it belongs to.
    */
-  code: boolean
+  kind: SegmentKind
 }
 
 /**
@@ -82,32 +82,27 @@ export function wrappedLinesOf(text: string, width: number): string[] {
 }
 
 /**
- * Lists the characters of segments in order, each with whether it belongs to a code segment.
+ * Lists the characters of segments in order, each with the kind of segment it belongs to.
  */
 function charactersOf(segments: readonly Segment[]): SegmentCharacter[] {
-  return segments.flatMap((segment): SegmentCharacter[] =>
-    typeof segment === 'string'
-      ? [...segment].map((character) => ({ character, code: false }))
-      : [...segment.code].map((character) => ({ character, code: true })),
+  return segments.flatMap((segment) =>
+    [...segmentTextOf(segment)].map((character) => ({ character, kind: kindOf(segment) })),
   )
 }
 
 /**
- * Joins characters into segments: each run of plain characters into words, and each run of code characters into a
- * code segment.
+ * Joins characters into segments, each run of characters of one kind into one segment of that kind.
  */
 function segmentsOf(characters: readonly SegmentCharacter[]): Segment[] {
   const segments: Segment[] = []
 
-  for (const { character, code } of characters) {
+  for (const { character, kind } of characters) {
     const last = segments.at(-1)
 
-    if (code && typeof last === 'object') {
-      segments[segments.length - 1] = { code: last.code + character }
-    } else if (!code && typeof last === 'string') {
-      segments[segments.length - 1] = last + character
+    if (last !== undefined && kindOf(last) === kind) {
+      segments[segments.length - 1] = segmentOf(kind, segmentTextOf(last) + character)
     } else {
-      segments.push(code ? { code: character } : character)
+      segments.push(segmentOf(kind, character))
     }
   }
 
@@ -116,8 +111,8 @@ function segmentsOf(characters: readonly SegmentCharacter[]): Segment[] {
 
 /**
  * Breaks a line of segments into lines at most `width` columns wide, as `wrappedLinesOf` breaks text, so a terminal
- * never wraps them itself. Each line keeps the commands, paths and URLs on it as code segments, a piece each when one
- * is broken across lines.
+ * never wraps them itself. Each line keeps the segments on it as they were, a piece each when one is broken across
+ * lines.
  */
 export function wrappedSegmentLinesOf(segments: readonly Segment[], width: number): Segment[][] {
   const characters = charactersOf(segments)
@@ -139,7 +134,7 @@ export function wrappedSegmentLinesOf(segments: readonly Segment[], width: numbe
         cursor += 1
       }
 
-      lineCharacters.push({ character, code: original?.code ?? false })
+      lineCharacters.push({ character, kind: original?.kind ?? 'text' })
     }
 
     lines.push(segmentsOf(lineCharacters))

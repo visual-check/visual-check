@@ -1,0 +1,14 @@
+{
+  "name": "@setup-monorepo/b",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "storybook": "storybook dev -p 6106 --ci"
+  },
+  "devDependencies": {
+    "@storybook/html-vite": "10.6.7",
+    "storybook": "10.6.7",
+    "vite": "8.3.8"
+  }
+}

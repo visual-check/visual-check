@@ -1,7 +1,9 @@
+import { join } from 'node:path'
 import { ContainerError, DockerMissingError } from '../container/container-error.js'
 import { classifyStorybookVersion, minimumText, newestSupportedMajor } from '../storybook/storybook-version.js'
 import type { DetectedProject } from './detect-project.js'
-import { relativePathOf } from './find-storybooks.js'
+import { relativePathOf, storybookFolderOf } from './find-storybooks.js'
+import type { Message } from './segment.js'
 
 /**
  * What `blockingProblemsOf` looks at.
@@ -42,8 +44,9 @@ const noManifestProblem =
 
 /**
  * Lists what stops `init` before it asks anything, each as one line of text, in the order the checks run: Node, no
- * `package.json` (which ends the list, since the other checks need a project), an unreadable `package.json`, Deno, no
- * terminal without `--yes`, no Storybook, and each Storybook older than the minimum. Gives `[]` when `init` can go on.
+ * `package.json` (which ends the list, since the other checks need a project), a workspace root without one, an
+ * unreadable `package.json` at the root, then in each Storybook's package, Deno, no terminal without `--yes`, no
+ * Storybook, and each Storybook older than the minimum. Gives `[]` when `init` can go on.
  */
 export function blockingProblemsOf({ cwd, nodeVersion, project, yes, interactive }: BlockingCheck): string[] {
   const nodeProblems = nodeProblemsOf(nodeVersion)
@@ -70,16 +73,25 @@ function nodeProblemsOf(nodeVersion: string): string[] {
 }
 
 /**
- * Lists the problems with the project and the run, in order: an unreadable `package.json`, Deno, and no terminal
- * without `--yes`.
+ * Lists the problems with the project and the run, in order: a workspace root without a `package.json`, such as
+ * Rush's, an unreadable `package.json` at the root, then in each Storybook's package, Deno, and no terminal without
+ * `--yes`.
  */
 function setupProblemsOf(cwd: string, project: DetectedProject, yes: boolean, interactive: boolean): string[] {
   const problems: string[] = []
 
-  if (project.manifestProblem !== undefined) {
+  if (!project.hasManifest) {
+    const workspace = project.workspace.kind === 'rush' ? 'Rush workspace' : 'workspace'
+
     problems.push(
-      `visual-check init can't read ${relativePathOf(cwd, project.manifestPath)}: ${project.manifestProblem}. ` +
-        'Fix it, then run visual-check init again.',
+      `visual-check init needs a package.json at the root of this ${workspace}, for its scripts and the CLI. ` +
+        'Add a private one, then run visual-check init again.',
+    )
+  }
+
+  for (const [path, problem] of manifestProblemsOf(project)) {
+    problems.push(
+      `visual-check init can't read ${relativePathOf(cwd, path)}: ${problem}. Fix it, then run visual-check init again.`,
     )
   }
 
@@ -101,6 +113,28 @@ function setupProblemsOf(cwd: string, project: DetectedProject, yes: boolean, in
 }
 
 /**
+ * Gives what is wrong with each `package.json` `init` reads and can't: the root's, then each Storybook package's, by
+ * absolute path, each once.
+ */
+function manifestProblemsOf(project: DetectedProject): Map<string, string> {
+  const problems = new Map<string, string>()
+  const found = [
+    [project.manifestPath, project.manifestProblem] as const,
+    ...project.storybooks.map(
+      ({ manifestDir, manifestProblem }) => [join(manifestDir, 'package.json'), manifestProblem] as const,
+    ),
+  ]
+
+  for (const [path, problem] of found) {
+    if (problem !== undefined && !problems.has(path)) {
+      problems.set(path, problem)
+    }
+  }
+
+  return problems
+}
+
+/**
  * Lists the Storybook problems of a project: none found, or a version below the minimum.
  */
 function storybookProblemsOf(project: DetectedProject): string[] {
@@ -115,33 +149,52 @@ function storybookProblemsOf(project: DetectedProject): string[] {
     .filter(({ version }) => version !== undefined && classifyStorybookVersion(version) === 'below-minimum')
     .map(
       ({ configDir, version }) =>
-        `The Storybook in ${configDir} runs storybook ${version}, and visual-check needs ${minimumText} or later. ` +
+        `The Storybook in ${storybookFolderOf(configDir, project.root)} runs storybook ${version}, and visual-check needs ${minimumText} or later. ` +
         'Upgrade storybook, then run visual-check init again.',
     )
 }
 
 /**
- * Lists the notes about Storybook versions that don't stop `init`: a warning for a version above the tested ones, a
- * hint for a Storybook that isn't installed, so has no version.
+ * The hint for a project on Yarn Plug'n'Play, where no Storybook's version can be read, so `init` skips the addon.
  */
-export function versionNotesOf(project: DetectedProject): string[] {
-  return project.storybooks.flatMap(({ configDir, version }) => {
+const yarnPnpNote =
+  "hint: init can't read Storybook's version under Yarn Plug'n'Play, so it skips the addon. To have init add it, " +
+  'set nodeLinker: node-modules in .yarnrc.yml, run yarn install, then run init again.'
+
+/**
+ * Lists the notes about Storybook versions that don't stop `init`: a warning for a version above the tested ones, a
+ * hint for a Storybook that isn't installed, so has no version. Under Yarn Plug'n'Play, one hint covers every Storybook
+ * without a version, since none can be read there.
+ */
+export function versionNotesOf(project: DetectedProject): Message[] {
+  const notes = project.storybooks.flatMap(({ configDir, version }) => {
     if (version === undefined) {
       return [
-        `hint: storybook isn't installed for ${configDir}, so init skips its addon. ` +
-          'Install dependencies, then run init again.',
+        project.yarnPnp
+          ? yarnPnpNote
+          : [
+              "hint: storybook isn't installed for ",
+              { code: storybookFolderOf(configDir, project.root) },
+              ', so init skips its addon. Install dependencies, then run init again.',
+            ],
       ]
     }
 
     if (classifyStorybookVersion(version) === 'above-maximum') {
       return [
-        `Warning: ${configDir} runs storybook ${version}, ` +
-          `newer than the versions visual-check is tested on (${minimumText} to ${newestSupportedMajor}).`,
+        [
+          'Warning: ',
+          { code: storybookFolderOf(configDir, project.root) },
+          ` runs storybook ${version}, ` +
+            `newer than the versions visual-check is tested on (${minimumText} to ${newestSupportedMajor}).`,
+        ],
       ]
     }
 
     return []
   })
+
+  return [...new Set(notes)]
 }
 
 /**

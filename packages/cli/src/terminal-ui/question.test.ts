@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isCancelKey, keyPressesOf } from './question.js'
+import { isCancelKey, keyPressesOf, stepOf } from './question.js'
 import { keyOf } from './terminal.fixture.js'
 
 describe('isCancelKey', () => {
@@ -48,5 +48,26 @@ describe('keyPressesOf', () => {
       ['', enter],
       ['c', keyOf({})],
     ])
+  })
+})
+
+describe('stepOf', () => {
+  it.each([
+    ['↑', '', keyOf({ upArrow: true })],
+    ['k', 'k', keyOf({})],
+  ])('moves back one on %s', (_name, input, key) => {
+    expect(stepOf(input, key)).toBe(-1)
+  })
+
+  it.each([
+    ['↓', '', keyOf({ downArrow: true })],
+    ['j', 'j', keyOf({})],
+  ])('moves on one on %s', (_name, input, key) => {
+    expect(stepOf(input, key)).toBe(1)
+  })
+
+  it('does not move on any other key', () => {
+    expect(stepOf('x', keyOf({}))).toBe(0)
+    expect(stepOf('', keyOf({ leftArrow: true }))).toBe(0)
   })
 })

@@ -11,6 +11,7 @@ import {
   type NewQuestion,
   planSteps,
   settleQuestion,
+  showQuestionProgress,
   startStep,
 } from './init-view-state.js'
 import { emptyOutputTail } from './output-tail.js'
@@ -40,10 +41,17 @@ describe('initialViewState', () => {
     expect(initial).toEqual({
       lines: [{ id: 0, kind: 'header', version: '1.2.3' }],
       question: undefined,
+      questionProgress: undefined,
       steps: [],
       plannedAt: undefined,
       nextId: 1,
     })
+  })
+})
+
+describe('showQuestionProgress', () => {
+  it('keeps how many questions are answered of the total, and nothing else changes', () => {
+    expect(showQuestionProgress(initial, 2, 9)).toEqual({ ...initial, questionProgress: { answered: 2, total: 9 } })
   })
 })
 
@@ -72,6 +80,23 @@ describe('askQuestion', () => {
 
     expect(state.question).toEqual({ ...question, id: 2 })
     expect(state.nextId).toBe(3)
+  })
+
+  it('makes a checklist question wait with its choices and validation', () => {
+    const question: NewQuestion = {
+      kind: 'checklist',
+      message: 'Storybooks',
+      defaultValue: ['web'],
+      hint: undefined,
+      choices: [{ value: 'web', label: 'web' }],
+      validate: () => 'Never.',
+      onSubmit: () => undefined,
+      onCancel: () => undefined,
+    }
+    const state = askQuestion(initial, question)
+
+    expect(state.question).toEqual({ ...question, id: 1 })
+    expect(state.nextId).toBe(2)
   })
 
   it('throws while another question waits', () => {

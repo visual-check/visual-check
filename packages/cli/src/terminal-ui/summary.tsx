@@ -1,5 +1,5 @@
 import { Box, Text, useWindowSize } from 'ink'
-import { Fragment, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import {
   ciLineOf,
   commandColumnWidthOf,
@@ -7,13 +7,16 @@ import {
   modesLineOf,
   type NextStepRow,
   type NextSteps,
-  type Segment,
+  nextHeadingOf,
+  packageScriptsLineOf,
 } from '../init/closing-message.js'
+import type { ManualInstall } from '../init/install.js'
 import type { InitResult } from '../init/run-init.js'
+import type { Message } from '../init/segment.js'
 import { ColouredText } from './coloured-text.js'
 import { MessageLine } from './message-line.js'
 import { glyphs } from './theme.js'
-import { wrappedSegmentLinesOf } from './wrapped-lines.js'
+import { WrappedSegments } from './wrapped-segments.js'
 import { WrappedText } from './wrapped-text.js'
 
 /**
@@ -49,7 +52,7 @@ interface MessageLinesProps {
   /**
    * The result's messages, in order.
    */
-  messages: readonly string[]
+  messages: readonly Message[]
 }
 
 /**
@@ -60,6 +63,21 @@ interface ReplacedLineProps {
    * The line that names the scripts `init` replaced, when it replaced any.
    */
   text: string | undefined
+}
+
+/**
+ * How far each install command under Rush is indented.
+ */
+const manualCommandIndent = 2
+
+/**
+ * What `ManualInstallView` takes.
+ */
+interface ManualInstallViewProps {
+  /**
+   * The install steps to run.
+   */
+  manualInstall: ManualInstall
 }
 
 /**
@@ -106,61 +124,6 @@ interface StepNumberProps {
 }
 
 /**
- * What `SegmentsText` takes.
- */
-interface SegmentsTextProps {
-  /**
-   * The segments to draw, in order.
-   */
-  segments: readonly Segment[]
-}
-
-/**
- * What `WrappedSegments` takes.
- */
-interface WrappedSegmentsProps {
-  /**
-   * The segments to draw, in order.
-   */
-  segments: readonly Segment[]
-  /**
-   * How many columns the lines may take.
-   */
-  width: number
-}
-
-/**
- * Draws a line of segments inside a `<Text>`: the words as they are, and each command, path or URL in the accent
- * colour.
- */
-function SegmentsText({ segments }: SegmentsTextProps): ReactNode {
-  // The segments never change, so where each one is tells it apart.
-  return Array.from(segments.entries(), ([position, segment]) =>
-    typeof segment === 'string' ? (
-      <Fragment key={position}>{segment}</Fragment>
-    ) : (
-      <ColouredText colour="accent" key={position}>
-        {segment.code}
-      </ColouredText>
-    ),
-  )
-}
-
-/**
- * Draws a line of segments inside a `<Text>`, broken into lines that fit `width` columns, so Ink never wraps it itself
- * and no line starts with the space it broke at. Each command, path or URL takes the accent colour.
- */
-function WrappedSegments({ segments, width }: WrappedSegmentsProps): ReactNode {
-  // The lines never change, so where each one is tells it apart.
-  return Array.from(wrappedSegmentLinesOf(segments, width).entries(), ([position, line]) => (
-    <Fragment key={position}>
-      {position === 0 ? '' : '\n'}
-      <SegmentsText segments={line} />
-    </Fragment>
-  ))
-}
-
-/**
  * Draws each of the result's messages: a warning or a hint as a note, and anything else as a problem.
  */
 function MessageLines({ messages }: MessageLinesProps): ReactNode {
@@ -182,6 +145,30 @@ function ReplacedLine({ text }: ReplacedLineProps): ReactNode {
       <Text dimColor>
         <WrappedText indent={replacedLineIndent} text={text} />
       </Text>
+    </Box>
+  )
+}
+
+/**
+ * Draws the install steps a person runs under Rush: the heading, whose workspace folder takes the accent colour, then
+ * each command on its own line, indented, in the accent colour. A long command wraps under its own first letter.
+ */
+function ManualInstallView({ manualInstall }: ManualInstallViewProps): ReactNode {
+  const { columns } = useWindowSize()
+
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text>
+        <WrappedSegments segments={manualInstall.heading} width={columns} />
+      </Text>
+      {/* The commands never change, so where each one is tells it apart. */}
+      {Array.from(manualInstall.commands.entries(), ([position, command]) => (
+        <Box key={position} marginLeft={manualCommandIndent}>
+          <Text>
+            <WrappedSegments segments={[{ code: command }]} width={columns - manualCommandIndent} />
+          </Text>
+        </Box>
+      ))}
     </Box>
   )
 }
@@ -242,9 +229,10 @@ function StepRow({ row, numberLabel, commandWidth, columns }: StepRowProps): Rea
 }
 
 /**
- * Draws what to do next: the numbered steps, each command in a column of its own, then, dim, where options for every
- * story go and the docs page for CI. Commands, paths and URLs take the accent colour. In a terminal too narrow for the
- * commands' column and 20 columns of text beside it, every command takes a line of its own, with its text under it.
+ * Draws what to do next: the heading, which names the workspace root to run the steps from when `init` runs below it,
+ * the numbered steps, each command in a column of its own, then, dim, where options for every story go and the docs
+ * page for CI. Commands, paths and URLs take the accent colour. In a terminal too narrow for the commands' column and
+ * 20 columns of text beside it, every command takes a line of its own, with its text under it.
  */
 function NextStepsView({ nextSteps }: NextStepsViewProps): ReactNode {
   const { columns } = useWindowSize()
@@ -254,7 +242,9 @@ function NextStepsView({ nextSteps }: NextStepsViewProps): ReactNode {
   return (
     <>
       <Box marginTop={1}>
-        <Text bold>Next</Text>
+        <Text bold>
+          <WrappedSegments segments={nextHeadingOf(nextSteps.runFrom)} width={columns} />
+        </Text>
       </Box>
       {/* The steps and their rows never change, so where each one is tells it apart, and gives the step its number. */}
       {Array.from(nextSteps.steps.entries()).flatMap(([position, rows]) =>
@@ -270,12 +260,17 @@ function NextStepsView({ nextSteps }: NextStepsViewProps): ReactNode {
       )}
       <Box flexDirection="column" marginTop={1}>
         {nextSteps.modesFiles.length === 0 ? null : (
-          <Text dimColor>
-            <WrappedSegments segments={modesLineOf(nextSteps.modesFiles)} width={columns} />
+          <Text>
+            <WrappedSegments dim segments={modesLineOf(nextSteps.modesFiles)} width={columns} />
           </Text>
         )}
-        <Text dimColor>
-          <WrappedSegments segments={ciLineOf(nextSteps.ciUrl)} width={columns} />
+        {nextSteps.packageFolders.length === 0 ? null : (
+          <Text>
+            <WrappedSegments dim segments={packageScriptsLineOf(nextSteps.packageFolders)} width={columns} />
+          </Text>
+        )}
+        <Text>
+          <WrappedSegments dim segments={ciLineOf(nextSteps.ciUrl)} width={columns} />
         </Text>
       </Box>
     </>
@@ -284,8 +279,9 @@ function NextStepsView({ nextSteps }: NextStepsViewProps): ReactNode {
 
 /**
  * The end of a run. One that got to the end says visual-check is set up, names the scripts it replaced, shows the
- * warnings, then what to do next. One whose install failed names the scripts it replaced, then why it stopped. One
- * that stopped before it wrote shows its warnings and hints as notes, and why it stopped after `✕`.
+ * warnings, the install steps to run under Rush, then what to do next. One whose install failed names the scripts it
+ * replaced, then why it stopped. One that stopped before it wrote shows its warnings and hints as notes, and why it
+ * stopped after `✕`.
  */
 export function Summary({ result }: SummaryProps): ReactNode {
   const { summary } = result
@@ -305,6 +301,7 @@ export function Summary({ result }: SummaryProps): ReactNode {
       )}
       <ReplacedLine text={summary.replacedLine} />
       <MessageLines messages={result.messages} />
+      {summary.manualInstall === undefined ? null : <ManualInstallView manualInstall={summary.manualInstall} />}
       {summary.nextSteps === undefined ? null : <NextStepsView nextSteps={summary.nextSteps} />}
     </Box>
   )

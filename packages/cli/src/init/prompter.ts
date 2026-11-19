@@ -1,5 +1,7 @@
+import type { Message } from './segment.js'
+
 /**
- * One answer a select question offers.
+ * One answer a select or checklist question offers.
  *
  * @public
  */
@@ -30,7 +32,7 @@ export interface Prompter {
    * `options.validate` returns a message, the prompter shows it and asks again.
    */
   text(
-    message: string,
+    message: Message,
     options: {
       /**
        * What an empty answer takes.
@@ -50,7 +52,7 @@ export interface Prompter {
    * Asks a yes or no question, which starts on `options.defaultValue`.
    */
   confirm(
-    message: string,
+    message: Message,
     options: {
       /**
        * The side the question starts on.
@@ -67,7 +69,7 @@ export interface Prompter {
    * the value of the choice picked.
    */
   select<T extends string>(
-    message: string,
+    message: Message,
     options: {
       /**
        * The answers, in the order they show. There is at least one.
@@ -84,10 +86,41 @@ export interface Prompter {
     },
   ): Promise<T>
   /**
+   * Asks the person to tick any of `options.choices`, which start ticked when their value is in
+   * `options.defaultValues`. Gives the values of the choices ticked, in the order of the choices. When
+   * `options.validate` returns a message, the prompter shows it and asks again.
+   */
+  checklist<T extends string>(
+    message: Message,
+    options: {
+      /**
+       * The answers, in the order they show. There is at least one.
+       */
+      choices: readonly [Choice<T>, ...Choice<T>[]]
+      /**
+       * The values of the choices the question starts with ticked.
+       */
+      defaultValues: readonly T[]
+      /**
+       * A line that helps answer the question.
+       */
+      hint?: string
+      /**
+       * Returns what is wrong with the values ticked, or `undefined` when they are fine.
+       */
+      validate?: (values: T[]) => string | undefined
+    },
+  ): Promise<T[]>
+  /**
    * Shows a line before or between the questions, such as a hint or a warning. The defaults prompter collects it
    * instead.
    */
-  note(text: string): void
+  note(text: Message): void
+  /**
+   * Tells how far through the questions the person is, before each question: `answered` of the `total` planned. The
+   * total can change once an answer changes what is left to ask. A prompter that shows no progress leaves it out.
+   */
+  questionProgress?(answered: number, total: number): void
 }
 
 /**
@@ -110,21 +143,57 @@ export class InputEndedError extends Error {
 }
 
 /**
- * Builds a prompter for `--yes`: every question gets its default, a text isn't validated, hints are ignored, and the
- * notes are collected in `notes`. It never reads the input.
+ * Builds a prompter for `--yes`: every question gets its default, a text or a checklist isn't validated, hints are
+ * ignored, and the notes are collected in `notes`. It never reads the input.
  *
  * @public
  */
-export function defaultsPrompter(): Prompter & { notes: string[] } {
-  const notes: string[] = []
+export function defaultsPrompter(): Prompter & { notes: Message[] } {
+  const notes: Message[] = []
 
   return {
     notes,
     text: (_message, { defaultValue }) => Promise.resolve(defaultValue),
     confirm: (_message, { defaultValue }) => Promise.resolve(defaultValue),
     select: (_message, { defaultValue }) => Promise.resolve(defaultValue),
+    checklist: (_message, { choices, defaultValues }) =>
+      Promise.resolve(choices.map(({ value }) => value).filter((value) => defaultValues.includes(value))),
     note(text) {
       notes.push(text)
+    },
+  }
+}
+
+/**
+ * Wraps a prompter so that before each question it tells the prompter how many questions are answered of the total
+ * planned, starting with `planned`. A question its prompter asks again after a validation message counts once. Notes
+ * pass straight through. `replan` sets a new total, for the questions after.
+ */
+export function countingPrompter(prompter: Prompter, planned: number): Prompter & { replan: (total: number) => void } {
+  let answered = 0
+  let total = planned
+
+  /**
+   * Tells the progress, asks the question, and counts it once answered.
+   */
+  async function counted<T>(ask: () => Promise<T>): Promise<T> {
+    prompter.questionProgress?.(answered, total)
+
+    const answer = await ask()
+
+    answered += 1
+
+    return answer
+  }
+
+  return {
+    text: (message, options) => counted(() => prompter.text(message, options)),
+    confirm: (message, options) => counted(() => prompter.confirm(message, options)),
+    select: (message, options) => counted(() => prompter.select(message, options)),
+    checklist: (message, options) => counted(() => prompter.checklist(message, options)),
+    note: (text) => prompter.note(text),
+    replan(next) {
+      total = next
     },
   }
 }

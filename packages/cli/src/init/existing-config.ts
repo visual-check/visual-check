@@ -5,11 +5,13 @@ import { loadConfig } from '../config/load-config.js'
 import { defaultBaselinesIn, type ResolvedConfig, type ResolvedStorybook } from '../config/resolve-config.js'
 import type { SetUpStorybook } from './closing-message.js'
 import type { DetectedProject, DetectedStorybook } from './detect-project.js'
-import { isInsideRoot, mainFileOnDiskIn, relativePathOf, takeUniqueName } from './find-storybooks.js'
-import { commandLineOf, type PackageManager, runScriptCommandOf, storybookCommandOf } from './package-manager.js'
+import { isInsideRoot, mainFileOnDiskIn, relativePathOf, storybookFolderOf, takeUniqueName } from './find-storybooks.js'
+import { commandLineOf, type PackageManager, storybookCommandOf } from './package-manager.js'
 import { defaultStorybookPort } from './questions.js'
-import { configEntryOf } from './setup-files.js'
+import type { Message } from './segment.js'
+import { configEntryOf, configStorybookOf } from './setup-files.js'
 import { defaultConfigDir } from './storybook-scripts.js'
+import { portOfStart, startCommandOf, startWorkspaceOf } from './storybook-start.js'
 
 /**
  * A Storybook of a config that was already there, which `init` sets up: its name, its absolute folders and its URL.
@@ -59,7 +61,7 @@ export interface ExistingConfig {
   /**
    * The hints and the warning about the config, a line each.
    */
-  notes: string[]
+  notes: Message[]
 }
 
 /**
@@ -100,7 +102,7 @@ function loadedConfigOf(cwd: string, project: DetectedProject, path: string, con
     config.storybooks.map(({ name, configDir }) => [relativePathOf(project.root, configDir), name]),
   )
   const storybooks: ConfigStorybookPlace[] = []
-  const notes: string[] = []
+  const notes: Message[] = []
 
   for (const { name, dir, configDir, baselines, url } of config.storybooks) {
     const leftAlone = leftAloneHintOf(cwd, project.root, path, { name, dir, configDir })
@@ -149,13 +151,19 @@ function missingStorybookHintsOf(
   project: DetectedProject,
   configPath: string,
   names: Record<string, string>,
-): string[] {
+): Message[] {
   const usedNames = new Set(Object.values(names))
 
   return project.storybooks
     .filter(({ configDir }) => !Object.hasOwn(names, configDir))
     .map((storybook) =>
-      missingStorybookHintOf(cwd, configPath, storybook, takeUniqueName(storybook.defaultName, usedNames)),
+      missingStorybookHintOf(
+        cwd,
+        project.root,
+        configPath,
+        storybook,
+        takeUniqueName(storybook.defaultName, usedNames),
+      ),
     )
 }
 
@@ -163,18 +171,28 @@ function missingStorybookHintsOf(
  * Words the hint for a detected Storybook the config doesn't hold, with the entry to add under `storybooks`, named
  * `name`.
  */
-function missingStorybookHintOf(cwd: string, configPath: string, storybook: DetectedStorybook, name: string): string {
-  const entry = configEntryOf({
-    name,
-    url: `http://127.0.0.1:${storybook.startScript?.port ?? defaultStorybookPort}`,
-    dir: relativePathOf(dirname(configPath), storybook.packageDir),
-    configDir: storybook.configDir,
-  })
-
-  return (
-    `hint: ${relativePathOf(cwd, configPath)} lists no Storybook in ${storybook.configDir}. ` +
-    `To add it, put this under storybooks: ${entry}`
+function missingStorybookHintOf(
+  cwd: string,
+  root: string,
+  configPath: string,
+  storybook: DetectedStorybook,
+  name: string,
+): Message {
+  const entry = configEntryOf(
+    configStorybookOf({
+      name,
+      url: `http://127.0.0.1:${portOfStart(storybook.start) ?? defaultStorybookPort}`,
+      configFolder: dirname(configPath),
+      packageDir: storybook.packageDir,
+      configDir: join(root, storybook.configDir),
+    }),
   )
+
+  return [
+    `hint: ${relativePathOf(cwd, configPath)} lists no Storybook in `,
+    { code: storybookFolderOf(storybook.configDir, root) },
+    `. To add it, put this under storybooks: ${entry}`,
+  ]
 }
 
 /**
@@ -224,7 +242,7 @@ function startPortOf(url: string | undefined): string {
 }
 
 /**
- * Returns the command that starts the Storybook of a config folder, relative to the root: its start script, else
+ * Returns the command that starts the Storybook of a config folder, relative to the root: its detected start, else
  * `storybook dev` on its URL's port, with `-c` when the folder isn't `.storybook`.
  */
 function detectedStartCommandOf(
@@ -233,13 +251,15 @@ function detectedStartCommandOf(
   configDir: string,
   url: string | undefined,
 ): string {
-  const startScript = project.storybooks.find((storybook) => storybook.configDir === configDir)?.startScript
+  const start = project.storybooks.find((storybook) => storybook.configDir === configDir)?.start
 
-  if (startScript !== undefined) {
-    return runScriptCommandOf(packageManager, startScript.script)
+  if (start !== undefined) {
+    return startCommandOf(start, packageManager, startWorkspaceOf(project, packageManager))
   }
 
   const configArgs = configDir === defaultConfigDir ? [] : ['-c', configDir]
 
-  return commandLineOf(storybookCommandOf(packageManager, ['dev', '-p', startPortOf(url), ...configArgs]))
+  return commandLineOf(
+    storybookCommandOf(packageManager, ['dev', '-p', startPortOf(url), ...configArgs], project.yarnBerry),
+  )
 }

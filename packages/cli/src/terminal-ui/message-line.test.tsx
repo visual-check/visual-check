@@ -39,6 +39,28 @@ describe('NoteLine', () => {
     expect(lastFrame()).toBe('\u001b[2m·\u001b[22m \u001b[2mrun it again with --yes.\u001b[22m')
   })
 
+  it('draws a hint of segments dim, with the folder it names in the accent colour, not dim', async () => {
+    const { lastFrame } = await renderSettled(
+      <NoteLine text={['hint: init sets up the workspace in ', { code: 'acme' }, ' ', { aside: '(../..)' }, '.']} />,
+    )
+
+    expect(plainFrameOf(lastFrame())).toBe('· init sets up the workspace in acme (../..).')
+    expect(lastFrame()).toBe(
+      '\u001b[2m·\u001b[22m \u001b[2minit sets up the workspace in \u001b[22m\u001b[36macme\u001b[39m' +
+        '\u001b[2m (../..).\u001b[22m',
+    )
+  })
+
+  it('draws a hint of segments without colour when the theme has colour off, the folder not dim', async () => {
+    const { lastFrame } = await renderSettled(
+      <ThemeContext value={{ colour: false }}>
+        <NoteLine text={['hint: from ', { code: 'acme' }, '.']} />
+      </ThemeContext>,
+    )
+
+    expect(lastFrame()).toBe('\u001b[2m·\u001b[22m \u001b[2mfrom \u001b[22macme\u001b[2m.\u001b[22m')
+  })
+
   it('draws any other note plain', async () => {
     const { lastFrame } = await renderSettled(<NoteLine text="Found 2 Storybooks." />)
 
@@ -95,6 +117,12 @@ describe('MessageLine', () => {
     const { lastFrame } = await renderSettled(<MessageLine text="visual-check init stopped." />)
 
     expect(lastFrame()).toBe('\u001b[31m✕\u001b[39m \u001b[31mvisual-check init stopped.\u001b[39m')
+  })
+
+  it('draws a problem of segments with what it names in the accent colour', async () => {
+    const { lastFrame } = await renderSettled(<MessageLine text={['Stopped in ', { code: 'acme' }, '.']} />)
+
+    expect(lastFrame()).toBe('\u001b[31m✕\u001b[39m \u001b[31mStopped in \u001b[36macme\u001b[31m.\u001b[39m')
   })
 
   it('draws a problem without colour when the theme has colour off', async () => {

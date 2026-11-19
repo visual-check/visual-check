@@ -1,5 +1,6 @@
 import { type Key, useInput } from 'ink'
 import { useRef, useState } from 'react'
+import type { Message } from '../init/segment.js'
 
 /**
  * What every question takes.
@@ -8,10 +9,10 @@ export interface QuestionProps<T> {
   /**
    * The question.
    */
-  message: string
+  message: Message
   /**
-   * The answer the question starts on: what an empty text input gives, the side a yes or no question starts on, or the
-   * choice a select question highlights first.
+   * The answer the question starts on: what an empty text input gives, the side a yes or no question starts on, the
+   * choice a select question highlights first, or the values of the choices a checklist question starts with ticked.
    */
   defaultValue: T
   /**
@@ -87,6 +88,22 @@ export function keyPressesOf(input: string, key: Key): [string, Key][] {
     ...(text === '' ? [] : [[text, key] as [string, Key]]),
     ...(index < lines.length - 1 ? [['', enter] as [string, Key]] : []),
   ])
+}
+
+/**
+ * How far a key press moves the highlight or pointer: back one for ↑ or k, on one for ↓ or j, and nowhere for any
+ * other key.
+ */
+export function stepOf(input: string, key: Key): number {
+  if (key.upArrow || input === 'k') {
+    return -1
+  }
+
+  if (key.downArrow || input === 'j') {
+    return 1
+  }
+
+  return 0
 }
 
 /**

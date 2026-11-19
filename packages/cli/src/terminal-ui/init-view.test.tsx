@@ -1,3 +1,4 @@
+import { basename } from 'node:path'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { pnpmAdd, toolsOf } from '../init/init-tools.fixture.js'
@@ -26,6 +27,7 @@ afterEach(async () => {
   for (const view of running.splice(0)) {
     await act(() => view.finish({ exitCode: 0, stdout: '', stderr: '', messages: [] }))
   }
+
   vi.useRealTimers()
   removeProjects()
 })
@@ -243,6 +245,51 @@ describe('startInitView', () => {
     expect(frame()).toBe(`${header}✓ Package manager Yarn\n`)
   })
 
+  it('asks a checklist question, toggled with Space, and collapses it to the labels ticked', async () => {
+    const { view, stdin, frame } = await startView()
+    const validate = vi.fn((values: string[]) => (values.length === 0 ? 'Pick one.' : undefined))
+    const { answer } = await asking(() =>
+      view.checklist('Package managers', {
+        choices: managers,
+        defaultValues: [],
+        hint: 'Nothing names one.',
+        validate,
+      }),
+    )
+
+    expect(frame()).toBe(
+      `${header}? Package managers\n  Nothing names one.\n❯ ◯ npm\n  ◯ Yarn · Yarn 1, or 2 and later\n  <space> to tick, 'a' to toggle all/none, <enter> to confirm`,
+    )
+
+    await typeInto(stdin, keys.enter, 'a', keys.enter)
+
+    await expect(answer).resolves.toEqual(['npm', 'yarn'])
+    expect(validate).toHaveBeenNthCalledWith(1, [])
+    expect(validate).toHaveBeenNthCalledWith(2, ['npm', 'yarn'])
+    expect(frame()).toBe(`${header}✓ Package managers npm, Yarn\n`)
+  })
+
+  it('collapses a checklist with nothing ticked to none', async () => {
+    const { view, stdin, frame } = await startView()
+    const { answer } = await asking(() => view.checklist('Addon', { choices: managers, defaultValues: [] }))
+
+    await typeInto(stdin, keys.enter)
+
+    await expect(answer).resolves.toEqual([])
+    expect(frame()).toBe(`${header}✓ Addon none\n`)
+  })
+
+  it('rejects a checklist with an InputEndedError on Ctrl+C', async () => {
+    const { view, stdin, frame } = await startView()
+    const { answer } = await asking(() => view.checklist('Addon', { choices: managers, defaultValues: [] }))
+    const settled = answer.catch((error: unknown) => error)
+
+    await typeInto(stdin, keys.ctrlC)
+
+    expect(await settled).toBeInstanceOf(InputEndedError)
+    expect(frame()).toBe(header)
+  })
+
   it('asks a yes or no question, switched with →, and collapses it to yes or no', async () => {
     const { view, stdin, frame } = await startView()
     const { answer } = await asking(() =>
@@ -269,6 +316,7 @@ describe('startInitView', () => {
         stdin.push(key)
         stdin.emit('readable')
       }
+
       second = view.text('Second', { defaultValue: 'b' })
     })
 
@@ -295,18 +343,64 @@ describe('startInitView', () => {
     expect(frame()).toBe(header)
   })
 
+  it('shows how far through the questions the person is above the one waiting, and nothing once none waits', async () => {
+    const { view, stdin, stdout, frame } = await startView()
+
+    await act(async () => {
+      view.questionProgress(2, 4)
+    })
+
+    expect(frame()).toBe(header)
+
+    const { answer } = await asking(() => view.text('Name', { defaultValue: 'web' }))
+
+    expect(frame()).toBe(`${header}━━━━━━━━━━────────── Step 3 of 4\n? Name\n› web (default)`)
+    expect(stdout.lastFrame()).toContain('\u001b[36m━━━━━━━━━━\u001b[39m\u001b[2m──────────\u001b[22m Step 3 of 4\n')
+
+    await typeInto(stdin, keys.enter)
+
+    await expect(answer).resolves.toBe('web')
+    expect(frame()).toBe(`${header}✓ Name web\n`)
+  })
+
+  it('never counts past the total, and narrows the bar so the label fits a narrow terminal', async () => {
+    const { view, stdin, frame } = await startView({ columns: 25 })
+
+    await act(async () => {
+      view.questionProgress(4, 4)
+    })
+
+    const { answer } = await asking(() => view.text('Name', { defaultValue: 'web' }))
+
+    // The header wraps at 25 columns too, so only the question area is compared.
+    expect(frame().endsWith('\n━━━━━━━━━━━━━ Step 4 of 4\n? Name\n› web (default)')).toBe(true)
+
+    await typeInto(stdin, keys.enter)
+
+    await expect(answer).resolves.toBe('web')
+  })
+
   it('takes every default at once with --yes, shows each answered, and reads no input', async () => {
     const { view, stdin, frame } = await startView({ yes: true })
+
+    await act(async () => {
+      view.questionProgress(0, 4)
+    })
+
     const { answer: text } = await asking(() => view.text('Name', { defaultValue: 'web', validate: () => 'Never.' }))
     const { answer: select } = await asking(() =>
       view.select('Package manager', { choices: managers, defaultValue: 'yarn' }),
     )
     const { answer: confirm } = await asking(() => view.confirm('Add the addon?', { defaultValue: true }))
+    const { answer: checklist } = await asking(() =>
+      view.checklist('Storybooks', { choices: managers, defaultValues: ['yarn'], validate: () => 'Never.' }),
+    )
 
+    await expect(checklist).resolves.toEqual(['yarn'])
     await expect(text).resolves.toBe('web')
     await expect(select).resolves.toBe('yarn')
     await expect(confirm).resolves.toBe(true)
-    expect(frame()).toBe(`${header}✓ Name web\n✓ Package manager Yarn\n✓ Add the addon? yes\n`)
+    expect(frame()).toBe(`${header}✓ Name web\n✓ Package manager Yarn\n✓ Add the addon? yes\n✓ Storybooks Yarn\n`)
     expect(stdin.rawModes).toEqual([])
   })
 
@@ -468,10 +562,12 @@ describe('startInitView', () => {
       text: (message, options) => stops.reached(view.text(message, options)),
       confirm: (message, options) => stops.reached(view.confirm(message, options)),
       select: (message, options) => stops.reached(view.select(message, options)),
+      checklist: (message, options) => stops.reached(view.checklist(message, options)),
       note: (text) => view.note(text),
+      questionProgress: (answered, total) => view.questionProgress(answered, total),
     }
     const runCommand: InitTools['runCommand'] = (_command, args) => {
-      if (args[0] !== 'add') {
+      if (!args.includes('--save-exact')) {
         return Promise.resolve(0)
       }
 
@@ -504,7 +600,8 @@ describe('startInitView', () => {
     await act(() => firstQuestion)
 
     expect(frame()).toBe(
-      `${header}? Name of the Storybook in .storybook\n  What the config and the report call this Storybook.\n› web-app (default)`,
+      `${header}──────────────────── Step 1 of 5\n` +
+        `? Name of the Storybook in ${basename(root)}\n  What the config and the report call this Storybook.\n› web-app (default)`,
     )
 
     for (let answered = 0; answered < 5; answered += 1) {
@@ -512,7 +609,7 @@ describe('startInitView', () => {
     }
 
     const answers =
-      '✓ Name of the Storybook in .storybook web-app\n' +
+      `✓ Name of the Storybook in ${basename(root)} web-app\n` +
       '✓ URL of web-app http://127.0.0.1:6006\n' +
       '✓ Name of the script that runs visual-check test visual:check\n' +
       '✓ Name of the script that runs visual-check update visual:update\n' +
@@ -523,11 +620,12 @@ describe('startInitView', () => {
     await advanceTimers(1000)
 
     expect(frame()).toBe(
-      `${header}${answers}\n━━━━━─────────────── 1/4 · 2.5s\n` +
+      `${header}${answers}\n━━━━──────────────── 1/5 · 2.5s\n` +
         '✓ Write the files and scripts 0.0s\n' +
         `⠹ ${installTitle} 2.5s\n` +
         `  ${pnpmAdd.command} ${pnpmAdd.args.join(' ')}\n` +
         '  │ Packages: +3\n  │ +++\n  │ Progress: resolved 3, reused 3, downloaded 0\n' +
+        '○ Install the browser package\n' +
         '○ Add the Storybook addon to web-app\n' +
         '○ Check for unlisted dependencies',
     )
@@ -537,10 +635,12 @@ describe('startInitView', () => {
       finishInstall(0)
       await run
     })
+
     const steps =
-      '\n━━━━━━━━━━━━━━━━━━━━ 4/4 · 5.0s\n' +
+      '\n━━━━━━━━━━━━━━━━━━━━ 5/5 · 5.0s\n' +
       '✓ Write the files and scripts 0.0s\n' +
       `✓ ${installTitle} 5.0s\n` +
+      '✓ Install the browser package 0.0s\n' +
       '✓ Add the Storybook addon to web-app 0.0s\n' +
       '✓ Check for unlisted dependencies 0.0s'
 

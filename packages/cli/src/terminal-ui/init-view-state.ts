@@ -1,5 +1,6 @@
 import type { Choice } from '../init/prompter.js'
 import type { InitResult } from '../init/run-init.js'
+import { type Message, textOf } from '../init/segment.js'
 import type { StepOutcome } from '../init/setup-progress.js'
 import { emptyOutputTail, type OutputTail, outputTailOf } from './output-tail.js'
 
@@ -66,7 +67,7 @@ export type ShownLine =
       /**
        * The note.
        */
-      text: string
+      text: Message
     }
   | {
       /**
@@ -76,7 +77,7 @@ export type ShownLine =
       /**
        * The question.
        */
-      message: string
+      message: Message
       /**
        * The answer, as the person sees it.
        */
@@ -124,7 +125,7 @@ interface QuestionBase<T> {
   /**
    * The question.
    */
-  message: string
+  message: Message
   /**
    * The answer the question starts on.
    */
@@ -173,6 +174,20 @@ export type NewQuestion =
        */
       choices: readonly [Choice<string>, ...Choice<string>[]]
     })
+  | (QuestionBase<string[]> & {
+      /**
+       * Any of a list.
+       */
+      kind: 'checklist'
+      /**
+       * The answers, in the order they show.
+       */
+      choices: readonly [Choice<string>, ...Choice<string>[]]
+      /**
+       * Returns what is wrong with the values ticked, or `undefined` when they are fine.
+       */
+      validate: ((values: string[]) => string | undefined) | undefined
+    })
 
 /**
  * The question waiting for its answer.
@@ -182,6 +197,20 @@ export type ActiveQuestion = NewQuestion & {
    * The question's key, unique within the view, so a question never takes over the state of the one before.
    */
   id: number
+}
+
+/**
+ * How far through the questions the person is.
+ */
+export interface QuestionProgress {
+  /**
+   * How many questions are answered.
+   */
+  answered: number
+  /**
+   * How many questions are planned in all.
+   */
+  total: number
 }
 
 /**
@@ -196,6 +225,10 @@ export interface ViewState {
    * The question waiting for its answer, if any.
    */
   question: ActiveQuestion | undefined
+  /**
+   * How far through the questions the person is, once a question is planned. Shown only while a question waits.
+   */
+  questionProgress: QuestionProgress | undefined
   /**
    * The setup steps, in the order of the plan, while they run. None before the plan, nor once the run is finished, when
    * they are among the lines.
@@ -236,6 +269,7 @@ export function initialViewState(version: string): ViewState {
   return {
     lines: [{ id: 0, kind: 'header', version }],
     question: undefined,
+    questionProgress: undefined,
     steps: [],
     plannedAt: undefined,
     nextId: 1,
@@ -254,8 +288,15 @@ function withLines(state: ViewState, added: readonly ShownLine[]): ViewState {
 /**
  * Adds a note.
  */
-export function addNote(state: ViewState, text: string): ViewState {
+export function addNote(state: ViewState, text: Message): ViewState {
   return withLines(state, [{ kind: 'note', text }])
+}
+
+/**
+ * Keeps how far through the questions the person is: `answered` of the `total` planned.
+ */
+export function showQuestionProgress(state: ViewState, answered: number, total: number): ViewState {
+  return { ...state, questionProgress: { answered, total } }
 }
 
 /**
@@ -265,7 +306,9 @@ export function addNote(state: ViewState, text: string): ViewState {
  */
 export function askQuestion(state: ViewState, question: NewQuestion): ViewState {
   if (state.question !== undefined) {
-    throw new Error(`"${question.message}" can't be asked while "${state.question.message}" waits for its answer.`)
+    throw new Error(
+      `"${textOf(question.message)}" can't be asked while "${textOf(state.question.message)}" waits for its answer.`,
+    )
   }
 
   return { ...state, question: { ...question, id: state.nextId }, nextId: state.nextId + 1 }

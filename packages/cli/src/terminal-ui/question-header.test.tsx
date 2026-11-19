@@ -17,6 +17,16 @@ describe('QuestionHeader', () => {
     expect(lastFrame()).toBe('\u001b[36m?\u001b[39m \u001b[1mPackage manager\u001b[22m')
   })
 
+  it('draws a folder or name in the question in the accent colour, still bold', async () => {
+    const { lastFrame } = await renderSettled(
+      <QuestionHeader message={['Name of the Storybook in ', { code: 'apps/my-app' }]} />,
+    )
+
+    expect(plainFrameOf(lastFrame())).toBe('? Name of the Storybook in apps/my-app')
+    expect(lastFrame()).toContain('\u001b[36mapps/my-app\u001b[39m')
+    expect(lastFrame()).toContain('\u001b[1m')
+  })
+
   it('draws the hint dim under the question, indented to match it', async () => {
     const { lastFrame } = await renderSettled(
       <QuestionHeader hint="It installs visual-check." message="Package manager" />,

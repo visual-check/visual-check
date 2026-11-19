@@ -77,6 +77,14 @@ export const glyphs = {
    */
   unchosen: '○',
   /**
+   * A choice of a checklist that is ticked.
+   */
+  ticked: '◉',
+  /**
+   * A choice of a checklist that is not ticked.
+   */
+  unticked: '◯',
+  /**
    * A hint, or what separates a label from its hint.
    */
   hint: '·',

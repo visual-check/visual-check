@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ContainerError, DockerMissingError } from '../container/container-error.js'
+import { closingMessageTextOf } from './closing-message.js'
 import {
   browserRange,
   cliVersion,
@@ -10,7 +11,9 @@ import {
   modesFile,
   type ProgressCall,
   pnpmAdd,
+  pnpmAddBrowser,
   pnpmAddon,
+  pnpmAddWithoutAddon,
   pnpmClosingMessage,
   pnpmNextSteps,
   toolsOf,
@@ -50,13 +53,15 @@ const pnpmPlan: ProgressCall = [
   [
     'Write the files and scripts',
     installTitle,
+    'Install the browser package',
     'Add the Storybook addon to web-app',
     'Check for unlisted dependencies',
   ],
 ]
 
 /**
- * The calls to the progress of a run on the pnpm project that gets as far as the install, whose outcome is `install`.
+ * The calls to the progress of a run on the pnpm project that gets as far as the first install, whose outcome is
+ * `install`. One that succeeds goes on to add the browser package.
  */
 function installProgressOf(install: 'done' | 'failed'): ProgressCall[] {
   return [
@@ -65,6 +70,12 @@ function installProgressOf(install: 'done' | 'failed'): ProgressCall[] {
     ['end', 'done'],
     ['start', installTitle, `${pnpmAdd.command} ${pnpmAdd.args.join(' ')}`],
     ['end', install],
+    ...(install === 'done'
+      ? ([
+          ['start', 'Install the browser package', `${pnpmAddBrowser.command} ${pnpmAddBrowser.args.join(' ')}`],
+          ['end', 'done'],
+        ] as const)
+      : []),
   ]
 }
 
@@ -119,17 +130,18 @@ describe('runInit', () => {
       'visual:check': 'visual-check test',
       'visual:update': 'visual-check update',
     })
-    expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddon))
+    expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddBrowser, pnpmAddon))
     expect(record.progress).toEqual(fullProgressOf('done', 'done'))
     expect(record.probes).toBe(1)
     expect(record.fallowRoots).toEqual([root])
   })
 
-  it('shows the paths relative to a subfolder it runs in', async () => {
+  it('says to run the next steps from the project root when it runs in a subfolder, with the paths relative to it', async () => {
     const root = pnpmProject({ files: { 'src/a.ts': '' } })
     const result = await runInit(join(root, 'src'), toolsOf().tools)
 
-    expect(result.stdout).toContain('To set options for every story, see ../.storybook/visual-check.ts.\n')
+    expect(result.stdout).toContain(`visual-check is set up. Next, from ${basename(root)}:\n`)
+    expect(result.stdout).toContain('To set options for every story, see .storybook/visual-check.ts.\n')
   })
 
   describe('each check that stops it writes nothing and runs nothing', () => {
@@ -178,8 +190,8 @@ describe('runInit', () => {
         name: 'storybook 9.0.0',
         project: () => pnpmProject({ storybookVersion: '9.0.0' }),
         tools: {},
-        messages: [
-          'The Storybook in .storybook runs storybook 9.0.0, and visual-check needs 9.1 or later. Upgrade storybook, then run visual-check init again.',
+        messages: (root: string) => [
+          `The Storybook in ${basename(root)} runs storybook 9.0.0, and visual-check needs 9.1 or later. Upgrade storybook, then run visual-check init again.`,
         ],
       },
       {
@@ -199,8 +211,9 @@ describe('runInit', () => {
           "visual-check init found no package.json in the current folder or its parents. Run it in your project's folder.",
         ],
       },
-    ])('$name', async ({ project, tools: overrides, messages }) => {
+    ])('$name', async ({ project, tools: overrides, messages: expectedMessages }) => {
       const root = project()
+      const messages = typeof expectedMessages === 'function' ? expectedMessages(root) : expectedMessages
       const before = snapshotFiles(root)
       const prompter = scriptedPrompter([])
       const { tools, record } = toolsOf({ ...overrides, prompter })
@@ -220,7 +233,7 @@ describe('runInit', () => {
         'visual-check needs Node 22 or later, and this is Node 20.18.0. Upgrade Node, then run visual-check init again.',
         "visual-check doesn't support Deno, and this project has deno.lock. Run visual-check init in a Node project.",
         "visual-check init asks questions, and there's no terminal to ask them in. Run it in a terminal, or pass --yes to take every default.",
-        'The Storybook in .storybook runs storybook 9.0.0, and visual-check needs 9.1 or later. Upgrade storybook, then run visual-check init again.',
+        `The Storybook in ${basename(root)} runs storybook 9.0.0, and visual-check needs 9.1 or later. Upgrade storybook, then run visual-check init again.`,
         '',
       ])
     })
@@ -247,13 +260,12 @@ describe('runInit', () => {
       expect(result.stderr).toBe('')
       expect(prompter.records[0]).toEqual({
         kind: 'note',
-        message:
-          'Warning: .storybook runs storybook 12.0.0, newer than the versions visual-check is tested on (9.1 to 11).',
+        message: `Warning: ${basename(root)} runs storybook 12.0.0, newer than the versions visual-check is tested on (9.1 to 11).`,
       })
       expectWritten(root, result.stdout)
-      expect(prompter.records.filter(({ kind }) => kind === 'confirm')).toEqual([])
+      expect(prompter.records.filter(({ kind }) => kind === 'checklist')).toEqual([])
       expect(prompter.unused()).toEqual([])
-      expect(record.commands).toEqual(commandsIn(root, pnpmAdd))
+      expect(record.commands).toEqual(commandsIn(root, pnpmAddWithoutAddon, pnpmAddBrowser))
     })
 
     it.each([
@@ -303,7 +315,7 @@ describe('runInit', () => {
 
     it("warns when the URL's port isn't the start command's", async () => {
       const root = pnpmProject()
-      const prompter = scriptedPrompter(['', 'http://127.0.0.1:7000', '', '', true])
+      const prompter = scriptedPrompter(['', 'http://127.0.0.1:7000', '', '', ''])
       const result = await runInit(root, toolsOf({ yes: false, interactive: true, prompter }).tools)
 
       expect(result.exitCode).toBe(0)
@@ -331,12 +343,12 @@ describe('runInit', () => {
 
     it('warns when storybook add fails, and carries on', async () => {
       const root = pnpmProject()
-      const { tools, record } = toolsOf({}, { exitCodes: [0, 1] })
+      const { tools, record } = toolsOf({}, { exitCodes: [0, 0, 1] })
       const result = await runInit(root, tools)
 
       expect(result.exitCode).toBe(0)
       expect(result.stderr).toBe(
-        `Warning: pnpm exec storybook add @visual-check/storybook-addon@${cliVersion} --yes failed, so web-app has no addon. Run it yourself to add it.\n`,
+        `Warning: pnpm exec storybook add @visual-check/storybook-addon@${cliVersion} --yes --skip-install failed, so web-app has no addon. Run it yourself to add it, then set @visual-check/storybook-addon back to "${cliVersion}" in package.json.\n`,
       )
       expectWritten(root, result.stdout)
       expect(record.fallowRoots).toEqual([root])
@@ -380,12 +392,12 @@ describe('runInit', () => {
     it('prints the hints and warnings in the order they arose', async () => {
       const root = pnpmProject({ manifest: { scripts: { storybook: 'storybook dev' } } })
       const error = new ContainerError("Docker's daemon isn't running.")
-      const result = await runInit(root, toolsOf({}, { dockerError: error, exitCodes: [0, 1] }).tools)
+      const result = await runInit(root, toolsOf({}, { dockerError: error, exitCodes: [0, 0, 1] }).tools)
 
       expect(result.stderr.split('\n')).toEqual([
         `Warning: Docker's daemon isn't running. ${dockerFix}`,
         "hint: The storybook script sets no port. Add -p 6006 to it, so Storybook always starts on the port in web-app's URL.",
-        `Warning: pnpm exec storybook add @visual-check/storybook-addon@${cliVersion} --yes failed, so web-app has no addon. Run it yourself to add it.`,
+        `Warning: pnpm exec storybook add @visual-check/storybook-addon@${cliVersion} --yes --skip-install failed, so web-app has no addon. Run it yourself to add it, then set @visual-check/storybook-addon back to "${cliVersion}" in package.json.`,
         '',
       ])
     })
@@ -416,6 +428,7 @@ describe('runInit', () => {
     for (const path of Object.keys(files)) {
       expect(after[path]).toBe(before[path])
     }
+
     expect(readText(root, 'package.json')).toBe(
       `${JSON.stringify(
         {
@@ -465,7 +478,7 @@ describe('runInit', () => {
       summary: pnpmSummary,
     })
     expect(existsSync(join(root, '.git'))).toBe(false)
-    expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddon))
+    expect(record.commands).toEqual(commandsIn(root, pnpmAdd, pnpmAddBrowser, pnpmAddon))
   })
 
   it('hints when storybook is not installed, asks nothing about the addon and still installs', async () => {
@@ -473,19 +486,24 @@ describe('runInit', () => {
       manifest: { name: 'web-app', packageManager: 'pnpm@9.12.3', scripts: { storybook: 'storybook dev -p 6006' } },
       files: { '.storybook/main.ts': '' },
     })
-    const hint =
-      "hint: storybook isn't installed for .storybook, so init skips its addon. Install dependencies, then run init again."
+    const hintTextIn = (folder: string) =>
+      `hint: storybook isn't installed for ${basename(folder)}, so init skips its addon. Install dependencies, then run init again.`
+    const hint = [
+      "hint: storybook isn't installed for ",
+      { code: basename(root) },
+      ', so init skips its addon. Install dependencies, then run init again.',
+    ]
     const yes = toolsOf()
     const yesResult = await runInit(root, yes.tools)
 
     expect(yesResult).toEqual({
       exitCode: 0,
       stdout: pnpmClosingMessage,
-      stderr: `${hint}\n`,
+      stderr: `${hintTextIn(root)}\n`,
       messages: [hint],
       summary: pnpmSummary,
     })
-    expect(yes.record.commands).toEqual(commandsIn(root, pnpmAdd))
+    expect(yes.record.commands).toEqual(commandsIn(root, pnpmAddWithoutAddon, pnpmAddBrowser))
 
     const asked = makeProject({
       manifest: { name: 'web-app', packageManager: 'pnpm@9.12.3', scripts: { storybook: 'storybook dev -p 6006' } },
@@ -495,8 +513,8 @@ describe('runInit', () => {
 
     await runInit(asked, toolsOf({ yes: false, interactive: true, prompter }).tools)
 
-    expect(prompter.records[0]).toEqual({ kind: 'note', message: hint })
-    expect(prompter.records.filter(({ kind }) => kind === 'confirm')).toEqual([])
+    expect(prompter.records[0]).toEqual({ kind: 'note', message: hintTextIn(asked) })
+    expect(prompter.records.filter(({ kind }) => kind === 'checklist')).toEqual([])
     expect(prompter.unused()).toEqual([])
   })
 
@@ -659,6 +677,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
         commandsIn(
           root,
           { command: 'npm', args: ['install', ...pnpmAdd.args.slice(1)] },
+          { command: 'npm', args: ['install', ...pnpmAddBrowser.args.slice(1)] },
           { command: 'npx', args: pnpmAddon.args.slice(1) },
         ),
       )
@@ -667,7 +686,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
 
     it('asks for one when nothing shows one', async () => {
       const root = pnpmProject({ manifest: { packageManager: undefined } })
-      const prompter = scriptedPrompter(['yarn', '', '', '', '', true])
+      const prompter = scriptedPrompter(['yarn', '', '', '', '', ''])
       const { tools, record } = toolsOf({ yes: false, interactive: true, prompter })
 
       await runInit(root, tools)
@@ -682,8 +701,9 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
       expect(record.commands).toEqual(
         commandsIn(
           root,
-          { command: 'yarn', args: ['add', '--dev', ...pnpmAdd.args.slice(2)] },
-          { command: 'yarn', args: pnpmAddon.args.slice(1) },
+          { command: 'yarn', args: ['add', '--dev', '--exact', ...pnpmAdd.args.slice(3)] },
+          { command: 'yarn', args: ['add', '--dev', ...pnpmAddBrowser.args.slice(2)] },
+          { command: 'npx', args: ['--no-install', ...pnpmAddon.args.slice(1)] },
         ),
       )
     })
@@ -693,7 +713,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
     const root = pnpmProject()
     const { tools, record } = toolsOf({}, { exitCodes: [1] })
 
-    const problem = `pnpm add --save-dev @visual-check/cli@${cliVersion} @visual-check/chromium@${browserRange} @visual-check/storybook@${cliVersion} failed with exit code 1. Run it yourself, then run visual-check init again.`
+    const problem = `pnpm add --save-dev --save-exact @visual-check/cli@${cliVersion} @visual-check/storybook@${cliVersion} @visual-check/storybook-addon@${cliVersion} failed with exit code 1. Run it yourself, then run visual-check init again.`
 
     expect(await runInit(root, tools)).toEqual({
       exitCode: 2,
@@ -735,5 +755,462 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
       'package.json',
       'visual-check.config.ts',
     ])
+  })
+})
+
+describe('runInit in a workspace', () => {
+  /**
+   * Makes a pnpm workspace with two packages, `packages/ui` and `packages/web`, each with a `.storybook` its
+   * `storybook` script starts. `packages/web` already lists `@visual-check/storybook`.
+   */
+  function pnpmWorkspace(): string {
+    return makeProject({
+      manifest: { name: 'acme', private: true, packageManager: 'pnpm@9.12.3' },
+      files: {
+        'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+        'packages/ui/package.json': JSON.stringify({
+          name: '@acme/ui',
+          scripts: { storybook: 'storybook dev -p 6006' },
+        }),
+        'packages/ui/.storybook/main.ts': '',
+        'packages/web/package.json': JSON.stringify({
+          name: 'web',
+          scripts: { storybook: 'storybook dev -p 6007' },
+          devDependencies: { '@visual-check/storybook': cliVersion },
+        }),
+        'packages/web/.storybook/main.ts': '',
+      },
+    })
+  }
+
+  it('sets up the workspace root from inside a package, and adds the Storybook package where it is missing', async () => {
+    const root = pnpmWorkspace()
+    const { tools, record } = toolsOf()
+    const result = await runInit(join(root, 'packages/ui'), tools)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.messages[0]).toEqual([
+      'hint: init sets up the workspace in ',
+      { code: basename(root) },
+      ', where the config goes and the next steps run.',
+    ])
+    expect(result.stderr).toContain(
+      `hint: init sets up the workspace in ${basename(root)}, where the config goes and the next steps run.\n`,
+    )
+    expect(existsSync(join(root, 'visual-check.config.ts'))).toBe(true)
+    expect(existsSync(join(root, 'packages/ui/visual-check.config.ts'))).toBe(false)
+    expect(readText(root, 'packages/ui/.storybook/visual-check.ts')).toBe(modesFile)
+    expect(readText(root, 'packages/web/.visual-check/.gitignore')).toBe(gitignore)
+    expect(record.commands).toEqual([
+      {
+        command: 'pnpm',
+        args: ['add', '--save-dev', '--save-exact', '-w', `@visual-check/cli@${cliVersion}`],
+        cwd: root,
+      },
+      { command: 'pnpm', args: ['add', '--save-dev', '-w', `@visual-check/chromium@${browserRange}`], cwd: root },
+      {
+        command: 'pnpm',
+        args: ['add', '--save-dev', '--save-exact', `@visual-check/storybook@${cliVersion}`],
+        cwd: join(root, 'packages/ui'),
+      },
+    ])
+    expect(result.stdout).toContain(`visual-check is set up. Next, from ${basename(root)}:\n`)
+    expect(result.stdout).toContain('packages/ui/.storybook/visual-check.ts')
+    expect(result.summary?.nextSteps?.runFrom).toEqual([{ code: basename(root) }])
+  })
+
+  /**
+   * Reads the scripts of the `package.json` in `dir`, a folder relative to `root`.
+   */
+  function scriptsIn(root: string, dir: string): Record<string, string> {
+    return JSON.parse(readText(root, join(dir, 'package.json'))).scripts
+  }
+
+  it("gives each Storybook's package the root's scripts, narrowed to its Storybook, and names those packages", async () => {
+    const root = pnpmWorkspace()
+    const result = await runInit(root, toolsOf().tools)
+    const packagesLine = 'To check only one Storybook, run the scripts in its package: packages/ui and packages/web.'
+
+    expect(result.exitCode).toBe(0)
+    expect(scriptsIn(root, '.')).toEqual({
+      'visual:check': 'visual-check test',
+      'visual:update': 'visual-check update',
+    })
+    expect(scriptsIn(root, 'packages/ui')).toEqual({
+      storybook: 'storybook dev -p 6006',
+      'visual:check': 'visual-check test --storybook ui',
+      'visual:update': 'visual-check update --storybook ui',
+    })
+    expect(scriptsIn(root, 'packages/web')).toEqual({
+      storybook: 'storybook dev -p 6007',
+      'visual:check': 'visual-check test --storybook web',
+      'visual:update': 'visual-check update --storybook web',
+    })
+    expect(result.stdout).toContain(`\n${packagesLine}\n`)
+    expect(result.summary?.nextSteps?.packageFolders).toEqual(['packages/ui', 'packages/web'])
+  })
+
+  it("replaces a package's script that has the name, and names it with its package.json", async () => {
+    const root = pnpmWorkspace()
+
+    writeFileSync(
+      join(root, 'packages/ui/package.json'),
+      JSON.stringify({ name: '@acme/ui', scripts: { storybook: 'storybook dev -p 6006', 'visual:check': 'vitest' } }),
+    )
+
+    const result = await runInit(root, toolsOf().tools)
+    const replacedLine = 'Replaced the script visual:check in packages/ui/package.json.'
+
+    expect(result.stdout.startsWith(`${replacedLine}\n\n`)).toBe(true)
+    expect(result.summary?.replacedLine).toBe(replacedLine)
+    expect(scriptsIn(root, 'packages/ui')['visual:check']).toBe('visual-check test --storybook ui')
+  })
+
+  it("changes no package's scripts when run a second time", async () => {
+    const root = pnpmWorkspace()
+
+    await runInit(root, toolsOf({}, { installs: true }).tools)
+
+    const before = snapshotFiles(root)
+    const second = await runInit(root, toolsOf({}, { installs: true }).tools)
+
+    expect(second.exitCode).toBe(0)
+    expect(second.summary?.replacedLine).toBe(undefined)
+    expect(second.summary?.nextSteps?.packageFolders).toEqual(['packages/ui', 'packages/web'])
+    expect(snapshotFiles(root)).toEqual(before)
+  })
+
+  it('runs the root binary with yarn run -T in a package under Yarn 2 or later', async () => {
+    const root = makeProject({
+      manifest: { name: 'acme', private: true, packageManager: 'yarn@4.18.1', workspaces: ['packages/*'] },
+      files: {
+        '.yarnrc.yml': 'nodeLinker: node-modules\n',
+        'packages/ui/package.json': JSON.stringify({ name: 'ui', scripts: { storybook: 'storybook dev -p 6006' } }),
+        'packages/ui/.storybook/main.ts': '',
+      },
+    })
+
+    expect((await runInit(root, toolsOf().tools)).exitCode).toBe(0)
+    expect(scriptsIn(root, 'packages/ui')).toMatchObject({
+      'visual:check': 'yarn run -T visual-check test --storybook ui',
+      'visual:update': 'yarn run -T visual-check update --storybook ui',
+    })
+  })
+
+  it('gives each of two Storybooks in one package a pair of scripts named after it', async () => {
+    const root = makeProject({
+      manifest: { name: 'acme', private: true, packageManager: 'pnpm@9.12.3' },
+      files: {
+        'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+        'packages/ui/package.json': JSON.stringify({
+          name: 'ui',
+          scripts: { storybook: 'storybook dev -p 6006', 'storybook:docs': 'storybook dev -c docs -p 6007' },
+        }),
+        'packages/ui/.storybook/main.ts': '',
+        'packages/ui/docs/main.ts': '',
+      },
+    })
+
+    expect((await runInit(root, toolsOf().tools)).exitCode).toBe(0)
+    expect(readText(root, 'visual-check.config.ts')).toContain("    'ui-2': { dir: 'packages/ui', configDir: 'docs',")
+    expect(scriptsIn(root, 'packages/ui')).toEqual({
+      storybook: 'storybook dev -p 6006',
+      'storybook:docs': 'storybook dev -c docs -p 6007',
+      'visual:check:ui': 'visual-check test --storybook ui',
+      'visual:update:ui': 'visual-check update --storybook ui',
+      'visual:check:ui-2': 'visual-check test --storybook ui-2',
+      'visual:update:ui-2': 'visual-check update --storybook ui-2',
+    })
+  })
+
+  /**
+   * Makes a pnpm workspace with two packages, `packages/ui` and `packages/web`, whose Storybooks both start on port
+   * 6006, with storybook 10 installed in the root. `packages/web`'s config folder is `.sb`.
+   */
+  function onePortWorkspace(): string {
+    return makeProject({
+      manifest: { name: 'acme', private: true, packageManager: 'pnpm@9.12.3' },
+      files: {
+        'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+        'packages/ui/package.json': JSON.stringify({
+          name: '@acme/ui',
+          scripts: { storybook: 'storybook dev -p 6006' },
+        }),
+        'packages/ui/.storybook/main.ts': '',
+        'packages/web/package.json': JSON.stringify({
+          name: 'web',
+          scripts: { storybook: 'storybook dev -c .sb -p 6006' },
+        }),
+        'packages/web/.sb/main.ts': '',
+      },
+      storybookVersion: '10.6.7',
+    })
+  }
+
+  it('lists every Storybook in one root config with --yes, and warns that they share a port', async () => {
+    const root = onePortWorkspace()
+    const { tools } = toolsOf()
+    const result = await runInit(root, tools)
+    const warning =
+      "Warning: ui and web both use port 6006, so they can't run at the same time. Give each Storybook its own port."
+
+    expect(result.exitCode).toBe(0)
+    expect(result.messages).toEqual([warning])
+    expect(result.stderr).toBe(`${warning}\n`)
+    expect(readText(root, 'visual-check.config.ts')).toBe(`import { defineConfig } from '@visual-check/cli'
+
+export default defineConfig({
+  storybooks: {
+    ui: { dir: 'packages/ui', url: 'http://127.0.0.1:6006' },
+    web: { dir: 'packages/web', configDir: '.sb', url: 'http://127.0.0.1:6006' },
+  },
+})
+`)
+    expect(readText(root, 'packages/web/.sb/visual-check.ts')).toBe(modesFile)
+    expect(result.summary?.nextSteps?.steps[0]).toEqual([
+      { command: 'pnpm --filter @acme/ui run storybook', text: ['Start ui, and keep it running'] },
+      { command: 'pnpm --filter web run storybook', text: ['Start web, and keep it running'] },
+    ])
+  })
+
+  it("adds each package's dependencies and the addon in its folder, then runs storybook add there", async () => {
+    const root = onePortWorkspace()
+    const { tools, record } = toolsOf()
+    const result = await runInit(root, tools)
+    const storybookSpecs = [`@visual-check/storybook@${cliVersion}`, `@visual-check/storybook-addon@${cliVersion}`]
+    const storybookAdd = ['exec', 'storybook', 'add', `@visual-check/storybook-addon@${cliVersion}`, '--yes']
+
+    expect(result.exitCode).toBe(0)
+    expect(record.commands).toEqual([
+      {
+        command: 'pnpm',
+        args: ['add', '--save-dev', '--save-exact', '-w', `@visual-check/cli@${cliVersion}`],
+        cwd: root,
+      },
+      { command: 'pnpm', args: ['add', '--save-dev', '-w', `@visual-check/chromium@${browserRange}`], cwd: root },
+      {
+        command: 'pnpm',
+        args: ['add', '--save-dev', '--save-exact', ...storybookSpecs],
+        cwd: join(root, 'packages/ui'),
+      },
+      {
+        command: 'pnpm',
+        args: ['add', '--save-dev', '--save-exact', ...storybookSpecs],
+        cwd: join(root, 'packages/web'),
+      },
+      { command: 'pnpm', args: [...storybookAdd, '--skip-install'], cwd: join(root, 'packages/ui') },
+      { command: 'pnpm', args: [...storybookAdd, '--skip-install', '-c', '.sb'], cwd: join(root, 'packages/web') },
+    ])
+    expect(record.progress[0]).toEqual([
+      'plan',
+      [
+        'Write the files and scripts',
+        installTitle,
+        'Install the browser package',
+        `${installTitle} in packages/ui`,
+        `${installTitle} in packages/web`,
+        'Add the Storybook addon to ui',
+        'Add the Storybook addon to web',
+        'Check for unlisted dependencies',
+      ],
+    ])
+  })
+
+  it('adds through npm --workspace for a package its list names, and in the folder of one only Nx finds', async () => {
+    const root = makeProject({
+      manifest: { name: 'acme', private: true, packageManager: 'npm@10.9.0', workspaces: ['packages/*'] },
+      files: {
+        'nx.json': '{}',
+        'packages/ui/package.json': JSON.stringify({
+          name: '@acme/ui',
+          scripts: { storybook: 'storybook dev -p 6006' },
+        }),
+        'packages/ui/.storybook/main.ts': '',
+        'libs/docs/package.json': JSON.stringify({ name: 'docs', scripts: { storybook: 'storybook dev -p 6007' } }),
+        'libs/docs/project.json': JSON.stringify({ name: 'docs' }),
+        'libs/docs/.storybook/main.ts': '',
+      },
+      storybookVersion: '10.6.7',
+    })
+    const { tools, record } = toolsOf()
+    const result = await runInit(root, tools)
+    const storybookSpecs = [`@visual-check/storybook@${cliVersion}`, `@visual-check/storybook-addon@${cliVersion}`]
+    const storybookAdd = ['storybook', 'add', `@visual-check/storybook-addon@${cliVersion}`, '--yes', '--skip-install']
+
+    expect(result.exitCode).toBe(0)
+    expect(record.commands).toEqual([
+      { command: 'npm', args: ['install', '--save-dev', '--save-exact', `@visual-check/cli@${cliVersion}`], cwd: root },
+      { command: 'npm', args: ['install', '--save-dev', `@visual-check/chromium@${browserRange}`], cwd: root },
+      {
+        command: 'npm',
+        args: ['install', '--save-dev', '--save-exact', ...storybookSpecs],
+        cwd: join(root, 'libs/docs'),
+      },
+      {
+        command: 'npm',
+        args: ['install', '--save-dev', '--save-exact', '--workspace', 'packages/ui', ...storybookSpecs],
+        cwd: root,
+      },
+      { command: 'npx', args: storybookAdd, cwd: join(root, 'libs/docs') },
+      { command: 'npx', args: storybookAdd, cwd: join(root, 'packages/ui') },
+    ])
+    expect(result.summary?.nextSteps?.steps[0]).toEqual([
+      { command: 'cd libs/docs && npm run storybook', text: ['Start docs, and keep it running'] },
+      { command: 'npm run storybook --workspace packages/ui', text: ['Start ui, and keep it running'] },
+    ])
+    // npm's list doesn't name libs/docs, so its scripts wouldn't find the CLI the root installed.
+    expect(scriptsIn(root, 'packages/ui')['visual:check']).toBe('visual-check test --storybook ui')
+    expect(scriptsIn(root, 'libs/docs')).toEqual({ storybook: 'storybook dev -p 6007' })
+    expect(result.summary?.nextSteps?.packageFolders).toEqual(['packages/ui'])
+  })
+
+  it('runs nothing under Rush, and prints the install steps before the closing message', async () => {
+    const root = makeProject({
+      manifest: { name: 'acme', private: true },
+      files: {
+        'rush.json': '{ "pnpmVersion": "9.0.0", "projects": [{ "packageName": "ui", "projectFolder": "libs/ui" }] }',
+        'libs/ui/package.json': JSON.stringify({ name: 'ui', scripts: { storybook: 'storybook dev -p 6006' } }),
+        'libs/ui/.storybook/main.ts': '',
+      },
+      storybookVersion: '10.6.7',
+    })
+    const { tools, record } = toolsOf()
+    const result = await runInit(root, tools)
+    const heading = "Add the Storybook addon and install visual-check's packages yourself:"
+    const manualInstall = {
+      heading: [heading],
+      commands: [
+        `cd libs/ui && pnpm exec storybook add @visual-check/storybook-addon@${cliVersion} --yes --skip-install`,
+        `pnpm add --save-dev --save-exact @visual-check/cli@${cliVersion}`,
+        `pnpm add --save-dev "@visual-check/chromium@${browserRange}"`,
+        `cd libs/ui && rush add --dev --exact --skip-update -p @visual-check/storybook@${cliVersion} ` +
+          `-p @visual-check/storybook-addon@${cliVersion}`,
+        'rush update',
+      ],
+    }
+
+    expect(result.exitCode).toBe(0)
+    expect(record.commands).toEqual([])
+    expect(record.progress[0]).toEqual(['plan', ['Write the files and scripts', 'Check for unlisted dependencies']])
+    expect(result.summary?.manualInstall).toEqual(manualInstall)
+    expect(result.stdout).toBe(
+      `${heading}\n${manualInstall.commands.map((command) => `  ${command}\n`).join('')}\n` +
+        closingMessageTextOf(result.summary?.nextSteps ?? pnpmNextSteps),
+    )
+    expect(readText(root, 'libs/ui/.storybook/visual-check.ts')).toBe(modesFile)
+    // A Rush project's scripts see only its own dependencies, not the CLI the root installed.
+    expect(scriptsIn(root, 'libs/ui')).toEqual({ storybook: 'storybook dev -p 6006' })
+    expect(scriptsIn(root, '.')).toEqual({
+      'visual:check': 'visual-check test',
+      'visual:update': 'visual-check update',
+    })
+  })
+
+  it('writes nothing, adds nothing and offers no addon for a Storybook left unticked', async () => {
+    const root = onePortWorkspace()
+    const prompter = scriptedPrompter([['packages/ui/.storybook'], '', '', '', '', ''])
+    const { tools, record } = toolsOf({ yes: false, interactive: true, prompter })
+    const result = await runInit(root, tools)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.messages).toEqual([])
+    expect(prompter.unused()).toEqual([])
+    expect(prompter.records.filter(({ kind }) => kind === 'checklist').map(({ defaultValue }) => defaultValue)).toEqual(
+      [['packages/ui/.storybook', 'packages/web/.sb']],
+    )
+    expect(prompter.records.filter(({ kind }) => kind === 'confirm').map(({ message }) => message)).toEqual([
+      'Add the Storybook addon to ui?',
+    ])
+    expect(readText(root, 'visual-check.config.ts')).toContain(
+      "  storybooks: {\n    ui: { dir: 'packages/ui', url: 'http://127.0.0.1:6006' },\n  },",
+    )
+    expect(existsSync(join(root, 'packages/web/.sb/visual-check.ts'))).toBe(false)
+    expect(existsSync(join(root, 'packages/web/.visual-check'))).toBe(false)
+    expect(record.commands.map(({ cwd }) => cwd)).not.toContain(join(root, 'packages/web'))
+    expect(JSON.stringify(record.commands)).not.toContain('.sb')
+  })
+
+  it('adds the Storybook package to the root for an Nx project with only a project.json', async () => {
+    const root = makeProject({
+      manifest: { name: 'acme', private: true, packageManager: 'pnpm@9.12.3' },
+      files: {
+        'nx.json': '{}',
+        'libs/ui/project.json': JSON.stringify({ name: 'ui', targets: { storybook: { options: { port: 4400 } } } }),
+        'libs/ui/.storybook/main.ts': '',
+      },
+    })
+    const { tools, record } = toolsOf()
+    const result = await runInit(root, tools)
+
+    expect(result.exitCode).toBe(0)
+    expect(readText(root, 'libs/ui/.visual-check/.gitignore')).toBe(gitignore)
+    expect(record.commands).toEqual(commandsIn(root, pnpmAddWithoutAddon, pnpmAddBrowser))
+    expect(result.summary?.nextSteps?.steps[0]).toEqual([
+      { command: 'pnpm exec nx run ui:storybook', text: ['Start Storybook, and keep it running'] },
+    ])
+  })
+
+  it("stops on a Storybook package's package.json it can't read, writing nothing and running nothing", async () => {
+    const root = makeProject({
+      manifest: { name: 'acme', private: true, packageManager: 'pnpm@9.12.3' },
+      files: {
+        'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+        'packages/ui/package.json': '{"name":"ui","scripts":"storybook dev"}',
+        'packages/ui/.storybook/main.ts': '',
+      },
+    })
+    const before = snapshotFiles(root)
+    const { tools, record } = toolsOf()
+    const result = await runInit(root, tools)
+
+    expect(result).toMatchObject({ exitCode: 2, stdout: '' })
+    expect(result.messages).toEqual([
+      'visual-check init can\'t read packages/ui/package.json: "scripts" must be an object. ' +
+        'Fix it, then run visual-check init again.',
+    ])
+    expect(snapshotFiles(root)).toEqual(before)
+    expect(record.commands).toEqual([])
+  })
+
+  it('stops a Rush workspace without a root package.json, writing nothing and running nothing', async () => {
+    const root = makeProject({
+      files: {
+        'rush.json': '{ "pnpmVersion": "9.0.0", "projects": [{ "packageName": "ui", "projectFolder": "libs/ui" }] }',
+        'libs/ui/package.json': JSON.stringify({ name: 'ui', scripts: { storybook: 'storybook dev -p 6006' } }),
+        'libs/ui/.storybook/main.ts': '',
+      },
+    })
+    const before = snapshotFiles(root)
+    const { tools, record } = toolsOf()
+    const result = await runInit(join(root, 'libs/ui'), tools)
+
+    expect(result).toMatchObject({ exitCode: 2, stdout: '' })
+    expect(result.messages).toEqual([
+      [
+        'hint: init sets up the workspace in ',
+        { code: basename(root) },
+        ', where the config goes and the next steps run.',
+      ],
+      'visual-check init needs a package.json at the root of this Rush workspace, for its scripts and the CLI. ' +
+        'Add a private one, then run visual-check init again.',
+    ])
+    expect(snapshotFiles(root)).toEqual(before)
+    expect(record.commands).toEqual([])
+  })
+
+  it('gives the note on a skipped Storybook before the problem that stops it', async () => {
+    const root = makeProject({
+      manifest: { name: 'app' },
+      files: { 'examples/package-lock.json': '{}', 'examples/.storybook/main.ts': '' },
+    })
+    const result = await runInit(root, toolsOf().tools)
+
+    expect(result.exitCode).toBe(2)
+    expect(result.messages[0]).toEqual([
+      'hint: init skips the Storybook in ',
+      { code: 'examples' },
+      ": examples has its own lockfile, so it's a workspace of its own. Run visual-check init there to set it up.",
+    ])
+    expect(result.messages[1]).toMatch(/^visual-check init found no Storybook/)
   })
 })

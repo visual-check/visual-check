@@ -1,10 +1,9 @@
-import { Box, type Key, Text } from 'ink'
+import { Box } from 'ink'
 import type { ReactNode } from 'react'
 import type { Choice } from '../init/prompter.js'
-import { ColouredText } from './coloured-text.js'
-import { type QuestionProps, useLatestState, useQuestionInput } from './question.js'
+import { ChoiceLine } from './choice-line.js'
+import { type QuestionProps, stepOf, useLatestState, useQuestionInput } from './question.js'
 import { QuestionHeader } from './question-header.js'
-import { glyphs } from './theme.js'
 
 /**
  * What `SelectQuestion` takes. `defaultValue` is the value of the choice highlighted at the start.
@@ -14,52 +13,6 @@ interface SelectQuestionProps<T extends string> extends QuestionProps<T> {
    * The answers, in the order they show. There is at least one.
    */
   choices: readonly [Choice<T>, ...Choice<T>[]]
-}
-
-/**
- * What `ChoiceLine` takes.
- */
-interface ChoiceLineProps {
-  /**
-   * What the person sees.
-   */
-  label: string
-  /**
-   * Whether the choice is the highlighted one.
-   */
-  highlighted: boolean
-  /**
-   * A few words after the label that help pick it.
-   */
-  hint?: string | undefined
-}
-
-/**
- * One choice: `❯` and the label in the accent colour when highlighted, the label indented to match when not, then the
- * hint dim.
- */
-function ChoiceLine({ label, highlighted, hint }: ChoiceLineProps): ReactNode {
-  return (
-    <Text>
-      {highlighted ? <ColouredText colour="accent">{`${glyphs.selected} ${label}`}</ColouredText> : `  ${label}`}
-      {hint === undefined ? null : <Text dimColor>{` ${glyphs.hint} ${hint}`}</Text>}
-    </Text>
-  )
-}
-
-/**
- * How far a key press moves the highlight: back one for ↑ or k, on one for ↓ or j, and nowhere for any other key.
- */
-function stepOf(input: string, key: Key): number {
-  if (key.upArrow || input === 'k') {
-    return -1
-  }
-
-  if (key.downArrow || input === 'j') {
-    return 1
-  }
-
-  return 0
 }
 
 /**

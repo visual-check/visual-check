@@ -7,24 +7,47 @@ import {
   closingMessageTextOf,
   type NextSteps,
   nextStepsOf,
+  type ReplacedScripts,
   replacedScriptsLineOf,
   type SetUpStorybook,
 } from './closing-message.js'
-import { type DetectedProject, detectProject } from './detect-project.js'
+import { type DetectedProject, type DetectedStorybook, detectProject } from './detect-project.js'
 import { type ExistingConfig, existingConfigOf, existingStorybooksOf } from './existing-config.js'
-import type { ListFiles } from './find-storybooks.js'
+import { type ListFiles, relativePathOf } from './find-storybooks.js'
 import { blockingProblemsOf, dockerWarningOf, versionNotesOf } from './init-checks.js'
-import { addAddons, addonTitleOf, dependenciesToAddOf, installDependencies, installTitle } from './install.js'
+import {
+  type AddonStep,
+  addAddons,
+  addonStepsOf,
+  addonTitleOf,
+  dependenciesToAddOf,
+  type InstallStep,
+  installDependencies,
+  installStepsOf,
+  type ManualInstall,
+  manualInstallTextOf,
+  rushInstallOf,
+} from './install.js'
+import { type PackageScripts, packageScriptsOf } from './package-scripts.js'
 import { InputEndedError, type Prompter } from './prompter.js'
 import { type Answers, askQuestions } from './questions.js'
 import type { RunCommand } from './run-command.js'
-import { configSourceOf, modesFileSource, setScripts, visualCheckGitignore, writeIfMissing } from './setup-files.js'
+import { type Message, textOf } from './segment.js'
+import {
+  configSourceOf,
+  configStorybookOf,
+  modesFileSource,
+  setScripts,
+  visualCheckGitignore,
+  writeIfMissing,
+} from './setup-files.js'
 import { runStep, type SetupProgress } from './setup-progress.js'
 import {
   type FindUnlistedDependencies,
   fallowFailureWarningOf,
   unlistedDependenciesWarningOf,
 } from './unlisted-dependencies.js'
+import { packageManagerListOf } from './workspace.js'
 
 /**
  * What `runInit` needs besides the folder it runs in: the flags, what it runs on, the prompter, and the tools that
@@ -63,7 +86,7 @@ export interface InitTools {
    * them printed on stderr, in order, before the warnings the answers call for. The terminal UI shows them as they
    * come, and has no `notes`.
    */
-  prompter: Prompter & { notes?: readonly string[] }
+  prompter: Prompter & { notes?: readonly Message[] }
   /**
    * Asks Docker what its engine has. `init` asks once, only to warn when Docker can't run the browser.
    */
@@ -98,8 +121,8 @@ export interface InitResult {
    */
   exitCode: number
   /**
-   * Text for standard output: the line that names the scripts replaced in `package.json`, when there are any, then the
-   * closing message, which a failed install leaves out.
+   * Text for standard output: the line that names the scripts replaced in each `package.json`, when there are any, then
+   * under Rush the install steps to run, then the closing message, which a failed install leaves out.
    */
   stdout: string
   /**
@@ -107,10 +130,10 @@ export interface InitResult {
    */
   stderr: string
   /**
-   * The problems, hints and warnings, in the order they arose. A message can span lines, so the terminal UI shows these
-   * rather than split `stderr`.
+   * The problems, hints and warnings, in the order they arose. A message can span lines, and its segments pick out what
+   * it names, so the terminal UI shows these rather than split `stderr`.
    */
-  messages: readonly string[]
+  messages: readonly Message[]
   /**
    * What the terminal UI sums the run up with, once `init` has written: the scripts it replaced, and the next steps
    * when it got to the end. A run that stopped before it wrote has none.
@@ -123,9 +146,13 @@ export interface InitResult {
  */
 interface InitSummary {
   /**
-   * The line that names the scripts `init` replaced in `package.json`, when it replaced any.
+   * The line that names the scripts `init` replaced in each `package.json`, when it replaced any.
    */
   replacedLine?: string
+  /**
+   * The install steps to run, under Rush, where `init` installs nothing itself, when there's anything to add.
+   */
+  manualInstall?: ManualInstall
   /**
    * What to do next, when `init` got to the end. A failed install leaves it out.
    */
@@ -153,9 +180,14 @@ interface Setup {
    */
   storybooks: SetUpStorybook[]
   /**
+   * The packages that get the Storybook dependencies, by the folder of their `package.json`: the chosen Storybooks',
+   * or with a config that was already there, the ones of its Storybooks that were detected.
+   */
+  withDependencies: Pick<DetectedStorybook, 'manifestDir' | 'manifest'>[]
+  /**
    * The hints and warnings for stderr so far, a line each, in the order they arose.
    */
-  notes: string[]
+  notes: Message[]
 }
 
 /**
@@ -174,10 +206,11 @@ const writeFilesTitle = 'Write the files and scripts'
 const checkUnlistedTitle = 'Check for unlisted dependencies'
 
 /**
- * Sets up visual-check in the project around `cwd`. It detects the project and runs the checks that stop it, before it
- * writes or runs anything. Then it notes the Storybook versions, Docker and a config that's already there, asks its
- * questions, writes the files that are missing and the scripts, adds the dependencies and the addon, and asks Fallow
- * for unlisted dependencies. A check that fails, a question the person gives up on, or a failed install, exits 2.
+ * Sets up visual-check in the workspace around `cwd`. It detects the project and runs the checks that stop it, before
+ * it writes or runs anything. A stop gives detection's notes, then the problems. Then it notes what detection found,
+ * the Storybook versions, Docker and a config that's already there, asks its questions, writes the files that are
+ * missing and the scripts, adds the dependencies and the addon, and asks Fallow for unlisted dependencies. A check
+ * that fails, a question the person gives up on, or a failed install, exits 2.
  *
  * @throws Any error besides the ones it words, such as a `package.json` it can't write.
  *
@@ -189,7 +222,7 @@ export async function runInit(cwd: string, tools: InitTools): Promise<InitResult
   const problems = blockingProblemsOf({ cwd, nodeVersion, project, yes, interactive })
 
   if (project === undefined || problems.length > 0) {
-    return failureOf(problems)
+    return failureOf([...(project?.notes ?? []), ...problems])
   }
 
   const setup = await settleSetup(cwd, project, tools)
@@ -220,9 +253,9 @@ async function settleSetup(cwd: string, project: DetectedProject, tools: InitToo
 }
 
 /**
- * Shows, through the prompter, what's known before the questions, so a person answering sees it first: the notes on
- * Storybook versions, the Docker warning, and the hints or the warning about a config that's already there. Gives that
- * config.
+ * Shows, through the prompter, what's known before the questions, so a person answering sees it first: the notes from
+ * detection, the notes on Storybook versions, the Docker warning, and the hints or the warning about a config that's
+ * already there. Gives that config.
  */
 async function noteBeforeQuestions(
   cwd: string,
@@ -232,7 +265,7 @@ async function noteBeforeQuestions(
   const dockerNotes = await dockerNotesOf(tools.probeDocker, tools.os)
   const existing = await existingConfigOf(cwd, project)
 
-  for (const note of [...versionNotesOf(project), ...dockerNotes, ...(existing?.notes ?? [])]) {
+  for (const note of [...project.notes, ...versionNotesOf(project), ...dockerNotes, ...(existing?.notes ?? [])]) {
     tools.prompter.note(note)
   }
 
@@ -240,14 +273,14 @@ async function noteBeforeQuestions(
 }
 
 /**
- * Builds what to set up from the answers: the config to write when there was none, and the Storybooks, the ones
- * answered or the config's own.
+ * Builds what to set up from the answers: the config to write when there was none, listing each Storybook chosen with
+ * its package folder as `dir`, and the Storybooks, the ones answered or the config's own.
  */
 function setupOf(
   project: DetectedProject,
   answers: Answers,
   existing: ExistingConfig | undefined,
-  notes: string[],
+  notes: Message[],
 ): Setup {
   if (existing !== undefined) {
     return {
@@ -255,56 +288,114 @@ function setupOf(
       configPath: existing.path,
       configSource: undefined,
       storybooks: existingStorybooksOf(project, existing, answers.packageManager),
+      withDependencies: project.storybooks.filter(({ configDir }) => Object.hasOwn(existing.names, configDir)),
       notes,
     }
   }
 
+  const { root } = project
+
   return {
     answers,
-    configPath: join(project.root, configFileName),
-    configSource: configSourceOf(answers.storybooks.map(({ name, url, configDir }) => ({ name, url, configDir }))),
-    storybooks: answers.storybooks.map(({ name, configDir, startCommand }) => {
-      const dir = project.storybooks.find((storybook) => storybook.configDir === configDir)?.packageDir ?? project.root
-
-      return { name, dir, configDir: join(project.root, configDir), baselines: defaultBaselinesIn(dir), startCommand }
-    }),
+    configPath: join(root, configFileName),
+    configSource: configSourceOf(
+      answers.storybooks.map(({ name, url, configDir, packageDir }) =>
+        configStorybookOf({ name, url, configFolder: root, packageDir, configDir: join(root, configDir) }),
+      ),
+    ),
+    storybooks: answers.storybooks.map(({ name, configDir, packageDir, startCommand }) => ({
+      name,
+      dir: packageDir,
+      configDir: join(root, configDir),
+      baselines: defaultBaselinesIn(packageDir),
+      startCommand,
+    })),
+    withDependencies: answers.storybooks,
     notes,
   }
 }
 
 /**
- * Writes the files and the scripts, adds the dependencies and the addon, and checks for unlisted dependencies. Standard
- * output names the scripts it replaced, then gives the closing message. A failed install exits 2 with no closing
- * message. The result carries a summary for the terminal UI: the scripts replaced, and the next steps unless the
- * install failed.
+ * How `init` adds its packages and the addon: the commands it runs, or under Rush, the steps it prints instead.
  */
-async function applySetup(cwd: string, project: DetectedProject, setup: Setup, tools: InitTools): Promise<InitResult> {
-  const { packageManager, scripts, addons } = setup.answers
-  const { cliVersion, runCommand, progress } = tools
+interface InstallPlan {
+  /**
+   * The add commands to run, each with its step's title. None under Rush.
+   */
+  installSteps: InstallStep[]
+  /**
+   * The `storybook add` commands to run after them. None under Rush.
+   */
+  addonSteps: AddonStep[]
+  /**
+   * The install steps to print under Rush, when there's anything to add.
+   */
+  manualInstall: ManualInstall | undefined
+}
+
+/**
+ * Plans how to add the packages each folder still needs, the addon included, and then the addon to each Storybook
+ * ticked. Under Rush, which installs through its own `rush add` and `rush update`, `init` runs none of it and prints
+ * the steps instead.
+ */
+function installPlanOf(cwd: string, project: DetectedProject, setup: Setup, tools: InitTools): InstallPlan {
+  const { root, yarnBerry, workspace } = project
+  const { packageManager, addons } = setup.answers
+  const { cliVersion } = tools
   const installs = dependenciesToAddOf({
-    root: project.root,
+    root,
     rootManifest: project.manifest,
-    // In a single package, every Storybook belongs to the root package.
-    storybooks: project.storybooks.map(({ packageDir }) => ({ packageDir, manifest: project.manifest })),
+    storybooks: setup.withDependencies,
+    addons,
     cliVersion,
     browserRange: tools.browserRange,
+  })
+  const addonSteps = addonStepsOf({ addons, packageManager, yarnBerry, cliVersion, root })
+  const context = { packageManager, yarnBerry, root, packageManagerLists: workspace.packageManagerLists }
+
+  if (workspace.kind === 'rush') {
+    return { installSteps: [], addonSteps: [], manualInstall: rushInstallOf({ ...context, cwd, installs, addonSteps }) }
+  }
+
+  return { installSteps: installStepsOf({ ...context, installs }), addonSteps, manualInstall: undefined }
+}
+
+/**
+ * Writes the files and the scripts, adds the dependencies and the addon, and checks for unlisted dependencies. Under
+ * Rush it adds nothing and prints the install steps instead. Standard output names the scripts it replaced, then gives
+ * the install steps under Rush, then the closing message. A failed install exits 2 with no closing message. The result
+ * carries a summary for the terminal UI: the scripts replaced, the install steps under Rush, and the next steps unless
+ * the install failed.
+ */
+async function applySetup(cwd: string, project: DetectedProject, setup: Setup, tools: InitTools): Promise<InitResult> {
+  const { packageManager, scripts } = setup.answers
+  const { runCommand, progress } = tools
+  const { installSteps, addonSteps, manualInstall } = installPlanOf(cwd, project, setup, tools)
+  const packageScripts = packageScriptsOf({
+    root: project.root,
+    storybooks: setup.storybooks,
+    scriptNames: { test: scripts.test.name, update: scripts.update.name },
+    packageManager,
+    yarnBerry: project.yarnBerry,
+    listedPackageDirs: packageManagerListOf(project.workspace.packageManagerLists, packageManager),
   })
 
   progress.plan([
     writeFilesTitle,
-    ...installs.map(() => installTitle),
-    ...addons.map(({ name }) => addonTitleOf(name)),
+    ...installSteps.map(({ title }) => title),
+    ...addonSteps.map(({ name }) => addonTitleOf(name)),
     checkUnlistedTitle,
   ])
+
   const replacedScripts = await runStep(
     progress,
     { title: writeFilesTitle },
-    () => writeSetupFiles(project, setup),
+    () => writeSetupFiles(project, setup, packageScripts),
     () => 'done',
   )
   const replacedLine = replacedScriptsLineOf(replacedScripts)
   const replacedSummary = replacedLine === undefined ? {} : { replacedLine }
-  const problem = await installDependencies({ installs, packageManager, runCommand, progress })
+  const problem = await installDependencies({ steps: installSteps, cwd, runCommand, progress })
 
   if (problem !== undefined) {
     return {
@@ -313,14 +404,7 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
     }
   }
 
-  const addonWarnings = await addAddons({
-    addons,
-    packageManager,
-    cliVersion,
-    root: project.root,
-    runCommand,
-    progress,
-  })
+  const addonWarnings = await addAddons({ steps: addonSteps, cwd, runCommand, progress })
 
   const fallowWarnings = await runStep(
     progress,
@@ -331,18 +415,25 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
 
   const nextSteps = nextStepsOf({
     cwd,
+    root: project.root,
     packageManager,
     configPath: setup.configPath,
     storybooks: setup.storybooks,
     scripts,
+    packageDirs: packageScripts.map(({ dir }) => dir),
     needsBaselines: await needsBaselinesOf(setup.storybooks),
   })
-  const closingMessage = closingMessageTextOf(nextSteps)
-  const stdout = replacedLine === undefined ? closingMessage : `${replacedLine}\n\n${closingMessage}`
+  const stdout = [
+    replacedLine,
+    manualInstall === undefined ? undefined : manualInstallTextOf(manualInstall),
+    closingMessageTextOf(nextSteps),
+  ]
+    .filter((part) => part !== undefined)
+    .join('\n\n')
 
   return {
     ...resultOf(0, stdout, [...setup.notes, ...addonWarnings, ...fallowWarnings]),
-    summary: { ...replacedSummary, nextSteps },
+    summary: { ...replacedSummary, ...(manualInstall === undefined ? {} : { manualInstall }), nextSteps },
   }
 }
 
@@ -392,10 +483,14 @@ async function dockerNotesOf(probeDocker: ProbeDocker, os: NodeJS.Platform): Pro
 
 /**
  * Writes each file that's missing: the config when there was none, each Storybook's `visual-check.ts` and
- * `.visual-check/.gitignore`, and the config folder's `.visual-check/.gitignore`. Then sets the scripts. Gives the names
- * of the scripts it replaced. An existing file is never touched.
+ * `.visual-check/.gitignore`, and the config folder's `.visual-check/.gitignore`. Then sets the root's scripts and each
+ * package's own. Gives the scripts it replaced, by `package.json`. An existing file is never touched.
  */
-function writeSetupFiles(project: DetectedProject, setup: Setup): string[] {
+function writeSetupFiles(
+  project: DetectedProject,
+  setup: Setup,
+  packageScripts: readonly PackageScripts[],
+): ReplacedScripts[] {
   const { answers, configPath, configSource, storybooks } = setup
   const contents: (readonly [string, string])[] = [
     ...(configSource === undefined ? [] : [[configPath, configSource] as const]),
@@ -410,7 +505,15 @@ function writeSetupFiles(project: DetectedProject, setup: Setup): string[] {
     writeIfMissing(path, content)
   }
 
-  return setScripts(project.manifestPath, scriptsToSetOf(answers.scripts))
+  const manifests = [
+    { path: project.manifestPath, scripts: scriptsToSetOf(answers.scripts) },
+    ...packageScripts.map(({ dir, scripts }) => ({ path: join(dir, 'package.json'), scripts })),
+  ]
+
+  return manifests.map(({ path, scripts }) => ({
+    manifest: relativePathOf(project.root, path),
+    names: setScripts(path, scripts),
+  }))
 }
 
 /**
@@ -452,15 +555,16 @@ function linesOf(lines: readonly string[]): string {
 }
 
 /**
- * Builds a result with its messages, which stderr holds a line each, or more for a message that spans lines.
+ * Builds a result with its messages, which stderr holds as plain text, a line each, or more for a message that spans
+ * lines.
  */
-function resultOf(exitCode: number, stdout: string, messages: readonly string[]): InitResult {
-  return { exitCode, stdout, stderr: linesOf(messages), messages }
+function resultOf(exitCode: number, stdout: string, messages: readonly Message[]): InitResult {
+  return { exitCode, stdout, stderr: linesOf(messages.map(textOf)), messages }
 }
 
 /**
  * Builds the result for problems that stop `init`: each on its own line on stderr, exit code 2.
  */
-function failureOf(problems: readonly string[]): InitResult {
+function failureOf(problems: readonly Message[]): InitResult {
   return resultOf(2, '', problems)
 }

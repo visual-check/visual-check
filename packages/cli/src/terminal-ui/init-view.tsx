@@ -1,6 +1,7 @@
 import { render } from 'ink'
 import { InputEndedError, type Prompter } from '../init/prompter.js'
 import type { InitResult } from '../init/run-init.js'
+import type { Message } from '../init/segment.js'
 import type { SetupProgress } from '../init/setup-progress.js'
 import { InitScreen } from './init-screen.js'
 import {
@@ -14,6 +15,7 @@ import {
   type NewQuestion,
   planSteps,
   settleQuestion,
+  showQuestionProgress,
   startStep,
 } from './init-view-state.js'
 import { colourEnabledOf, ThemeContext } from './theme.js'
@@ -23,6 +25,11 @@ import { colourEnabledOf, ThemeContext } from './theme.js'
  * the run.
  */
 export interface InitView extends Prompter {
+  /**
+   * Keeps how far through the questions the person is, which a bar above each question waiting shows, such as
+   * `Step 3 of 9`. With no question waiting, nothing shows it.
+   */
+  questionProgress(answered: number, total: number): void
   /**
    * Shows the setup steps after the questions, from the plan on: a progress bar with the time taken, then each step
    * pending, running with its command and the last three lines of its output, or ended with how long it took.
@@ -119,7 +126,7 @@ export function startInitView(options: InitViewOptions): InitView {
    * `InputEndedError`, and the question goes.
    */
   function ask<T>(
-    message: string,
+    message: Message,
     defaultValue: T,
     answerOf: (value: T) => string,
     questionOf: (settling: Settling<T>) => NewQuestion,
@@ -191,8 +198,40 @@ export function startInitView(options: InitViewOptions): InitView {
 
       return choiceOf(value).value
     },
+    async checklist(message, { choices, defaultValues, hint, validate }) {
+      /**
+       * Gives the values among `values` that a choice has, in the order of the choices. It turns the `string[]` the
+       * view state holds back into the `T[]` the prompter gives, as `choiceOf` does for select.
+       */
+      const pickedOf = (values: readonly string[]) =>
+        choices.map((choice) => choice.value).filter((value) => values.includes(value))
+      const defaults = pickedOf(defaultValues)
+      const values = await ask<string[]>(
+        message,
+        defaults,
+        (picked) => {
+          const labels = choices.filter((choice) => picked.includes(choice.value)).map((choice) => choice.label)
+
+          return labels.length === 0 ? 'none' : labels.join(', ')
+        },
+        (settling) => ({
+          kind: 'checklist',
+          message,
+          defaultValue: defaults,
+          hint,
+          choices,
+          validate: validate === undefined ? undefined : (picked) => validate(pickedOf(picked)),
+          ...settling,
+        }),
+      )
+
+      return pickedOf(values)
+    },
     note(text) {
       store.update((state) => addNote(state, text))
+    },
+    questionProgress(answered, total) {
+      store.update((state) => showQuestionProgress(state, answered, total))
     },
     progress: {
       plan(titles) {
