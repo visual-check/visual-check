@@ -7,7 +7,13 @@ import {
 } from '../storybook/options-read.js'
 import { minimumText, newestSupportedMajor } from '../storybook/storybook-version.js'
 import { type CaptureSettings, failureReasonOf, pageSetupOf, waitMarginMs } from './capture-session.js'
-import { BrowserExitedError, type Driver, type Page, PageTimeoutError } from './driver/driver.js'
+import {
+  BrowserExitedError,
+  type Driver,
+  type Page,
+  PageNavigatedAwayError,
+  PageTimeoutError,
+} from './driver/driver.js'
 
 /**
  * What to read the per-story options of, and in which Storybook.
@@ -71,6 +77,25 @@ const tryAgain = 'Run visual-check again, and report it if it keeps failing.'
  * What a problem that names the preview's URL says to do about a preview that doesn't load or get ready in time.
  */
 const openPreview = 'Open it to see why, or raise readyTimeout.'
+
+/**
+ * How many times the preview is loaded again, each on a fresh page, when it reloads itself before it loads, as Vite's
+ * dev server does once it has optimized dependencies it found late. The retries follow at once, with no wait.
+ */
+const previewReloadRetries = 2
+
+/**
+ * What loading the preview on a page gives when the preview reloaded itself before it loaded and may be loaded again.
+ */
+type Reloaded = 'reloaded'
+
+/**
+ * Whether `goto` failed because the preview reloaded itself before it loaded: its page navigated to the preview's own
+ * URL.
+ */
+function reloadedItself(error: unknown, previewUrl: string): boolean {
+  return error instanceof PageNavigatedAwayError && error.url === previewUrl
+}
 
 /**
  * Says what to do about a preview that doesn't answer, when the problem doesn't name its URL.
@@ -232,20 +257,26 @@ function evaluationProblem(error: unknown, request: OptionsRequest, readyTimeout
 
 /**
  * Loads the preview on an open page and reads the options in it. The preview gets the whole readyTimeout to become
- * ready and the files get the whole of it to load, and the driver allows the margin more for the page's answer.
- * Rejects only with a `BrowserExitedError`.
+ * ready and the files get the whole of it to load, and the driver allows the margin more for the page's answer. When
+ * `mayReload` and the preview reloads itself before it loads, it gives `'reloaded'`, so the caller loads it again on a
+ * fresh page. Rejects only with a `BrowserExitedError`.
  */
 async function readOnPage(
   page: Page,
   settings: CaptureSettings,
   request: OptionsRequest,
-): Promise<StorybookOptionsRead> {
+  mayReload: boolean,
+): Promise<StorybookOptionsRead | Reloaded> {
   const { storybookName, previewUrl, files } = request
   const { readyTimeoutMs } = settings
 
   try {
     await page.goto(previewUrl, readyTimeoutMs)
   } catch (error) {
+    if (mayReload && reloadedItself(error, previewUrl)) {
+      return 'reloaded'
+    }
+
     return problemOf(
       error,
       error instanceof PageTimeoutError
@@ -264,20 +295,15 @@ async function readOnPage(
 }
 
 /**
- * Reads the merged per-story options of the stories in a Storybook's preview, with the globals each story pins and the
- * globals the Storybook declares, on a page of its own set up as a capture page is. The page loads the preview, which
- * renders no story, and reads each stories file, giving the preview and the files each the whole readyTimeout. It's
- * closed afterwards, ignoring a failure to. Whatever goes wrong other than the browser exiting comes back as a problem
- * that names the Storybook and the fix, an answer that isn't exactly the files and stories asked for included. Rejects
- * only with a `BrowserExitedError`, and then the page isn't closed, since the browser is gone.
- *
- * @public
+ * Opens a page, reads the options on it as `readOnPage` does, and closes it, ignoring a failure to. Rejects only with a
+ * `BrowserExitedError`, and then the page isn't closed, since the browser is gone.
  */
-export async function readStoryOptions(
+async function readOnNewPage(
   driver: Driver,
   settings: CaptureSettings,
   request: OptionsRequest,
-): Promise<StorybookOptionsRead> {
+  mayReload: boolean,
+): Promise<StorybookOptionsRead | Reloaded> {
   let page: Page
 
   try {
@@ -290,9 +316,35 @@ export async function readStoryOptions(
     )
   }
 
-  const read = await readOnPage(page, settings, request)
+  const read = await readOnPage(page, settings, request, mayReload)
 
   await page.close().catch(() => undefined)
 
   return read
+}
+
+/**
+ * Reads the merged per-story options of the stories in a Storybook's preview, with the globals each story pins and the
+ * globals the Storybook declares, on a page of its own set up as a capture page is. The page loads the preview, which
+ * renders no story, and reads each stories file, giving the preview and the files each the whole readyTimeout. It's
+ * closed afterwards, ignoring a failure to. A preview that reloads itself before it loads, as Vite's dev server does
+ * once it has optimized dependencies it found late, is loaded again on a fresh page, up to 2 times. Whatever goes wrong
+ * other than the browser exiting comes back as a problem that names the Storybook and the fix, an answer that isn't
+ * exactly the files and stories asked for included. Rejects only with a `BrowserExitedError`, and then the page isn't
+ * closed, since the browser is gone.
+ *
+ * @public
+ */
+export async function readStoryOptions(
+  driver: Driver,
+  settings: CaptureSettings,
+  request: OptionsRequest,
+): Promise<StorybookOptionsRead> {
+  for (let retry = 0; ; retry += 1) {
+    const read = await readOnNewPage(driver, settings, request, retry < previewReloadRetries)
+
+    if (read !== 'reloaded') {
+      return read
+    }
+  }
 }
