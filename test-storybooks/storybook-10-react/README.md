@@ -216,13 +216,20 @@ The cache is `VISUAL_CHECK_CACHE_DIR` when set, which must name an empty or miss
 pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --host --no-docker
 ```
 
-`--affected`, with `--host` and without `--no-docker`, runs three affected stories cases in place of the host cases. Each runs `test --base HEAD` with `CI` unset, so `test` covers the stories the working tree's changes affect, and a checkout of one commit works too. The working tree's own changes must affect no story. Their baselines folder holds a baseline for every expected snapshot, so the consistency check finds nothing:
+`--affected`, with `--host` and without `--no-docker`, runs seven affected stories cases in place of the host cases. Each runs `test --base HEAD` with `CI` unset, so `test` covers the stories the working tree's changes affect, and a checkout of one commit works too. The working tree's own changes must affect no story. The first three use the host config, whose baselines folder holds a baseline for every expected snapshot, so the consistency check finds nothing:
 
-- With no change, `test` captures nothing, and its note says no story is affected.
+- With no change, `test` captures nothing, its note says no story is affected, and the next note says the Storybook `react` is left out.
 - With a stories file changed, `test` captures only that file's stories.
 - With a helper changed, `test` captures only the stories of the stories files that import it.
 
-The last two add a line to a tracked file while the CLI runs, and put back its exact bytes after, also on Ctrl+C. They share the cache as the host cases do, but it needn't start empty.
+The last four use a config of the three test Storybooks, `storybook-9`, `storybook-10` and `storybook-11`, each at a URL nothing answers at. The CLI reads each one's stories globs with that test Storybook's own Storybook (9.1, 10 and 11), and 9.1's and 11's point into this package's stories. A run that requires a Storybook stops with exit 2 before any capture, and the report's `error.storybooks` names the Storybooks it required:
+
+- With no change, `test` exits 0, its notes say no story is affected and all three Storybooks are left out, and the report has no error.
+- With a stories file changed, `error.storybooks` names all three, 9.1 and 11 through their globs into this package.
+- With Storybook 9.1's `.storybook/main.ts` changed, `error.storybooks` names `storybook-9` alone.
+- With Storybook 11's `.storybook/main.ts` changed, `error.storybooks` names `storybook-11` alone, which shows 9.1's and 10's globs were read: a Storybook whose globs can't be read is always required.
+
+The cases with a change add a comment line to a tracked file while the CLI runs, so each `main.ts` still loads, and put back its exact bytes after, also on Ctrl+C. They share the cache as the host cases do, but it needn't start empty.
 
 ```sh
 pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --host --affected
