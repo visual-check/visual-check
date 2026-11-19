@@ -1,26 +1,30 @@
 // The Setup check (docs/prd/18-repo-ci.md › Setup under each package manager): it sets up a tiny Storybook the way a
-// user would, with packages that aren't on npm yet. It packs visual-check's packages and serves them from a registry
-// on 127.0.0.1, which the project's `.npmrc` names for the `@visual-check` scope; everything else comes from npm. On a
-// copy of the fixture, it installs, runs `init --yes` through `pnpm dlx` and checks what init wrote and printed. Then
-// it installs again, adds the browser image to the config, starts Storybook, runs one `update` and one `test`, and runs
-// `init --yes` again, which must change nothing. `init` and `update` run without `CI` in their environment, as on a
-// developer's machine; `test` runs in the environment the check gets, so in CI it runs as a project's CI does.
+// user would, with packages that aren't on npm yet, under npm, pnpm, Yarn 1 or Yarn 4. It packs visual-check's
+// packages and serves them from a registry on 127.0.0.1, which the project's `.npmrc` or `.yarnrc.yml` names for the
+// `@visual-check` scope; everything else comes from npm. On a copy of a fixture, it installs, runs `init --yes` the way
+// the package manager runs a package it hasn't installed, and checks what init wrote and printed. Then it installs
+// again from the lockfile. For the single-package fixture, it adds the browser image to the config, starts Storybook,
+// runs one `update` and one `test`, and runs `init --yes` again, which must change nothing. The monorepo fixture's two
+// Storybooks share a port, so it stops after the install. `init` and `update` run without `CI` in their environment,
+// as on a developer's machine; `test` runs in the environment the check gets, so in CI it runs as a project's CI does.
 //
 // Run it with `pnpm turbo run init-check --filter @visual-check/test-setup -- --package-manager pnpm`, which builds the
-// packages first, with TEST_STORYBOOK_IMAGE naming the browser image. Port 6106, where the fixture's Storybook starts,
-// must be free. It prints one line per step, then each of its problems, and exits 1 when a step fails, skipping the
-// steps after it. It works in a temporary folder, which it removes at the end, and the project uses a store and cache
-// of its own there, so nothing from an earlier run is reused. On a failure, it copies the project, without
-// `node_modules`, and every command's output to `init-check-output/`. A SIGINT or SIGTERM stops every command it
-// started, skips the steps left, cleans up as on a failure, and exits 130 or 143.
+// packages first. For the single fixture, whose Storybook it starts, TEST_STORYBOOK_IMAGE must name the browser image
+// and port 6106 must be free; the monorepo needs neither. Yarn needs the `corepack` command. It prints one line per
+// step, then each of its problems, and exits 1 when a step fails, skipping the steps after it. It works in a temporary
+// folder, which it removes at the end, and the project uses a store and cache of its own there, so nothing from an
+// earlier run is reused. On a failure, it copies the project, without `node_modules`, and every command's output to
+// `init-check-output/`. A SIGINT or SIGTERM stops every command it started, skips the steps left, cleans up as on a
+// failure, and exits 130 or 143.
 //
-// `--package-manager <name>` picks the fixture in `fixtures/<name>` and the package manager that sets it up. There's a
-// fixture for pnpm only so far.
+// `--package-manager npm|pnpm|yarn1|yarn4` picks the package manager, which the check declares in the copy's
+// `packageManager` field; Yarn runs through Corepack. `--fixture single|monorepo` picks the fixture in
+// `fixtures/<name>`, `single` by default.
 //
 // With `--init-only` it stops after the first `init`, and needs no TEST_STORYBOOK_IMAGE. It's for a machine without
-// Docker: init's only warning must be that there's no docker command, naming `platform: 'host'`, so where there's a
-// docker command, that step fails.
-import { type ChildProcessByStdio, spawn } from 'node:child_process'
+// Docker: besides the fixture's own warnings, init's only warning must be that there's no docker command, naming
+// `platform: 'host'`, so where there's a docker command, that step fails.
+import { type ChildProcessByStdio, spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
   cpSync,
@@ -35,10 +39,11 @@ import {
 } from 'node:fs'
 import { connect } from 'node:net'
 import { constants, tmpdir } from 'node:os'
-import { basename, dirname, join, relative } from 'node:path'
+import { basename, delimiter, dirname, join, relative } from 'node:path'
 import type { Readable } from 'node:stream'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
+import { type Fixture, fixtureNames, fixtures } from './fixtures.ts'
 import {
   configWithImage,
   type PackedManifest,
@@ -47,6 +52,14 @@ import {
   startRegistry,
   type Tarball,
 } from './local-packages.ts'
+import {
+  type CommandLine,
+  commandLineOf,
+  type PackageManager,
+  packageManagerNames,
+  packageManagers,
+  projectFilesOf,
+} from './package-managers.ts'
 
 /**
  * A started command, with its standard output and standard error piped.
@@ -146,9 +159,13 @@ interface StartedCommand {
  */
 interface Arguments {
   /**
-   * The package manager whose fixture the check sets up, as `--package-manager` names it.
+   * The package manager that sets the fixture up, as `--package-manager` names it.
    */
-  packageManager: string
+  packageManager: PackageManager
+  /**
+   * The fixture the check sets up, as `--fixture` names it.
+   */
+  fixture: Fixture
   /**
    * Whether the check stops after the first `init`, as `--init-only` says.
    */
@@ -168,9 +185,17 @@ interface Check {
    */
   project: string
   /**
-   * The fixture the project is a copy of.
+   * The folder of the fixture the project is a copy of.
    */
-  fixture: string
+  fixtureDir: string
+  /**
+   * That fixture, and what the check expects of it.
+   */
+  fixture: Fixture
+  /**
+   * The package manager that sets the project up.
+   */
+  packageManager: PackageManager
   /**
    * Whether the check stops after the first `init`.
    */
@@ -223,6 +248,10 @@ interface Manifest {
    * The scripts, by name.
    */
   scripts?: Record<string, string>
+  /**
+   * The dependencies, with the range of each.
+   */
+  dependencies?: Record<string, string>
   /**
    * The development dependencies, with the range of each.
    */
@@ -285,18 +314,6 @@ const commandTimeoutMilliseconds = 600_000
 const tailLineCount = 15
 
 /**
- * The config `init` writes for the fixture: its one Storybook, at its URL.
- */
-const expectedConfig = `import { defineConfig } from '@visual-check/cli'
-
-export default defineConfig({
-  storybooks: {
-    'setup-fixture': { url: 'http://127.0.0.1:6106' },
-  },
-})
-`
-
-/**
  * The `visual-check.ts` `init` writes in the config folder.
  */
 const expectedModesFile = `import { defineVisualCheck } from '@visual-check/storybook'
@@ -354,71 +371,137 @@ function messageOf(error: unknown): string {
 }
 
 /**
- * Reads the arguments, or gives the problem with them: one the check doesn't know, or a package manager that is
- * missing or has no fixture.
+ * Reads the arguments, or gives the problem with them: one the check doesn't know, a package manager that is missing
+ * or unknown, or an unknown fixture.
  */
 function parseArguments(): Arguments | { problem: string } {
   try {
     const { values } = parseArgs({
-      options: { 'package-manager': { type: 'string' }, 'init-only': { type: 'boolean', default: false } },
+      options: {
+        'package-manager': { type: 'string' },
+        fixture: { type: 'string', default: 'single' },
+        'init-only': { type: 'boolean', default: false },
+      },
       strict: true,
     })
 
-    return argumentsOf(values['package-manager'], values['init-only'])
+    return argumentsOf(values['package-manager'], values.fixture, values['init-only'])
   } catch (error) {
     return { problem: messageOf(error) }
   }
 }
 
 /**
- * Gives the arguments, or the problem with the package manager: none named, or one with no fixture.
+ * Whether a value is one of a list's.
  */
-function argumentsOf(packageManager: string | undefined, initOnly: boolean): Arguments | { problem: string } {
-  if (packageManager === undefined) {
-    return { problem: '--package-manager is missing: pass --package-manager pnpm.' }
-  }
-
-  return packageManager === 'pnpm'
-    ? { packageManager, initOnly }
-    : { problem: `There's a fixture for pnpm only so far, so --package-manager must be pnpm, not ${packageManager}.` }
+function isOneOf<T extends string>(list: readonly T[], value: string): value is T {
+  return (list as readonly string[]).includes(value)
 }
 
 /**
- * Lists what the check needs and doesn't have: the built packages, and the browser image unless it stops after
- * `init`.
+ * Gives the arguments, or the problem with them: no package manager named, or a package manager or fixture the check
+ * doesn't know.
  */
-function findSetupProblems(initOnly: boolean): string[] {
+function argumentsOf(
+  packageManager: string | undefined,
+  fixture: string,
+  initOnly: boolean,
+): Arguments | { problem: string } {
+  const packageManagerList = packageManagerNames.join(', ')
+
+  if (packageManager === undefined) {
+    return { problem: `--package-manager is missing: pass one of ${packageManagerList}.` }
+  }
+
+  if (!isOneOf(packageManagerNames, packageManager)) {
+    return { problem: `--package-manager must be one of ${packageManagerList}, not ${packageManager}.` }
+  }
+
+  if (!isOneOf(fixtureNames, fixture)) {
+    return { problem: `--fixture must be one of ${fixtureNames.join(', ')}, not ${fixture}.` }
+  }
+
+  return { packageManager: packageManagers[packageManager], fixture: fixtures[fixture], initOnly }
+}
+
+/**
+ * Lists the problem with Corepack: a package manager that runs through its shim needs the `corepack` command to run.
+ */
+function corepackProblems(packageManager: PackageManager): string[] {
+  if (!packageManager.usesCorepackShim) {
+    return []
+  }
+
+  const { status, error } = spawnSync('corepack', ['--version'], { stdio: 'ignore' })
+
+  return error === undefined && status === 0
+    ? []
+    : ["Yarn runs through Corepack, which Node 25 and later don't ship: run npm i -g corepack."]
+}
+
+/**
+ * Lists the problem with the browser image: a run that starts a Storybook needs `TEST_STORYBOOK_IMAGE`.
+ */
+function imageProblems({ fixture, initOnly }: Arguments): string[] {
+  return initOnly || !fixture.startsStorybook || image
+    ? []
+    : ['TEST_STORYBOOK_IMAGE is not set: set it to the browser image, such as visual-check-chromium:ci.']
+}
+
+/**
+ * Lists what the check needs and doesn't have: the built packages, Corepack for Yarn, and the browser image when it
+ * starts a Storybook.
+ */
+function findSetupProblems(parsed: Arguments): string[] {
   return [
     ...builtFiles
       .filter((file) => !existsSync(join(repoRoot, file)))
       .map(
         (file) =>
           `${file} is missing: run the check with pnpm turbo run init-check --filter @visual-check/test-setup ` +
-          '-- --package-manager pnpm, which builds the packages first.',
+          '-- --package-manager <name>, which builds the packages first.',
       ),
-    ...(initOnly || image
-      ? []
-      : ['TEST_STORYBOOK_IMAGE is not set: set it to the browser image, such as visual-check-chromium:ci.']),
+    ...corepackProblems(parsed.packageManager),
+    ...imageProblems(parsed),
   ]
 }
 
 /**
- * The check's own environment without `GITHUB_STEP_SUMMARY`, so no run of the CLI writes the step summary of the CI job
- * running the check.
+ * The folder of Corepack's `yarn` shim, in the temporary folder.
  */
-function checkEnvironment(): NodeJS.ProcessEnv {
+function shimFolderOf(check: Check): string {
+  return join(check.folder, 'corepack', 'shims')
+}
+
+/**
+ * The check's own environment without `GITHUB_STEP_SUMMARY`, so no run of the CLI writes the step summary of the CI job
+ * running the check. For Yarn, the folder of Corepack's `yarn` shim goes first on the `PATH`, so `yarn` is the version
+ * the project's `packageManager` field names, for `init` too. Corepack downloads it without asking into a home in the
+ * temporary folder, and changes no `package.json`.
+ */
+function checkEnvironment(check: Check): NodeJS.ProcessEnv {
   const environment = { ...process.env }
 
   delete environment.GITHUB_STEP_SUMMARY
 
-  return environment
+  if (!check.packageManager.usesCorepackShim) {
+    return environment
+  }
+
+  return {
+    ...environment,
+    PATH: [shimFolderOf(check), environment.PATH].filter((path) => path !== undefined).join(delimiter),
+    COREPACK_HOME: join(check.folder, 'corepack', 'home'),
+    COREPACK_ENABLE_DOWNLOAD_PROMPT: '0',
+    COREPACK_ENABLE_AUTO_PIN: '0',
+  }
 }
 
 /**
  * The check's environment without `CI` either, as on a developer's machine: `update` refuses to run under it.
  */
-function localEnvironment(): NodeJS.ProcessEnv {
-  const environment = checkEnvironment()
+function localEnvironment(check: Check): NodeJS.ProcessEnv {
+  const environment = checkEnvironment(check)
 
   delete environment.CI
 
@@ -444,7 +527,7 @@ function startCommand(
 
   const run: CommandRun = {
     label,
-    commandLine: [command, ...args].join(' '),
+    commandLine: commandLineOf({ command, args: [...args] }),
     cwd: options.cwd,
     exitCode: null,
     signal: null,
@@ -455,7 +538,7 @@ function startCommand(
   }
   const child = spawn(command, args, {
     cwd: options.cwd,
-    env: options.env ?? checkEnvironment(),
+    env: options.env ?? checkEnvironment(check),
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true,
   })
@@ -514,6 +597,20 @@ async function runCommand(
     timeoutMilliseconds: commandTimeoutMilliseconds,
     ...options,
   }).finished
+}
+
+/**
+ * Runs a package manager's command line in the project, to the end, or until its time limit kills it.
+ *
+ * @throws {Error} When the check was interrupted, so it starts no more commands.
+ */
+async function runInProject(
+  check: Check,
+  label: string,
+  { command, args }: CommandLine,
+  env: NodeJS.ProcessEnv = checkEnvironment(check),
+): Promise<CommandRun> {
+  return await runCommand(check, label, command, args, { cwd: check.project, env })
 }
 
 /**
@@ -671,26 +768,57 @@ async function serveTarballs(check: Check): Promise<string[]> {
 }
 
 /**
- * Copies the fixture into the temporary folder, without anything a local install left in it, points the `@visual-check`
- * scope at the registry with a store and cache of the project's own, makes it a git repo, and installs it, as a
- * project that has its dependencies is.
+ * Copies the fixture into the temporary folder, without anything a local install left in it, and writes what the
+ * package manager needs: the `packageManager` field, the workspace's packages for a monorepo, and the files that point
+ * the `@visual-check` scope at the registry with a store and cache of the project's own.
+ *
+ * @throws {Error} When the registry hasn't started.
  */
-async function makeProject(check: Check): Promise<string[]> {
-  const { folder, project, registry } = check
+function copyFixture(check: Check): void {
+  const { folder, project, registry, packageManager } = check
 
-  cpSync(check.fixture, project, {
+  if (registry === undefined) {
+    throw new Error("The registry hasn't started")
+  }
+
+  cpSync(check.fixtureDir, project, {
     recursive: true,
     filter: (source) => !['node_modules', 'storybook-static'].includes(basename(source)),
   })
+
+  const { files, manifestFields } = projectFilesOf(packageManager, {
+    registryUrl: registry.url,
+    folder,
+    workspaces: check.fixture.workspaces,
+  })
+  const manifestPath = join(project, 'package.json')
+
+  for (const [path, content] of Object.entries(files)) {
+    writeFileSync(join(project, path), content)
+  }
+
   writeFileSync(
-    join(project, '.npmrc'),
-    [
-      `@visual-check:registry=${registry?.url}/`,
-      `store-dir=${join(folder, 'store')}`,
-      `cache-dir=${join(folder, 'cache')}`,
-      '',
-    ].join('\n'),
+    manifestPath,
+    `${JSON.stringify({ ...JSON.parse(readFileSync(manifestPath, 'utf8')), ...manifestFields }, null, 2)}\n`,
   )
+}
+
+/**
+ * Copies the fixture with what the package manager needs, makes Corepack's `yarn` shim for Yarn, makes the project a
+ * git repo, and installs it, as a project that has its dependencies is.
+ *
+ * @throws {Error} When the registry hasn't started.
+ */
+async function makeProject(check: Check): Promise<string[]> {
+  const { project, packageManager } = check
+
+  copyFixture(check)
+
+  const problems = packageManager.usesCorepackShim ? await makeYarnShim(check) : []
+
+  if (problems.length > 0) {
+    return problems
+  }
 
   const gitInit = await runCommand(check, 'git init', 'git', ['init', '-q'], { cwd: project })
 
@@ -698,9 +826,23 @@ async function makeProject(check: Check): Promise<string[]> {
     return exitProblems(gitInit)
   }
 
-  // Under CI, pnpm takes --frozen-lockfile by default, and the fixture has no lockfile.
+  return exitProblems(await runInProject(check, 'install the fixture', packageManager.install))
+}
+
+/**
+ * Makes Corepack's `yarn` shim in the temporary folder, whose folder goes first on every command's `PATH`. Unlike
+ * `corepack enable` without a folder, it changes nothing outside the temporary folder, and neither does Corepack
+ * after it, since its home is there too.
+ */
+async function makeYarnShim(check: Check): Promise<string[]> {
+  const shimFolder = shimFolderOf(check)
+
+  mkdirSync(shimFolder, { recursive: true })
+
   return exitProblems(
-    await runCommand(check, 'install the fixture', 'pnpm', ['install', '--no-frozen-lockfile'], { cwd: project }),
+    await runCommand(check, 'corepack shim', 'corepack', ['enable', '--install-directory', shimFolder, 'yarn'], {
+      cwd: check.folder,
+    }),
   )
 }
 
@@ -714,16 +856,18 @@ function readProjectFile(check: Check, path: string): string | undefined {
 }
 
 /**
- * Runs `init --yes` through `pnpm dlx` at the packed CLI's version, without `CI`, and checks it: it exits 0, warns
- * only that there's no docker command with `--init-only` and not at all without, writes and adds what it should, and
- * ends with the closing message's CI line.
+ * Runs `init --yes` the way the package manager runs a package it hasn't installed, at the packed CLI's version,
+ * without `CI`, and checks it: it exits 0, prints the fixture's warnings and, with `--init-only`, one that there's no
+ * docker command, and no other, writes and adds what it should, and ends with the closing message's CI line.
  */
 async function checkInit(check: Check): Promise<string[]> {
   const cliSpec = `@visual-check/cli@${cliTarballOf(check).manifest.version}`
-  const run = await runCommand(check, 'init', 'pnpm', ['dlx', cliSpec, 'init', '--yes'], {
-    cwd: check.project,
-    env: localEnvironment(),
-  })
+  const run = await runInProject(
+    check,
+    'init',
+    check.packageManager.dlx(cliSpec, ['init', '--yes']),
+    localEnvironment(check),
+  )
   const problems = exitProblems(run)
 
   if (problems.length > 0) {
@@ -731,7 +875,7 @@ async function checkInit(check: Check): Promise<string[]> {
   }
 
   return [
-    ...(check.initOnly ? noDockerWarningProblems(run.stderr) : warningProblems('init', run.stderr)),
+    ...initWarningProblems(check, run.stderr),
     ...writtenFileProblems(check),
     ...manifestProblems(check),
     ...addonProblems(check),
@@ -740,12 +884,22 @@ async function checkInit(check: Check): Promise<string[]> {
 }
 
 /**
- * Lists the problem with `.storybook/main.js` after `init`: it must list the addon, which `storybook add` adds.
+ * Gives a path in a package folder of the project, relative to the project, as problems name it: `path` itself for
+ * the root.
+ */
+function pathIn(dir: string, path: string): string {
+  return dir === '.' ? path : `${dir}/${path}`
+}
+
+/**
+ * Lists the problem with each Storybook's `.storybook/main.js` after `init`: it must list the addon, which
+ * `storybook add` adds.
  */
 function addonProblems(check: Check): string[] {
-  return readFileSync(join(check.project, '.storybook', 'main.js'), 'utf8').includes(addonPackage)
-    ? []
-    : [`.storybook/main.js lists no ${addonPackage}: storybook add didn't add the addon`]
+  return check.fixture.storybookDirs
+    .map((dir) => pathIn(dir, '.storybook/main.js'))
+    .filter((path) => !readFileSync(join(check.project, path), 'utf8').includes(addonPackage))
+    .map((path) => `${path} lists no ${addonPackage}: storybook add didn't add the addon`)
 }
 
 /**
@@ -772,34 +926,57 @@ function warningProblems(command: string, stderr: string): string[] {
 }
 
 /**
- * Lists the problems with init's warnings on a machine without Docker: there must be exactly one, which says there's
- * no docker command and names `platform: 'host'`.
+ * Lists the problems with init's warnings: it must print each of the fixture's, and no other, except with
+ * `--init-only`, for a machine without Docker, exactly one more, which says there's no docker command and names
+ * `platform: 'host'`.
  */
-function noDockerWarningProblems(stderr: string): string[] {
+function initWarningProblems(check: Check, stderr: string): string[] {
   const warnings = warningsOf(stderr)
-
-  if (warnings.length === 1 && noDockerTexts.every((text) => warnings.join('').includes(text))) {
-    return []
-  }
+  const expected = check.fixture.expectedWarnings
+  const missing = expected
+    .filter((warning) => !warnings.includes(warning))
+    .map((warning) => `init didn't warn: ${warning}`)
+  const others = warnings.filter((warning) => !expected.includes(warning))
 
   return [
-    `init's only warning should say ${noDockerTexts.map((text) => JSON.stringify(text)).join(' and ')}, ` +
-      `and it warned: ${warnings.length === 0 ? 'nothing' : warnings.join(' | ')}`,
+    ...missing,
+    ...(check.initOnly ? noDockerWarningProblems(others) : others.map((warning) => `init warned: ${warning}`)),
   ]
 }
 
 /**
- * Lists each file `init` writes that isn't what it should be, and the fixture's `.gitignore` when init changed it.
+ * Lists the problem with init's warnings besides the fixture's on a machine without Docker: there must be exactly
+ * one, which says there's no docker command and names `platform: 'host'`.
+ */
+function noDockerWarningProblems(others: readonly string[]): string[] {
+  if (others.length === 1 && noDockerTexts.every((text) => others.join('').includes(text))) {
+    return []
+  }
+
+  return [
+    `init's only other warning should say ${noDockerTexts.map((text) => JSON.stringify(text)).join(' and ')}, ` +
+      `and it warned: ${others.length === 0 ? 'nothing else' : others.join(' | ')}`,
+  ]
+}
+
+/**
+ * Lists each file `init` writes that isn't what it should be: the config and the root `.visual-check/.gitignore`,
+ * and each Storybook's `visual-check.ts` and `.visual-check/.gitignore`. Lists the fixture's `.gitignore` too when
+ * init changed it.
  */
 function writtenFileProblems(check: Check): string[] {
   const expected: [path: string, content: string][] = [
-    ['visual-check.config.ts', expectedConfig],
-    ['.storybook/visual-check.ts', expectedModesFile],
+    ['visual-check.config.ts', check.fixture.expectedConfig],
     ['.visual-check/.gitignore', expectedGitignore],
-    ['.gitignore', readFileSync(join(check.fixture, '.gitignore'), 'utf8')],
+    ...check.fixture.storybookDirs.flatMap((dir): [string, string][] => [
+      [pathIn(dir, '.storybook/visual-check.ts'), expectedModesFile],
+      [pathIn(dir, '.visual-check/.gitignore'), expectedGitignore],
+    ]),
+    ['.gitignore', readFileSync(join(check.fixtureDir, '.gitignore'), 'utf8')],
   ]
 
-  return expected.flatMap(([path, content]) => {
+  // The single fixture's Storybook is at the root, so its `.visual-check/.gitignore` is the root one.
+  return [...new Map(expected)].flatMap(([path, content]) => {
     const actual = readProjectFile(check, path)
 
     if (actual === content) {
@@ -815,21 +992,22 @@ function writtenFileProblems(check: Check): string[] {
 }
 
 /**
- * Reads the scripts and `devDependencies` of a `package.json`, empty when it has none.
+ * Reads the scripts, `dependencies` and `devDependencies` of a `package.json`, each empty when it has none.
  */
 function readManifest(path: string): Required<Manifest> {
-  const { scripts, devDependencies } = JSON.parse(readFileSync(path, 'utf8')) as Manifest
+  const { scripts, dependencies, devDependencies } = JSON.parse(readFileSync(path, 'utf8')) as Manifest
 
-  return { scripts: scripts ?? {}, devDependencies: devDependencies ?? {} }
+  return { scripts: scripts ?? {}, dependencies: dependencies ?? {}, devDependencies: devDependencies ?? {} }
 }
 
 /**
- * Gives the spec `init` adds each of its own packages at: the packed CLI's exact version for the CLI,
- * `@visual-check/storybook` and the addon, and the CLI's peer range for `@visual-check/chromium`.
+ * Gives the spec `init` adds each of its own packages at, by the folder of the package it adds them to: the CLI at the
+ * packed CLI's exact version and `@visual-check/chromium` at the CLI's peer range at the root, and
+ * `@visual-check/storybook` and the addon at the CLI's exact version in each Storybook's package.
  *
  * @throws {Error} When the packed CLI has no peer dependency on `@visual-check/chromium`.
  */
-function addedDependencySpecsOf(check: Check): Record<string, string> {
+function addedDependencySpecsOf(check: Check): Map<string, Record<string, string>> {
   const { version, peerDependencies } = cliTarballOf(check).manifest
   const browserRange = peerDependencies?.['@visual-check/chromium']
 
@@ -837,12 +1015,15 @@ function addedDependencySpecsOf(check: Check): Record<string, string> {
     throw new Error("The packed CLI's package.json has no peer dependency on @visual-check/chromium")
   }
 
-  return {
-    '@visual-check/cli': version,
-    '@visual-check/chromium': browserRange,
-    '@visual-check/storybook': version,
-    [addonPackage]: version,
+  const specs = new Map<string, Record<string, string>>([
+    ['.', { '@visual-check/cli': version, '@visual-check/chromium': browserRange }],
+  ])
+
+  for (const dir of check.fixture.storybookDirs) {
+    specs.set(dir, { ...specs.get(dir), '@visual-check/storybook': version, [addonPackage]: version })
   }
+
+  return specs
 }
 
 /**
@@ -853,40 +1034,46 @@ function describedValueOf(value: string | undefined): string {
 }
 
 /**
- * Lists what's wrong with the project's `package.json` after `init`: it must keep the fixture's scripts and
- * `devDependencies`, and add the two scripts and its four packages, the addon included, the browser at the CLI's range
- * and the others at their exact versions.
+ * Lists what's wrong with the project's `package.json` files after `init`. Each must keep the fixture's scripts and
+ * `devDependencies`. The root's gains the two scripts, the CLI at its exact version and the browser at the CLI's range;
+ * each Storybook's package gains `@visual-check/storybook` and the addon at the CLI's exact version. No package lists
+ * another of visual-check's packages.
  */
 function manifestProblems(check: Check): string[] {
-  const fixture = readManifest(join(check.fixture, 'package.json'))
-  const { scripts, devDependencies } = readManifest(join(check.project, 'package.json'))
+  return [...addedDependencySpecsOf(check)].flatMap(([dir, addedSpecs]) => {
+    const path = pathIn(dir, 'package.json')
+    const fixture = readManifest(join(check.fixtureDir, path))
+    const { scripts, dependencies, devDependencies } = readManifest(join(check.project, path))
+    const expectedScripts = { ...fixture.scripts, ...(dir === '.' ? addedScripts : {}) }
 
-  return [
-    ...Object.entries({ ...fixture.scripts, ...addedScripts })
-      .filter(([name, script]) => scripts[name] !== script)
-      .map(
-        ([name, script]) =>
-          `package.json's ${name} script should be "${script}", and it is ${describedValueOf(scripts[name])}`,
-      ),
-    ...Object.entries({ ...fixture.devDependencies, ...addedDependencySpecsOf(check) })
-      .filter(([name, range]) => devDependencies[name] !== range)
-      .map(
-        ([name, range]) =>
-          `package.json's devDependencies should have ${name} at "${range}", and it is ` +
-          describedValueOf(devDependencies[name]),
-      ),
-  ]
+    return [
+      ...Object.entries(expectedScripts)
+        .filter(([name, script]) => scripts[name] !== script)
+        .map(
+          ([name, script]) =>
+            `${path}'s ${name} script should be "${script}", and it is ${describedValueOf(scripts[name])}`,
+        ),
+      ...Object.entries({ ...fixture.devDependencies, ...addedSpecs })
+        .filter(([name, range]) => devDependencies[name] !== range)
+        .map(
+          ([name, range]) =>
+            `${path}'s devDependencies should have ${name} at "${range}", and it is ` +
+            describedValueOf(devDependencies[name]),
+        ),
+      ...Object.keys({ ...dependencies, ...devDependencies })
+        .filter((name) => name.startsWith('@visual-check/') && !(name in addedSpecs))
+        .map((name) => `${path} shouldn't list ${name}`),
+    ]
+  })
 }
 
 /**
  * Installs the project as it is after `init`, from its lockfile, which must hold everything `init` added, and checks
- * the project has its own `visual-check` binary, so `pnpm run` and `pnpm exec` can't find another one on the PATH,
+ * the project has its own `visual-check` binary, so running a script or a binary can't find another one on the PATH,
  * such as this workspace's.
  */
 async function installAfterInit(check: Check): Promise<string[]> {
-  const problems = exitProblems(
-    await runCommand(check, 'install', 'pnpm', ['install', '--frozen-lockfile'], { cwd: check.project }),
-  )
+  const problems = exitProblems(await runInProject(check, 'install', check.packageManager.frozenInstall))
 
   if (problems.length > 0) {
     return problems
@@ -963,7 +1150,8 @@ async function startStorybook(check: Check): Promise<string[]> {
     ]
   }
 
-  const storybook = startCommand(check, 'storybook', 'pnpm', ['run', 'storybook'], { cwd: check.project })
+  const { command, args } = check.packageManager.runScript('storybook')
+  const storybook = startCommand(check, 'storybook', command, args, { cwd: check.project })
 
   check.storybook = storybook
 
@@ -1019,10 +1207,12 @@ function pngFilesIn(folder: string): string[] {
  * Runs `update` through its script, without `CI`, and checks it exits 0 and writes the one story's baseline.
  */
 async function checkUpdate(check: Check): Promise<string[]> {
-  const run = await runCommand(check, 'update', 'pnpm', ['run', 'visual:update'], {
-    cwd: check.project,
-    env: localEnvironment(),
-  })
+  const run = await runInProject(
+    check,
+    'update',
+    check.packageManager.runScript('visual:update'),
+    localEnvironment(check),
+  )
   const problems = exitProblems(run)
 
   if (problems.length > 0) {
@@ -1040,7 +1230,7 @@ async function checkUpdate(check: Check): Promise<string[]> {
  * Runs `test` through its script, in the check's own environment, and checks it exits 0.
  */
 async function checkTest(check: Check): Promise<string[]> {
-  return exitProblems(await runCommand(check, 'test', 'pnpm', ['run', 'visual:check'], { cwd: check.project }))
+  return exitProblems(await runInProject(check, 'test', check.packageManager.runScript('visual:check')))
 }
 
 /**
@@ -1094,10 +1284,12 @@ function snapshotProblems(before: ReadonlyMap<string, string>, after: ReadonlyMa
  */
 async function checkInitAgain(check: Check): Promise<string[]> {
   const before = await snapshotProject(check, 'list files before init again')
-  const run = await runCommand(check, 'init again', 'pnpm', ['exec', 'visual-check', 'init', '--yes'], {
-    cwd: check.project,
-    env: localEnvironment(),
-  })
+  const run = await runInProject(
+    check,
+    'init again',
+    check.packageManager.execBin('visual-check', ['init', '--yes']),
+    localEnvironment(check),
+  )
   const problems = exitProblems(run)
 
   if (problems.length > 0) {
@@ -1134,16 +1326,23 @@ async function stopStorybook(storybook: StartedCommand): Promise<string[]> {
 }
 
 /**
- * The steps of the check, in order. `--init-only` stops after the first `init`.
+ * Describes what `init` must warn, for the init step's line: the fixture's warnings and, with `--init-only`, that
+ * there's no docker command.
+ */
+function initWarningsDescriptionOf(check: Check): string {
+  const noDocker = check.initOnly ? ["that there's no docker command, naming platform: 'host'"] : []
+  const warnings = [...check.fixture.warningsDescription, ...noDocker]
+
+  return warnings.length === 0 ? 'without a warning' : `warning only ${warnings.join(' and ')}`
+}
+
+/**
+ * The steps of the check, in order. `--init-only` stops after the first `init`, and a fixture that starts no Storybook,
+ * such as the monorepo, whose Storybooks share a port, after the install that follows it.
  */
 function stepsOf(check: Check): Step[] {
-  const initName = check.initOnly
-    ? "init: pnpm dlx @visual-check/cli init --yes exits 0, its only warning says there's no docker command and " +
-      "names platform: 'host', it writes the config, visual-check.ts and .visual-check/.gitignore, adds the scripts, " +
-      'the packages and the addon, leaves .gitignore alone, and ends with the CI line'
-    : 'init: pnpm dlx @visual-check/cli init --yes exits 0 without a warning, writes the config, visual-check.ts and ' +
-      '.visual-check/.gitignore, adds the scripts, the packages and the addon, leaves .gitignore alone, and ends ' +
-      'with the CI line'
+  const { packageManager, fixture } = check
+  const where = fixture.workspaces === undefined ? '' : ' at the root and in each Storybook package'
   const steps: Step[] = [
     {
       name: 'pack: pnpm pack makes a tarball of each package a project installs',
@@ -1151,34 +1350,57 @@ function stepsOf(check: Check): Step[] {
     },
     { name: 'registry: a local registry serves the tarballs', run: () => serveTarballs(check) },
     {
-      name: 'project: a copy of the fixture, with the registry for @visual-check in its .npmrc, installs',
+      name:
+        `project: a copy of the ${fixture.name} fixture, declaring ${packageManager.packageManagerField} and the ` +
+        `registry for @visual-check, installs with ${commandLineOf(packageManager.install)}`,
       run: () => makeProject(check),
     },
-    { name: initName, run: () => checkInit(check) },
+    {
+      name:
+        `init: ${commandLineOf(packageManager.dlx('@visual-check/cli', ['init', '--yes']))} exits 0 ` +
+        `${initWarningsDescriptionOf(check)}, writes the config, visual-check.ts and ` +
+        `.visual-check/.gitignore${where}, adds the scripts, the packages and the addon, leaves .gitignore alone, ` +
+        'and ends with the CI line',
+      run: () => checkInit(check),
+    },
   ]
 
   if (check.initOnly) {
     return steps
   }
 
+  const install: Step = {
+    name:
+      `install: ${commandLineOf(packageManager.frozenInstall)} exits 0, and the project has its own visual-check ` +
+      'binary',
+    run: () => installAfterInit(check),
+  }
+
+  if (!fixture.startsStorybook) {
+    return [...steps, install]
+  }
+
   return [
     ...steps,
-    {
-      name: 'install: pnpm install --frozen-lockfile exits 0, and the project has its own visual-check binary',
-      run: () => installAfterInit(check),
-    },
+    install,
     { name: 'image: the config names the browser image', run: () => addImage(check) },
     {
-      name: `storybook: pnpm run storybook answers for index.json within ${storybookReadyMilliseconds / 1000} s`,
+      name:
+        `storybook: ${commandLineOf(packageManager.runScript('storybook'))} answers for index.json within ` +
+        `${storybookReadyMilliseconds / 1000} s`,
       run: () => startStorybook(check),
     },
     {
-      name: 'update: pnpm run visual:update without CI exits 0 and writes one baseline',
+      name:
+        `update: ${commandLineOf(packageManager.runScript('visual:update'))} without CI exits 0 and writes one ` +
+        'baseline',
       run: () => checkUpdate(check),
     },
-    { name: 'test: pnpm run visual:check exits 0', run: () => checkTest(check) },
+    { name: `test: ${commandLineOf(packageManager.runScript('visual:check'))} exits 0`, run: () => checkTest(check) },
     {
-      name: 'init again: pnpm exec visual-check init --yes exits 0 without a warning and changes no file',
+      name:
+        `init again: ${commandLineOf(packageManager.execBin('visual-check', ['init', '--yes']))} exits 0 without a ` +
+        'warning and changes no file',
       run: () => checkInitAgain(check),
     },
   ]
@@ -1311,14 +1533,16 @@ function exitCodeOf(check: Check, passed: boolean): number {
  * Runs the check in a temporary folder, then stops Storybook and the registry, keeps the output when anything failed
  * or a signal interrupted it, and removes the folder. Gives the exit code.
  */
-async function runCheck({ packageManager, initOnly }: Arguments): Promise<number> {
+async function runCheck({ packageManager, fixture, initOnly }: Arguments): Promise<number> {
   rmSync(outputDir, { recursive: true, force: true })
 
   const folder = realpathSync(mkdtempSync(join(tmpdir(), 'visual-check-init-check-')))
   const check: Check = {
     folder,
     project: join(folder, 'project'),
-    fixture: join(packageDir, 'fixtures', packageManager),
+    fixtureDir: join(packageDir, 'fixtures', fixture.name),
+    fixture,
+    packageManager,
     initOnly,
     commands: [],
     running: new Set(),
@@ -1335,13 +1559,16 @@ async function runCheck({ packageManager, initOnly }: Arguments): Promise<number
   } finally {
     passed = (await stopServers(check)) && passed
 
-    if (!passed) {
-      keepOutput(check)
-      console.log(`The project and every command's output are in ${relative(repoRoot, outputDir)}/.`)
+    // The folder goes even when keeping the output fails, such as on a full disk.
+    try {
+      if (!passed) {
+        keepOutput(check)
+        console.log(`The project and every command's output are in ${relative(repoRoot, outputDir)}/.`)
+      }
+    } finally {
+      rmSync(folder, { recursive: true, force: true })
+      stopListening()
     }
-
-    rmSync(folder, { recursive: true, force: true })
-    stopListening()
   }
 
   return exitCodeOf(check, passed)
@@ -1359,7 +1586,7 @@ async function main(): Promise<number> {
     return 1
   }
 
-  const setupProblems = findSetupProblems(parsed.initOnly)
+  const setupProblems = findSetupProblems(parsed)
 
   if (setupProblems.length > 0) {
     console.error(setupProblems.join('\n'))

@@ -104,12 +104,19 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
-  # init on a tiny pnpm Storybook, with the packages packed and served from a local registry: `init --yes`, install,
-  # one `update` without `CI` and one `test`, then a second `init` that changes nothing.
+  # init under each package manager, with the packages packed and served from a local registry. On a tiny Storybook:
+  # `init --yes`, install, one `update` without `CI` and one `test`, then a second `init` that changes nothing. On a
+  # monorepo with two Storybooks on one port: `init --yes` writes one root config and warns, then install; no Storybook
+  # starts, so it needs no browser image. Yarn runs through the Corepack Node ships.
   setup:
-    name: Setup (pnpm)
+    name: Setup (${{ matrix.package-manager }}, ${{ matrix.fixture }})
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        package-manager: [pnpm, npm, yarn1, yarn4]
+        fixture: [single, monorepo]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -120,19 +127,28 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Check Corepack runs
+        if: startsWith(matrix.package-manager, 'yarn')
+        run: corepack --version
       - name: Create a docker-container builder
+        if: matrix.fixture == 'single'
         run: docker buildx create --driver docker-container --use
       - name: Build the browser image
+        if: matrix.fixture == 'single'
         run: packages/chromium/image/build.sh amd64 --output type=docker,name=visual-check-chromium:ci
       - name: Setup check
         env:
           TEST_STORYBOOK_IMAGE: visual-check-chromium:ci
-        run: pnpm turbo run init-check --filter @visual-check/test-setup -- --package-manager pnpm
+          PACKAGE_MANAGER: ${{ matrix.package-manager }}
+          FIXTURE: ${{ matrix.fixture }}
+        run: >-
+          pnpm turbo run init-check --filter @visual-check/test-setup --
+          --package-manager "$PACKAGE_MANAGER" --fixture "$FIXTURE"
       - name: Upload the Setup check's output
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: init-check-output-${{ github.job }}
+          name: init-check-output-${{ github.job }}-${{ matrix.package-manager }}-${{ matrix.fixture }}
           path: test-storybooks/setup/init-check-output/
           if-no-files-found: ignore
           retention-days: 3
