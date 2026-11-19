@@ -353,10 +353,8 @@ describe('startInitView', () => {
 
     const { answer } = await asking(() => view.text('Name', { defaultValue: 'web' }))
 
-    expect(frame()).toBe(`${header}━━━━━━━━━━────────── Question 3 of 4\n? Name\n› web (default)`)
-    expect(stdout.lastFrame()).toContain(
-      '\u001b[36m━━━━━━━━━━\u001b[39m\u001b[2m──────────\u001b[22m Question 3 of 4\n',
-    )
+    expect(frame()).toBe(`${header}━━━━━━━━━━────────── Step 3 of 4\n? Name\n› web (default)`)
+    expect(stdout.lastFrame()).toContain('\u001b[36m━━━━━━━━━━\u001b[39m\u001b[2m──────────\u001b[22m Step 3 of 4\n')
 
     await typeInto(stdin, keys.enter)
 
@@ -374,7 +372,7 @@ describe('startInitView', () => {
     const { answer } = await asking(() => view.text('Name', { defaultValue: 'web' }))
 
     // The header wraps at 25 columns too, so only the question area is compared.
-    expect(frame().endsWith('\n━━━━━━━━━ Question 4 of 4\n? Name\n› web (default)')).toBe(true)
+    expect(frame().endsWith('\n━━━━━━━━━━━━━ Step 4 of 4\n? Name\n› web (default)')).toBe(true)
 
     await typeInto(stdin, keys.enter)
 
@@ -601,7 +599,7 @@ describe('startInitView', () => {
     await act(() => firstQuestion)
 
     expect(frame()).toBe(
-      `${header}──────────────────── Question 1 of 5\n` +
+      `${header}──────────────────── Step 1 of 5\n` +
         '? Name of the Storybook in .storybook\n  What the config and the report call this Storybook.\n› web-app (default)',
     )
 

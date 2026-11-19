@@ -29,7 +29,7 @@ interface ProgressBarProps {
    */
   total: number
   /**
-   * What follows the bar in place of the count, such as `Question 3 of 9`.
+   * What follows the bar in place of the count, such as `Step 3 of 9`.
    */
   label?: string
   /**

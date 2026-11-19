@@ -147,7 +147,7 @@ const questionBarWidth = 20
 
 /**
  * Draws the question waiting for its answer, with a bar of how far through the questions the person is above it, such
- * as `Question 3 of 9`, once known. The count never goes past the total. In a narrow terminal the bar narrows, so the
+ * as `Step 3 of 9`, once known. The count never goes past the total. In a narrow terminal the bar narrows, so the
  * label always fits on its line.
  */
 function QuestionArea({ question, progress }: QuestionAreaProps): ReactNode {
@@ -158,7 +158,7 @@ function QuestionArea({ question, progress }: QuestionAreaProps): ReactNode {
   }
 
   const { answered, total } = progress
-  const label = `Question ${Math.min(answered + 1, total)} of ${total}`
+  const label = `Step ${Math.min(answered + 1, total)} of ${total}`
 
   return (
     <Box flexDirection="column">

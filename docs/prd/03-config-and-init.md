@@ -144,7 +144,7 @@ Yarn 4 refuses a package version published less than a day ago by default (`npmM
 
 ## `init`: terminal UI
 
-- In a terminal (stdin and stdout are TTYs, and `CI` is unset, empty, `0` or `false`), `init` runs an Ink UI, which it loads only then. It shows the brand header, then each question with a hint, under the progress bar the setup steps use, which counts the questions, as in `Question 3 of 9`. The count is the questions planned from what `init` detected, planned again once the Storybooks to set up are ticked; a question asked again after a validation message counts once. Arrows choose, and an answered question collapses to one line.
+- In a terminal (stdin and stdout are TTYs, and `CI` is unset, empty, `0` or `false`), `init` runs an Ink UI, which it loads only then. It shows the brand header, then each question with a hint, under the progress bar the setup steps use, which counts the questions as steps, as in `Step 3 of 9`. The count is the questions planned from what `init` detected, planned again once the Storybooks to set up are ticked; a question asked again after a validation message counts once. Arrows choose, and an answered question collapses to one line.
 - After the questions it lists the setup steps under a progress bar of the steps that have ended, with the time taken:
   - a step not started yet is dim after `○`;
   - the running step turns the spinner and counts its time up each second, with its command and the last three lines of its output under it, dim;

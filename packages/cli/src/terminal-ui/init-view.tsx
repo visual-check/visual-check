@@ -26,7 +26,7 @@ import { colourEnabledOf, ThemeContext } from './theme.js'
 export interface InitView extends Prompter {
   /**
    * Keeps how far through the questions the person is, which a bar above each question waiting shows, such as
-   * `Question 3 of 9`. With no question waiting, nothing shows it.
+   * `Step 3 of 9`. With no question waiting, nothing shows it.
    */
   questionProgress(answered: number, total: number): void
   /**
