@@ -24,6 +24,11 @@ export interface Fixture {
    */
   storybookDirs: string[]
   /**
+   * The name of the Storybook in each package that gets scripts of its own, which check only that Storybook, by the
+   * package's folder. A Storybook at the root has only the root's scripts.
+   */
+  packageStorybooks: Record<string, string>
+  /**
    * The config `init` writes at its root.
    */
   expectedConfig: string
@@ -56,6 +61,7 @@ export const fixtures: Record<FixtureName, Fixture> = {
   single: {
     name: 'single',
     storybookDirs: ['.'],
+    packageStorybooks: {},
     expectedConfig: `import { defineConfig } from '@visual-check/cli'
 
 export default defineConfig({
@@ -72,6 +78,7 @@ export default defineConfig({
   monorepo: {
     name: 'monorepo',
     storybookDirs: ['apps/a', 'apps/b'],
+    packageStorybooks: { 'apps/a': 'a', 'apps/b': 'b' },
     expectedConfig: `import { defineConfig } from '@visual-check/cli'
 
 export default defineConfig({

@@ -75,9 +75,14 @@ export interface PackageManager {
    */
   dlx: (spec: string, args: readonly string[]) => CommandLine
   /**
-   * Runs one of the project's scripts.
+   * Runs one of the project's scripts, passing `args` on to it.
    */
-  runScript: (script: string) => CommandLine
+  runScript: (script: string, args?: readonly string[]) => CommandLine
+  /**
+   * The line a workspace package's script runs a binary the root installed with, as `init` writes it: Yarn 4 puts only
+   * the package's own binaries on the script's `PATH`, so it runs the root's through `yarn run -T`.
+   */
+  rootBinScript: (bin: string, args: readonly string[]) => string
   /**
    * Runs a binary the project installed, with `args`, as `init` itself does.
    */
@@ -102,6 +107,20 @@ function npxNoInstall(bin: string, args: readonly string[]): CommandLine {
  */
 function npxDlx(spec: string, args: readonly string[]): CommandLine {
   return { command: 'npx', args: ['-y', spec, ...args] }
+}
+
+/**
+ * Gives a binary and its arguments as one line, as a script runs it.
+ */
+function binLineOf(bin: string, args: readonly string[]): string {
+  return [bin, ...args].join(' ')
+}
+
+/**
+ * Runs a script with `args` the way pnpm and Yarn do: after the script's name.
+ */
+function runScriptWith(command: string): (script: string, args?: readonly string[]) => CommandLine {
+  return (script, args = []) => ({ command, args: ['run', script, ...args] })
 }
 
 /**
@@ -131,7 +150,12 @@ export const packageManagers: Record<PackageManagerName, PackageManager> = {
     install: { command: 'npm', args: ['install'] },
     frozenInstall: { command: 'npm', args: ['ci'] },
     dlx: npxDlx,
-    runScript: (script) => ({ command: 'npm', args: ['run', script] }),
+    // npm takes the flags after the script's name as its own, so they go after `--`.
+    runScript: (script, args = []) => ({
+      command: 'npm',
+      args: ['run', script, ...(args.length === 0 ? [] : ['--', ...args])],
+    }),
+    rootBinScript: binLineOf,
     execBin: npxNoInstall,
     registryFiles: (registryUrl, folder) => ({
       '.npmrc': linesOf([scopeRegistryLine(registryUrl), `cache=${join(folder, 'cache')}`]),
@@ -146,7 +170,8 @@ export const packageManagers: Record<PackageManagerName, PackageManager> = {
     install: { command: 'pnpm', args: ['install', '--no-frozen-lockfile'] },
     frozenInstall: { command: 'pnpm', args: ['install', '--frozen-lockfile'] },
     dlx: (spec, args) => ({ command: 'pnpm', args: ['dlx', spec, ...args] }),
-    runScript: (script) => ({ command: 'pnpm', args: ['run', script] }),
+    runScript: runScriptWith('pnpm'),
+    rootBinScript: binLineOf,
     execBin: (bin, args) => ({ command: 'pnpm', args: ['exec', bin, ...args] }),
     registryFiles: (registryUrl, folder) => ({
       '.npmrc': linesOf([
@@ -164,7 +189,8 @@ export const packageManagers: Record<PackageManagerName, PackageManager> = {
     install: { command: 'yarn', args: ['install'] },
     frozenInstall: { command: 'yarn', args: ['install', '--frozen-lockfile'] },
     dlx: npxDlx,
-    runScript: (script) => ({ command: 'yarn', args: ['run', script] }),
+    runScript: runScriptWith('yarn'),
+    rootBinScript: binLineOf,
     execBin: npxNoInstall,
     // Yarn 1 reads the scope's registry from `.npmrc`, and its cache folder from `.yarnrc`. `npx` reads `cache`.
     registryFiles: (registryUrl, folder) => ({
@@ -181,7 +207,8 @@ export const packageManagers: Record<PackageManagerName, PackageManager> = {
     install: { command: 'yarn', args: ['install', '--no-immutable'] },
     frozenInstall: { command: 'yarn', args: ['install', '--immutable'] },
     dlx: (spec, args) => ({ command: 'yarn', args: ['dlx', spec, ...args] }),
-    runScript: (script) => ({ command: 'yarn', args: ['run', script] }),
+    runScript: runScriptWith('yarn'),
+    rootBinScript: (bin, args) => `yarn run -T ${binLineOf(bin, args)}`,
     execBin: (bin, args) => ({ command: 'yarn', args: ['exec', bin, ...args] }),
     // Yarn 4 reads no `.npmrc`. It refuses a registry over plain HTTP unless its host is whitelisted, and a version
     // published less than a day ago unless the package is preapproved: the packed ones are new on every run. It keeps

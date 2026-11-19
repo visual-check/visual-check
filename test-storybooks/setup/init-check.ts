@@ -5,7 +5,8 @@
 // the package manager runs a package it hasn't installed, and checks what init wrote and printed. Then it installs
 // again from the lockfile. For the single-package fixture, it adds the browser image to the config, starts Storybook,
 // runs one `update` and one `test`, and runs `init --yes` again, which must change nothing. The monorepo fixture's two
-// Storybooks share a port, so it stops after the install. `init` and `update` run without `CI` in their environment,
+// Storybooks share a port, so it stops after the install and a run of each package's own `visual:check` script with
+// `--help`, which must find the root's CLI. `init` and `update` run without `CI` in their environment,
 // as on a developer's machine; `test` runs in the environment the check gets, so in CI it runs as a project's CI does.
 //
 // Run it with `pnpm turbo run init-check --filter @visual-check/test-setup -- --package-manager pnpm`, which builds the
@@ -1034,17 +1035,42 @@ function describedValueOf(value: string | undefined): string {
 }
 
 /**
+ * Gives the scripts `init` adds to the `package.json` in `dir`: the two that run every Storybook at the root, and in a
+ * package that gets scripts of its own, the same two names narrowed to its Storybook, run as the package manager runs
+ * a binary the root installed.
+ */
+function addedScriptsIn(check: Check, dir: string): Record<string, string> {
+  if (dir === '.') {
+    return addedScripts
+  }
+
+  const name = check.fixture.packageStorybooks[dir]
+
+  if (name === undefined) {
+    return {}
+  }
+
+  const { rootBinScript } = check.packageManager
+
+  return {
+    'visual:check': rootBinScript('visual-check', ['test', '--storybook', name]),
+    'visual:update': rootBinScript('visual-check', ['update', '--storybook', name]),
+  }
+}
+
+/**
  * Lists what's wrong with the project's `package.json` files after `init`. Each must keep the fixture's scripts and
  * `devDependencies`. The root's gains the two scripts, the CLI at its exact version and the browser at the CLI's range;
- * each Storybook's package gains `@visual-check/storybook` and the addon at the CLI's exact version. No package lists
- * another of visual-check's packages.
+ * each Storybook's package gains its own two scripts, narrowed to its Storybook, unless it's the root, and
+ * `@visual-check/storybook` and the addon at the CLI's exact version. No package lists another of visual-check's
+ * packages.
  */
 function manifestProblems(check: Check): string[] {
   return [...addedDependencySpecsOf(check)].flatMap(([dir, addedSpecs]) => {
     const path = pathIn(dir, 'package.json')
     const fixture = readManifest(join(check.fixtureDir, path))
     const { scripts, dependencies, devDependencies } = readManifest(join(check.project, path))
-    const expectedScripts = { ...fixture.scripts, ...(dir === '.' ? addedScripts : {}) }
+    const expectedScripts = { ...fixture.scripts, ...addedScriptsIn(check, dir) }
 
     return [
       ...Object.entries(expectedScripts)
@@ -1082,6 +1108,53 @@ async function installAfterInit(check: Check): Promise<string[]> {
   return existsSync(join(check.project, 'node_modules', '.bin', 'visual-check'))
     ? []
     : ["node_modules/.bin/visual-check is missing: the project's own CLI isn't installed"]
+}
+
+/**
+ * The text `visual-check --help` starts with.
+ */
+const helpStart = 'Usage: visual-check'
+
+/**
+ * The check's environment with no `node_modules/.bin` folder on the `PATH`, such as this workspace's, which holds a
+ * `visual-check` too. A script then finds only the binaries its package manager puts on its `PATH`.
+ */
+function environmentWithoutBins(check: Check): NodeJS.ProcessEnv {
+  const environment = checkEnvironment(check)
+  const binFolder = join('node_modules', '.bin')
+
+  return {
+    ...environment,
+    PATH: (environment.PATH ?? '')
+      .split(delimiter)
+      .filter((folder) => !folder.endsWith(binFolder))
+      .join(delimiter),
+  }
+}
+
+/**
+ * Runs the `visual:check` script of each package that gets scripts of its own, in its folder, with `--help`, which
+ * needs no Storybook. It must start the CLI the root installed, which prints its help and exits 0.
+ */
+async function checkPackageScripts(check: Check): Promise<string[]> {
+  const problems: string[] = []
+
+  for (const dir of Object.keys(check.fixture.packageStorybooks)) {
+    const { command, args } = check.packageManager.runScript('visual:check', ['--help'])
+    const run = await runCommand(check, `visual-check in ${dir}`, command, args, {
+      cwd: join(check.project, dir),
+      env: environmentWithoutBins(check),
+    })
+    const exit = exitProblems(run)
+
+    if (exit.length > 0) {
+      problems.push(...exit.map((problem) => `in ${dir}: ${problem}`))
+    } else if (!run.stdout.includes(helpStart)) {
+      problems.push(`in ${dir}: ${run.commandLine} printed no help${tailOf(run)}`)
+    }
+  }
+
+  return problems
 }
 
 /**
@@ -1337,6 +1410,27 @@ function initWarningsDescriptionOf(check: Check): string {
 }
 
 /**
+ * The step that runs each package's own `visual:check` script, for a fixture whose packages get scripts of their own.
+ * None for one whose only Storybook is at the root.
+ */
+function packageScriptStepsOf(check: Check): Step[] {
+  const packageDirs = Object.keys(check.fixture.packageStorybooks)
+
+  if (packageDirs.length === 0) {
+    return []
+  }
+
+  return [
+    {
+      name:
+        `package scripts: ${commandLineOf(check.packageManager.runScript('visual:check', ['--help']))} in ` +
+        `${packageDirs.join(' and ')}, with no other visual-check on the PATH, runs the root's CLI`,
+      run: () => checkPackageScripts(check),
+    },
+  ]
+}
+
+/**
  * The steps of the check, in order. `--init-only` stops after the first `init`, and a fixture that starts no Storybook,
  * such as the monorepo, whose Storybooks share a port, after the install that follows it.
  */
@@ -1376,13 +1470,16 @@ function stepsOf(check: Check): Step[] {
     run: () => installAfterInit(check),
   }
 
+  const packageScripts = packageScriptStepsOf(check)
+
   if (!fixture.startsStorybook) {
-    return [...steps, install]
+    return [...steps, install, ...packageScripts]
   }
 
   return [
     ...steps,
     install,
+    ...packageScripts,
     { name: 'image: the config names the browser image', run: () => addImage(check) },
     {
       name:

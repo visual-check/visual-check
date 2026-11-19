@@ -53,7 +53,7 @@ What CI checks there:
 ## Setup under each package manager
 
 - On a tiny Storybook, for each of npm, pnpm, Yarn 1 and Yarn 4: pack the packages, run `init --yes`, install, then run one `update` and one `test`. The packed packages come from a local registry, because `init` installs by version and that version isn't on npm yet.
-- A second fixture is a monorepo with two Storybooks on one port, where `init` must warn. It runs under the same four package managers, so `storybook add` with an exact version in a monorepo is covered there.
+- A second fixture is a monorepo with two Storybooks on one port, where `init` must warn. It runs under the same four package managers, so `storybook add` with an exact version in a monorepo is covered there, and so is each package's own `visual:check` script finding the CLI the root installed, run with `--help`.
 
 ## Other tests this repo needs
 
