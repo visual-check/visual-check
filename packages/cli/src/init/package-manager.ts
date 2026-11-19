@@ -205,17 +205,26 @@ function yarnVersionOfField(value: unknown): string | undefined {
 }
 
 /**
- * Returns whether a project uses Yarn 2 or later, which `init` calls Yarn Berry: the root holds a `.yarnrc.yml`, or the
- * manifest's `packageManager` or `devEngines.packageManager` declares Yarn with a major version of 2 or more. It
- * doesn't say whether Yarn is the package manager: read it only when `packageManagerOf` gives `yarn`.
+ * Returns whether the start of a `yarn.lock` is in the format of Yarn 2 and later, which opens with a `__metadata:`
+ * entry. Yarn 1's has none.
  */
-export function yarnBerryOf(manifest: Manifest, hasYarnrcYml: boolean): boolean {
+export function isBerryLockfile(head: string): boolean {
+  return /^__metadata:/m.test(head)
+}
+
+/**
+ * Returns whether a project uses Yarn 2 or later, which `init` calls Yarn Berry: the root's files show it (a
+ * `.yarnrc.yml`, or a `yarn.lock` in Yarn 2's format), or the manifest's `packageManager` or
+ * `devEngines.packageManager` declares Yarn with a major version of 2 or more. It doesn't say whether Yarn is the
+ * package manager: read it only when `packageManagerOf` gives `yarn`.
+ */
+export function yarnBerryOf(manifest: Manifest, filesShowBerry: boolean): boolean {
   const devEnginesVersions = devEnginesEntriesOf(manifest.devEngines).flatMap((entry) =>
     isJsonObject(entry) && entry.name === 'yarn' ? [entry.version] : [],
   )
   const versions = [yarnVersionOfField(manifest.packageManager), ...devEnginesVersions]
 
-  return hasYarnrcYml || versions.some((version) => (majorOf(version) ?? 0) >= 2)
+  return filesShowBerry || versions.some((version) => (majorOf(version) ?? 0) >= 2)
 }
 
 /**

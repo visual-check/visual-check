@@ -1,8 +1,9 @@
-import { readFileSync } from 'node:fs'
+import { closeSync, openSync, readFileSync, readSync } from 'node:fs'
 import { join, posix, resolve } from 'node:path'
 import { foldersUp, isFile } from '../config/find-config.js'
 import { isInsideRoot, type ListFiles, orderWithFirst, relativePathOf } from './find-storybooks.js'
 import {
+  isBerryLockfile,
   isJsonObject,
   type Manifest,
   type PackageManager,
@@ -76,8 +77,8 @@ export interface Workspace {
    */
   packageManager: PackageManager | undefined
   /**
-   * Whether the root shows Yarn 2 or later: a `.yarnrc.yml`, or a Yarn version of 2 or more declared in its
-   * `package.json`. It means something only when the package manager is Yarn.
+   * Whether the root shows Yarn 2 or later: a `.yarnrc.yml`, a `yarn.lock` in Yarn 2's format, or a Yarn version of 2
+   * or more declared in its `package.json`. It means something only when the package manager is Yarn.
    */
   yarnBerry: boolean
 }
@@ -582,6 +583,36 @@ function holdsManifest(folder: string): boolean {
 }
 
 /**
+ * How many bytes of `yarn.lock` `init` reads to tell its format, enough for the comment and `__metadata:` at its top.
+ */
+const lockfileHeadBytes = 4096
+
+/**
+ * Returns whether the root's files show Yarn 2 or later: a `.yarnrc.yml`, or a `yarn.lock` whose first few KB hold
+ * Yarn 2's `__metadata:` entry.
+ */
+function filesShowBerryIn(root: string): boolean {
+  if (isFile(join(root, '.yarnrc.yml'))) {
+    return true
+  }
+
+  try {
+    const descriptor = openSync(join(root, 'yarn.lock'), 'r')
+
+    try {
+      const head = Buffer.alloc(lockfileHeadBytes)
+      const length = readSync(descriptor, head, 0, lockfileHeadBytes, 0)
+
+      return isBerryLockfile(head.toString('utf8', 0, length))
+    } finally {
+      closeSync(descriptor)
+    }
+  } catch {
+    return false
+  }
+}
+
+/**
  * Builds the workspace at `root` from its config, packages and listed files.
  */
 function workspaceOf(root: string, config: WorkspaceConfig, packageDirs: string[], files: string[]): Workspace {
@@ -592,7 +623,7 @@ function workspaceOf(root: string, config: WorkspaceConfig, packageDirs: string[
     packageManagerLists: packageManagerListsOf(config.packageManagerGlobs, files),
     files,
     packageManager: config.packageManager,
-    yarnBerry: yarnBerryOf(config.manifest ?? {}, isFile(join(root, '.yarnrc.yml'))),
+    yarnBerry: yarnBerryOf(config.manifest ?? {}, filesShowBerryIn(root)),
   }
 }
 

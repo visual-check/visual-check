@@ -103,7 +103,7 @@ Rules for the keys:
   Run inside a package, `init` works at the workspace root and says so. A workspace root without a `package.json`, such as Rush's, stops `init`: it needs the root's scripts and a place for the CLI.
 - **Package manager:** the `packageManager` or `devEngines.packageManager` field, then the lockfile.
   - npm, pnpm, Yarn 1 and Yarn 4 are supported. Bun works but isn't tested.
-  - Yarn counts as Yarn 2 or later when there's a `.yarnrc.yml`, or the declared version is 2 or later.
+  - Yarn counts as Yarn 2 or later when there's a `.yarnrc.yml`, `yarn.lock` opens with Yarn 2's `__metadata:` entry, or the declared version is 2 or later.
   - With nothing found, `init` asks, with npm as the default.
 - **Storybooks:** `git ls-files` for `**/.storybook/main.{ts,js,mjs,cjs,mts,cts}`, plus any `-c <dir>` in scripts. That skips ignored worktrees and copies.
   - Each is matched to the deepest package that holds it.

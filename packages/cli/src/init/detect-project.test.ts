@@ -617,6 +617,15 @@ describe('detectProject in a workspace', () => {
   })
 
   it.each([
+    ['__metadata:\n  version: 8\n', true],
+    ['# yarn lockfile v1\n\na@^1.0.0:\n  version "1.0.0"\n', false],
+  ])("tells Yarn 2 or later from Yarn 1 by yarn.lock's format: %j", async (lockfile, yarnBerry) => {
+    const root = createProject({ 'package.json': json({ name: 'app' }), 'yarn.lock': lockfile })
+
+    expect(await detectProject(root, listProjectFiles)).toMatchObject({ packageManager: 'yarn', yarnBerry })
+  })
+
+  it.each([
     ['its loader file', { 'yarn.lock': '', '.pnp.cjs': '' }, true],
     ["Yarn 4's default, with no node_modules", { 'yarn.lock': '', '.yarnrc.yml': '' }, true],
     ['nodeLinker: pnp', { 'yarn.lock': '', '.yarnrc.yml': 'nodeLinker: pnp\n', 'node_modules/.keep': '' }, true],
