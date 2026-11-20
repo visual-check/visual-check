@@ -335,9 +335,14 @@ export function cliArgvOf(command, args) {
 // ---------------------------------------------------------------------------------------------------------------------
 
 /**
- * The command line `cmd.exe` runs for `argv` on Windows. Each word goes in double quotes, inside which `cmd.exe` takes
- * `& | < > ^ ( )` literally, also when a `.cmd` shim passes them on. A word's trailing backslashes are doubled, so they
- * don't escape the closing quote.
+ * The command line `cmd.exe` runs for `argv` on Windows. Each argument goes in double quotes, inside which `cmd.exe`
+ * takes `& | < > ^ ( )` literally, also when a `.cmd` shim passes them on. A word's trailing backslashes are doubled, so
+ * they don't escape the closing quote.
+ *
+ * The program goes in double quotes too, unless it is a bare name, such as `npm` or `pnpm.cmd`, which holds nothing
+ * `cmd.exe` could misread. A `.cmd` shim found through PATH by a quoted bare name gets the current folder, not its own,
+ * as `%~dp0`, so `npm.cmd` looks for npm in the command's folder. A quoted path is fine: `%~dp0` resolves it against
+ * the current folder, which is where it points.
  *
  * Throws an `Error` naming the first word that can't be passed safely: one holding a double quote or a line break, or
  * a name between percent signs, such as `%PATH%`, which `cmd.exe` expands even inside double quotes.
@@ -348,11 +353,15 @@ export function cliArgvOf(command, args) {
  */
 export function windowsCommandLineOf(argv) {
   return argv
-    .map((word) => {
+    .map((word, index) => {
       if (/["\r\n]|%[^%]+%/.test(word)) {
         throw new Error(
           `On Windows the script can't pass an argument that holds a double quote, a line break or a %name%: ${word}`,
         )
+      }
+
+      if (index === 0 && /^[\w.-]+$/.test(word)) {
+        return word
       }
 
       return `"${word.replace(/(\\+)$/, '$1$1')}"`

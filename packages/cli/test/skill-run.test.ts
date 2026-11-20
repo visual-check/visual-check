@@ -109,10 +109,26 @@ describe('cliArgvOf', () => {
 })
 
 describe('windowsCommandLineOf', () => {
-  it("quotes every word, so cmd.exe's special characters stay literal", () => {
+  it("quotes every argument, so cmd.exe's special characters stay literal", () => {
     expect(windowsCommandLineOf(['pnpm', 'exec', 'visual-check', 'test', '--filter', '^(a|b)&<c> d$'])).toBe(
-      '"pnpm" "exec" "visual-check" "test" "--filter" "^(a|b)&<c> d$"',
+      'pnpm "exec" "visual-check" "test" "--filter" "^(a|b)&<c> d$"',
     )
+  })
+
+  it.each([['npm'], ['pnpm.cmd'], ['yarn'], ['my_tool-2']])(
+    'leaves the program %s bare, so a .cmd shim found through PATH gets its own folder as %%~dp0',
+    (program) => {
+      expect(windowsCommandLineOf([program, 'run'])).toBe(`${program} "run"`)
+    },
+  )
+
+  it.each([
+    ['a path', 'C:\\Program Files\\nodejs\\npm.cmd'],
+    ['a relative path', 'node_modules\\.bin\\storybook.cmd'],
+    ['a name with a special character', 'a&b'],
+    ['a name with a space', 'my tool'],
+  ])('quotes a program that is %s', (_case, program) => {
+    expect(windowsCommandLineOf([program, 'run'])).toBe(`"${program}" "run"`)
   })
 
   it("doubles a word's trailing backslashes and leaves inner ones", () => {
@@ -120,7 +136,7 @@ describe('windowsCommandLineOf', () => {
   })
 
   it('passes a lone percent sign, which cmd.exe leaves as it is', () => {
-    expect(windowsCommandLineOf(['--threshold', '50%'])).toBe('"--threshold" "50%"')
+    expect(windowsCommandLineOf(['pnpm', '--threshold', '50%'])).toBe('pnpm "--threshold" "50%"')
   })
 
   it.each([

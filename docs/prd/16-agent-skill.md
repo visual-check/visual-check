@@ -57,7 +57,7 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
 - **Reuse:** after a run with no run error, it reports as reused each Storybook of the last run's report that it didn't start. A Storybook already on the port is reused that way and left running.
 - **Mid-run check:** there's no lock between parallel sessions. After a last run that exits 1, it asks each Storybook of the run for its index once. One that refuses the connection stopped mid-run, so the script says so and exits 2. It does the same when the second run names as unreachable a Storybook it had just started or found answering.
 - **Interrupts:** on SIGINT, SIGTERM or SIGHUP, and SIGBREAK on Windows, it stops everything it started and exits with 128 plus the signal's number, such as 130 for SIGINT. stdout gets whatever the last CLI run printed so far.
-- **Windows:** every command runs through `cmd.exe`, each word in double quotes. An argument that holds a double quote, a line break or a `%name%` can't pass safely, so the script exits 2 without starting that command, or any Storybook.
+- **Windows:** every command runs through `cmd.exe`, each argument in double quotes, and the program too unless it is a bare name such as `npm`, since a `.cmd` shim called by a quoted bare name can't find its own folder. An argument that holds a double quote, a line break or a `%name%` can't pass safely, so the script exits 2 without starting that command, or any Storybook.
 - **Channels:**
   - stdout carries the last CLI run's JSON, unchanged, written after every stderr line;
   - stderr carries the start, ready, stop and reuse lines, and the CLI's own stderr;
