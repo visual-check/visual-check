@@ -227,6 +227,10 @@ jobs:
         env:
           VISUAL_CHECK_CACHE_DIR: ${{ runner.temp }}/visual-check-cache
         run: pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --host --affected
+      # pnpm skips the `visual-check` command when the CLI's `dist/bin.js` doesn't exist yet, as at the first install,
+      # and the skill's `pnpm exec visual-check` needs it. The steps above built the CLI.
+      - name: Link the CLI's command
+        run: pnpm install --frozen-lockfile --offline
       # The skill script's end to end cases on the host: it starts and stops Storybook, reuses one already running,
       # stops at a port mismatch, starts only the Storybook a change reaches, and an interrupt stops what it started.
       - name: Skill script end to end
