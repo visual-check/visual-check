@@ -8,11 +8,11 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
 
 `.agents/skills/visual-check/`, committed:
 
-| File              | Holds                                                                                                                                                                                                            |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SKILL.md`        | The skill, identical for every project. Its frontmatter uses only fields of the Agent Skills format: `name`, `description`, `compatibility` and `metadata.visual-check-version`. It passes `skills-ref validate` |
-| `scripts/run.mjs` | The runner script: plain Node with no dependencies                                                                                                                                                               |
-| `setup.json`      | Written by `init` for this project                                                                                                                                                                               |
+| File              | Holds                                                                                                                                                                                                             |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SKILL.md`        | The skill, identical for every project. Its frontmatter uses only fields of the Agent Skills format: `name`, `description`, `compatibility` and `metadata.visual-check-version`. It passes `agentskills validate` |
+| `scripts/run.mjs` | The runner script: plain Node with no dependencies                                                                                                                                                                |
+| `setup.json`      | Written by `init` for this project                                                                                                                                                                                |
 
 - `setup.json` holds:
   - `cli`: `{ command, cwd }`, the CLI command for the project's package manager in a form that never downloads, such as `["pnpm", "exec", "visual-check"]`, run from the workspace root;
@@ -28,6 +28,9 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
   }
   ```
 
+- The CLI command is the package manager's form that runs only what's installed: `pnpm exec visual-check`, `npx --no-install visual-check` under npm and Yarn 1, `yarn exec visual-check` under Yarn 2 and later, and `bunx --no-install visual-check` under Bun, which needs a Bun recent enough to honour `--no-install`.
+- A Storybook no script starts gets a command too, in the same never-downloading form: an Nx target as `nx run <project>:<target>` from the workspace root, and a Storybook with no start found as `storybook dev -p <its URL's port>`, with `-c` when its config folder isn't `.storybook`, from its `dir`.
+- `SKILL.md`'s `metadata.visual-check-version` names the CLI version that wrote it. The package ships the skill's source in `skill/`.
 - `init` writes every Storybook of the config. When a run needs a Storybook `setup.json` has no start command for, the script exits 2 and asks to run `init` again.
 - `.claude/skills/visual-check` is a link to that folder, because Claude Code reads only its own path. It's a copy on Windows. The link is committed, so on Windows the copy shows as a changed file in git. That's accepted.
 - Not used: model choice, `allowed-tools`, runner subagents and images. Users allow the command in their own agent's settings.
@@ -35,12 +38,14 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
 ## Install and refresh
 
 - `init` installs the skill as one of its questions, yes by default. Running `init` again rewrites the skill files and refreshes `setup.json` from the config.
+- The skill counts as installed when `.agents/skills/visual-check/SKILL.md` sits beside the config.
 - When the installed skill was written by another CLI version, a local `test` or `update`:
-  - rewrites `SKILL.md` and `run.mjs`, in both places;
+  - rewrites `SKILL.md` and `run.mjs`, in both places, though in `.claude` only where it's a copy: a link shares the files. The `.claude` copy goes first and `.agents/skills/visual-check/SKILL.md` last, so a refresh that fails is tried again on the next run;
   - keeps `setup.json`;
-  - prints the rewritten paths on stderr.
-- In CI they write nothing.
-- If a new version needs a `setup.json` value it can't fill, the run warns to run `init` again.
+  - prints `visual-check <version> rewrote the agent skill, which another version wrote:` on stderr, then each path.
+- In CI they read and write nothing.
+- If `setup.json` is missing, isn't JSON, or lacks a top-level key the new runner script reads, that run warns to run `init` again. The script checks the values itself when it runs.
+- A write that fails warns `visual-check couldn't rewrite the agent skill in <folder>: <reason>. Run visual-check init again to rewrite it.` It never changes the run's result.
 - There's no postinstall and no `npx skills add` route in v1.
 
 ## The runner script
