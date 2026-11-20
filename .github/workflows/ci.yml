@@ -206,6 +206,9 @@ jobs:
       # The baseline files' unit tests, on APFS.
       - name: Baseline files
         run: pnpm turbo run test:unit --filter @visual-check/cli -- src/baselines
+      # The skill script's own tests: they start and stop fake Storybooks and the CLI, and interrupt them.
+      - name: Skill script
+        run: pnpm turbo run test:unit --filter @visual-check/cli -- test/skill-run
       # The host check downloads the headless shell into a cache this job names, which must start empty, and the
       # affected stories check reuses it.
       - name: No-Docker error and one host capture
@@ -220,6 +223,112 @@ jobs:
         run: pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --host --affected
       - name: init without Docker
         run: pnpm turbo run init-check --filter @visual-check/test-setup -- --package-manager pnpm --init-only
+
+  # The runner image's Docker runs Windows containers only, so the job stops it and installs Docker Desktop with its
+  # WSL 2 backend, about 6 minutes in all. It runs the skill script's own tests, builds the browser image, then the
+  # end-to-end check's skill script cases: they start and stop the test Storybooks through `cmd.exe` and `taskkill`,
+  # and check that an interrupt mid-capture and a killed CLI leave no browser container.
+  windows-skill-script:
+    name: Windows skill script
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      # Windows runners set core.autocrlf, which would check out build.sh and the image's scripts with CRLF.
+      - name: Keep LF line endings on checkout
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Vitest directly, not through turbo, whose strict environment mode may drop Windows variables the tests read.
+      - name: Skill script tests
+        run: pnpm --filter @visual-check/cli exec vitest run test/skill-run
+      # Docker Desktop 4.98.0, the version research #33 ran on this runner. To bump it, take the build number from
+      # Docker Desktop's release notes, and the checksum from checksums.txt beside the installer.
+      - name: Install Docker Desktop
+        shell: pwsh
+        run: |
+          $build = '245422'
+          $checksum = 'cd6273d9eaa4f07fa7593fc6813d37e1004381cebc3f26047a2554fa5db24388'
+          $installer = "$env:RUNNER_TEMP\DockerDesktopInstaller.exe"
+          $ProgressPreference = 'SilentlyContinue'
+          $url = "https://desktop.docker.com/win/main/amd64/$build/Docker%20Desktop%20Installer.exe"
+          Invoke-WebRequest -Uri $url -OutFile $installer -MaximumRetryCount 3 -RetryIntervalSec 10
+          $hash = (Get-FileHash $installer -Algorithm SHA256).Hash
+          if ($hash -ne $checksum) { throw "The Docker Desktop installer's checksum is $hash, not $checksum." }
+          $arguments = 'install', '--quiet', '--accept-license', '--backend=wsl-2', '--always-run-service'
+          $process = Start-Process $installer -ArgumentList $arguments -PassThru
+          # Reading the handle keeps it open, so ExitCode isn't null once the installer exits.
+          $null = $process.Handle
+          if (-not $process.WaitForExit(300000)) { throw 'The Docker Desktop installer ran over 5 minutes.' }
+          "Installer exit code: $($process.ExitCode)"
+          if ($null -eq $process.ExitCode -or $process.ExitCode -ne 0) {
+            throw "The Docker Desktop installer exited with code '$($process.ExitCode)'."
+          }
+          # The runner's own Docker service holds \\.\pipe\docker_engine, which Docker Desktop needs.
+          Stop-Service docker -Force
+          Start-Process 'C:\Program Files\Docker\Docker\Docker Desktop.exe'
+          $docker = 'C:\Program Files\Docker\Docker\resources\bin\docker.exe'
+          for ($attempt = 0; $attempt -lt 60; $attempt++) {
+            & $docker --context desktop-linux info *> $null
+            if (-not $LASTEXITCODE) { break }
+            Start-Sleep 5
+          }
+          if ($LASTEXITCODE) {
+            # What the engine, the services, WSL and Docker Desktop's logs say, for the log.
+            try {
+              & $docker --context desktop-linux info
+              Get-Service com.docker.service, docker -ErrorAction SilentlyContinue | Format-Table | Out-String
+              (wsl.exe -l -v | Out-String) -replace "`0", ''
+              $logs = Get-ChildItem "$env:LOCALAPPDATA\Docker\log" -Recurse -File -ErrorAction SilentlyContinue
+              foreach ($log in $logs) {
+                "--- $($log.FullName)"
+                Get-Content $log.FullName -Tail 50 -ErrorAction SilentlyContinue
+              }
+            } catch {
+              "Couldn't gather the diagnostics: $_"
+            }
+            throw "Docker Desktop's engine didn't answer within 5 minutes."
+          }
+          & $docker --context desktop-linux info --format '{{.OSType}}'
+          & $docker context use desktop-linux
+          if ($LASTEXITCODE) { throw "Couldn't switch docker to the desktop-linux context." }
+          'C:\Program Files\Docker\Docker\resources\bin' | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Check Docker runs Linux containers
+        shell: bash
+        run: |
+          os=$(docker info --format '{{.OSType}}')
+          echo "OSType: $os"
+          test "$os" = linux
+          docker buildx version
+      - name: Create a docker-container builder
+        shell: bash
+        run: docker buildx create --driver docker-container --use
+      - name: Build the browser image
+        shell: bash
+        run: packages/chromium/image/build.sh amd64 --output type=docker,name=visual-check-chromium:ci
+      - name: Build the CLI and the Storybook
+        run: pnpm turbo run build build-storybook --filter '@visual-check/test-storybook-10-react...'
+      # Not through turbo, whose strict environment mode may drop Windows variables that docker and pnpm read, such as
+      # USERPROFILE.
+      - name: Skill script end to end
+        working-directory: test-storybooks/storybook-10-react
+        env:
+          TEST_STORYBOOK_IMAGE: visual-check-chromium:ci
+        run: node e2e.ts --skill-script
+      - name: Upload the end-to-end output
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-output-${{ github.job }}
+          path: test-storybooks/storybook-10-react/e2e-output/
+          if-no-files-found: ignore
+          retention-days: 3
 
   # One host capture where Chromium's sandbox can't start, so visual-check relaunches the browser without it. The
   # check downloads the headless shell into a cache this job names, so a later step can run it.
