@@ -30,10 +30,12 @@ import { createHash } from 'node:crypto'
 import {
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -1326,10 +1328,13 @@ async function snapshotProject(check: Check, label: string): Promise<Map<string,
 }
 
 /**
- * Gives the SHA-256 of a file's content, in hex.
+ * Gives the SHA-256 of a file's content, in hex, or for a symbolic link, such as the agent skill's `.claude` link, of
+ * where it points.
  */
 function sha256Of(path: string): string {
-  return createHash('sha256').update(readFileSync(path)).digest('hex')
+  const content = lstatSync(path).isSymbolicLink() ? `link to ${readlinkSync(path)}` : readFileSync(path)
+
+  return createHash('sha256').update(content).digest('hex')
 }
 
 /**

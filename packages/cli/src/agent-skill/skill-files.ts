@@ -8,6 +8,16 @@ import { skillMarkdownOf, skillSourcePaths } from './skill-markdown.js'
 export const skillFolder = join('.agents', 'skills', 'visual-check')
 
 /**
+ * Where Claude Code reads the skill, relative to the workspace root: a link to `skillFolder`, or a copy on Windows.
+ */
+export const claudeSkillFolder = join('.claude', 'skills', 'visual-check')
+
+/**
+ * The link's target, relative to the link's own folder, with `/` so the committed link works on every machine.
+ */
+export const claudeLinkTarget = '../../.agents/skills/visual-check'
+
+/**
  * Writes the skill's `SKILL.md`, for `cliVersion`, and its runner script into `folder`, creating what's missing.
  * Gives the paths written, in that order.
  */

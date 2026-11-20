@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { skillSourcePaths, skillVersionOf } from '../agent-skill/skill-markdown.js'
@@ -40,6 +40,11 @@ export default defineConfig({
  * Where `init` installs the agent skill, relative to the project root.
  */
 const skillDir = '.agents/skills/visual-check'
+
+/**
+ * Where `init` shows the agent skill to Claude Code, relative to the project root.
+ */
+const claudeSkillDir = '.claude/skills/visual-check'
 
 /**
  * The CLI command the agent skill's `setup.json` holds for a pnpm project, run from the workspace root.
@@ -493,6 +498,30 @@ describe('runInit', () => {
       expect(result.stdout).toBe(pnpmClosingMessage)
     })
 
+    it.skipIf(process.platform === 'win32')('links the skill for Claude Code with --yes', async () => {
+      const root = pnpmProject()
+
+      await runInit(root, toolsOf().tools)
+
+      expect(lstatSync(join(root, claudeSkillDir)).isSymbolicLink()).toBe(true)
+      expect(readlinkSync(join(root, claudeSkillDir))).toBe('../../.agents/skills/visual-check')
+    })
+
+    it('copies the skill for Claude Code on Windows', async () => {
+      const root = pnpmProject()
+
+      await runInit(root, toolsOf({ os: 'win32' }).tools)
+
+      const snapshot = snapshotFiles(root)
+      const paths = ['SKILL.md', 'scripts/run.mjs', 'setup.json']
+
+      expect(Object.keys(snapshot)).toEqual(expect.arrayContaining(paths.map((path) => `${claudeSkillDir}/${path}`)))
+
+      for (const path of paths) {
+        expect(snapshot[`${claudeSkillDir}/${path}`]).toBe(snapshot[`${skillDir}/${path}`])
+      }
+    })
+
     it('installs no agent skill when the answer is no', async () => {
       const root = pnpmProject()
       const prompter = scriptedPrompter(['', '', '', '', false, ''])
@@ -820,10 +849,14 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
     await runInit(root, toolsOf().tools)
     rmSync(join(root, 'node_modules'), { recursive: true, force: true })
 
+    // The `.claude` files are the link's: Node's recursive readdir walks into the linked folder.
     expect(Object.keys(snapshotFiles(root))).toEqual([
       '.agents/skills/visual-check/SKILL.md',
       '.agents/skills/visual-check/scripts/run.mjs',
       '.agents/skills/visual-check/setup.json',
+      '.claude/skills/visual-check/SKILL.md',
+      '.claude/skills/visual-check/scripts/run.mjs',
+      '.claude/skills/visual-check/setup.json',
       '.storybook/main.ts',
       '.storybook/visual-check.ts',
       '.visual-check/.gitignore',

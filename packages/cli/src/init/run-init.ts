@@ -411,7 +411,7 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
   const replacedScripts = await runStep(
     progress,
     { title: writeFilesTitle },
-    () => writeSetupFiles(project, setup, packageScripts, tools.cliVersion),
+    () => writeSetupFiles(project, setup, packageScripts, tools),
     () => 'done',
   )
   const replacedLine = replacedScriptsLineOf(replacedScripts)
@@ -506,13 +506,14 @@ async function dockerNotesOf(probeDocker: ProbeDocker, os: NodeJS.Platform): Pro
  * Writes each file that's missing: the config when there was none, each Storybook's `visual-check.ts` and
  * `.visual-check/.gitignore`, and the config folder's `.visual-check/.gitignore`. Then sets the root's scripts and each
  * package's own. Gives the scripts it replaced, by `package.json`. An existing file is never touched, except the agent
- * skill's: when the person chose to install it, its files are written over for `cliVersion`.
+ * skill's: when the person chose to install it, its files are written over for the CLI version, and linked, or copied
+ * on Windows, for Claude Code.
  */
 function writeSetupFiles(
   project: DetectedProject,
   setup: Setup,
   packageScripts: readonly PackageScripts[],
-  cliVersion: string,
+  skillTools: Pick<InitTools, 'cliVersion' | 'os'>,
 ): ReplacedScripts[] {
   const { answers, configPath, configSource, storybooks } = setup
   const contents: (readonly [string, string])[] = [
@@ -529,7 +530,7 @@ function writeSetupFiles(
   }
 
   if (setup.skill !== undefined) {
-    installSkill({ root: project.root, cliVersion, setup: setup.skill })
+    installSkill({ root: project.root, cliVersion: skillTools.cliVersion, os: skillTools.os, setup: setup.skill })
   }
 
   const manifests = [
