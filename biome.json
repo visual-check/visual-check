@@ -162,6 +162,10 @@
           }
         }
       }
+    },
+    {
+      "includes": ["packages/cli/skill/SKILL.md"],
+      "formatter": { "enabled": false }
     }
   ],
   "javascript": {
