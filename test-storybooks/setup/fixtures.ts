@@ -29,6 +29,11 @@ export interface Fixture {
    */
   packageStorybooks: Record<string, string>
   /**
+   * Each Storybook's config name, mapped to the folder of the package whose `storybook` script starts it, relative to
+   * the root.
+   */
+  skillStorybooks: Record<string, string>
+  /**
    * The config `init` writes at its root.
    */
   expectedConfig: string
@@ -62,6 +67,7 @@ export const fixtures: Record<FixtureName, Fixture> = {
     name: 'single',
     storybookDirs: ['.'],
     packageStorybooks: {},
+    skillStorybooks: { 'setup-fixture': '.' },
     expectedConfig: `import { defineConfig } from '@visual-check/cli'
 
 export default defineConfig({
@@ -79,6 +85,7 @@ export default defineConfig({
     name: 'monorepo',
     storybookDirs: ['apps/a', 'apps/b'],
     packageStorybooks: { 'apps/a': 'a', 'apps/b': 'b' },
+    skillStorybooks: { a: 'apps/a', b: 'apps/b' },
     expectedConfig: `import { defineConfig } from '@visual-check/cli'
 
 export default defineConfig({

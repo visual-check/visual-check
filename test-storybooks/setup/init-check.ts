@@ -3,11 +3,14 @@
 // packages and serves them from a registry on 127.0.0.1, which the project's `.npmrc` or `.yarnrc.yml` names for the
 // `@visual-check` scope; everything else comes from npm. On a copy of a fixture, it installs, runs `init --yes` the way
 // the package manager runs a package it hasn't installed, and checks what init wrote and printed. Then it installs
-// again from the lockfile. For the single-package fixture, it adds the browser image to the config, starts Storybook,
-// runs one `update` and one `test`, and runs `init --yes` again, which must change nothing. The monorepo fixture's two
-// Storybooks share a port, so it stops after the install and a run of each package's own `visual:check` script with
-// `--help`, which must find the root's CLI. `init` and `update` run without `CI` in their environment,
-// as on a developer's machine; `test` runs in the environment the check gets, so in CI it runs as a project's CI does.
+// again from the lockfile. `init` must install the agent skill, linked from `.claude`, whose `setup.json` CLI command
+// never downloads: the check runs it with `--help`. For the single-package fixture, it adds the browser image to the
+// config, starts Storybook, runs one `update`, which must rewrite a skill an older CLI wrote, and one `test` with `CI`
+// set, which must leave it alone, and runs `init --yes` again, which must change nothing. Then it stops Storybook and
+// runs the skill's script, which must start and stop Storybook through `setup.json`. The monorepo fixture's two
+// Storybooks share a port, so it stops after the install, the skill's CLI command and a run of each package's own
+// `visual:check` script with `--help`, which must find the root's CLI. `init`, `update` and the skill's script run
+// without `CI` in their environment, as on a developer's machine.
 //
 // Run it with `pnpm turbo run init-check --filter @visual-check/test-setup -- --package-manager pnpm`, which builds the
 // packages first. For the single fixture, whose Storybook it starts, TEST_STORYBOOK_IMAGE must name the browser image
@@ -42,7 +45,7 @@ import {
 } from 'node:fs'
 import { connect } from 'node:net'
 import { constants, tmpdir } from 'node:os'
-import { basename, delimiter, dirname, join, relative } from 'node:path'
+import { basename, delimiter, dirname, join, posix, relative, resolve } from 'node:path'
 import type { Readable } from 'node:stream'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
@@ -262,6 +265,20 @@ interface Manifest {
 }
 
 /**
+ * The agent skill's files a refresh rewrites: its `SKILL.md` and its runner script.
+ */
+interface SkillFiles {
+  /**
+   * The text of `SKILL.md`.
+   */
+  markdown: string
+  /**
+   * The text of `scripts/run.mjs`.
+   */
+  script: string
+}
+
+/**
  * This package's folder.
  */
 const packageDir = import.meta.dirname
@@ -365,6 +382,26 @@ const noDockerTexts = ["there's no docker command on PATH", "platform: 'host'"]
  * The browser image `update` and `test` run in, until the browser package names a published one.
  */
 const image = process.env.TEST_STORYBOOK_IMAGE
+
+/**
+ * The folder `init` installs the agent skill in, relative to the project.
+ */
+const skillFolder = '.agents/skills/visual-check'
+
+/**
+ * The agent skill's link for Claude Code, relative to the project.
+ */
+const skillLink = '.claude/skills/visual-check'
+
+/**
+ * Where the skill's link points, relative to the folder that holds it.
+ */
+const skillLinkTarget = '../../.agents/skills/visual-check'
+
+/**
+ * The runner script in this repo, which `init` copies into the skill.
+ */
+const skillScriptSource = join(repoRoot, 'packages', 'cli', 'skill', 'scripts', 'run.mjs')
 
 /**
  * Gives an error's message, or the thrown value as text when it isn't an `Error`.
@@ -882,7 +919,103 @@ async function checkInit(check: Check): Promise<string[]> {
     ...writtenFileProblems(check),
     ...manifestProblems(check),
     ...addonProblems(check),
+    ...skillProblems(check),
     ...closingLineProblems(run.stdout),
+  ]
+}
+
+/**
+ * Gives the `setup.json` `init` writes in the skill: the package manager's never-downloading form of `visual-check`
+ * from the root, and `<pm> run storybook` in the package of each Storybook, each `cwd` relative to the skill's folder.
+ */
+function expectedSetupFileOf(check: Check): string {
+  const cli = check.packageManager.execBin('visual-check', [])
+  const start = check.packageManager.runScript('storybook')
+  const storybooks = Object.fromEntries(
+    Object.entries(check.fixture.skillStorybooks).map(([name, dir]) => [
+      name,
+      { command: [start.command, ...start.args], cwd: posix.join('../../..', dir) },
+    ]),
+  )
+
+  return `${JSON.stringify({ cli: { command: [cli.command, ...cli.args], cwd: '../../..' }, storybooks }, null, 2)}\n`
+}
+
+/**
+ * Lists the problem with a file of the project: it's missing, or its content isn't what `isExpected` wants, which
+ * `mismatch` describes.
+ */
+function projectFileProblems(
+  check: Check,
+  path: string,
+  isExpected: (content: string) => boolean,
+  mismatch: (content: string) => string,
+): string[] {
+  const content = readProjectFile(check, path)
+
+  if (content === undefined) {
+    return [`${path} is missing`]
+  }
+
+  return isExpected(content) ? [] : [`${path} ${mismatch(content)}`]
+}
+
+/**
+ * Lists the problem with a file of the project whose content must be exactly `expected`: it's missing, or it differs.
+ */
+function exactFileProblems(check: Check, path: string, expected: string): string[] {
+  return projectFileProblems(
+    check,
+    path,
+    (content) => content === expected,
+    (content) => `should be ${JSON.stringify(expected)}, and it is ${JSON.stringify(content)}`,
+  )
+}
+
+/**
+ * Lists the problem with the agent skill's `.claude` link: it must be a symbolic link to the skill's folder, through
+ * which its `SKILL.md` is found.
+ */
+function skillLinkProblems(check: Check): string[] {
+  const link = join(check.project, skillLink)
+
+  if (!lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink()) {
+    return [`${skillLink} isn't a symbolic link`]
+  }
+
+  const target = readlinkSync(link)
+
+  if (target !== skillLinkTarget) {
+    return [`${skillLink} should link to ${skillLinkTarget}, and it links to ${target}`]
+  }
+
+  return existsSync(join(link, 'SKILL.md')) ? [] : [`${skillLink} links to ${target}, where there's no SKILL.md`]
+}
+
+/**
+ * Lists what's wrong with the agent skill `init` installs: its `SKILL.md` must name the CLI's version, its runner
+ * script must be this repo's, its `setup.json` must hold the commands that never download, and `.claude` must link to
+ * it.
+ */
+function skillProblems(check: Check): string[] {
+  const versionLine = `visual-check-version: ${JSON.stringify(cliTarballOf(check).manifest.version)}`
+  const runnerScript = readFileSync(skillScriptSource, 'utf8')
+
+  return [
+    ...projectFileProblems(
+      check,
+      `${skillFolder}/SKILL.md`,
+      (content) => content.includes(versionLine),
+      () => `doesn't say ${versionLine}`,
+    ),
+    ...projectFileProblems(
+      check,
+      `${skillFolder}/scripts/run.mjs`,
+      (content) => content === runnerScript,
+      () => "isn't the CLI's runner script",
+    ),
+    ...exactFileProblems(check, `${skillFolder}/setup.json`, expectedSetupFileOf(check)),
+    ...skillLinkProblems(check),
   ]
 }
 
@@ -979,19 +1112,7 @@ function writtenFileProblems(check: Check): string[] {
   ]
 
   // The single fixture's Storybook is at the root, so its `.visual-check/.gitignore` is the root one.
-  return [...new Map(expected)].flatMap(([path, content]) => {
-    const actual = readProjectFile(check, path)
-
-    if (actual === content) {
-      return []
-    }
-
-    return [
-      actual === undefined
-        ? `${path} is missing`
-        : `${path} should be ${JSON.stringify(content)}, and it is ${JSON.stringify(actual)}`,
-    ]
-  })
+  return [...new Map(expected)].flatMap(([path, content]) => exactFileProblems(check, path, content))
 }
 
 /**
@@ -1160,6 +1281,32 @@ async function checkPackageScripts(check: Check): Promise<string[]> {
 }
 
 /**
+ * Runs the skill's CLI command from `setup.json`, from its `cwd`, with `--help` and no `node_modules/.bin` folder on
+ * the `PATH`. It must start the project's own CLI, which prints its help and exits 0.
+ */
+async function checkSkillCli(check: Check): Promise<string[]> {
+  const setupDir = join(check.project, skillFolder)
+  const setup = JSON.parse(readFileSync(join(setupDir, 'setup.json'), 'utf8')) as {
+    cli: { command: string[]; cwd: string }
+  }
+  const [command, ...args] = setup.cli.command
+
+  if (command === undefined) {
+    return ['setup.json names no CLI command']
+  }
+
+  const run = await runCommand(check, 'skill cli help', command, [...args, '--help'], {
+    cwd: resolve(setupDir, setup.cli.cwd),
+    env: environmentWithoutBins(check),
+  })
+  const problems = exitProblems(run)
+
+  return problems.length > 0 || run.stdout.includes(helpStart)
+    ? problems
+    : [`${run.commandLine} printed no help${tailOf(run)}`]
+}
+
+/**
  * Adds the browser image to the config, after `storybooks`, as the test Storybooks' configs do until the browser
  * package names a published image.
  */
@@ -1279,9 +1426,53 @@ function pngFilesIn(folder: string): string[] {
 }
 
 /**
- * Runs `update` through its script, without `CI`, and checks it exits 0 and writes the one story's baseline.
+ * Reads the agent skill's `SKILL.md` and runner script.
+ */
+function readSkillFiles(check: Check): SkillFiles {
+  return {
+    markdown: readFileSync(join(check.project, skillFolder, 'SKILL.md'), 'utf8'),
+    script: readFileSync(join(check.project, skillFolder, 'scripts', 'run.mjs'), 'utf8'),
+  }
+}
+
+/**
+ * Writes the agent skill's `SKILL.md` and runner script.
+ */
+function writeSkillFilesTo(check: Check, files: SkillFiles): void {
+  writeFileSync(join(check.project, skillFolder, 'SKILL.md'), files.markdown)
+  writeFileSync(join(check.project, skillFolder, 'scripts', 'run.mjs'), files.script)
+}
+
+/**
+ * Gives the skill's files as an older CLI would have written them: `SKILL.md` at another version, and another runner
+ * script.
+ *
+ * @throws {Error} When `SKILL.md` has no version line, so the stale files wouldn't differ from the fresh ones.
+ */
+function staleSkillOf(files: SkillFiles): SkillFiles {
+  const versionPattern = /visual-check-version: "[^"]*"/
+
+  if (!versionPattern.test(files.markdown)) {
+    throw new Error(`${skillFolder}/SKILL.md has no visual-check-version line, so the check can't make it stale`)
+  }
+
+  return {
+    markdown: files.markdown.replace(versionPattern, 'visual-check-version: "0.0.0-stale"'),
+    script: '// An older runner script.\n',
+  }
+}
+
+/**
+ * Runs `update` through its script, without `CI`, after making the agent skill look as an older CLI wrote it, and
+ * checks it exits 0, writes the one story's baseline, rewrites `SKILL.md` and the runner script, names them on
+ * standard error, and keeps `setup.json`. On a failure, the skill's files stay as `update` left them.
  */
 async function checkUpdate(check: Check): Promise<string[]> {
+  const fresh = readSkillFiles(check)
+  const setupBefore = readProjectFile(check, `${skillFolder}/setup.json`)
+
+  writeSkillFilesTo(check, staleSkillOf(fresh))
+
   const run = await runInProject(
     check,
     'update',
@@ -1295,17 +1486,69 @@ async function checkUpdate(check: Check): Promise<string[]> {
   }
 
   const baselines = pngFilesIn(join(check.project, '.visual-check', 'baselines'))
+  const baselineProblems =
+    baselines.length === 1
+      ? []
+      : [`.visual-check/baselines/ should hold one .png, and it holds ${baselines.length}: ${baselines.join(', ')}`]
 
-  return baselines.length === 1
-    ? []
-    : [`.visual-check/baselines/ should hold one .png, and it holds ${baselines.length}: ${baselines.join(', ')}`]
+  return [...baselineProblems, ...skillRefreshProblems(check, { fresh, setupBefore, run })]
 }
 
 /**
- * Runs `test` through its script, in the check's own environment, and checks it exits 0.
+ * Lists what's wrong with the agent skill after `update` refreshed it: `SKILL.md` and the runner script must be the
+ * fresh ones again, their paths on `update`'s standard error, and `setup.json` as it was.
+ */
+function skillRefreshProblems(
+  check: Check,
+  { fresh, setupBefore, run }: { fresh: SkillFiles; setupBefore: string | undefined; run: CommandRun },
+): string[] {
+  const refreshed = readSkillFiles(check)
+  const files: [path: string, rewritten: boolean][] = [
+    [`${skillFolder}/SKILL.md`, refreshed.markdown === fresh.markdown],
+    [`${skillFolder}/scripts/run.mjs`, refreshed.script === fresh.script],
+  ]
+  const paths = files.map(([path]) => path)
+
+  return [
+    ...files.filter(([, rewritten]) => !rewritten).map(([path]) => `update didn't rewrite ${path}`),
+    ...(readProjectFile(check, `${skillFolder}/setup.json`) === setupBefore
+      ? []
+      : [`update changed ${skillFolder}/setup.json`]),
+    ...paths
+      .filter((path) => !run.stderr.includes(path))
+      .map((path) => `update's standard error doesn't name ${path}${tailOf(run)}`),
+  ]
+}
+
+/**
+ * Runs `test` through its script with `CI` set, after making the agent skill look as an older CLI wrote it, and checks
+ * it exits 0 and leaves the skill alone. Then it writes the skill's files back, so `init` again changes nothing.
  */
 async function checkTest(check: Check): Promise<string[]> {
-  return exitProblems(await runInProject(check, 'test', check.packageManager.runScript('visual:check')))
+  const fresh = readSkillFiles(check)
+  const stale = staleSkillOf(fresh)
+
+  writeSkillFilesTo(check, stale)
+
+  try {
+    const run = await runInProject(check, 'test', check.packageManager.runScript('visual:check'), {
+      ...checkEnvironment(check),
+      CI: 'true',
+    })
+    const problems = exitProblems(run)
+
+    if (problems.length > 0) {
+      return problems
+    }
+
+    const after = readSkillFiles(check)
+
+    return after.markdown === stale.markdown && after.script === stale.script
+      ? []
+      : ['test with CI set rewrote the agent skill']
+  } finally {
+    writeSkillFilesTo(check, fresh)
+  }
 }
 
 /**
@@ -1377,6 +1620,116 @@ async function checkInitAgain(check: Check): Promise<string[]> {
   const after = await snapshotProject(check, 'list files after init again')
 
   return [...warningProblems('init again', run.stderr), ...snapshotProblems(before, after)]
+}
+
+/**
+ * Waits until nothing listens on Storybook's port, or the time limit is up. Resolves with whether the port is free.
+ */
+async function waitForStorybookPortFree(): Promise<boolean> {
+  const deadline = Date.now() + storybookStopMilliseconds
+
+  while (Date.now() < deadline) {
+    if (!(await isStorybookPortTaken())) {
+      return true
+    }
+
+    await sleep(200)
+  }
+
+  return !(await isStorybookPortTaken())
+}
+
+/**
+ * Stops the check's own Storybook, if it runs, and waits until its port is free.
+ */
+async function stopCheckStorybook(check: Check): Promise<string[]> {
+  const { storybook } = check
+
+  if (storybook !== undefined) {
+    const problems = await stopStorybook(storybook)
+
+    if (problems.length > 0) {
+      return problems
+    }
+
+    check.storybook = undefined
+  }
+
+  return (await waitForStorybookPortFree())
+    ? []
+    : [`Something still listens on 127.0.0.1:${storybookPort} after the check stopped Storybook`]
+}
+
+/**
+ * Stops the check's Storybook, then runs the skill's script with `test --all`, without `CI`. It must start Storybook
+ * through `setup.json`, exit 0 with only the JSON report on standard output, and stop Storybook again.
+ */
+async function checkSkillScript(check: Check): Promise<string[]> {
+  const stopped = await stopCheckStorybook(check)
+
+  if (stopped.length > 0) {
+    return stopped
+  }
+
+  const run = await runCommand(
+    check,
+    'skill script',
+    process.execPath,
+    [join(check.project, skillFolder, 'scripts', 'run.mjs'), 'test', '--all'],
+    { cwd: check.project, env: localEnvironment(check) },
+  )
+  const portProblems = (await waitForStorybookPortFree())
+    ? []
+    : [
+        `Something still listens on 127.0.0.1:${storybookPort} ${storybookStopMilliseconds / 1000} s after the ` +
+          "skill's script ended",
+      ]
+
+  return [...exitProblems(run), ...skillReportProblems(run), ...skillStorybookLineProblems(check, run), ...portProblems]
+}
+
+/**
+ * Lists each line the skill's script didn't print on standard error: that it starts and stops each Storybook.
+ */
+function skillStorybookLineProblems(check: Check, run: CommandRun): string[] {
+  return Object.keys(check.fixture.skillStorybooks)
+    .flatMap((name) => [`Starting Storybook ${name} `, `Stopped Storybook ${name}.`])
+    .filter((line) => !run.stderr.includes(line))
+    .map((line) => `the skill's script didn't say ${JSON.stringify(line)}${tailOf(run)}`)
+}
+
+/**
+ * Reads the report the skill's script printed on standard output, or gives the problem with it: it printed nothing, or
+ * something besides the JSON report.
+ */
+function skillReportOf(run: CommandRun): { report: { command?: unknown; exitCode?: unknown } } | { problem: string } {
+  if (run.stdout.trim() === '') {
+    return { problem: `the skill's script printed nothing on standard output${tailOf(run)}` }
+  }
+
+  try {
+    return { report: JSON.parse(run.stdout) as { command?: unknown; exitCode?: unknown } }
+  } catch {
+    return { problem: `the skill's script printed something besides the JSON report on standard output${tailOf(run)}` }
+  }
+}
+
+/**
+ * Lists the problem with what the skill's script printed on standard output: it must be only the JSON report of a
+ * `test` that exited 0.
+ */
+function skillReportProblems(run: CommandRun): string[] {
+  const parsed = skillReportOf(run)
+
+  if ('problem' in parsed) {
+    return [parsed.problem]
+  }
+
+  const { report } = parsed
+
+  return report.command === 'test' && report.exitCode === 0
+    ? []
+    : [`the skill's script's report should be of a test that exited 0, and it is ${JSON.stringify(report)}`]
 }
 
 /**
@@ -1457,9 +1810,9 @@ function stepsOf(check: Check): Step[] {
     {
       name:
         `init: ${commandLineOf(packageManager.dlx('@visual-check/cli', ['init', '--yes']))} exits 0 ` +
-        `${initWarningsDescriptionOf(check)}, writes the config, visual-check.ts and ` +
-        `.visual-check/.gitignore${where}, adds the scripts, the packages and the addon, leaves .gitignore alone, ` +
-        'and ends with the CI line',
+        `${initWarningsDescriptionOf(check)}, writes the config, visual-check.ts, .visual-check/.gitignore${where} ` +
+        'and the agent skill with its .claude link, adds the scripts, the packages and the addon, leaves .gitignore ' +
+        'alone, and ends with the CI line',
       run: () => checkInit(check),
     },
   ]
@@ -1475,15 +1828,22 @@ function stepsOf(check: Check): Step[] {
     run: () => installAfterInit(check),
   }
 
+  const skillCli: Step = {
+    name:
+      "skill cli: setup.json's CLI command, from its cwd with --help and no node_modules/.bin on the PATH, prints " +
+      "the CLI's help",
+    run: () => checkSkillCli(check),
+  }
   const packageScripts = packageScriptStepsOf(check)
 
   if (!fixture.startsStorybook) {
-    return [...steps, install, ...packageScripts]
+    return [...steps, install, skillCli, ...packageScripts]
   }
 
   return [
     ...steps,
     install,
+    skillCli,
     ...packageScripts,
     { name: 'image: the config names the browser image', run: () => addImage(check) },
     {
@@ -1494,16 +1854,27 @@ function stepsOf(check: Check): Step[] {
     },
     {
       name:
-        `update: ${commandLineOf(packageManager.runScript('visual:update'))} without CI exits 0 and writes one ` +
-        'baseline',
+        `update: ${commandLineOf(packageManager.runScript('visual:update'))} without CI exits 0, writes one ` +
+        'baseline, and rewrites the agent skill an older CLI wrote, keeping setup.json',
       run: () => checkUpdate(check),
     },
-    { name: `test: ${commandLineOf(packageManager.runScript('visual:check'))} exits 0`, run: () => checkTest(check) },
+    {
+      name:
+        `test: ${commandLineOf(packageManager.runScript('visual:check'))} with CI set exits 0 and leaves the agent ` +
+        'skill alone',
+      run: () => checkTest(check),
+    },
     {
       name:
         `init again: ${commandLineOf(packageManager.execBin('visual-check', ['init', '--yes']))} exits 0 without a ` +
         'warning and changes no file',
       run: () => checkInitAgain(check),
+    },
+    {
+      name:
+        `skill: with Storybook stopped, node ${skillFolder}/scripts/run.mjs test --all starts Storybook through ` +
+        'setup.json, exits 0 with only the report on stdout, and stops it',
+      run: () => checkSkillScript(check),
     },
   ]
 }
