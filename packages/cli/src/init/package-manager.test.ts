@@ -4,6 +4,7 @@ import {
   addDevDependenciesCommandOf,
   commandInFolderOf,
   commandLineOf,
+  installedBinCommandOf,
   isBerryLockfile,
   listsDependency,
   lockfileNames,
@@ -174,6 +175,27 @@ describe('nxCommandOf', () => {
     ['bun', false, 'bunx nx run ui:storybook'],
   ] as const)('runs nx under %s, Yarn 2 or later: %s', (packageManager, yarnBerry, command) => {
     expect(commandLineOf(nxCommandOf(packageManager, ['run', 'ui:storybook'], yarnBerry))).toBe(command)
+  })
+})
+
+describe('installedBinCommandOf', () => {
+  it.each([
+    ['pnpm', false, { command: 'pnpm', args: ['exec', 'visual-check'] }],
+    ['npm', false, { command: 'npx', args: ['--no-install', 'visual-check'] }],
+    ['yarn', false, { command: 'npx', args: ['--no-install', 'visual-check'] }],
+    ['yarn', true, { command: 'yarn', args: ['exec', 'visual-check'] }],
+    ['bun', false, { command: 'bunx', args: ['--no-install', 'visual-check'] }],
+  ] as const)(
+    'runs an installed binary under %s, Yarn 2 or later: %s, never downloading',
+    (packageManager, yarnBerry, expected) => {
+      expect(installedBinCommandOf(packageManager, 'visual-check', [], yarnBerry)).toEqual(expected)
+    },
+  )
+
+  it('passes the arguments on', () => {
+    expect(commandLineOf(installedBinCommandOf('npm', 'storybook', ['dev', '-p', '6006'], false))).toBe(
+      'npx --no-install storybook dev -p 6006',
+    )
   })
 })
 

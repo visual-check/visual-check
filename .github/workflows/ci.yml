@@ -33,6 +33,12 @@ jobs:
         run: pnpm turbo run test:type
       - name: Fallow
         run: pnpm lint:fallow
+      # The agent skill against the Agent Skills format. skills-ref wants the skill in a folder named after it.
+      - name: Agent skill format
+        run: |
+          mkdir -p "$RUNNER_TEMP/visual-check"
+          cp packages/cli/skill/SKILL.md "$RUNNER_TEMP/visual-check/SKILL.md"
+          pipx run --spec skills-ref==0.1.1 agentskills validate "$RUNNER_TEMP/visual-check"
       - name: Unit tests
         run: pnpm turbo run test:unit
 
@@ -186,7 +192,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
-  # Apple Silicon runners have no Docker. A later ticket adds starting and stopping Storybook to this job.
+  # Apple Silicon runners have no Docker, so the skill script's cases run on the host.
   macos-no-docker:
     name: macOS without Docker
     runs-on: macos-15
@@ -221,13 +227,23 @@ jobs:
         env:
           VISUAL_CHECK_CACHE_DIR: ${{ runner.temp }}/visual-check-cache
         run: pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --host --affected
+      # pnpm skips the `visual-check` command when the CLI's `dist/bin.js` doesn't exist yet, as at the first install,
+      # and the skill's `pnpm exec visual-check` needs it. The steps above built the CLI.
+      - name: Link the CLI's command
+        run: pnpm install --frozen-lockfile --offline
+      # The skill script's end to end cases on the host: it starts and stops Storybook, reuses one already running,
+      # stops at a port mismatch, starts only the Storybook a change reaches, and an interrupt stops what it started.
+      - name: Skill script end to end
+        env:
+          VISUAL_CHECK_CACHE_DIR: ${{ runner.temp }}/visual-check-cache
+        run: pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --host --skill-script
       - name: init without Docker
         run: pnpm turbo run init-check --filter @visual-check/test-setup -- --package-manager pnpm --init-only
 
   # The runner image's Docker runs Windows containers only, so the job stops it and installs Docker Desktop with its
-  # WSL 2 backend, about 6 minutes in all. It runs the skill script's own tests, builds the browser image, then the
-  # end-to-end check's skill script cases: they start and stop the test Storybooks through `cmd.exe` and `taskkill`,
-  # and check that an interrupt mid-capture and a killed CLI leave no browser container.
+  # WSL 2 backend, about 6 minutes in all. It runs the skill script's and the agent skill's own tests, builds the
+  # browser image, then the end-to-end check's skill script cases: they start and stop the test Storybooks through
+  # `cmd.exe` and `taskkill`, and check that an interrupt mid-capture and a killed CLI leave no browser container.
   windows-skill-script:
     name: Windows skill script
     runs-on: windows-2025
@@ -245,9 +261,10 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # Vitest directly, not through turbo, whose strict environment mode may drop Windows variables the tests read.
-      - name: Skill script tests
-        run: pnpm --filter @visual-check/cli exec vitest run test/skill-run
+      # Vitest directly, not through turbo, whose strict environment mode may drop Windows variables the tests read. The
+      # agent skill's tests copy the skill to `.claude` on NTFS.
+      - name: Skill script and agent skill tests
+        run: pnpm --filter @visual-check/cli exec vitest run test/skill-run src/agent-skill
       # Docker Desktop 4.98.0, the version research #33 ran on this runner. To bump it, take the build number from
       # Docker Desktop's release notes, and the checksum from checksums.txt beside the installer.
       - name: Install Docker Desktop

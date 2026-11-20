@@ -492,13 +492,14 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
         'visual-check.config.ts': "export default { storybooks: { web: { url: 'http://127.0.0.1:6006' } } }\n",
       },
     })
-    const prompter = scriptedPrompter(['', '', ''])
+    const prompter = scriptedPrompter(['', '', '', ''])
     const result = await runInit(root, toolsOf({ yes: false, interactive: true, prompter }).tools)
 
     expect(result.exitCode).toBe(0)
     expect(prompter.records.map(({ kind, message, defaultValue }) => ({ kind, message, defaultValue }))).toEqual([
       { kind: 'text', message: 'Name of the script that runs visual-check test', defaultValue: 'visual:check' },
       { kind: 'text', message: 'Name of the script that runs visual-check update', defaultValue: 'visual:update' },
+      { kind: 'confirm', message: 'Install the agent skill?', defaultValue: true },
       { kind: 'confirm', message: 'Add the Storybook addon to web?', defaultValue: true },
     ])
     expect(prompter.unused()).toEqual([])

@@ -64,6 +64,7 @@ packages/cli/src/
   index.ts              entry: the public config API
   commands/             init, test, update
   init/                 what init detects, asks, writes and installs; adapter: git ls-files and Fallow's check
+  agent-skill/          writes and refreshes the agent skill's files (SKILL.md, the runner script, setup.json) from packages/cli/skill/
   terminal-ui/          adapter: Ink and React: init's questions, steps and summary, and the live reporter
   docs-site/            the docs site's address, which every docs link starts with
   config/

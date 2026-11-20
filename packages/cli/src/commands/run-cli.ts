@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path'
 import type { ReadStoriesMatchers, TracedChanges } from '../affected-stories/affected-stories.js'
 import { type FindReachedFiles, findReachedFilesWithFallow } from '../affected-stories/fallow-graph.js'
 import { InvalidBaseError } from '../affected-stories/git-changes.js'
+import { refreshSkill, skillRefreshLinesOf } from '../agent-skill/refresh-skill.js'
 import { checkBrowserPackage } from '../browser/browser-package.js'
 import { runImageOf } from '../browser/browser-version.js'
 import { chromeForTestingPlatformOf } from '../browser/chrome-for-testing-platform.js'
@@ -328,6 +329,9 @@ export async function runCli(
  * the command and exit code, `--reporter json` moves the human lines to stderr, before what the run prints there. An
  * error that is a bug, once the config loads, ends the run as a problem would, with its stack trace and its message.
  *
+ * Locally, before anything else, it rewrites an agent skill another CLI version installed beside the config, naming
+ * the files on stderr; in CI it never touches the skill.
+ *
  * @throws {Error} Any error besides the problems that stop the run with exit 2, before the config loads.
  */
 async function runTestOrUpdate(
@@ -466,12 +470,41 @@ interface RunContext {
 }
 
 /**
+ * Locally, rewrites the agent skill installed beside the config the run would load when another CLI version wrote it,
+ * and writes what it did on stderr as it happens. In CI it reads and writes nothing.
+ */
+function refreshInstalledSkill(context: RunContext): void {
+  if (context.ci) {
+    return
+  }
+
+  const configPath = locateConfig(context.cwd, context.options.config)
+
+  if (configPath === undefined) {
+    return
+  }
+
+  const refresh = refreshSkill(dirname(configPath), readCliManifest().version)
+
+  if (refresh !== undefined) {
+    context.write(
+      'stderr',
+      skillRefreshLinesOf(refresh, context.cwd)
+        .map((line) => `${line}\n`)
+        .join(''),
+    )
+  }
+}
+
+/**
  * Runs `test` or `update` as `runTestOrUpdate` says, and gives how it ended. Once the config loads, an error that is
  * a bug stops the run too, with its stack trace and its message.
  *
  * @throws {Error} Any error besides the problems that stop the run with exit 2, before the config loads.
  */
 async function runOutcomeOf(context: RunContext): Promise<RunOutcome> {
+  refreshInstalledSkill(context)
+
   const browserCheck = checkBrowserPackage(context.environment)
 
   if ('problem' in browserCheck) {

@@ -82,6 +82,10 @@ export interface Answers {
     update: ScriptAnswer
   }
   /**
+   * Whether `init` installs the agent skill.
+   */
+  skill: boolean
+  /**
    * The Storybooks that get the visual-check addon.
    */
   addons: AddonAnswer[]
@@ -153,6 +157,11 @@ const scriptHints = {
 } as const
 
 /**
+ * The hint of the question whether to install the agent skill.
+ */
+const skillHint = 'Teaches a coding agent to run visual-check and report what changed.'
+
+/**
  * What `plannedQuestionCountOf` needs.
  */
 interface QuestionPlanInput extends Omit<QuestionInput, 'prompter'> {
@@ -166,7 +175,8 @@ interface QuestionPlanInput extends Omit<QuestionInput, 'prompter'> {
 /**
  * Counts the questions `askQuestions` plans to ask: the package manager when nothing shows it; with no config yet,
  * which Storybooks to set up when there's more than one, then for each one ticked its name, its URL and, when nothing
- * starts it, its start command; each script that no script already runs; and the addon when a Storybook takes it.
+ * starts it, its start command; each script that no script already runs; whether to install the agent skill, always;
+ * and the addon when a Storybook takes it.
  */
 export function plannedQuestionCountOf({
   project,
@@ -190,15 +200,16 @@ export function plannedQuestionCountOf({
     (project.packageManager === undefined ? 1 : 0) +
     storybookQuestions +
     (['test', 'update'] as const).filter((kind) => reusedScriptOf(scripts, kind) === undefined).length +
+    1 +
     (addonOffered.length > 0 ? 1 : 0)
   )
 }
 
 /**
  * Asks the questions of `init`, in order: the package manager, which Storybooks to set up, each of them, the script
- * names, and the addon. Gives the answers, and the warnings the answers call for. It prints nothing: hints go through
- * the prompter. Before each question it tells the prompter how far through the planned questions the person is, and
- * plans again once the Storybooks to set up are ticked.
+ * names, the agent skill, and the addon. Gives the answers, and the warnings the answers call for. It prints nothing:
+ * hints go through the prompter. Before each question it tells the prompter how far through the planned questions the
+ * person is, and plans again once the Storybooks to set up are ticked.
  */
 export async function askQuestions({
   project,
@@ -214,12 +225,20 @@ export async function askQuestions({
 
   const storybooks = await askStorybooks(project, chosen, packageManager, counted, warnings)
   const scripts = await askScripts(project, counted)
+  const skill = await askSkill(counted)
   const addons = await askAddons({ project, answered: storybooks, existingConfig, prompter: counted })
 
   return {
-    answers: { packageManager, storybooks, scripts, addons },
+    answers: { packageManager, storybooks, scripts, skill, addons },
     warnings: [...warnings, ...sharedPortWarningsOf(storybooks)],
   }
+}
+
+/**
+ * Asks whether to install the agent skill, yes by default.
+ */
+function askSkill(prompter: Prompter): Promise<boolean> {
+  return prompter.confirm('Install the agent skill?', { defaultValue: true, hint: skillHint })
 }
 
 /**
@@ -441,7 +460,7 @@ function askUrl(storybook: DetectedStorybook, name: string, prompter: Prompter):
 /**
  * Returns the port of a URL: its own, or the one its protocol uses.
  */
-function urlPortOf(url: URL): number {
+export function urlPortOf(url: URL): number {
   if (url.port !== '') {
     return Number(url.port)
   }

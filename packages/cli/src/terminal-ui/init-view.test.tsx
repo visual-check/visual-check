@@ -600,11 +600,11 @@ describe('startInitView', () => {
     await act(() => firstQuestion)
 
     expect(frame()).toBe(
-      `${header}──────────────────── Step 1 of 5\n` +
+      `${header}──────────────────── Step 1 of 6\n` +
         `? Name of the Storybook in ${basename(root)}\n  What the config and the report call this Storybook.\n› web-app (default)`,
     )
 
-    for (let answered = 0; answered < 5; answered += 1) {
+    for (let answered = 0; answered < 6; answered += 1) {
       await until(() => stdin.push(keys.enter))
     }
 
@@ -613,6 +613,7 @@ describe('startInitView', () => {
       '✓ URL of web-app http://127.0.0.1:6006\n' +
       '✓ Name of the script that runs visual-check test visual:check\n' +
       '✓ Name of the script that runs visual-check update visual:update\n' +
+      '✓ Install the agent skill? yes\n' +
       '✓ Add the Storybook addon to web-app? yes\n'
     const installTitle = "Install visual-check's packages"
 

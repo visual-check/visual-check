@@ -132,7 +132,7 @@ Rules for the keys:
 
    The questions and notes call a Storybook by its folder, not its config folder: `Name of the Storybook in apps/my-app` for `apps/my-app/.storybook`, and the root folder's own name, such as `acme-monorepo`, for a `.storybook` at the root. Any other config folder, such as `config/storybook`, shows as it is. Then the questions ask `URL of <name>` and `Command that starts <name>`. The folder and the name show in the accent colour.
 3. **Script names,** `visual:check` and `visual:update` by default. A name another script has replaces that script, unless it starts a Storybook, in the root or in a Storybook's package, which get scripts of the same names. A script that already runs `visual-check test` or `update` is reused, and when the default name is taken by the other script or by a script that starts Storybook, the suggestion is `visual:test` or `visual:update-baselines`.
-4. **"Install the agent skill?"**, yes by default.
+4. **"Install the agent skill?"**, yes by default, with the hint "Teaches a coding agent to run visual-check and report what changed."
 5. **"Add the Storybook addon?"** A checklist of the chosen Storybooks on 10, all ticked. When only one is on 10, it's a yes or no question instead, `Add the Storybook addon to <name>?`, yes by default. It's shown only when at least one is on 10. Storybooks on another major are skipped with a note.
 
 Rules:
@@ -194,7 +194,7 @@ What it never does:
 Run again, `init`:
 
 - leaves an existing config alone, and prints any Storybook missing from it as a hint;
-- rewrites the skill files and refreshes the skill's `setup.json` from the config;
+- rewrites the skill files and refreshes the skill's `setup.json` from the config, and makes `.claude/skills/visual-check` the link again, or the copy on Windows;
 - adds any per-Storybook file that's missing.
 
 ## `init`: checks

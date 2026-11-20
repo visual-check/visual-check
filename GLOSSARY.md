@@ -112,6 +112,10 @@ _Avoid_: Output format, formatter, output mode
 The Markdown page GitHub Actions shows for a job step, where every `test` and `update` writes its shard, counts, flaky snapshots and failures, or its run error.
 _Avoid_: Job summary, check summary, annotations
 
+**Agent skill**:
+The folder `init` installs at `.agents/skills/visual-check/`, linked from `.claude/skills/visual-check`, that tells a coding agent when to run visual-check, how to read its report and which fixes to offer, with the runner script that starts the Storybooks a run needs.
+_Avoid_: Plugin, agent rules, agent prompt
+
 **Run error**:
 A problem outside any story that stops a run before it has results, such as an invalid config or an unreachable Storybook. It exits 2, unlike a broken story.
 _Avoid_: Fatal error, crash
