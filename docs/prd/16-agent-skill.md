@@ -15,9 +15,20 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
 | `setup.json`      | Written by `init` for this project                                                                                                                                                                               |
 
 - `setup.json` holds:
-  - the CLI command for the project's package manager, in a form that never downloads, such as `pnpm exec visual-check`;
-  - its working directory;
-  - each Storybook's start command, as `<package manager> run <script>` with its package as the working directory.
+  - `cli`: `{ command, cwd }`, the CLI command for the project's package manager in a form that never downloads, such as `["pnpm", "exec", "visual-check"]`, run from the workspace root;
+  - `storybooks`: for each Storybook, keyed by its config name, `{ command, cwd }`, its start command as `["<package manager>", "run", "<script>"]` with its package as the working directory.
+- Each `command` is a list of words, the program first, so no word is ever split, and the script quotes each word for its system. Each `cwd` is relative to the folder holding `setup.json`:
+
+  ```json
+  {
+    "cli": { "command": ["pnpm", "exec", "visual-check"], "cwd": "../../.." },
+    "storybooks": {
+      "web": { "command": ["pnpm", "run", "storybook"], "cwd": "../../../apps/web" }
+    }
+  }
+  ```
+
+- `init` writes every Storybook of the config. When a run needs a Storybook `setup.json` has no start command for, the script exits 2 and asks to run `init` again.
 - `.claude/skills/visual-check` is a link to that folder, because Claude Code reads only its own path. It's a copy on Windows. The link is committed, so on Windows the copy shows as a changed file in git. That's accepted.
 - Not used: model choice, `allowed-tools`, runner subagents and images. Users allow the command in their own agent's settings.
 
@@ -34,18 +45,23 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
 
 ## The runner script
 
-- It runs the CLI from `setup.json` with the caller's command and flags, plus `--reporter json`.
+- It runs the CLI from `setup.json` with the caller's command and flags, plus `--reporter json`. The CLI runs at most twice.
 - **When the CLI exits 2 because Storybooks are unreachable,** which the JSON's `error.storybooks` says, it handles only those. In a local affected run that list holds only the required Storybooks that are down ([Affected stories](11-affected-stories.md#required-storybooks)). It:
-  1. starts each one's command, adding `--ci --exact-port`, after `--` under npm. On Windows it starts the command through a shell;
-  2. polls `<url>/index.json` for up to 180 s;
+  1. starts each one's command, adding `--ci --exact-port`, after `--` under npm. Several start in parallel, and the first that fails stops the others;
+  2. polls `<url>/index.json` for up to 180 s, until it answers with a Storybook index;
   3. runs the CLI again.
 - If a Storybook it started prints a URL on another port than the config's, it exits 2 at once and names both ports.
-- **It always stops the process trees it started,** also after a failure or an interrupt: `taskkill /T /F` on Windows, the process group elsewhere. It never touches a server it didn't start.
+- If a Storybook it started exits before it answers while something still holds its port, it keeps polling. A Storybook that answers there is reused.
+- **It always stops the process trees it started,** also after a failure or an interrupt: `taskkill /T /F` on Windows, the process group elsewhere. It never touches a server it didn't start, beyond asking for its `index.json`.
+- **Each tree runs under a keeper,** the CLI's and each Storybook's: the script itself, run again, which stops its tree when the script tells it to, or when the script ends in any way, killed included.
+- **Reuse:** after a run with no run error, it reports as reused each Storybook of the last run's report that it didn't start. A Storybook already on the port is reused that way and left running.
+- **Mid-run check:** there's no lock between parallel sessions. After a last run that exits 1, it asks each Storybook of the run for its index once. One that refuses the connection stopped mid-run, so the script says so and exits 2. It does the same when the second run names as unreachable a Storybook it had just started or found answering.
+- **Interrupts:** on SIGINT, SIGTERM or SIGHUP, and SIGBREAK on Windows, it stops everything it started and exits with 128 plus the signal's number, such as 130 for SIGINT. stdout gets whatever the last CLI run printed so far.
+- **Windows:** every command runs through `cmd.exe`, each word in double quotes. An argument that holds a double quote, a line break or a `%name%` can't pass safely, so the script exits 2 without starting that command, or any Storybook.
 - **Channels:**
-  - stdout carries the CLI's JSON, unchanged;
-  - stderr carries the start, stop and reuse lines;
-  - the exit code is the CLI's. A Storybook that fails to start gives exit 2, with the end of its output on stderr.
-- There's no lock between parallel sessions. If another session stops a Storybook mid-run, the run exits 2 and says so. A Storybook already on the port is reused and reported.
+  - stdout carries the last CLI run's JSON, unchanged, written after every stderr line;
+  - stderr carries the start, ready, stop and reuse lines, and the CLI's own stderr;
+  - the exit code is the last CLI run's, except that a failure of the script exits 2: a missing or invalid `setup.json`, a missing start command, a Windows argument it can't pass, a Storybook that fails to start, with the end of its output on stderr, a port mismatch, or a Storybook stopped mid-run.
 
 ## What `SKILL.md` tells the agent
 
