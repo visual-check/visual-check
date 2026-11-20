@@ -2,10 +2,11 @@
 // sets say:
 //
 // - FAKE_CLI_CALLS: the JSON-lines file it appends `{ argv, cwd, pid, keeperPid }` to, and `{ childPid }` for a
-//   grandchild.
+//   grandchild. `keeperPid` is `null` unless FAKE_CLI_CHILD is `1`.
 // - FAKE_CLI_STORYBOOKS: the Storybooks of the run, `[{ name, url }]`. Those whose index fetch throws are unreachable,
-//   and so are the names in FAKE_CLI_UNREACHABLE_FIRST on the first call. Any unreachable one makes a run error.
-// - FAKE_CLI_CHILD: `1` starts a grandchild that runs until the fake ends it.
+//   and so are the names in FAKE_CLI_UNREACHABLE_FIRST on the first call and FAKE_CLI_UNREACHABLE_SECOND on the
+//   second. Any unreachable one makes a run error.
+// - FAKE_CLI_CHILD: `1` starts a grandchild that runs until the fake ends it, and records the keeper's pid.
 // - FAKE_CLI_RELEASE: a file the fake waits for before it answers.
 // - FAKE_CLI_EXIT: the exit code it answers with, 0 when not given.
 
@@ -68,19 +69,20 @@ function indexUrlOf(url) {
 }
 
 /**
- * The Storybooks of `storybooks` where nothing answers, plus those named unreachable on the first call.
+ * The Storybooks of `storybooks` where nothing answers, plus those named unreachable on this call.
  *
  * @param {Storybook[]} storybooks The Storybooks of the run.
  * @returns {Promise<Storybook[]>}
  */
 async function unreachableOf(storybooks) {
-  const unreachableFirst = call === 1 ? (environment.FAKE_CLI_UNREACHABLE_FIRST ?? '').split(',') : []
+  const named = { 1: environment.FAKE_CLI_UNREACHABLE_FIRST, 2: environment.FAKE_CLI_UNREACHABLE_SECOND }[call]
+  const unreachableNow = (named ?? '').split(',')
 
   /** @type {Storybook[]} */
   const unreachable = []
 
   for (const storybook of storybooks) {
-    if (unreachableFirst.includes(storybook.name)) {
+    if (unreachableNow.includes(storybook.name)) {
       unreachable.push(storybook)
 
       continue
@@ -108,9 +110,12 @@ function answer(document, code) {
   })
 }
 
+// Only the tests that check a tree stops look for the keeper, since on Windows that takes about a second.
+const keeperPid = environment.FAKE_CLI_CHILD === '1' ? keeperPidOf() : null
+
 appendFileSync(
   callsPath,
-  `${JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), pid: process.pid, keeperPid: keeperPidOf() })}\n`,
+  `${JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), pid: process.pid, keeperPid })}\n`,
 )
 process.stderr.write('fake cli on stderr\n')
 

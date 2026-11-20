@@ -9,6 +9,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs'
+import { createServer as createHttpServer, type Server } from 'node:http'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -84,6 +85,24 @@ interface ScriptResult {
 }
 
 /**
+ * A server that answers like a Storybook, one the script didn't start.
+ */
+interface IndexServer {
+  /**
+   * The server's URL, `http://127.0.0.1:<port>`.
+   */
+  url: string
+  /**
+   * The port the server listens on.
+   */
+  port: number
+  /**
+   * Stops the server and closes its open connections.
+   */
+  close: () => Promise<void>
+}
+
+/**
  * A script run in progress.
  */
 interface RunningScript {
@@ -114,6 +133,16 @@ const scriptSource = fileURLToPath(new URL('../skill/scripts/run.mjs', import.me
  * The fake CLI, which records each call and answers as the env vars a test sets say.
  */
 const fakeCliPath = fileURLToPath(new URL('./skill-run-fakes/fake-cli.mjs', import.meta.url))
+
+/**
+ * The fake Storybook, which records each start and serves an empty Storybook index.
+ */
+const fakeStorybookPath = fileURLToPath(new URL('./skill-run-fakes/fake-storybook.mjs', import.meta.url))
+
+/**
+ * The index servers `serveIndex` started, closed by `cleanUpScripts`.
+ */
+const servers: Server[] = []
 
 /**
  * The temp folders the fixtures made, removed by `cleanUpScripts`.
@@ -166,6 +195,95 @@ export function installSkill(setup: SetupFile | string): SkillInstall {
  */
 export function fakeCliCommand(): string[] {
   return [process.execPath, fakeCliPath]
+}
+
+/**
+ * The command that starts a fake Storybook named `name` on `port`, 0 to let the system pick one, with `flags` such as
+ * `--fail`.
+ *
+ * @public
+ */
+export function fakeStorybookCommand(name: string, port: number, flags: string[] = []): string[] {
+  return [process.execPath, fakeStorybookPath, '-p', String(port), '--name', name, ...flags]
+}
+
+/**
+ * Writes a package whose `storybook` script starts a fake Storybook named `name` on `port`, and returns its start
+ * command through npm and its folder.
+ *
+ * @public
+ */
+export function npmStorybookPackage(name: string, port: number): SetupCommand {
+  const cwd = temporaryFolder()
+  const script = [process.execPath, fakeStorybookPath].map((word) => JSON.stringify(word)).join(' ')
+
+  writeFileSync(
+    join(cwd, 'package.json'),
+    JSON.stringify({
+      name: 'fake-storybook',
+      private: true,
+      scripts: { storybook: `${script} -p ${port} --name ${name}` },
+    }),
+  )
+
+  return { command: ['npm', 'run', 'storybook'], cwd }
+}
+
+/**
+ * Serves an empty Storybook index at `/index.json` on `port`, 0 to let the system pick one, like a Storybook the
+ * script didn't start.
+ *
+ * @public
+ */
+export function serveIndex(port = 0): Promise<IndexServer> {
+  const server = createHttpServer((request, response) => {
+    const found = request.url === '/index.json'
+
+    response.statusCode = found ? 200 : 404
+    response.end(found ? JSON.stringify({ v: 5, entries: {} }) : undefined)
+  })
+
+  servers.push(server)
+
+  return new Promise((resolve, reject) => {
+    server.on('error', reject)
+    server.listen(port, '127.0.0.1', () => {
+      const address = server.address()
+
+      if (address === null || typeof address === 'string') {
+        reject(new Error('The server has no port.'))
+
+        return
+      }
+
+      resolve({
+        url: urlOf(address.port),
+        port: address.port,
+        close: () => closeServer(server),
+      })
+    })
+  })
+}
+
+/**
+ * Stops `server` and closes its open connections.
+ */
+function closeServer(server: Server): Promise<void> {
+  return new Promise((resolve) => {
+    server.close(() => {
+      resolve()
+    })
+    server.closeAllConnections()
+  })
+}
+
+/**
+ * The URL of a Storybook on `port` of `127.0.0.1`.
+ *
+ * @public
+ */
+export function urlOf(port: number): string {
+  return `http://127.0.0.1:${port}`
 }
 
 /**
@@ -310,12 +428,12 @@ function recordedPids(): number[] {
 }
 
 /**
- * Kills every script the tests started and every process the fakes recorded, then removes the temp folders. For
- * `afterEach`.
+ * Kills every script the tests started and every process the fakes recorded, closes the index servers, then removes
+ * the temp folders. For `afterEach`.
  *
  * @public
  */
-export function cleanUpScripts(): void {
+export async function cleanUpScripts(): Promise<void> {
   for (const script of scripts.splice(0)) {
     if (script.exitCode === null && script.signalCode === null) {
       script.kill('SIGKILL')
@@ -329,6 +447,8 @@ export function cleanUpScripts(): void {
       // The process is already gone.
     }
   }
+
+  await Promise.all(servers.splice(0).map((server) => (server.listening ? closeServer(server) : undefined)))
 
   for (const folder of folders.splice(0)) {
     rmSync(folder, { recursive: true, force: true, maxRetries: 5 })

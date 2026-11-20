@@ -1,6 +1,21 @@
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { cliArgvOf, exitCodeOf, setupOf, windowsCommandLineOf } from '../skill/scripts/run.mjs'
+import {
+  cliArgvOf,
+  exitCodeOf,
+  failedStartMessageOf,
+  indexUrlOf,
+  outputTail,
+  portMismatchMessageOf,
+  portOf,
+  reportOf,
+  reusedLineOf,
+  setupOf,
+  startedPortOf,
+  stoppedMidRunMessageOf,
+  storybookArgvOf,
+  windowsCommandLineOf,
+} from '../skill/scripts/run.mjs'
 
 /**
  * The folder the cases' `setup.json` sits in.
@@ -132,5 +147,199 @@ describe('exitCodeOf', () => {
     [null, 'SIGNOTONE', 2],
   ] as const)('gives %s and %s the exit code %s', (code, signal, exitCode) => {
     expect(exitCodeOf(code, signal)).toBe(exitCode)
+  })
+})
+
+describe('reportOf', () => {
+  const web = { name: 'web', url: 'http://127.0.0.1:6006' }
+  const docs = { name: 'docs', url: 'http://127.0.0.1:6007' }
+
+  it('reads the Storybooks of a run error and those where nothing answers', () => {
+    const stdout = JSON.stringify({
+      exitCode: 2,
+      storybooks: [web, docs],
+      error: { message: 'Nothing answers.', storybooks: [docs] },
+    })
+
+    expect(reportOf(`${stdout}\n`)).toEqual({ storybooks: [web, docs], unreachable: [docs], runError: true })
+  })
+
+  it('reads a run without a run error', () => {
+    expect(reportOf(JSON.stringify({ exitCode: 1, storybooks: [web], error: null }))).toEqual({
+      storybooks: [web],
+      unreachable: [],
+      runError: false,
+    })
+  })
+
+  it('reads a run error that names no Storybooks', () => {
+    expect(reportOf(JSON.stringify({ exitCode: 2, storybooks: [], error: { message: 'Docker is missing.' } }))).toEqual(
+      { storybooks: [], unreachable: [], runError: true },
+    )
+  })
+
+  it('leaves out entries without a string name and URL', () => {
+    const stdout = JSON.stringify({
+      storybooks: [web, { name: 'no-url' }, { url: 'http://x' }, { name: 3, url: 'http://y' }, null],
+      error: { storybooks: [{ name: 'docs' }, docs] },
+    })
+
+    expect(reportOf(stdout)).toEqual({ storybooks: [web], unreachable: [docs], runError: true })
+  })
+
+  it.each([
+    ['junk', 'Error: boom'],
+    ['nothing', ''],
+    ['a list', '[]'],
+    ['an object without Storybooks', '{"exitCode":0}'],
+  ])('gives undefined for %s', (_case, stdout) => {
+    expect(reportOf(stdout)).toBeUndefined()
+  })
+})
+
+describe('storybookArgvOf', () => {
+  it.each([[['pnpm', 'run', 'storybook']], [['yarn', 'storybook']], [['bun', 'run', 'storybook']]])(
+    'appends --ci --exact-port without -- for %j',
+    (argv) => {
+      expect(storybookArgvOf(argv)).toEqual([...argv, '--ci', '--exact-port'])
+    },
+  )
+
+  it.each([[['npm', 'run', 'storybook']], [['npm.cmd', 'run', 'storybook']], [['NPM.EXE', 'run', 'storybook']]])(
+    'puts -- before the flags under npm, for %j',
+    (argv) => {
+      expect(storybookArgvOf(argv)).toEqual([...argv, '--', '--ci', '--exact-port'])
+    },
+  )
+
+  it('adds no second -- under npm', () => {
+    expect(storybookArgvOf(['npm', 'run', 'storybook', '--', '-p', '6006'])).toEqual([
+      'npm',
+      'run',
+      'storybook',
+      '--',
+      '-p',
+      '6006',
+      '--ci',
+      '--exact-port',
+    ])
+  })
+})
+
+describe('indexUrlOf', () => {
+  it.each([
+    ['http://127.0.0.1:6006', 'http://127.0.0.1:6006/index.json'],
+    ['http://127.0.0.1:6006/', 'http://127.0.0.1:6006/index.json'],
+    ['https://host/sb', 'https://host/sb/index.json'],
+    ['https://host/sb/', 'https://host/sb/index.json'],
+    ['https://user:secret@host/sb?path=/story/a#top', 'https://host/sb/index.json'],
+  ])('gives %s the index %s', (url, index) => {
+    expect(indexUrlOf(url)).toBe(index)
+  })
+})
+
+describe('portOf', () => {
+  it.each([
+    ['http://127.0.0.1:6006', 6006],
+    ['http://host/sb', 80],
+    ['https://host/sb', 443],
+    ['https://host:8443', 8443],
+  ])('gives %s the port %s', (url, port) => {
+    expect(portOf(url)).toBe(port)
+  })
+})
+
+describe('startedPortOf', () => {
+  const border = '\x1b[38;2;255;71;133m│\x1b[39m'
+
+  it("reads the port of Storybook 10's banner, with its colours and borders", () => {
+    const line = `│ ${border}   - Local:                http://127.0.0.1:6123/                           ${border}`
+
+    expect(startedPortOf(line)).toBe(6123)
+  })
+
+  it("reads the port of Storybook 9.1's table row", () => {
+    expect(startedPortOf('Local:            http://localhost:6006/')).toBe(6006)
+  })
+
+  it.each([
+    ['a URL without the Local label', 'See https://storybook.js.org/docs for more.'],
+    ['the network line', '│ │   - On your network:      http://192.168.1.2:6006/   │'],
+    ['a Local label without a URL', 'Local:   not yet'],
+  ])('gives undefined for %s', (_case, line) => {
+    expect(startedPortOf(line)).toBeUndefined()
+  })
+})
+
+describe('outputTail', () => {
+  it('joins lines split across chunks and returns the lines each chunk completes', () => {
+    const tail = outputTail(15)
+
+    expect(tail.add('first li')).toEqual([])
+    expect(tail.add('ne\r\nsecond\nthi')).toEqual(['first line', 'second'])
+    expect(tail.lines()).toEqual(['first line', 'second', 'thi'])
+  })
+
+  it('strips colours and trailing whitespace, and skips blank lines', () => {
+    const tail = outputTail(15)
+
+    tail.add('\x1b[31mred\x1b[39m   \n\n   \n\tindented\n')
+
+    expect(tail.lines()).toEqual(['red', '\tindented'])
+  })
+
+  it('keeps only the last lines', () => {
+    const tail = outputTail(3)
+
+    tail.add('1\n2\n3\n4\n')
+    tail.add('5')
+
+    expect(tail.lines()).toEqual(['3', '4', '5'])
+  })
+})
+
+describe('the messages', () => {
+  const index = 'http://127.0.0.1:6006/index.json'
+
+  it('names both ports of a port mismatch', () => {
+    expect(portMismatchMessageOf('web', 6007, 'http://127.0.0.1:6006')).toBe(
+      'Storybook web started on port 6007, but its URL http://127.0.0.1:6006 is on port 6006. Make its start command and its URL use the same port.',
+    )
+  })
+
+  it('shows the end of the output of a Storybook that exited, indented', () => {
+    expect(failedStartMessageOf('web', { exitCode: 1 }, index, ['Error: boom', 'at main'])).toBe(
+      `Storybook web exited with code 1 before it answered at ${index}. The end of its output:\n  Error: boom\n  at main`,
+    )
+  })
+
+  it('says a Storybook that exited printed nothing', () => {
+    expect(failedStartMessageOf('web', { exitCode: 1 }, index, [])).toBe(
+      `Storybook web exited with code 1 before it answered at ${index}, and printed nothing.`,
+    )
+  })
+
+  it('shows the end of the output of a Storybook that ran out of time', () => {
+    expect(failedStartMessageOf('web', { timeout: true }, index, ['compiling'])).toBe(
+      `Storybook web didn't answer at ${index} within 180 s. The end of its output:\n  compiling`,
+    )
+  })
+
+  it('says a Storybook that ran out of time printed nothing', () => {
+    expect(failedStartMessageOf('web', { timeout: true }, index, [])).toBe(
+      `Storybook web didn't answer at ${index} within 180 s, and printed nothing.`,
+    )
+  })
+
+  it('says a Storybook stopped answering during the run', () => {
+    expect(stoppedMidRunMessageOf({ name: 'web', url: 'http://127.0.0.1:6006' })).toBe(
+      "Storybook web stopped answering at http://127.0.0.1:6006 during the run, so the run's results can't be trusted. Another session may have stopped it. Run the script again.",
+    )
+  })
+
+  it('says the run reused a Storybook', () => {
+    expect(reusedLineOf({ name: 'web', url: 'http://127.0.0.1:6006' })).toBe(
+      'Reused Storybook web, which was already running at http://127.0.0.1:6006.',
+    )
   })
 })
