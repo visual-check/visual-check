@@ -237,6 +237,25 @@ pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --host --af
 
 CI's "Ubuntu host" job runs `--host` where Chromium's sandbox can't start, so the CLI relaunches without it. "macOS without Docker" runs `--host --no-docker`, then `--host --affected` with the same cache.
 
+## Running the skill script cases
+
+`--skill-script` checks the agent skill's runner script, `packages/cli/skill/scripts/run.mjs`, in place of every other case: with `--host` on your machine, else with `TEST_STORYBOOK_IMAGE` naming the browser image. Each case installs the script in a temporary folder with a `setup.json` whose CLI command is `pnpm exec visual-check` in this folder. In the cases that start a Storybook, its start command is `pnpm run storybook`, which serves a test Storybook on port 6006 with `storybook dev`:
+
+- With nothing on port 6006, the script starts this Storybook with `--ci --exact-port`, waits until it answers, runs `test` on `card--default` and stops it. It exits with the report's code, and its standard output is `report.json`'s one document.
+- With a server already answering at the Storybook's URL, and a start command that would fail, the script starts nothing, says it reused the server, and leaves it running.
+- With the Storybook's URL on another port than 6006, the script exits 2 naming both ports, and stops the Storybook it started.
+- With a config of Storybook 9.1 on port 6006 and this one at another URL, and Storybook 9.1's `.storybook/main.ts` changed, `test --base HEAD` through the script starts Storybook 9.1 alone. Once the CLI captures, an interrupt ends the script, which stops Storybook 9.1 and the CLI: outside Windows no process the script started is left, and with the image no container.
+- With the image, killing the CLI leaves no container behind, as in the cases above.
+
+Port 6006 must be free. The interrupt case adds a comment line to Storybook 9.1's `main.ts` while the script runs, and puts back its exact bytes after, also on Ctrl+C. The working tree's own changes must reach no story, so that line is the only change `test --base HEAD` sees: the case first checks that `test --base HEAD` requires no Storybook, and fails saying so when it does. A Storybook that fails to start writes `debug-storybook.log` into its package folder, which git ignores. On the host, the cases share the cache as the host cases do, but it needn't start empty.
+
+```sh
+pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --host --skill-script
+TEST_STORYBOOK_IMAGE=visual-check-chromium:amd64 pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --skill-script
+```
+
+CI's "Windows skill script" job runs the second through Docker Desktop.
+
 ## Running it on the arm64 image
 
 `--arm64` runs one case: the checks of the first case above, on a server that leaves out the `load-fails` stories, with a config that sets `platform: 'linux/arm64'` and the default tolerance, against the committed baselines, which are written on amd64. It shows the default tolerance absorbs arm64's differences from amd64. When the case fails, `test`'s report, with the baseline, snapshot and diff of each snapshot that differs, is copied to `e2e-output/arm64-report/`. It needs `TEST_STORYBOOK_IMAGE` to name an arm64 build of the browser image. From the repo root:

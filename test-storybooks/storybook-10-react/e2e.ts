@@ -31,6 +31,16 @@
 // the platform `linux/arm64` and the default tolerance gives the expected outcomes against the committed baselines,
 // which are written on amd64. It makes the committed baselines case's checks, on a server that leaves out the stories
 // of the file that fails to load.
+//
+// With `--skill-script` it runs the agent skill's runner script cases in place of every other case, with `--host` on
+// the machine itself, else with TEST_STORYBOOK_IMAGE naming the browser image. Each case installs the script with a
+// setup.json whose CLI command is `pnpm exec visual-check` in this package's folder, and whose Storybooks start with
+// `pnpm run storybook`, which serves a test Storybook on port 6006 with `storybook dev`. So port 6006 must be free. The
+// script starts a Storybook, reuses one already running, exits 2 on a port mismatch, and starts only the Storybook a
+// change reaches, which an interrupt then stops with the CLI and the browser. That case changes Storybook 9.1's
+// `main.ts` while the script runs, and puts back its exact bytes after, also on SIGINT or SIGTERM. The working tree's
+// own changes must reach no story, which it checks first. With the image, the killed CLI case runs too. On the host,
+// the cases share the cache as the host cases do, but it needn't start empty.
 import { type ChildProcessByStdio, spawn, spawnSync } from 'node:child_process'
 import {
   accessSync,
@@ -132,6 +142,39 @@ const affectedOnly = process.argv.includes('--affected')
  * Whether the check runs the committed baselines on the arm64 browser image, as the `--arm64` argument says.
  */
 const onArm64Image = process.argv.includes('--arm64')
+
+/**
+ * Whether the check runs the agent skill's runner script cases in place of every other case, as the `--skill-script`
+ * argument says.
+ */
+const skillScriptOnly = process.argv.includes('--skill-script')
+
+/**
+ * The agent skill's runner script, through this package's workspace link to the CLI, which holds its source folder.
+ */
+const skillScriptSource = join(packageDir, 'node_modules', '@visual-check', 'cli', 'skill', 'scripts', 'run.mjs')
+
+/**
+ * Where `storybook dev` serves a test Storybook, as each one's `storybook` script starts it.
+ */
+const storybookDevUrl = 'http://127.0.0.1:6006'
+
+/**
+ * How long, in ms, the interrupt case waits for the runner script to start Storybook 9.1 and the CLI to start
+ * capturing: a cold `storybook dev` start on Windows and the CLI's own start can take minutes.
+ */
+const skillStartTimeout = 240_000
+
+/**
+ * How long, in ms, the runner script has to end after an interrupt, and a Storybook it started to stop answering.
+ */
+const skillStopTimeouts = { ended: 60_000, stopped: 15_000 }
+
+/**
+ * How long, in ms, a runner script may run before it is killed: two CLI runs and up to 180 s of waiting for
+ * Storybook, and above the interrupt case's wait for the capture plus its wait for the end.
+ */
+const skillScriptTimeout = 420_000
 
 /**
  * Where visual-check's browser image records the browser it holds.
@@ -1019,6 +1062,10 @@ interface CliRun {
    */
   timedOut: boolean
   /**
+   * The time limit it ran under, in ms.
+   */
+  timeLimit: number
+  /**
    * Its standard output.
    */
   stdout: string
@@ -1218,7 +1265,8 @@ function findPackageNameProblems(packageName: string | undefined): string[] {
 
 /**
  * Lists what is wrong with the arguments: `--inside-image`, `--host` and `--arm64` are separate modes, `--no-docker`
- * needs `--host`, and `--affected` needs `--host` and goes without `--no-docker`.
+ * needs `--host`, `--affected` needs `--host` and goes without `--no-docker`, and `--skill-script` goes alone or with
+ * `--host`.
  */
 function findArgumentProblems(): string[] {
   const modeCount = [insideImage, onHost, onArm64Image].filter(Boolean).length
@@ -1229,7 +1277,20 @@ function findArgumentProblems(): string[] {
     [affectedOnly && withoutDocker, '--affected runs in place of the host cases, so it goes without --no-docker.'],
   ]
 
-  return conflicts.filter(([conflicting]) => conflicting).map(([, problem]) => problem)
+  return [
+    ...conflicts.filter(([conflicting]) => conflicting).map(([, problem]) => problem),
+    ...findSkillScriptArgumentProblems(),
+  ]
+}
+
+/**
+ * Lists the problem with `--skill-script` given with an argument of another mode's cases, or none. It's apart from
+ * `findArgumentProblems`, whose table one more condition would make too complex.
+ */
+function findSkillScriptArgumentProblems(): string[] {
+  return skillScriptOnly && [insideImage, onArm64Image, withoutDocker, affectedOnly].some(Boolean)
+    ? ['--skill-script runs in place of the other cases: give it alone, or with --host.']
+    : []
 }
 
 /**
@@ -1555,14 +1616,22 @@ async function withTemporaryFolder<T>(use: (folder: string) => Promise<T>): Prom
 
 /**
  * Starts the built CLI in this package's folder with the given arguments and environment. It is killed when it runs
- * past the time limit.
+ * past the CLI's time limit.
  */
 function startCli(args: string[], env: NodeJS.ProcessEnv): CliProcess {
-  return spawn(process.execPath, [cliBin, ...args], {
+  return startNode(cliBin, args, env, cliTimeoutMilliseconds)
+}
+
+/**
+ * Starts Node on the script `entry` in this package's folder with the given arguments and environment, with its
+ * standard output and error piped. It is killed with `SIGKILL` when it runs past the time limit, in ms.
+ */
+function startNode(entry: string, args: string[], env: NodeJS.ProcessEnv, timeLimit: number): CliProcess {
+  return spawn(process.execPath, [entry, ...args], {
     cwd: packageDir,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: cliTimeoutMilliseconds,
+    timeout: timeLimit,
     killSignal: 'SIGKILL',
   })
 }
@@ -1631,7 +1700,7 @@ function cliRunOf(stdout: string, ended: Omit<CliRun, 'stdout' | 'snapshots' | '
  * limit has killed it. Follow it as soon as it starts: following it later can miss its `close` event and wait forever,
  * and the time limit counts from the start.
  */
-function followCli(cli: CliProcess): FollowedCli {
+function followCli(cli: CliProcess, timeLimit = cliTimeoutMilliseconds): FollowedCli {
   const started = performance.now()
   let stdout = ''
   let stderr = ''
@@ -1654,9 +1723,9 @@ function followCli(cli: CliProcess): FollowedCli {
     })
     cli.on('close', (code, signal) => resolve([code, signal]))
   }).then(([exitCode, signal]) => {
-    const timedOut = signal === 'SIGKILL' && performance.now() - started >= cliTimeoutMilliseconds
+    const timedOut = signal === 'SIGKILL' && performance.now() - started >= timeLimit
 
-    return cliRunOf(stdout, { exitCode, signal, timedOut, stderr })
+    return cliRunOf(stdout, { exitCode, signal, timedOut, timeLimit, stderr })
   })
 
   // A case that stops before the CLI ends never awaits its run, so a CLI that couldn't run mustn't reject unhandled.
@@ -1670,17 +1739,27 @@ function followCli(cli: CliProcess): FollowedCli {
  * expected code.
  */
 function exitCodeProblems(command: string, run: CliRun, expected: number): string[] {
-  if (run.timedOut) {
-    return [`${command} timed out after ${cliTimeoutMilliseconds / 1000} s${outputOf(run.stderr)}`]
-  }
+  const ending = endingProblems(command, run)
 
-  if (run.signal !== null) {
-    return [`${command} was ended by ${run.signal}${outputOf(run.stderr)}`]
+  if (ending.length > 0) {
+    return ending
   }
 
   return run.exitCode === expected
     ? []
     : [`${command} exited ${run.exitCode}, expected ${expected}${outputOf(run.stderr)}`]
+}
+
+/**
+ * Gives the problem when the time limit or a signal ended a run, with what it printed on standard error, or none when
+ * it exited.
+ */
+function endingProblems(command: string, run: CliRun): string[] {
+  if (run.timedOut) {
+    return [`${command} timed out after ${run.timeLimit / 1000} s${outputOf(run.stderr)}`]
+  }
+
+  return run.signal === null ? [] : [`${command} was ended by ${run.signal}${outputOf(run.stderr)}`]
 }
 
 /**
@@ -3469,13 +3548,21 @@ async function checkNoDocker(): Promise<string[]> {
 }
 
 /**
+ * The cache the CLI keeps the headless shell in on the host: VISUAL_CHECK_CACHE_DIR when the caller sets it, resolved
+ * as the CLI resolves it in this package's folder, else a new folder inside the temporary one.
+ */
+function hostCacheDirOf(folder: string): string {
+  const cacheSetting = process.env.VISUAL_CHECK_CACHE_DIR
+
+  return cacheSetting ? resolvePath(packageDir, cacheSetting) : join(folder, 'cache')
+}
+
+/**
  * Writes the config the host cases share, with `platform: 'host'` and its baselines in a new folder inside the
- * temporary one, and gives what they share. The cache is VISUAL_CHECK_CACHE_DIR when the caller sets it, resolved as
- * the CLI resolves it in this package's folder, else a new folder inside the temporary one.
+ * temporary one, and gives what they share, with the cache `hostCacheDirOf` gives.
  */
 function hostRunOf(folder: string, url: string): HostRun {
-  const cacheSetting = process.env.VISUAL_CHECK_CACHE_DIR
-  const cacheDir = cacheSetting ? resolvePath(packageDir, cacheSetting) : join(folder, 'cache')
+  const cacheDir = hostCacheDirOf(folder)
 
   return {
     config: writeConfig(folder, url, join(folder, 'baselines'), { platform: 'host' }),
@@ -4206,6 +4293,582 @@ function arm64ImageCases(expected: Outcomes): Case[] {
 }
 
 /**
+ * A Storybook in a config the runner script cases write.
+ */
+interface SkillStorybook {
+  /**
+   * The test Storybook's package folder.
+   */
+  dir: string
+  /**
+   * Where it is served.
+   */
+  url: string
+  /**
+   * Its baselines folder.
+   */
+  baselines: string
+}
+
+/**
+ * A command in the skill's `setup.json`, as the runner script reads it.
+ */
+interface SkillCommand {
+  /**
+   * The words of the command, the program first.
+   */
+  command: string[]
+  /**
+   * The folder it runs in, absolute.
+   */
+  cwd: string
+}
+
+/**
+ * A runner script a case started.
+ */
+interface SkillScriptRun {
+  /**
+   * The script's process.
+   */
+  child: CliProcess
+  /**
+   * The script, followed as a CLI is.
+   */
+  followed: FollowedCli
+}
+
+/**
+ * Installs the agent skill in `folder` as `visual-check init` lays it out: the runner script in `skill/scripts/`, and
+ * `skill/setup.json`, whose CLI command is `pnpm exec visual-check` in this package's folder and whose Storybooks start
+ * with the given commands. Gives the script's path.
+ */
+function writeSkillInstall(folder: string, storybooks: Record<string, SkillCommand>): string {
+  const script = join(folder, 'skill', 'scripts', 'run.mjs')
+  const setup = { cli: { command: ['pnpm', 'exec', 'visual-check'], cwd: packageDir }, storybooks }
+
+  mkdirSync(dirname(script), { recursive: true })
+  cpSync(skillScriptSource, script)
+  writeFileSync(join(folder, 'skill', 'setup.json'), `${JSON.stringify(setup, null, 2)}\n`)
+
+  return script
+}
+
+/**
+ * The start command of the test Storybook in `dir`, as `init` writes it: its `storybook` script, which serves it at
+ * `storybookDevUrl` with `storybook dev`.
+ */
+function devStart(dir: string): SkillCommand {
+  return { command: ['pnpm', 'run', 'storybook'], cwd: dir }
+}
+
+/**
+ * The environment the runner script cases run the script in: the machine's without `CI`, and on the host with
+ * VISUAL_CHECK_CACHE_DIR naming the cache `hostCacheDirOf` gives for the temporary folder.
+ */
+function skillEnvironment(folder: string): NodeJS.ProcessEnv {
+  return onHost ? { ...localEnvironment(), VISUAL_CHECK_CACHE_DIR: hostCacheDirOf(folder) } : localEnvironment()
+}
+
+/**
+ * Writes a config with these Storybooks into `folder` that captures with 2 workers, with `platform: 'host'` on the
+ * host, else in the browser image. Gives its path. `test`'s report goes into `.visual-check/report` in that folder.
+ */
+function skillConfig(folder: string, storybooks: Record<string, SkillStorybook>): string {
+  const path = join(folder, 'visual-check.config.mjs')
+  const config = { storybooks, workers: parallelWorkers, ...(onHost ? { platform: 'host' } : { image }) }
+
+  mkdirSync(folder, { recursive: true })
+  writeFileSync(path, `export default ${JSON.stringify(config, null, 2)}\n`)
+
+  return path
+}
+
+/**
+ * Starts the runner script in this package's folder with the given arguments and environment, and follows it as a CLI
+ * is. It is killed when it runs past the script's time limit.
+ */
+function startSkillScript(script: string, args: string[], env: NodeJS.ProcessEnv): SkillScriptRun {
+  const child = startNode(script, args, env, skillScriptTimeout)
+
+  return { child, followed: followCli(child, skillScriptTimeout) }
+}
+
+/**
+ * Interrupts the runner script as an agent's tool does: `SIGINT`, or on Windows `TerminateProcess`, which no handler
+ * can catch, so the script's keepers stop what it started.
+ */
+function interruptSkillScript(child: CliProcess): void {
+  if (process.platform === 'win32') {
+    child.kill()
+  } else {
+    child.kill('SIGINT')
+  }
+}
+
+/**
+ * Whether anything answers a request for `<url>/index.json` within 2 s, whatever the answer.
+ */
+async function answersAt(url: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${url}/index.json`, { signal: AbortSignal.timeout(2_000) })
+
+    await response.body?.cancel()
+
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Gives the problem when something answers at `storybookDevUrl`, where a case is about to have the script start a test
+ * Storybook, or none.
+ */
+async function portFreeProblems(): Promise<string[]> {
+  return (await answersAt(storybookDevUrl))
+    ? ['port 6006 is in use: stop what serves it, since the case starts a test Storybook there.']
+    : []
+}
+
+/**
+ * Waits for `storybookDevUrl` to stop answering, as it does once the script has stopped the Storybook it started. Gives
+ * the problem when it still answers once the time is up.
+ */
+async function stoppedProblems(): Promise<string[]> {
+  const deadline = Date.now() + skillStopTimeouts.stopped
+
+  while (await answersAt(storybookDevUrl)) {
+    if (Date.now() >= deadline) {
+      return [`${storybookDevUrl} still answers ${skillStopTimeouts.stopped / 1000} s after the script ended`]
+    }
+
+    await sleep(200)
+  }
+
+  return []
+}
+
+/**
+ * Gives the problem when the time limit or a signal ended the script, or its exit code isn't its report's, or isn't 0
+ * or 1, or none.
+ */
+function reportExitCodeProblems(run: CliRun, configFolder: string): string[] {
+  const ending = endingProblems('the script', run)
+
+  if (ending.length > 0) {
+    return ending
+  }
+
+  return reportProblems(configFolder, (report) =>
+    problemUnless(
+      run.exitCode === report.exitCode && (report.exitCode === 0 || report.exitCode === 1),
+      `the script exited ${run.exitCode} and the report says ${report.exitCode}, expected the same 0 or 1${outputOf(run.stderr)}`,
+    ),
+  )
+}
+
+/**
+ * Gives the problem when the script's standard output isn't the one line of a JSON document, else what `check` finds
+ * wrong with the document.
+ */
+function skillStdoutProblems(run: CliRun, check: (document: TestReport) => string[]): string[] {
+  if (run.stdout.split('\n').length !== 2) {
+    return [`stdout isn't one line${outputOf(run.stdout)}`]
+  }
+
+  let document: TestReport
+
+  try {
+    document = JSON.parse(run.stdout) as TestReport
+  } catch {
+    return [`stdout isn't a JSON document${outputOf(run.stdout)}`]
+  }
+
+  return check(document)
+}
+
+/**
+ * With nothing on port 6006, the script starts the Storybook `react` with `pnpm run storybook --ci --exact-port`, waits
+ * until it answers, runs `test` on the card story and stops it. It exits with the report's code, and its standard
+ * output is `report.json`'s one document. The `^` and `$` of the filter go through `pnpm.cmd` on Windows.
+ */
+async function checkSkillStartsAndStops(folder: string, environment: NodeJS.ProcessEnv): Promise<string[]> {
+  const portProblems = await portFreeProblems()
+
+  if (portProblems.length > 0) {
+    return portProblems
+  }
+
+  const config = skillConfig(folder, {
+    react: { dir: packageDir, url: storybookDevUrl, baselines: committedBaselines },
+  })
+  const script = writeSkillInstall(folder, { react: devStart(packageDir) })
+  const args = ['test', '--filter', `^${hostStoryId}$`, '--config', config]
+  const run = await startSkillScript(script, args, environment).followed.finished
+  const reportJsonPath = join(reportFolderOf(folder), 'report.json')
+
+  return [
+    ...reportExitCodeProblems(run, folder),
+    ...skillStdoutProblems(run, () =>
+      problemUnless(
+        isFile(reportJsonPath) && run.stdout.trim() === readFileSync(reportJsonPath, 'utf8').trim(),
+        `stdout isn't report.json's document${outputOf(run.stdout)}`,
+      ),
+    ),
+    // The script's messages, as packages/cli/skill/scripts/run.mjs words them.
+    ...stderrInOrderProblems('the script', run, [
+      'Starting Storybook react in ',
+      'pnpm run storybook --ci --exact-port',
+      `Storybook react answers at ${storybookDevUrl} after `,
+      'Stopped Storybook react.',
+    ]),
+    ...(await stoppedProblems()),
+  ]
+}
+
+/**
+ * With a server already answering at the Storybook `react`'s URL, the script starts nothing, whose start command would
+ * fail, says it reused the server, exits with the report's code and leaves the server running.
+ */
+async function checkSkillReuses(folder: string, environment: NodeJS.ProcessEnv): Promise<string[]> {
+  return await withStorybookServer({}, async (server) => {
+    const config = skillConfig(folder, { react: { dir: packageDir, url: server.url, baselines: committedBaselines } })
+    const script = writeSkillInstall(folder, {
+      react: { command: [process.execPath, '-e', 'process.exit(3)'], cwd: packageDir },
+    })
+    const args = ['test', '--filter', `^${hostStoryId}$`, '--config', config]
+    const run = await startSkillScript(script, args, environment).followed.finished
+
+    return [
+      // The script's messages, as packages/cli/skill/scripts/run.mjs words them.
+      ...problemUnless(
+        !run.stderr.includes('Starting Storybook'),
+        `the script started a Storybook${outputOf(run.stderr)}`,
+      ),
+      ...missingTextProblems(run.stderr, [`Reused Storybook react, which was already running at ${server.url}.`]),
+      ...reportExitCodeProblems(run, folder),
+      ...problemUnless(await answersAt(server.url), 'the server no longer answers after the script ended'),
+    ]
+  })
+}
+
+/**
+ * With the Storybook `react`'s URL on another port than the 6006 its start command serves on, the script exits 2
+ * naming both ports and stops the Storybook, and its standard output is the first `test`'s document, whose error names
+ * `react` at that URL. `--all` makes the run require `react`, whatever the working tree's changes.
+ */
+async function checkSkillPortMismatch(folder: string, environment: NodeJS.ProcessEnv): Promise<string[]> {
+  const portProblems = await portFreeProblems()
+
+  if (portProblems.length > 0) {
+    return portProblems
+  }
+
+  const url = await unusedUrl()
+  const config = skillConfig(folder, { react: { dir: packageDir, url, baselines: committedBaselines } })
+  const script = writeSkillInstall(folder, { react: devStart(packageDir) })
+  const run = await startSkillScript(script, ['test', '--all', '--config', config], environment).followed.finished
+  const expected = [{ name: 'react', url }]
+
+  return [
+    ...exitCodeProblems('the script', run, 2),
+    // The script's messages, as packages/cli/skill/scripts/run.mjs words them.
+    ...stderrInOrderProblems('the script', run, [
+      `Storybook react started on port 6006, but its URL ${url} is on port ${new URL(url).port}.`,
+      'Stopped Storybook react.',
+    ]),
+    ...skillStdoutProblems(run, (document) =>
+      problemUnless(
+        isDeepStrictEqual(document.error?.storybooks, expected),
+        `error.storybooks is ${JSON.stringify(document.error?.storybooks)}, expected ${JSON.stringify(expected)}`,
+      ),
+    ),
+    ...(await stoppedProblems()),
+  ]
+}
+
+/**
+ * Waits until the script has started the Storybook `storybook-9` and the CLI it ran again has printed its header, and,
+ * in the image, a visual-check container that isn't in `before` is running.
+ *
+ * @throws {Error} When the script ends first, or that doesn't happen in time.
+ */
+async function waitForSkillCapture(followed: FollowedCli, before: ReadonlySet<string>): Promise<void> {
+  /**
+   * Whether the CLI has printed its header after the script said `storybook-9` answers, with a new container running
+   * in the image.
+   */
+  const capturing = (): boolean => {
+    const stderr = followed.stderr()
+    const answered = stderr.indexOf('Storybook storybook-9 answers at')
+
+    return (
+      answered !== -1 &&
+      headerCountPattern.test(stderr.slice(answered)) &&
+      (onHost || newContainers('running', before).length > 0)
+    )
+  }
+
+  await waitUntil(() => capturing() || followed.ending() !== undefined, skillStartTimeout)
+
+  const ending = followed.ending()
+
+  if (ending !== undefined) {
+    throw new Error(`the script ${ending} before the interrupt${outputOf(followed.stderr())}`)
+  }
+
+  if (!capturing()) {
+    throw new Error(
+      `the script didn't start storybook-9 and the CLI capturing in ${skillStartTimeout / 1000} s${outputOf(followed.stderr())}`,
+    )
+  }
+}
+
+/**
+ * Gives the problems with how the interrupted script ended: it didn't end in time, or outside Windows it didn't exit
+ * 130 or say it stopped `storybook-9`, or it didn't start `storybook-9`, or it started `storybook-10`. On Windows
+ * `TerminateProcess` ends the script before it can say anything.
+ */
+async function interruptedProblems(followed: FollowedCli): Promise<string[]> {
+  if (!(await waitUntil(() => followed.ending() !== undefined, skillStopTimeouts.ended))) {
+    return [
+      `the script still ran ${skillStopTimeouts.ended / 1000} s after the interrupt${outputOf(followed.stderr())}`,
+    ]
+  }
+
+  const run = await followed.finished
+  // The script's messages, as packages/cli/skill/scripts/run.mjs words them.
+  const posixProblems =
+    process.platform === 'win32'
+      ? []
+      : [
+          ...exitCodeProblems('the script', run, 130),
+          ...missingTextProblems(run.stderr, ['Stopped Storybook storybook-9.']),
+        ]
+
+  return [
+    ...posixProblems,
+    ...missingTextProblems(run.stderr, ['Starting Storybook storybook-9 ']),
+    ...problemUnless(
+      !run.stderr.includes('Starting Storybook storybook-10 '),
+      `the script started storybook-10${outputOf(run.stderr)}`,
+    ),
+  ]
+}
+
+/**
+ * Gives the problem when `test --base HEAD` with this config, run with the working tree as it is, requires a Storybook,
+ * which it does when the tree's own changes reach a story: the interrupt case then couldn't tell which Storybooks its
+ * change makes the script start. Gives none when it exits 0, requiring none.
+ */
+async function cleanTreeProblems(config: string, environment: NodeJS.ProcessEnv): Promise<string[]> {
+  const run = await runCli(['test', '--base', 'HEAD', '--config', config], environment)
+
+  return [
+    ...endingProblems('test --base HEAD', run),
+    ...problemUnless(
+      run.exitCode === 0,
+      `with the working tree as it is, test --base HEAD exits ${run.exitCode}, so the tree's own changes reach a story: commit or stash them, since the case needs its own change to be the only one${outputOf(run.stderr)}`,
+    ),
+  ]
+}
+
+/**
+ * Lists every running process as `ps` prints it, a `<pid> <parent pid>` line each, outside Windows.
+ */
+function processLines(): string[] {
+  const listed = spawnSync('ps', ['-A', '-o', 'pid=,ppid='], { encoding: 'utf8' })
+
+  if (listed.error !== undefined || listed.status !== 0) {
+    throw new Error(`Couldn't list the running processes with ps: ${listed.error ?? `it exited with ${listed.status}`}`)
+  }
+
+  return listed.stdout.trim().split('\n')
+}
+
+/**
+ * Lists each running process's children, by its parent's process ID, from `ps`, outside Windows.
+ */
+function childrenByParent(): Map<number, number[]> {
+  const children = new Map<number, number[]>()
+
+  for (const [child = 0, parent = 0] of processLines().map((line) => line.trim().split(/\s+/).map(Number))) {
+    children.set(parent, [...(children.get(parent) ?? []), child])
+  }
+
+  return children
+}
+
+/**
+ * Lists the processes that descend from the process `pid`, outside Windows.
+ */
+function descendantsOf(pid: number): number[] {
+  const children = childrenByParent()
+  // On macOS the process 0 is its own parent, so the walk never visits it, nor any process twice.
+  const seen = new Set([0, pid])
+  const tree = [pid].filter((id) => id !== 0)
+
+  for (let index = 0; index < tree.length; index += 1) {
+    tree.push(...takeUnseen(children.get(tree[index] ?? 0) ?? [], seen))
+  }
+
+  return tree.slice(1)
+}
+
+/**
+ * Takes from `pids` the process IDs not in `seen` yet, and adds them to it.
+ */
+function takeUnseen(pids: number[], seen: Set<number>): number[] {
+  const unseen = pids.filter((pid) => !seen.has(pid))
+
+  for (const pid of unseen) {
+    seen.add(pid)
+  }
+
+  return unseen
+}
+
+/**
+ * Whether the process `pid` still runs: signal 0 reaches it, or reaches it but may not signal it.
+ */
+function isRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+/**
+ * Waits for each of these processes to end. Gives the problem with the ones that still run once the time is up.
+ */
+async function processesGoneProblems(pids: number[]): Promise<string[]> {
+  const gone = await waitUntil(() => !pids.some(isRunning), skillStopTimeouts.stopped)
+
+  return gone
+    ? []
+    : [
+        `processes the script started still run ${skillStopTimeouts.stopped / 1000} s after it ended: ${pids.filter(isRunning).join(', ')}`,
+      ]
+}
+
+/**
+ * With Storybook 9.1's `main.ts` changed, `test --base HEAD` through the script requires `storybook-9` alone, so the
+ * script starts it alone: starting `storybook-10` too would serve port 6006 against its other URL and fail. Once the
+ * CLI captures, an interrupt ends the script, which stops Storybook and the CLI: outside Windows every process the
+ * script started is gone, and in the image no container is left behind. Containers that were there before the run
+ * don't count. The working tree's own changes must reach no story, which the case checks first.
+ */
+async function checkSkillInterrupt(folder: string, environment: NodeJS.ProcessEnv): Promise<string[]> {
+  const portProblems = await portFreeProblems()
+
+  if (portProblems.length > 0) {
+    return portProblems
+  }
+
+  const storybook9Dir = join(dirname(packageDir), 'storybook-9-react')
+  const config = skillConfig(folder, {
+    'storybook-9': {
+      dir: storybook9Dir,
+      url: storybookDevUrl,
+      baselines: join(storybook9Dir, '.visual-check', 'baselines'),
+    },
+    'storybook-10': { dir: packageDir, url: await unusedUrl(), baselines: join(folder, 'baselines-10') },
+  })
+  const treeProblems = await cleanTreeProblems(config, environment)
+
+  if (treeProblems.length > 0) {
+    return treeProblems
+  }
+
+  const script = writeSkillInstall(folder, {
+    'storybook-9': devStart(storybook9Dir),
+    'storybook-10': devStart(packageDir),
+  })
+  const before = new Set(onHost ? [] : visualCheckContainers('all'))
+
+  return await withChangedFile(join(storybook9Dir, '.storybook', 'main.ts'), async () => {
+    const { child, followed } = startSkillScript(script, ['test', '--base', 'HEAD', '--config', config], environment)
+
+    try {
+      await waitForSkillCapture(followed, before)
+    } catch (error) {
+      followed.kill()
+      await stoppedProblems()
+
+      throw error
+    }
+
+    try {
+      return await afterInterruptProblems({ child, followed }, before)
+    } finally {
+      followed.kill()
+    }
+  })
+}
+
+/**
+ * Notes the processes the capturing script started, outside Windows, interrupts it, and gives the problems with what
+ * is left: how it ended, Storybook still answering, any of those processes still running, and in the image a
+ * visual-check container that isn't in `before`.
+ */
+async function afterInterruptProblems(
+  { child, followed }: SkillScriptRun,
+  before: ReadonlySet<string>,
+): Promise<string[]> {
+  const started = process.platform === 'win32' ? [] : descendantsOf(child.pid ?? 0)
+
+  interruptSkillScript(child)
+
+  return [
+    ...(await interruptedProblems(followed)),
+    ...(await stoppedProblems()),
+    ...(await processesGoneProblems(started)),
+    ...(onHost ? [] : await waitForRemoval(before)),
+  ]
+}
+
+/**
+ * The runner script cases, in order, each in its own folder inside the temporary one, so their configs and reports
+ * stay apart: it starts and stops a Storybook, reuses one, exits 2 on a port mismatch, starts only the Storybook a
+ * change reaches and stops everything on an interrupt, then in the image the killed CLI case.
+ */
+function skillScriptCases(folder: string): Case[] {
+  const environment = skillEnvironment(folder)
+
+  return [
+    {
+      name: "starts and stops: with nothing on port 6006, the script starts react with pnpm run storybook --ci --exact-port, waits until it answers, exits with the report's code, stdout is report.json's one document, and it stops react after",
+      run: () => checkSkillStartsAndStops(join(folder, 'starts'), environment),
+    },
+    {
+      name: "reuses: with a server already answering at react's URL, the script starts nothing, says it reused it, exits with the report's code, and the server still answers after",
+      run: () => checkSkillReuses(join(folder, 'reuses'), environment),
+    },
+    {
+      name: "port mismatch: with react's URL on another port than 6006, the script exits 2 naming both ports, stops react, and stdout is test's document naming react in its error",
+      run: () => checkSkillPortMismatch(join(folder, 'mismatch'), environment),
+    },
+    {
+      name: "interrupt: with Storybook 9.1's main.ts changed, test --base HEAD through the script starts storybook-9 alone, and an interrupt while the CLI captures ends the script, stops storybook-9 and the CLI, and leaves no process or container behind",
+      run: () => checkSkillInterrupt(join(folder, 'interrupt'), environment),
+    },
+    ...(onHost ? [] : [{ name: 'killing the CLI: no container is left behind', run: checkKill }]),
+  ]
+}
+
+/**
+ * Runs the runner script cases and resolves with whether all of them passed. They share a temporary folder, which holds
+ * each case's folder, and on the host their cache when the caller doesn't name one.
+ */
+async function runSkillScriptCases(): Promise<boolean> {
+  return await withTemporaryFolder((folder) => runCases(skillScriptCases(folder)))
+}
+
+/**
  * Reads each snapshot's expected outcome from `expected-outcomes.json`.
  */
 function readExpectedOutcomes(): Outcomes {
@@ -4261,6 +4924,8 @@ const setupProblems = findSetupProblems()
 if (setupProblems.length > 0) {
   console.error(setupProblems.join('\n'))
   process.exitCode = 1
+} else if (skillScriptOnly) {
+  process.exitCode = (await runSkillScriptCases()) ? 0 : 1
 } else if (affectedOnly) {
   process.exitCode = (await runAffectedCases(withoutLoadFails(readExpectedOutcomes()))) ? 0 : 1
 } else if (onHost) {

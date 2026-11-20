@@ -136,7 +136,10 @@
         "test-storybooks/storybook-11-react/.storybook/main.ts",
         "test-storybooks/storybook-11-react/visual-check.config.ts",
         "test-storybooks/setup/*.ts",
-        "packages/*/test/**/*.test.ts"
+        "packages/cli/skill/scripts/run.mjs",
+        "packages/*/test/**/*.test.ts",
+        "packages/*/test/**/*.fixture.ts",
+        "packages/cli/test/skill-run-fakes/*.mjs"
       ]
     }
   }
