@@ -386,7 +386,10 @@ describe('runCli test report after the consistency check', () => {
     const expected = await runCli(['test', '--all'], {}, plain.project, fakeBrowser().options)
     const result = await runCli(['test', '--all', '--reporter', 'log'], {}, flagged.project, fakeBrowser().options)
 
-    expect(result).toEqual(expected)
+    expect({ ...result, stdout: withoutTimes(result.stdout) }).toEqual({
+      ...expected,
+      stdout: withoutTimes(expected.stdout),
+    })
   })
 })
 
