@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { type SkillSetup, setupFileTextOf } from './setup-file.js'
+import { type SkillSetup, setupFileProblemOf, setupFileTextOf } from './setup-file.js'
 
 /**
  * The skill folder `setup.json` is written in, in a project at `/p`.
@@ -42,5 +42,27 @@ describe('setupFileTextOf', () => {
     }
 
     expect(setupFileTextOf(setup, setupDir)).toBe(`${JSON.stringify(expected, null, 2)}\n`)
+  })
+})
+
+describe('setupFileProblemOf', () => {
+  it("says a setup.json that is missing doesn't exist", () => {
+    expect(setupFileProblemOf(undefined)).toBe("doesn't exist")
+  })
+
+  it('says text that is not JSON is not valid JSON', () => {
+    expect(setupFileProblemOf('nope')).toBe("isn't valid JSON")
+  })
+
+  it('names every key a document that is not an object lacks', () => {
+    expect(setupFileProblemOf('[]')).toBe('has no cli or storybooks')
+  })
+
+  it('names the key the runner script reads that is missing', () => {
+    expect(setupFileProblemOf('{"cli":{}}')).toBe('has no storybooks')
+  })
+
+  it('finds nothing when every key is there, whatever the values', () => {
+    expect(setupFileProblemOf('{"cli":{},"storybooks":{}}')).toBeUndefined()
   })
 })

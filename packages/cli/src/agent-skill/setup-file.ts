@@ -47,3 +47,32 @@ export function setupFileTextOf(setup: SkillSetup, setupDir: string): string {
 
   return `${JSON.stringify({ cli: entryOf(setup.cli), storybooks }, null, 2)}\n`
 }
+
+/**
+ * The top-level keys of `setup.json` this version's runner script reads. A version that needs a new key adds it here,
+ * so the run that refreshes the skill after an upgrade warns to run `init` again.
+ */
+const setupKeys = ['cli', 'storybooks'] as const
+
+/**
+ * Says what keeps an installed `setup.json` from serving this version's runner script: it doesn't exist, isn't JSON,
+ * or lacks a key the script reads. `undefined` when nothing does. It doesn't check the values: the script does.
+ */
+export function setupFileProblemOf(text: string | undefined): string | undefined {
+  if (text === undefined) {
+    return "doesn't exist"
+  }
+
+  let parsed: unknown
+
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return "isn't valid JSON"
+  }
+
+  const record = typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : {}
+  const missing = setupKeys.filter((key) => !Object.hasOwn(record, key))
+
+  return missing.length === 0 ? undefined : `has no ${missing.join(' or ')}`
+}

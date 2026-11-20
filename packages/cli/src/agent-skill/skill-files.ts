@@ -18,16 +18,17 @@ export const claudeSkillFolder = join('.claude', 'skills', 'visual-check')
 export const claudeLinkTarget = '../../.agents/skills/visual-check'
 
 /**
- * Writes the skill's `SKILL.md`, for `cliVersion`, and its runner script into `folder`, creating what's missing.
- * Gives the paths written, in that order.
+ * Writes the skill's runner script and then its `SKILL.md`, for `cliVersion`, into `folder`, creating what's missing.
+ * `SKILL.md` goes last, so its version marks a complete write: a write that fails before it leaves the old version,
+ * and the next run tries again. Gives the paths written, `SKILL.md` first.
  */
 export function writeSkillFiles(folder: string, cliVersion: string): string[] {
   const markdown = join(folder, 'SKILL.md')
   const script = join(folder, 'scripts', 'run.mjs')
 
   mkdirSync(dirname(script), { recursive: true })
-  writeFileSync(markdown, skillMarkdownOf(readFileSync(skillSourcePaths.markdown, 'utf8'), cliVersion))
   copyFileSync(skillSourcePaths.script, script)
+  writeFileSync(markdown, skillMarkdownOf(readFileSync(skillSourcePaths.markdown, 'utf8'), cliVersion))
 
   return [markdown, script]
 }

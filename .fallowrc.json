@@ -65,7 +65,7 @@
       { "from": "cli/container", "allow": ["cli/capture/driver"] },
       { "from": "cli/browser-process", "allow": ["cli/capture/driver"] },
       { "from": "cli/affected-stories", "allow": ["cli/baselines"] },
-      { "from": "cli/agent-skill", "allow": [] },
+      { "from": "cli/agent-skill", "allow": ["cli/system-error"] },
       { "from": "cli/baselines", "allow": ["cli/system-error"] },
       { "from": "cli/browser", "allow": ["cli/config"] },
       { "from": "cli/browser-download", "allow": [] },
@@ -73,6 +73,7 @@
         "from": "cli/commands",
         "allow": [
           "cli/affected-stories",
+          "cli/agent-skill",
           "cli/baselines",
           "cli/browser",
           "cli/browser-download",
