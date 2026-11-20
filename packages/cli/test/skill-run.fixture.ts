@@ -85,6 +85,20 @@ interface ScriptResult {
 }
 
 /**
+ * A process a fake recorded, with the part it plays in the script's trees.
+ */
+export interface RecordedProcess {
+  /**
+   * The process's pid.
+   */
+  pid: number
+  /**
+   * The part the process plays, such as `keeper of CLI call 2`, which a test names when the process outlives a stop.
+   */
+  role: string
+}
+
+/**
  * A server that answers like a Storybook, one the script didn't start.
  */
 interface IndexServer {
@@ -388,34 +402,52 @@ function isAlive(pid: number): boolean {
 }
 
 /**
- * Waits until every process of `pids` is gone, polling every 100 ms for up to `timeoutMs`. Returns the ones still
- * alive then.
+ * Waits until every process of `processes` is gone, polling every 100 ms for up to `timeoutMs`. Returns the ones still
+ * alive then, each as `<role> (pid <pid>)`.
  *
  * @public
  */
-export async function waitUntilGone(pids: number[], timeoutMs: number): Promise<number[]> {
+export async function waitUntilGone(processes: RecordedProcess[], timeoutMs: number): Promise<string[]> {
   const deadline = Date.now() + timeoutMs
+  const alive = () => processes.filter((each) => isAlive(each.pid))
 
-  while (Date.now() < deadline) {
-    if (!pids.some(isAlive)) {
-      return []
-    }
-
+  while (Date.now() < deadline && alive().length > 0) {
     await sleep(100)
   }
 
-  return pids.filter(isAlive)
+  return alive().map((each) => `${each.role} (pid ${each.pid})`)
 }
 
 /**
- * The pids recorded in the JSON-lines file at `path`, as `pid`, `childPid` or `keeperPid`.
+ * The processes recorded in the JSON-lines file at `path`, with their roles: the fake CLI's calls (`pid`, `keeperPid`,
+ * and a grandchild's `childPid`) or the fake Storybooks' starts (`pid`, and a grandchild's `childPid`).
  *
  * @public
  */
-export function recordedPidsIn(path: string): number[] {
-  return readJsonLines(path)
-    .flatMap((record) => [record.pid, record.childPid, record.keeperPid])
-    .filter((value) => typeof value === 'number')
+export function recordedProcessesIn(path: string): RecordedProcess[] {
+  const processes: RecordedProcess[] = []
+  let call = 0
+
+  for (const record of readJsonLines(path)) {
+    if (record.name === undefined && 'argv' in record) {
+      call += 1
+    }
+
+    const owner = typeof record.name === 'string' ? `Storybook ${record.name}` : `CLI call ${call}`
+    const roles: [unknown, string][] = [
+      [record.pid, owner],
+      [record.keeperPid, `keeper of ${owner}`],
+      [record.childPid, `grandchild of ${owner}`],
+    ]
+
+    for (const [pid, role] of roles) {
+      if (typeof pid === 'number') {
+        processes.push({ pid, role })
+      }
+    }
+  }
+
+  return processes
 }
 
 /**
@@ -424,7 +456,9 @@ export function recordedPidsIn(path: string): number[] {
 function recordedPids(): number[] {
   const stateDirs = folders.map((folder) => join(folder, 'state')).filter((stateDir) => existsSync(stateDir))
 
-  return stateDirs.flatMap((stateDir) => readdirSync(stateDir).flatMap((file) => recordedPidsIn(join(stateDir, file))))
+  return stateDirs
+    .flatMap((stateDir) => readdirSync(stateDir).flatMap((file) => recordedProcessesIn(join(stateDir, file))))
+    .map((each) => each.pid)
 }
 
 /**

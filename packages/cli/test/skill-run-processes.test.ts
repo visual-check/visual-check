@@ -8,8 +8,9 @@ import {
   fakeStorybookCommand,
   installSkill,
   npmStorybookPackage,
+  type RecordedProcess,
   readJsonLines,
-  recordedPidsIn,
+  recordedProcessesIn,
   runScript,
   serveIndex,
   unusedPort,
@@ -51,12 +52,12 @@ function cliCalls(stateDir: string): Record<string, unknown>[] {
 }
 
 /**
- * The pids the fake CLI and the fake Storybooks recorded in the install's state folder.
+ * The processes the fake CLI and the fake Storybooks recorded in the install's state folder.
  */
-function recordedPids(stateDir: string): number[] {
+function recordedProcesses(stateDir: string): RecordedProcess[] {
   return [
-    ...recordedPidsIn(join(stateDir, 'cli-calls.jsonl')),
-    ...recordedPidsIn(join(stateDir, 'storybook-starts.jsonl')),
+    ...recordedProcessesIn(join(stateDir, 'cli-calls.jsonl')),
+    ...recordedProcessesIn(join(stateDir, 'storybook-starts.jsonl')),
   ]
 }
 
@@ -199,12 +200,12 @@ describe('the runner script', () => {
     script.child.kill('SIGINT')
 
     const result = await script.exited
-    const pids = recordedPidsIn(join(install.stateDir, 'cli-calls.jsonl'))
+    const processes = recordedProcessesIn(join(install.stateDir, 'cli-calls.jsonl'))
 
     expect(result.code).toBe(130)
     // The fake CLI, its keeper and its grandchild.
-    expect(pids).toHaveLength(3)
-    expect(await waitUntilGone(pids, 10_000)).toEqual([])
+    expect(processes).toHaveLength(3)
+    expect(await waitUntilGone(processes, 10_000), result.stderr).toEqual([])
   })
 
   it("stops the CLI's process tree when the script itself is killed", async () => {
@@ -219,11 +220,11 @@ describe('the runner script', () => {
     // TerminateProcess on Windows, which no handler of the script can catch.
     script.child.kill(windows ? undefined : 'SIGKILL')
 
-    const pids = recordedPidsIn(join(install.stateDir, 'cli-calls.jsonl'))
+    const processes = recordedProcessesIn(join(install.stateDir, 'cli-calls.jsonl'))
 
     // The fake CLI, its keeper and its grandchild.
-    expect(pids).toHaveLength(3)
-    expect(await waitUntilGone(pids, 10_000)).toEqual([])
+    expect(processes).toHaveLength(3)
+    expect(await waitUntilGone(processes, 10_000), script.stderr()).toEqual([])
   })
 
   it.runIf(windows)('exits 2 for an argument holding a double quote, naming it, and never runs the CLI', async () => {
@@ -267,7 +268,7 @@ describe('the runner script with fake Storybooks', () => {
     expect(result.stdout.toString()).toBe(documentOf(2, 1, storybooks))
     expect(result.code).toBe(1)
     expect(await answers(urlOf(port))).toBe(false)
-    expect(await waitUntilGone(recordedPids(install.stateDir), 10_000)).toEqual([])
+    expect(await waitUntilGone(recordedProcesses(install.stateDir), 10_000)).toEqual([])
   })
 
   it('starts only the Storybooks the run needs', async () => {
@@ -307,12 +308,12 @@ describe('the runner script with fake Storybooks', () => {
     ).exited
     const [start] = storybookStarts(install.stateDir)
 
-    expect(result.code).toBe(0)
+    expect(result.code, result.stderr).toBe(0)
     expect(result.stderr).toContain('Starting Storybook docs in ')
     expect(result.stderr).toContain(': npm run storybook -- --ci --exact-port')
     expect(start?.argv).toEqual(['-p', String(port), '--name', 'docs', '--ci', '--exact-port'])
     expect(await answers(urlOf(port))).toBe(false)
-    expect(await waitUntilGone(recordedPids(install.stateDir), 10_000)).toEqual([])
+    expect(await waitUntilGone(recordedProcesses(install.stateDir), 10_000), result.stderr).toEqual([])
   })
 
   it('reuses a Storybook that already runs, and leaves it running', async () => {
@@ -362,7 +363,15 @@ describe('the runner script with fake Storybooks', () => {
 
     const [start] = storybookStarts(install.stateDir)
 
-    expect(await waitUntilGone([start?.pid, start?.parentPid].map(Number), 15_000)).toEqual([])
+    expect(
+      await waitUntilGone(
+        [
+          { pid: Number(start?.pid), role: 'Storybook web' },
+          { pid: Number(start?.parentPid), role: 'parent of Storybook web' },
+        ],
+        15_000,
+      ),
+    ).toEqual([])
     writeFileSync(release, '')
 
     const result = await script.exited
@@ -400,7 +409,7 @@ describe('the runner script with fake Storybooks', () => {
     ])
     expect(result.stdout.toString()).toBe(documentOf(1, 2, storybooks, true))
     expect(cliCalls(install.stateDir)).toHaveLength(1)
-    expect(await waitUntilGone(recordedPids(install.stateDir), 10_000)).toEqual([])
+    expect(await waitUntilGone(recordedProcesses(install.stateDir), 10_000)).toEqual([])
   })
 
   it('exits 2 with the end of its output when a Storybook exits before it answers', async () => {
@@ -473,7 +482,7 @@ describe('the runner script with fake Storybooks', () => {
     expect(result.stderr).not.toContain('Storybook web answers at')
     expect(result.stderr).not.toContain('Stopped Storybook docs.')
     expect(cliCalls(install.stateDir)).toHaveLength(1)
-    expect(await waitUntilGone(recordedPids(install.stateDir), 10_000)).toEqual([])
+    expect(await waitUntilGone(recordedProcesses(install.stateDir), 10_000)).toEqual([])
   })
 
   it.skipIf(windows)('stops a Storybook it waits for on SIGINT, and exits 130', async () => {
@@ -497,7 +506,7 @@ describe('the runner script with fake Storybooks', () => {
     expect(result.code).toBe(130)
     expect(result.stderr).toContain('Stopped Storybook docs.')
     expect(cliCalls(install.stateDir)).toHaveLength(1)
-    expect(await waitUntilGone(recordedPids(install.stateDir), 10_000)).toEqual([])
+    expect(await waitUntilGone(recordedProcesses(install.stateDir), 10_000)).toEqual([])
   })
 
   it('exits 2 when setup.json has no start command for a Storybook the run needs', async () => {
@@ -542,7 +551,7 @@ describe('the runner script with fake Storybooks', () => {
       'Stopped Storybook docs.',
     ])
     expect(result.stdout.toString()).toBe(documentOf(2, 2, storybooks, true))
-    expect(await waitUntilGone(recordedPids(install.stateDir), 10_000)).toEqual([])
+    expect(await waitUntilGone(recordedProcesses(install.stateDir), 10_000)).toEqual([])
   })
 
   it('exits 2 naming the fault when the script itself fails, and stops what it started', async () => {
@@ -562,7 +571,7 @@ describe('the runner script with fake Storybooks', () => {
     expect(result.code).toBe(2)
     expect(result.stderr).toContain('The runner script failed: TypeError: Invalid URL')
     expect(result.stdout).toHaveLength(0)
-    expect(await waitUntilGone(recordedPids(install.stateDir), 10_000)).toEqual([])
+    expect(await waitUntilGone(recordedProcesses(install.stateDir), 10_000)).toEqual([])
   })
 
   it('exits 2 when a Storybook stops answering during the run', async () => {
@@ -625,13 +634,13 @@ describe('the runner script with fake Storybooks', () => {
     script.child.kill('SIGINT')
 
     const result = await script.exited
-    const pids = recordedPids(install.stateDir)
+    const processes = recordedProcesses(install.stateDir)
 
     expect(result.code).toBe(130)
     expect(result.stderr).toContain('Stopped Storybook docs.')
     // Each call's fake CLI and keeper, the second's grandchild, and the fake Storybook and its grandchild.
-    expect(pids).toHaveLength(7)
-    expect(await waitUntilGone(pids, 10_000)).toEqual([])
+    expect(processes).toHaveLength(7)
+    expect(await waitUntilGone(processes, 10_000), result.stderr).toEqual([])
     expect(await answers(url)).toBe(false)
   })
 
@@ -641,10 +650,10 @@ describe('the runner script with fake Storybooks', () => {
     // TerminateProcess on Windows, which no handler of the script can catch.
     script.child.kill(windows ? undefined : 'SIGKILL')
 
-    const pids = recordedPids(install.stateDir)
+    const processes = recordedProcesses(install.stateDir)
 
-    expect(pids).toHaveLength(7)
-    expect(await waitUntilGone(pids, 10_000)).toEqual([])
+    expect(processes).toHaveLength(7)
+    expect(await waitUntilGone(processes, 10_000), script.stderr()).toEqual([])
     expect(await answers(url)).toBe(false)
   })
 })

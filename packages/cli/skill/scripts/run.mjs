@@ -844,8 +844,11 @@ function groupIsAlive(pgid) {
  */
 function startTree(command, output) {
   // The keeper runs in the script's working directory, so a missing `command.cwd` fails in the keeper, which names it.
+  // It is detached, so it outlives the script to stop its tree: outside Windows it leaves the script's process group,
+  // which a terminal's Ctrl+C or a group kill reaches. On Windows Node puts a child that isn't detached into a job that
+  // kills it when the script dies, and the keeper's own job then kills only `cmd.exe`, not the tree below it.
   const keeper = spawn(process.execPath, [scriptPath, keepTreeFlag, JSON.stringify(command)], {
-    detached: !windows,
+    detached: true,
     windowsHide: true,
     stdio: output === 'cli' ? ['pipe', 'pipe', 'inherit'] : ['pipe', 'pipe', 'pipe'],
   })
