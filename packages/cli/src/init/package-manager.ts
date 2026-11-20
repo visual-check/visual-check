@@ -431,6 +431,27 @@ function binCommandOf(
 }
 
 /**
+ * The command that runs a binary the project installed, such as `visual-check`, with `args`, in a form that never
+ * downloads: `npx` and `bunx` fetch a package they can't find, so they get `--no-install` and fail instead. pnpm's
+ * `exec` and Yarn 2's `exec` only run what's installed.
+ */
+export function installedBinCommandOf(
+  packageManager: PackageManager,
+  bin: string,
+  args: readonly string[],
+  yarnBerry: boolean,
+): CommandLine {
+  const command = binCommandOf(packageManager, bin, args, yarnBerry)
+  const downloads = command.command === 'npx' || command.command === 'bunx'
+
+  if (!downloads || command.args[0] === '--no-install') {
+    return command
+  }
+
+  return { command: command.command, args: ['--no-install', ...command.args] }
+}
+
+/**
  * The command that runs the project's `storybook` binary with `args`, such as `['dev', '-p', '6006']`. `yarnBerry`
  * says whether Yarn is Yarn 2 or later.
  */

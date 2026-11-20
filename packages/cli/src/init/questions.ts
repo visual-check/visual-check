@@ -441,7 +441,7 @@ function askUrl(storybook: DetectedStorybook, name: string, prompter: Prompter):
 /**
  * Returns the port of a URL: its own, or the one its protocol uses.
  */
-function urlPortOf(url: URL): number {
+export function urlPortOf(url: URL): number {
   if (url.port !== '') {
     return Number(url.port)
   }

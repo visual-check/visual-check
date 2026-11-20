@@ -97,7 +97,7 @@
       { "from": "cli/docs-site", "allow": [] },
       {
         "from": "cli/init",
-        "allow": ["cli/baselines", "cli/config", "cli/container", "cli/docs-site", "cli/storybook"]
+        "allow": ["cli/agent-skill", "cli/baselines", "cli/config", "cli/container", "cli/docs-site", "cli/storybook"]
       },
       { "from": "cli/report", "allow": ["cli/system-error"] },
       { "from": "cli/reporter", "allow": ["cli/report"] },
