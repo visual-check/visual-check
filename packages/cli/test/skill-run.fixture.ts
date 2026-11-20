@@ -229,14 +229,17 @@ export function fakeStorybookCommand(name: string, port: number, flags: string[]
  */
 export function npmStorybookPackage(name: string, port: number): SetupCommand {
   const cwd = temporaryFolder()
-  const script = [process.execPath, fakeStorybookPath].map((word) => JSON.stringify(word)).join(' ')
 
+  // The script holds no quotes, as a real `storybook dev -p 6006` doesn't: on Windows npm runs it verbatim through
+  // `cmd.exe /d /s /c <script>`, and cmd.exe strips a script's leading quote and the line's last one, which breaks a
+  // script that starts with a quoted path. So the fake goes into the package, and `node` comes from PATH, as npm's does.
+  copyFileSync(fakeStorybookPath, join(cwd, 'fake-storybook.mjs'))
   writeFileSync(
     join(cwd, 'package.json'),
     JSON.stringify({
       name: 'fake-storybook',
       private: true,
-      scripts: { storybook: `${script} -p ${port} --name ${name}` },
+      scripts: { storybook: `node fake-storybook.mjs -p ${port} --name ${name}` },
     }),
   )
 
