@@ -314,6 +314,10 @@ jobs:
         run: packages/chromium/image/build.sh amd64 --output type=docker,name=visual-check-chromium:ci
       - name: Build the CLI and the Storybook
         run: pnpm turbo run build build-storybook --filter '@visual-check/test-storybook-10-react...'
+      # On Windows pnpm skips the `visual-check` command when the CLI's `dist/bin.js` doesn't exist yet, as at the first
+      # install, and the skill's `pnpm exec visual-check` needs it.
+      - name: Link the CLI's command
+        run: pnpm install --frozen-lockfile --offline
       # Not through turbo, whose strict environment mode may drop Windows variables that docker and pnpm read, such as
       # USERPROFILE.
       - name: Skill script end to end
