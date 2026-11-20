@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { skillSourcePaths, skillVersionOf } from '../agent-skill/skill-markdown.js'
 import { ContainerError, DockerMissingError } from '../container/container-error.js'
 import { closingMessageTextOf } from './closing-message.js'
 import {
@@ -34,6 +35,23 @@ export default defineConfig({
   },
 })
 `
+
+/**
+ * Where `init` installs the agent skill, relative to the project root.
+ */
+const skillDir = '.agents/skills/visual-check'
+
+/**
+ * The CLI command the agent skill's `setup.json` holds for a pnpm project, run from the workspace root.
+ */
+const skillCli = { command: ['pnpm', 'exec', 'visual-check'], cwd: '../../..' }
+
+/**
+ * Reads the agent skill's `setup.json` in the project at `root`.
+ */
+function skillSetupIn(root: string): unknown {
+  return JSON.parse(readText(root, `${skillDir}/setup.json`))
+}
 
 /**
  * The sentence a missing or stopped Docker gets after its message.
@@ -252,7 +270,7 @@ describe('runInit', () => {
 
     it('warns of storybook 12.0.0 before the questions and asks nothing about the addon', async () => {
       const root = pnpmProject({ storybookVersion: '12.0.0' })
-      const prompter = scriptedPrompter(['', '', '', ''])
+      const prompter = scriptedPrompter(['', '', '', '', ''])
       const { tools, record } = toolsOf({ yes: false, interactive: true, prompter })
       const result = await runInit(root, tools)
 
@@ -315,7 +333,7 @@ describe('runInit', () => {
 
     it("warns when the URL's port isn't the start command's", async () => {
       const root = pnpmProject()
-      const prompter = scriptedPrompter(['', 'http://127.0.0.1:7000', '', '', ''])
+      const prompter = scriptedPrompter(['', 'http://127.0.0.1:7000', '', '', '', ''])
       const result = await runInit(root, toolsOf({ yes: false, interactive: true, prompter }).tools)
 
       expect(result.exitCode).toBe(0)
@@ -461,6 +479,60 @@ describe('runInit', () => {
     expect(record.fallowRoots).toEqual([root])
   })
 
+  describe('the agent skill', () => {
+    it('installs the agent skill with --yes', async () => {
+      const root = pnpmProject()
+      const result = await runInit(root, toolsOf().tools)
+
+      expect(skillSetupIn(root)).toEqual({
+        cli: skillCli,
+        storybooks: { 'web-app': { command: ['pnpm', 'run', 'storybook'], cwd: '../../..' } },
+      })
+      expect(skillVersionOf(readText(root, `${skillDir}/SKILL.md`))).toBe(cliVersion)
+      expect(readText(root, `${skillDir}/scripts/run.mjs`)).toBe(readFileSync(skillSourcePaths.script, 'utf8'))
+      expect(result.stdout).toBe(pnpmClosingMessage)
+    })
+
+    it('installs no agent skill when the answer is no', async () => {
+      const root = pnpmProject()
+      const prompter = scriptedPrompter(['', '', '', '', false, ''])
+      const result = await runInit(root, toolsOf({ yes: false, interactive: true, prompter }).tools)
+
+      expect(result.exitCode).toBe(0)
+      expect(prompter.unused()).toEqual([])
+      expect(existsSync(join(root, '.agents'))).toBe(false)
+    })
+
+    it('rewrites the skill files and refreshes setup.json from the config when run again', async () => {
+      const root = pnpmProject()
+
+      await runInit(root, toolsOf({}, { installs: true }).tools)
+
+      const paths = ['SKILL.md', 'scripts/run.mjs', 'setup.json'].map((path) => `${skillDir}/${path}`)
+      const written = paths.map((path) => readText(root, path))
+
+      writeFileSync(join(root, skillDir, 'SKILL.md'), 'old\n')
+      writeFileSync(join(root, skillDir, 'scripts/run.mjs'), '// old\n')
+      writeFileSync(join(root, skillDir, 'setup.json'), '{}\n')
+      await runInit(root, toolsOf({}, { installs: true }).tools)
+
+      expect(paths.map((path) => readText(root, path))).toEqual(written)
+    })
+
+    it("names the config's Storybooks in setup.json when a config was already there", async () => {
+      const root = pnpmProject()
+
+      await runInit(root, toolsOf({}, { installs: true }).tools)
+      writeFileSync(join(root, 'visual-check.config.ts'), webAppConfig.replace("'web-app':", 'docs:'))
+      await runInit(root, toolsOf({}, { installs: true }).tools)
+
+      expect(skillSetupIn(root)).toEqual({
+        cli: skillCli,
+        storybooks: { docs: { command: ['pnpm', 'run', 'storybook'], cwd: '../../..' } },
+      })
+    })
+  })
+
   it('sets up a project that is no git repo, finding the Storybook through its start script', async () => {
     const root = makeProject({
       manifest: { name: 'web-app', packageManager: 'pnpm@9.12.3', scripts: { storybook: 'storybook dev -p 6006' } },
@@ -509,7 +581,7 @@ describe('runInit', () => {
       manifest: { name: 'web-app', packageManager: 'pnpm@9.12.3', scripts: { storybook: 'storybook dev -p 6006' } },
       files: { '.storybook/main.ts': '' },
     })
-    const prompter = scriptedPrompter(['', '', '', ''])
+    const prompter = scriptedPrompter(['', '', '', '', ''])
 
     await runInit(asked, toolsOf({ yes: false, interactive: true, prompter }).tools)
 
@@ -686,7 +758,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
 
     it('asks for one when nothing shows one', async () => {
       const root = pnpmProject({ manifest: { packageManager: undefined } })
-      const prompter = scriptedPrompter(['yarn', '', '', '', '', ''])
+      const prompter = scriptedPrompter(['yarn', '', '', '', '', '', ''])
       const { tools, record } = toolsOf({ yes: false, interactive: true, prompter })
 
       await runInit(root, tools)
@@ -742,13 +814,16 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
     expect(result.summary).toEqual({ replacedLine })
   })
 
-  it('writes no file besides the config, the modes file, the .gitignore and package.json', async () => {
+  it('writes no file besides the agent skill, the config, the modes file, the .gitignore and package.json', async () => {
     const root = pnpmProject()
 
     await runInit(root, toolsOf().tools)
     rmSync(join(root, 'node_modules'), { recursive: true, force: true })
 
     expect(Object.keys(snapshotFiles(root))).toEqual([
+      '.agents/skills/visual-check/SKILL.md',
+      '.agents/skills/visual-check/scripts/run.mjs',
+      '.agents/skills/visual-check/setup.json',
       '.storybook/main.ts',
       '.storybook/visual-check.ts',
       '.visual-check/.gitignore',
@@ -878,6 +953,20 @@ describe('runInit in a workspace', () => {
     expect(second.summary?.replacedLine).toBe(undefined)
     expect(second.summary?.nextSteps?.packageFolders).toEqual(['packages/ui', 'packages/web'])
     expect(snapshotFiles(root)).toEqual(before)
+  })
+
+  it("installs the agent skill with each package's Storybook started in its folder", async () => {
+    const root = pnpmWorkspace()
+
+    await runInit(root, toolsOf().tools)
+
+    expect(skillSetupIn(root)).toEqual({
+      cli: skillCli,
+      storybooks: {
+        ui: { command: ['pnpm', 'run', 'storybook'], cwd: '../../../packages/ui' },
+        web: { command: ['pnpm', 'run', 'storybook'], cwd: '../../../packages/web' },
+      },
+    })
   })
 
   it('runs the root binary with yarn run -T in a package under Yarn 2 or later', async () => {
@@ -1108,7 +1197,7 @@ export default defineConfig({
 
   it('writes nothing, adds nothing and offers no addon for a Storybook left unticked', async () => {
     const root = onePortWorkspace()
-    const prompter = scriptedPrompter([['packages/ui/.storybook'], '', '', '', '', ''])
+    const prompter = scriptedPrompter([['packages/ui/.storybook'], '', '', '', '', '', ''])
     const { tools, record } = toolsOf({ yes: false, interactive: true, prompter })
     const result = await runInit(root, tools)
 
@@ -1119,6 +1208,7 @@ export default defineConfig({
       [['packages/ui/.storybook', 'packages/web/.sb']],
     )
     expect(prompter.records.filter(({ kind }) => kind === 'confirm').map(({ message }) => message)).toEqual([
+      'Install the agent skill?',
       'Add the Storybook addon to ui?',
     ])
     expect(readText(root, 'visual-check.config.ts')).toContain(

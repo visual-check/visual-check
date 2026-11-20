@@ -1,4 +1,6 @@
 import { dirname, join } from 'node:path'
+import { installSkill } from '../agent-skill/install-skill.js'
+import type { SkillSetup } from '../agent-skill/setup-file.js'
 import { BaselineError } from '../baselines/baseline-error.js'
 import { listBaselines } from '../baselines/baseline-files.js'
 import { defaultBaselinesIn } from '../config/resolve-config.js'
@@ -42,6 +44,7 @@ import {
   writeIfMissing,
 } from './setup-files.js'
 import { runStep, type SetupProgress } from './setup-progress.js'
+import { skillSetupOf } from './skill-setup.js'
 import {
   type FindUnlistedDependencies,
   fallowFailureWarningOf,
@@ -185,6 +188,10 @@ interface Setup {
    */
   withDependencies: Pick<DetectedStorybook, 'manifestDir' | 'manifest'>[]
   /**
+   * What the agent skill's `setup.json` holds, or `undefined` when the person chose not to install it.
+   */
+  skill: SkillSetup | undefined
+  /**
    * The hints and warnings for stderr so far, a line each, in the order they arose.
    */
   notes: Message[]
@@ -209,8 +216,9 @@ const checkUnlistedTitle = 'Check for unlisted dependencies'
  * Sets up visual-check in the workspace around `cwd`. It detects the project and runs the checks that stop it, before
  * it writes or runs anything. A stop gives detection's notes, then the problems. Then it notes what detection found,
  * the Storybook versions, Docker and a config that's already there, asks its questions, writes the files that are
- * missing and the scripts, adds the dependencies and the addon, and asks Fallow for unlisted dependencies. A check
- * that fails, a question the person gives up on, or a failed install, exits 2.
+ * missing and the scripts, installs the agent skill when the person says yes, writing over an earlier one, adds the
+ * dependencies and the addon, and asks Fallow for unlisted dependencies. A check that fails, a question the person
+ * gives up on, or a failed install, exits 2.
  *
  * @throws Any error besides the ones it words, such as a `package.json` it can't write.
  *
@@ -274,7 +282,8 @@ async function noteBeforeQuestions(
 
 /**
  * Builds what to set up from the answers: the config to write when there was none, listing each Storybook chosen with
- * its package folder as `dir`, and the Storybooks, the ones answered or the config's own.
+ * its package folder as `dir`, the Storybooks, the ones answered or the config's own, and when the person chose the
+ * agent skill, its `setup.json` for those Storybooks.
  */
 function setupOf(
   project: DetectedProject,
@@ -282,35 +291,47 @@ function setupOf(
   existing: ExistingConfig | undefined,
   notes: Message[],
 ): Setup {
+  const { packageManager } = answers
+
   if (existing !== undefined) {
     return {
       answers,
       configPath: existing.path,
       configSource: undefined,
-      storybooks: existingStorybooksOf(project, existing, answers.packageManager),
+      storybooks: existingStorybooksOf(project, existing, packageManager),
       withDependencies: project.storybooks.filter(({ configDir }) => Object.hasOwn(existing.names, configDir)),
+      skill: answers.skill ? skillSetupOf({ project, packageManager, storybooks: existing.storybooks }) : undefined,
       notes,
     }
   }
 
   const { root } = project
+  // Each Storybook answered, with its package folder as `dir` and its config folder made absolute.
+  const placed = answers.storybooks.map(({ name, url, configDir, packageDir, startCommand }) => ({
+    name,
+    url,
+    dir: packageDir,
+    configDir: join(root, configDir),
+    startCommand,
+  }))
 
   return {
     answers,
     configPath: join(root, configFileName),
     configSource: configSourceOf(
-      answers.storybooks.map(({ name, url, configDir, packageDir }) =>
-        configStorybookOf({ name, url, configFolder: root, packageDir, configDir: join(root, configDir) }),
+      placed.map(({ name, url, dir, configDir }) =>
+        configStorybookOf({ name, url, configFolder: root, packageDir: dir, configDir }),
       ),
     ),
-    storybooks: answers.storybooks.map(({ name, configDir, packageDir, startCommand }) => ({
+    storybooks: placed.map(({ name, dir, configDir, startCommand }) => ({
       name,
-      dir: packageDir,
-      configDir: join(root, configDir),
-      baselines: defaultBaselinesIn(packageDir),
+      dir,
+      configDir,
+      baselines: defaultBaselinesIn(dir),
       startCommand,
     })),
     withDependencies: answers.storybooks,
+    skill: answers.skill ? skillSetupOf({ project, packageManager, storybooks: placed }) : undefined,
     notes,
   }
 }
@@ -390,7 +411,7 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
   const replacedScripts = await runStep(
     progress,
     { title: writeFilesTitle },
-    () => writeSetupFiles(project, setup, packageScripts),
+    () => writeSetupFiles(project, setup, packageScripts, tools.cliVersion),
     () => 'done',
   )
   const replacedLine = replacedScriptsLineOf(replacedScripts)
@@ -484,12 +505,14 @@ async function dockerNotesOf(probeDocker: ProbeDocker, os: NodeJS.Platform): Pro
 /**
  * Writes each file that's missing: the config when there was none, each Storybook's `visual-check.ts` and
  * `.visual-check/.gitignore`, and the config folder's `.visual-check/.gitignore`. Then sets the root's scripts and each
- * package's own. Gives the scripts it replaced, by `package.json`. An existing file is never touched.
+ * package's own. Gives the scripts it replaced, by `package.json`. An existing file is never touched, except the agent
+ * skill's: when the person chose to install it, its files are written over for `cliVersion`.
  */
 function writeSetupFiles(
   project: DetectedProject,
   setup: Setup,
   packageScripts: readonly PackageScripts[],
+  cliVersion: string,
 ): ReplacedScripts[] {
   const { answers, configPath, configSource, storybooks } = setup
   const contents: (readonly [string, string])[] = [
@@ -503,6 +526,10 @@ function writeSetupFiles(
 
   for (const [path, content] of contents) {
     writeIfMissing(path, content)
+  }
+
+  if (setup.skill !== undefined) {
+    installSkill({ root: project.root, cliVersion, setup: setup.skill })
   }
 
   const manifests = [

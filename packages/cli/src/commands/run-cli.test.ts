@@ -271,7 +271,7 @@ Other options:
 
   it('runs init through the terminal UI in a terminal, which shows the end of the run', async () => {
     const project = createInitProject()
-    const view = fakeInitView(['', '', '', '', ''])
+    const view = fakeInitView(['', '', '', '', '', ''])
     const environment = { TERM: 'xterm' }
 
     initViewModule.startInitView.mockReturnValue(view)
@@ -571,7 +571,7 @@ describe('runCli init in a terminal', () => {
   })
 
   it.each(['false', 'FALSE', '0', ''])('draws the terminal UI with CI=%j, which is no CI run', async (ci) => {
-    const view = fakeInitView(['', '', '', '', ''])
+    const view = fakeInitView(['', '', '', '', '', ''])
 
     initViewModule.startInitView.mockReturnValue(view)
 
