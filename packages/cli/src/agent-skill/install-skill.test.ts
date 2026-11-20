@@ -57,18 +57,18 @@ describe('installSkill', () => {
   }
 
   it('writes SKILL.md for the CLI version, the runner script and setup.json', () => {
-    installSkill({ root, cliVersion: '1.2.3', os: 'linux', setup })
+    installSkill({ root, cliVersion: '1.2.3', os: process.platform, setup })
 
     expectInstalled()
   })
 
   it('writes over the files already there', () => {
-    installSkill({ root, cliVersion: '1.2.3', os: 'linux', setup })
+    installSkill({ root, cliVersion: '1.2.3', os: process.platform, setup })
     writeFileSync(join(folder, 'SKILL.md'), 'old\n')
     writeFileSync(join(folder, 'scripts', 'run.mjs'), '// old\n')
     writeFileSync(join(folder, 'setup.json'), '{}\n')
 
-    installSkill({ root, cliVersion: '1.2.3', os: 'linux', setup })
+    installSkill({ root, cliVersion: '1.2.3', os: process.platform, setup })
 
     expectInstalled()
   })
