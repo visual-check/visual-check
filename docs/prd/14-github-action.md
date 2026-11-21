@@ -53,19 +53,22 @@ For exit 1 and exit 2 alike, the Action:
 
 `uses: visual-check/action/.github/workflows/test.yml@v1`
 
-| Input               | Default         | Does                                                                                                                |
-| ------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `shards`            | Required        | The number of shards                                                                                                |
-| `setup`             | Required        | A shell script, run after checkout and Node setup, that installs, builds and serves Storybook and leaves it running |
-| `node-version-file` | `.nvmrc`        |                                                                                                                     |
-| `runs-on`           | `ubuntu-24.04`  |                                                                                                                     |
-| `working-directory` | The repo root   |                                                                                                                     |
-| `storybook`         | Every Storybook |                                                                                                                     |
+| Input               | Default              | Does                                                                                                                |
+| ------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `shards`            | Required             | The number of shards                                                                                                |
+| `setup`             | Required             | A shell script, run after checkout and Node setup, that installs, builds and serves Storybook and leaves it running |
+| `node-version-file` | `.nvmrc`             |                                                                                                                     |
+| `runs-on`           | `ubuntu-24.04`       |                                                                                                                     |
+| `working-directory` | The repo root        |                                                                                                                     |
+| `storybook`         | Every Storybook      |                                                                                                                     |
+| `repository`        | The run's repository | The repository every job checks out, as `owner/name`. Another repository is checked out at its default branch       |
+| `artifact`          | None                 | An artifact of the run that every job downloads into `$RUNNER_TEMP/<name>` before `setup`                           |
 
 - Secrets come through `secrets: inherit`, for private registries.
 - A plan job turns `shards` into the matrix, with `fail-fast: false`.
 - A consistency job runs `setup`, then the Action with `consistency: true`. The shard jobs `needs:` it, so no shard runs when it fails.
 - Each shard runs `setup`, so it builds and serves its own Storybook.
+- A workflow called from another repository's workflow gets that caller's `github` context, so its checkout is the caller's repository unless `repository` names another. The test apps' workflow relies on this when this repo's CI calls it.
 
 ## Workflows the docs show
 
