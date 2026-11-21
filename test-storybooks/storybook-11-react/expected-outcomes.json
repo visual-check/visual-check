@@ -1,5 +1,6 @@
 {
   "animations--chained-animation": "passed",
+  "animations--css-svg-animations": "passed",
   "animations--entrance-forwards": "passed",
   "animations--exit-unmounts": "passed",
   "animations--gifs": "passed",
