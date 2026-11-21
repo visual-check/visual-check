@@ -4,6 +4,7 @@ import { userEvent, within } from 'storybook/test'
 import animatedGifDataUrl from './animated.gif?inline'
 import animatedGifFileUrl from './animated.gif?no-inline'
 import clipUrl from './clip.webm'
+import smilSpinnerFileUrl from './smil-spinner.svg?no-inline'
 
 /**
  * The keyframes and classes the stories animate with, in each stage's stylesheet and in each shadow root's.
@@ -755,6 +756,51 @@ function SmilSvg() {
 }
 
 /**
+ * An SVG with SMIL animations, inlined into a stylesheet as a `data:image/svg+xml` URL: a red square sliding right and
+ * back over 2 s, forever.
+ */
+const smilSlideSvg =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80" viewBox="0 0 120 80">' +
+  '<rect y="20" width="40" height="40" fill="#dc2626">' +
+  '<animate attributeName="x" values="0;80;0" dur="2s" repeatCount="indefinite"/>' +
+  '</rect></svg>'
+
+/**
+ * The rules that show SVG with SMIL animations as CSS images: the sliding square as the background of a box's
+ * `::before`, and the spinner file as the `content` of another box's `::after`.
+ */
+const cssSvgStyles = `
+.animations-css-svg { position: relative; width: 120px; height: 80px; background-color: #ffffff; }
+.animations-css-svg-background::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,${encodeURIComponent(smilSlideSvg)}");
+}
+.animations-css-svg-content::after {
+  content: url("${smilSpinnerFileUrl}");
+  position: absolute;
+  inset: 0;
+}
+`
+
+/**
+ * Two boxes showing SVG with SMIL animations as CSS images: one as a `::before`'s background, from a `data:` URL, and
+ * one as an `::after`'s `content`, from a file URL, whose path ends in `.svg`.
+ */
+function CssSvgs() {
+  return (
+    <Stage title="SVG with SMIL animations as CSS images">
+      <style>{cssSvgStyles}</style>
+      <div style={rowStyle}>
+        <div className="animations-css-svg animations-css-svg-background" />
+        <div className="animations-css-svg animations-css-svg-content" />
+      </div>
+    </Stage>
+  )
+}
+
+/**
  * What a GIF figure shows.
  */
 interface GifFigureProps {
@@ -930,6 +976,16 @@ export const VideoPlayerControls: Story = {
  */
 export const InlineSvgAnimation: Story = {
   render: () => <SmilSvg />,
+}
+
+/**
+ * Two boxes showing SVG with SMIL animations as CSS images: a red square sliding right and back, as a `::before`'s
+ * background from a `data:` URL, and a rotating bar and a growing dot, as an `::after`'s `content` from a file URL.
+ * Their clocks are out of reach of scripts, so visual-check rewrites each SVG with its animations held. The snapshot
+ * shows them at time 0: the square on the left, the bar upright and the dot at its smallest.
+ */
+export const CssSvgAnimations: Story = {
+  render: () => <CssSvgs />,
 }
 
 /**
