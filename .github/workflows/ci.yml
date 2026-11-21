@@ -526,3 +526,9 @@ jobs:
         with:
           node-version: 24
       - run: node packages/repo-checks/src/check-lockstep.ts
+
+  # The packages a project installs, packed from this commit, and the browser image built from it, which the test apps
+  # run on.
+  pack:
+    name: Pack
+    uses: ./.github/workflows/pack.yml
