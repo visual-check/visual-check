@@ -44,10 +44,12 @@ const cssEscapePattern = String.raw`/\\(?:([0-9a-fA-F]{1,6}) ?|([^]))/g`
  * The source of a function, evaluated in the page as part of the page script, that creates the end state. It takes
  * what the page script kept at document start: `shadowRoots`, the browser's own `setTimer`, `clearTimer`,
  * `requestFrame` (`undefined` in a page without `requestAnimationFrame`) and `fetchResource` (`undefined` in a page
- * without `fetch`), and `parkedByStorybook`, the Storybook
- * adapter's predicate for the animations Storybook 11 parked. It gives a function that takes a time limit in ms and
- * brings the page to its end state, in the document and in every shadow root: the recorded ones, and every open one
- * found by walking each root's elements, again at every check.
+ * without `fetch`), `parkedByStorybook`, the Storybook adapter's predicate for the animations Storybook 11 parked, and
+ * `stateGlobal`, the name of the global it keeps its state under in every document. It gives a function that takes a
+ * time limit in ms and brings the page to its end state, in the document and in every shadow root: the recorded ones,
+ * and every open one found by walking each root's elements. It does so in the document of every reachable frame too,
+ * as a same-origin or `srcdoc` one's is, with the closed shadow roots the frame's own page script recorded, its open
+ * shadow roots and the frames in it. It walks them all again at every check.
  *
  * When it's created, at document start, it wraps `Animation.prototype.finish`, where the page has it, to note each
  * call that doesn't throw. The browser dispatches the end events of an animation finished by a call only at the next
@@ -95,9 +97,9 @@ const cssEscapePattern = String.raw`/\\(?:([0-9a-fA-F]{1,6}) ?|([^]))/g`
  *      duration of about 31 years and no `end`, `repeatDur` or `max`, so it holds the value it starts with. The
  *      rewritten SVG becomes a data URL, with the original's fragment, and once an image of it loaded, it's shown in
  *      place of the original, in the computed value it was found in. A pseudo-element takes no inline style, so the
- *      element gets a numbered `data-visual-check-frozen-svg` attribute and its root, the document or a shadow root,
- *      adopts a sheet whose rules set the values `!important`, in a layer, so they win over the page's own unlayered
- *      `!important` ones. It counts as a change once the sheet is adopted. An SVG without SMIL animation elements,
+ *      element gets a numbered `data-visual-check-frozen-svg` attribute and its root, a document, a frame's included,
+ *      or a shadow root, adopts a sheet its document's window made, whose rules set the values `!important`, in a
+ *      layer, so they win over the page's own unlayered `!important` ones. It counts as a change once the sheet is adopted. An SVG without SMIL animation elements,
  *      one that doesn't parse, and one whose fetch fails, such as a cross-origin one without CORS, are left as they
  *      are. A later end state in the page leaves the SVGs it froze alone. An animation that begins later, such as at
  *      `begin="1s"` or at another one's end, shows the page's value until it begins, so the SVG is at time 0 only
@@ -113,8 +115,10 @@ const cssEscapePattern = String.raw`/\\(?:([0-9a-fA-F]{1,6}) ?|([^]))/g`
  *
  * A frame is two `requestFrame` callbacks, then a task. In a page without `requestFrame`, or when asking for the first
  * callback throws, it's two tasks of 16 ms, and when only asking for the second throws, it's one callback, then two
- * tasks of 16 ms. Only animations on the document's timeline are touched: scroll-driven and view-driven ones, and
- * those with no timeline, are left alone, and so are those the page paused itself, Storybook 11's aside.
+ * tasks of 16 ms. Only animations on their document's timeline are touched, a frame's own for one in a frame:
+ * scroll-driven and view-driven ones, and those with no timeline, are left alone, and so are those the page paused
+ * itself, Storybook 11's aside. Only `finish()` calls made in the top document are noted: a frame's own calls aren't,
+ * though the end state's calls on a frame's animations still wait two quiet checks a frame apart.
  *
  * Left to the project, through a mask or a `wait` hook: SVG in `<img>`, SVG with SMIL animation behind a URL whose
  * path doesn't end in `.svg`, or as a CSS image of another property or pseudo-element, GIFs as CSS backgrounds or cross-origin
@@ -131,7 +135,7 @@ const cssEscapePattern = String.raw`/\\(?:([0-9a-fA-F]{1,6}) ?|([^]))/g`
  * after only animations changed, `step: 'animations'`. It never throws: every call into the page is guarded.
  */
 export const endStateFunction = `(context) => {
-  const { shadowRoots, setTimer, clearTimer, requestFrame, fetchResource, parkedByStorybook } = context
+  const { shadowRoots, setTimer, clearTimer, requestFrame, fetchResource, parkedByStorybook, stateGlobal } = context
   const timedOut = Symbol('timed out')
 
   // Noting finish() calls: their end events are pending until two animation frames passed since the latest call.
@@ -180,9 +184,31 @@ export const endStateFunction = `(context) => {
     }
   } catch {}
 
-  // Collecting the animations: every root, then every animation on the document's timeline in them, each once.
+  // Collecting the animations: every root, then every animation on its document's timeline in them, each once.
 
-  const { elementsOf, rootsOf, read } = (${pageRootsFunction})()
+  const { elementsOf, rootsOf, read, isObject, recordedRootsOf } = (${pageRootsFunction})()
+
+  // Every root, each mapped to its document: the top document's roots, then those of every reachable frame's document,
+  // as a same-origin or srcdoc one's is, with the shadow roots the frame's own page script recorded, nested frames too.
+  const allRoots = () => {
+    const documents = new Map()
+    const visit = (rootDocument, recordedRoots) => {
+      const roots = rootsOf(rootDocument, recordedRoots)
+      for (const root of roots) {
+        documents.set(root, rootDocument)
+      }
+      for (const root of roots) {
+        for (const frame of elementsOf(root, 'iframe, frame')) {
+          const frameDocument = read(() => frame.contentDocument, null)
+          if (isObject(frameDocument) && !documents.has(frameDocument)) {
+            visit(frameDocument, recordedRootsOf(frame, stateGlobal))
+          }
+        }
+      }
+    }
+    visit(document, shadowRoots)
+    return documents
+  }
 
   const animationsIn = (root) => {
     try {
@@ -192,13 +218,17 @@ export const endStateFunction = `(context) => {
     }
   }
 
-  const onDocumentTimeline = (animation) => {
+  // Whether an animation runs on its document's timeline. A frame's timeline is made by the frame's window, so it's
+  // checked against that window's DocumentTimeline, not the top window's.
+  const onDocumentTimeline = (animation, rootDocument) => {
     try {
       const timeline = animation.timeline
-      if (typeof DocumentTimeline === 'function') {
-        return timeline instanceof DocumentTimeline
+      const ownClass = read(() => rootDocument.defaultView.DocumentTimeline, undefined)
+      const timelineClass = typeof ownClass === 'function' ? ownClass : globalThis.DocumentTimeline
+      if (typeof timelineClass === 'function') {
+        return timeline instanceof timelineClass
       }
-      return typeof timeline === 'object' && timeline !== null && timeline === document.timeline
+      return isObject(timeline) && timeline === rootDocument.timeline
     } catch {
       return false
     }
@@ -206,12 +236,14 @@ export const endStateFunction = `(context) => {
 
   const animationsOf = (roots) => {
     const animations = new Set()
-    for (const root of roots) {
+    for (const [root, rootDocument] of roots) {
       for (const animation of animationsIn(root)) {
-        animations.add(animation)
+        if (!animations.has(animation) && onDocumentTimeline(animation, rootDocument)) {
+          animations.add(animation)
+        }
       }
     }
-    return Array.from(animations).filter(onDocumentTimeline)
+    return Array.from(animations)
   }
 
   // Reading an animation, never throwing.
@@ -583,8 +615,9 @@ export const endStateFunction = `(context) => {
 
   // Shows the SVGs with SMIL animation that a root's elements and their ::before and ::after show as CSS images
   // frozen, through a sheet adopted by the root: a pseudo-element takes no inline style. Its rules are !important in a
-  // layer, so they win over the page's own, unlayered !important ones too. Gives whether it adopted one.
-  const freezeCssSvgsIn = async (root, frozenSvgOnce) => {
+  // layer, so they win over the page's own, unlayered !important ones too. The sheet is made by the root's document's
+  // window, as a document adopts only sheets its own window made. Gives whether it adopted one.
+  const freezeCssSvgsIn = async (root, rootDocument, frozenSvgOnce) => {
     const rules = []
     for (const element of elementsOf(root, '*')) {
       for (const pseudoElement of [null, '::before', '::after']) {
@@ -607,7 +640,8 @@ export const endStateFunction = `(context) => {
       return false
     }
     try {
-      const sheet = new CSSStyleSheet()
+      const ownClass = read(() => rootDocument.defaultView.CSSStyleSheet, undefined)
+      const sheet = new (typeof ownClass === 'function' ? ownClass : CSSStyleSheet)()
       sheet.replaceSync('@layer { ' + cssRules.join(' ') + ' }')
       root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet]
       return true
@@ -629,7 +663,9 @@ export const endStateFunction = `(context) => {
       return frozenSvgs.get(url)
     }
     try {
-      const adopted = await Promise.all(Array.from(roots, (root) => freezeCssSvgsIn(root, frozenSvgOnce)))
+      const adopted = await Promise.all(
+        Array.from(roots, ([root, rootDocument]) => freezeCssSvgsIn(root, rootDocument, frozenSvgOnce)),
+      )
       return adopted.includes(true)
     } catch {
       return false
@@ -638,7 +674,7 @@ export const endStateFunction = `(context) => {
 
   // Freezes every video, inline SVG, GIF in an image and SVG with SMIL animation as a CSS image in the roots.
   const freezeMedia = (roots) => {
-    const elements = (selector) => Array.from(roots).flatMap((root) => elementsOf(root, selector))
+    const elements = (selector) => Array.from(roots.keys()).flatMap((root) => elementsOf(root, selector))
     return [
       ...elements('video').map(freezeVideo),
       ...elements('svg').map(freezeSvg),
@@ -701,7 +737,7 @@ export const endStateFunction = `(context) => {
       let quietChecks = 0
       let roots
       for (;;) {
-        roots = rootsOf(document, shadowRoots)
+        roots = allRoots()
         const running = animationsOf(roots).filter(
           (animation) =>
             !unfinishable.has(animation) && playStateOf(animation) === 'running' && isFiniteAnimation(animation),

@@ -10,6 +10,7 @@ import {
 import { parkedByStorybookSource } from '../storybook/preview-script.js'
 import {
   cssSvgGlobals,
+  type FakeSheet,
   type FakeStyledElement,
   type FakeSvgFile,
   fakeFetch,
@@ -21,6 +22,7 @@ import {
   FakeFrames,
   type FakeRoot,
   fakeDocument,
+  fakeFrameElement,
   fakeRoot,
   mediaTimedOutAnswer,
   settledAnswer,
@@ -126,6 +128,7 @@ function openEndState(parts: EndStatePageParts = {}): EndStatePage {
     requestFrame,
     fetchResource,
     parkedByStorybook: run(parkedByStorybookSource),
+    stateGlobal: '__visualCheck',
   })
 
   return {
@@ -661,6 +664,55 @@ describe('the roots', () => {
     expect(onAnother.actions).toEqual([])
   })
 
+  it("include the documents of same-origin frames, nested ones too, with their roots, on their own window's timeline", async () => {
+    // A frame's window has its own DocumentTimeline class, so its animations aren't instances of the page's.
+    class FrameTimeline {}
+    const inFrame = fakeAnimation({ timeline: new FrameTimeline() })
+    const inFrameRecorded = fakeAnimation({ timeline: new FrameTimeline() })
+    const inFrameOpen = fakeAnimation({ timeline: new FrameTimeline() })
+    const inInnerFrame = fakeAnimation({ timeline: new FrameTimeline() })
+    const scrollDriven = fakeAnimation({ timeline: new FakeScrollTimeline() })
+    const finished = [inFrame, inFrameRecorded, inFrameOpen, inInnerFrame]
+    const view = { DocumentTimeline: FrameTimeline }
+    const innerFrame = fakeDocument({ animations: [inInnerFrame], view })
+    const frame = fakeDocument({
+      animations: [inFrame, scrollDriven],
+      openShadowRoots: [fakeRoot({ animations: [inFrameOpen] })],
+      frames: [fakeFrameElement(innerFrame)],
+      view,
+    })
+    const recorded = fakeRoot({ animations: [inFrameRecorded] })
+    const document = fakeDocument({ frames: [fakeFrameElement(frame, [recorded]), fakeFrameElement(null)] })
+
+    expect(await endStateOf({ document })).toEqual(settledAnswer(true))
+    expect(finished.map((animation) => animation.actions)).toEqual(finished.map(() => ['finish']))
+    expect(scrollDriven.actions).toEqual([])
+  })
+
+  it("take a frame's timeline from its document when its window has no DocumentTimeline", async () => {
+    const frame = fakeDocument({ view: {} })
+    const onFrameDocument = fakeAnimation({ timeline: frame.timeline })
+    const onAnother = fakeAnimation({ timeline: new FakeScrollTimeline() })
+
+    frame.animations.push(onFrameDocument, onAnother)
+    expect(await endStateOf({ document: fakeDocument({ frames: [fakeFrameElement(frame)] }) })).toEqual(
+      settledAnswer(true),
+    )
+    expect(onFrameDocument.actions).toEqual(['finish'])
+    expect(onAnother.actions).toEqual([])
+  })
+
+  it('walk a frame showing a document already walked only once', async () => {
+    const animation = fakeAnimation()
+    const frame = fakeDocument({ animations: [animation] })
+
+    Object.assign(frame, fakeRoot({ animations: [animation], frames: [fakeFrameElement(frame)] }))
+    expect(await endStateOf({ document: fakeDocument({ frames: [fakeFrameElement(frame)] }) })).toEqual(
+      settledAnswer(true),
+    )
+    expect(animation.actions).toEqual(['finish'])
+  })
+
   it('cope with roots, elements and animations that throw', async () => {
     const fail = (): never => {
       throw new Error('unreadable')
@@ -1132,6 +1184,34 @@ describe('media', () => {
       expect(document.adoptedStyleSheets).toEqual([])
     })
 
+    it("in a same-origin frame is held in a sheet the frame's document adopts, made by the frame's window", async () => {
+      const element = fakeStyledElement({ '': { 'background-image': cssUrl(spinnerUrl) } })
+      const frameSheets: FakeSheet[] = []
+      const frameWindow = {
+        CSSStyleSheet: class {
+          text = ''
+
+          constructor() {
+            frameSheets.push(this)
+          }
+
+          replaceSync(text: string): void {
+            this.text = text
+          }
+        },
+      }
+      const frame = fakeDocument({ styled: [element], view: frameWindow })
+      const { parts, sheets } = cssSvgPage([])
+      const document = fakeDocument({ frames: [fakeFrameElement(frame)] })
+
+      expect(await endStateOf({ ...parts, document })).toEqual(settledAnswer(true))
+      expect(sheets).toEqual([])
+      expect(frame.adoptedStyleSheets).toEqual(frameSheets)
+      expect(frameSheets.map(({ text }) => text)).toEqual([
+        `@layer { [data-visual-check-frozen-svg="1"] { background-image: ${cssUrl(heldSpinnerUrl)} !important; } }`,
+      ])
+    })
+
     it('is held once in a page, its element keeping its mark when another of its images is held later', async () => {
       const element = fakeStyledElement({ '': { 'background-image': cssUrl(spinnerUrl) } })
       const { parts, sheets } = cssSvgPage([element])
@@ -1263,6 +1343,20 @@ describe('media', () => {
     const closed = fakeRoot({ media: [video, svg, image] })
 
     expect(await endStateOf({ shadowRoots: [closed] })).toEqual(settledAnswer(true))
+    expect(video.actions).toEqual(['pause', 'autoplay = false', 'currentTime = 0'])
+    expect(svg.actions).toEqual(['pauseAnimations', 'setCurrentTime 0'])
+    expect(image.actions).toEqual(replacedWith(firstFrameUrl(spinner)))
+  })
+
+  it("are frozen in a same-origin frame's document", async () => {
+    const video = fakeVideo()
+    const svg = fakeSvg()
+    const image = fakeImage({ src: spinner })
+    const frame = fakeDocument({ media: [video, svg, image] })
+
+    expect(await endStateOf({ document: fakeDocument({ frames: [fakeFrameElement(frame)] }) })).toEqual(
+      settledAnswer(true),
+    )
     expect(video.actions).toEqual(['pause', 'autoplay = false', 'currentTime = 0'])
     expect(svg.actions).toEqual(['pauseAnimations', 'setCurrentTime 0'])
     expect(image.actions).toEqual(replacedWith(firstFrameUrl(spinner)))

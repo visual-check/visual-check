@@ -68,7 +68,7 @@ A snapshot shows finite animations and transitions as finished, and infinite ani
 
 At capture, after the `wait` hook:
 
-1. Call `finish()` on every running finite animation, CSS or script, in the document and in every shadow root. Animations the page paused itself and scroll-driven ones are left alone.
+1. Call `finish()` on every running finite animation, CSS or script, in the document, in every shadow root and in every same-origin or `srcdoc` frame, nested ones too. Animations the page paused itself and scroll-driven ones are left alone.
 2. Let a frame pass, so end events run page logic. The browser sends the end events of an animation finished by a call, the page's, Storybook's or visual-check's, only at its next rendering update, so they count as pending until two animation frames have passed since the latest call. A check that finds them pending lets a frame pass too.
 3. Repeat until two checks a frame apart find nothing finite running and no end events pending, for at most 20 rounds. Each check that finds either counts as a round.
 4. Put every animation still running on its first keyframe: infinite ones, finite ones whose `finish()` throws, such as one with a playback rate of 0, and any still starting after 20 rounds.
@@ -85,8 +85,8 @@ At capture, after the `wait` hook:
 Notes:
 
 - `play` sees real durations and every end event. A story with nothing running and nothing pending pays nothing: its first check ends step 3, no frame passes, and images and fonts aren't checked again.
-- Closed shadow roots are reached because `attachShadow` is wrapped at document start. Declarative shadow roots are reached only when open.
-- `Animation.prototype.finish` is wrapped at document start too, to know when end events are pending. Both wrappers pass `this`, the arguments, the result and any error through, so the page sees no difference.
+- Closed shadow roots are reached because `attachShadow` is wrapped at document start, in a frame too when the page script ran there. Declarative shadow roots are reached only when open.
+- `Animation.prototype.finish` is wrapped at document start too, to know when end events are pending. Both wrappers pass `this`, the arguments, the result and any error through, so the page sees no difference. Only calls made in the top document count: visual-check's own calls on a frame's animations still wait for two quiet checks a frame apart.
 - An animation Storybook 11 parked is told by behaviour: a CSS animation or transition on the document's timeline, paused at 0. One the page itself paused at 0 matches too, and pinning leaves it looking the same.
 - Left to the project, through a mask or a `wait` hook:
   - SVG in `<img>`;
@@ -94,7 +94,7 @@ Notes:
   - GIFs as CSS backgrounds, cross-origin without CORS, or at a URL without `.gif` or `data:image/gif`, and a GIF picked by a `<source>` in `<picture>`;
   - a video that hasn't loaded anything;
   - APNG, animated WebP, canvas, Lottie and other script-driven motion;
-  - animations and media inside same-origin iframes, which aren't reached.
+  - animations and media inside cross-origin frames, which aren't reached.
 
 ## Retries and flaky snapshots
 

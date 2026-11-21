@@ -303,6 +303,7 @@ ${storybookPageScript};
     requestFrame,
     fetchResource,
     parkedByStorybook: ${parkedByStorybookSource},
+    stateGlobal: '${stateGlobal}',
   })
 
   // The remote content search, run only when a step needs it.
