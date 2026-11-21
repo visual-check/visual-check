@@ -18,6 +18,10 @@ interface FakeRootParts {
    * The videos, inline SVGs and images in the root.
    */
   media?: FakeMedia[]
+  /**
+   * The `<iframe>` and `<frame>` elements in the root, as `fakeFrameElement` builds them.
+   */
+  frames?: object[]
 }
 
 /**
@@ -28,6 +32,10 @@ interface FakeDocumentParts extends FakeRootParts {
    * How the server gives each image file, by URL. A file not listed loads from the page's own origin, at 40 × 30.
    */
   files?: Record<string, FakeImageFile>
+  /**
+   * The document's window: none by default, as the top document's is the page's global scope.
+   */
+  view?: object
 }
 
 /**
@@ -51,36 +59,63 @@ export interface FakeDocument extends FakeRoot {
 }
 
 /**
- * Builds a fake shadow root holding these animations, open shadow roots and media. It lists its animations, leaving
- * out cancelled ones as the browser does. For `*`, it lists its elements: one hosting each open shadow root, one
- * hosting none, and its media. For a tag name, it lists its media of that name.
+ * Builds a fake shadow root holding these animations, open shadow roots, media and frames. It lists its animations,
+ * leaving out cancelled ones as the browser does. For `*`, it lists its elements: one hosting each open shadow root,
+ * one hosting none, its media and its frames. For `iframe, frame`, it lists its frames, and for a tag name, its media
+ * of that name.
  */
-export function fakeRoot({ animations = [], openShadowRoots = [], media = [] }: FakeRootParts = {}): FakeRoot {
-  const elements = [...openShadowRoots.map((shadowRoot) => ({ shadowRoot })), { shadowRoot: null }, ...media]
+export function fakeRoot({
+  animations = [],
+  openShadowRoots = [],
+  media = [],
+  frames = [],
+}: FakeRootParts = {}): FakeRoot {
+  const elements = [...openShadowRoots.map((shadowRoot) => ({ shadowRoot })), { shadowRoot: null }, ...media, ...frames]
+  const elementsMatching = (selector: string): object[] => {
+    if (selector === '*') {
+      return elements
+    }
+
+    if (selector === 'iframe, frame') {
+      return frames
+    }
+
+    return media.filter((element) => element.localName === selector)
+  }
   const root = {
     animations,
     getAnimations: () => animations.filter((animation) => animation.playState !== 'idle'),
-    querySelectorAll: (selector: string) =>
-      selector === '*' ? elements : media.filter((element) => element.localName === selector),
+    querySelectorAll: elementsMatching,
   }
 
   return root
 }
 
 /**
- * Builds a fake document holding these animations, open shadow roots and media, as `fakeRoot` does, with the
- * document's timeline, Storybook's preview URL as its base URL, and `createElement` for the images and canvases
+ * Builds a fake document holding these animations, open shadow roots, media and frames, as `fakeRoot` does, with its
+ * window when `view` is given, the document's timeline, Storybook's preview URL as its base URL, and `createElement` for the images and canvases
  * scripts create. The images it creates load files as `files` says.
  */
-export function fakeDocument({ files = {}, ...parts }: FakeDocumentParts = {}): FakeDocument {
+export function fakeDocument({ files = {}, view, ...parts }: FakeDocumentParts = {}): FakeDocument {
   const document = {
     ...fakeRoot(parts),
+    ...(view === undefined ? {} : { defaultView: view }),
     timeline: new animationClasses.DocumentTimeline(),
     baseURI: 'http://localhost:6006/iframe.html',
     createElement: fakeCreateElement(files),
   }
 
   return document
+}
+
+/**
+ * Builds a fake `<iframe>` showing `document`, `null` for a cross-origin one, whose own page script recorded
+ * `recordedShadowRoots` under the page script's global, when they're given.
+ */
+export function fakeFrameElement(document: object | null, recordedShadowRoots?: object[]): object {
+  const contentWindow = recordedShadowRoots === undefined ? {} : { __visualCheck: { shadowRoots: recordedShadowRoots } }
+
+  return { localName: 'iframe', shadowRoot: null, contentDocument: document, contentWindow }
 }
 
 /**

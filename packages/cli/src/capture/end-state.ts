@@ -13,10 +13,13 @@ const taskFrameMs = 16
 /**
  * The source of a function, evaluated in the page as part of the page script, that creates the end state. It takes
  * what the page script kept at document start: `shadowRoots`, the browser's own `setTimer`, `clearTimer` and
- * `requestFrame` (`undefined` in a page without `requestAnimationFrame`), and `parkedByStorybook`, the Storybook
- * adapter's predicate for the animations Storybook 11 parked. It gives a function that takes a time limit in ms and
- * brings the page to its end state, in the document and in every shadow root: the recorded ones, and every open one
- * found by walking each root's elements, again at every check.
+ * `requestFrame` (`undefined` in a page without `requestAnimationFrame`), `parkedByStorybook`, the Storybook adapter's
+ * predicate for the animations Storybook 11 parked, and `stateGlobal`, the name of the global it keeps its state under
+ * in every document. It gives a function that takes a time limit in ms and brings the page to its end state, in the
+ * document and in every shadow root: the recorded ones, and every open one found by walking each root's elements. It
+ * does so in the document of every reachable frame too, as a same-origin or `srcdoc` one's is, with the closed shadow
+ * roots the frame's own page script recorded, its open shadow roots and the frames in it. It walks them all again at
+ * every check.
  *
  * When it's created, at document start, it wraps `Animation.prototype.finish`, where the page has it, to note each
  * call that doesn't throw. The browser dispatches the end events of an animation finished by a call only at the next
@@ -67,8 +70,10 @@ const taskFrameMs = 16
  *
  * A frame is two `requestFrame` callbacks, then a task. In a page without `requestFrame`, or when asking for the first
  * callback throws, it's two tasks of 16 ms, and when only asking for the second throws, it's one callback, then two
- * tasks of 16 ms. Only animations on the document's timeline are touched: scroll-driven and view-driven ones, and
- * those with no timeline, are left alone, and so are those the page paused itself, Storybook 11's aside.
+ * tasks of 16 ms. Only animations on their document's timeline are touched, a frame's own for one in a frame:
+ * scroll-driven and view-driven ones, and those with no timeline, are left alone, and so are those the page paused
+ * itself, Storybook 11's aside. Only `finish()` calls made in the top document are noted: a frame's own calls aren't,
+ * though the end state's calls on a frame's animations still wait two quiet checks a frame apart.
  *
  * Left to the project, through a mask or a `wait` hook: SVG in `<img>`, GIFs as CSS backgrounds or cross-origin
  * without CORS, APNG, animated WebP, canvas, Lottie and other script-driven motion, and a video that hasn't loaded
@@ -84,7 +89,7 @@ const taskFrameMs = 16
  * after only animations changed, `step: 'animations'`. It never throws: every call into the page is guarded.
  */
 export const endStateFunction = `(context) => {
-  const { shadowRoots, setTimer, clearTimer, requestFrame, parkedByStorybook } = context
+  const { shadowRoots, setTimer, clearTimer, requestFrame, parkedByStorybook, stateGlobal } = context
   const timedOut = Symbol('timed out')
 
   // Noting finish() calls: their end events are pending until two animation frames passed since the latest call.
@@ -133,9 +138,31 @@ export const endStateFunction = `(context) => {
     }
   } catch {}
 
-  // Collecting the animations: every root, then every animation on the document's timeline in them, each once.
+  // Collecting the animations: every root, then every animation on its document's timeline in them, each once.
 
-  const { elementsOf, rootsOf } = (${pageRootsFunction})()
+  const { elementsOf, rootsOf, read, isObject, recordedRootsOf } = (${pageRootsFunction})()
+
+  // Every root, each mapped to its document: the top document's roots, then those of every reachable frame's document,
+  // as a same-origin or srcdoc one's is, with the shadow roots the frame's own page script recorded, nested frames too.
+  const allRoots = () => {
+    const documents = new Map()
+    const visit = (rootDocument, recordedRoots) => {
+      const roots = rootsOf(rootDocument, recordedRoots)
+      for (const root of roots) {
+        documents.set(root, rootDocument)
+      }
+      for (const root of roots) {
+        for (const frame of elementsOf(root, 'iframe, frame')) {
+          const frameDocument = read(() => frame.contentDocument, null)
+          if (isObject(frameDocument) && !documents.has(frameDocument)) {
+            visit(frameDocument, recordedRootsOf(frame, stateGlobal))
+          }
+        }
+      }
+    }
+    visit(document, shadowRoots)
+    return documents
+  }
 
   const animationsIn = (root) => {
     try {
@@ -145,13 +172,17 @@ export const endStateFunction = `(context) => {
     }
   }
 
-  const onDocumentTimeline = (animation) => {
+  // Whether an animation runs on its document's timeline. A frame's timeline is made by the frame's window, so it's
+  // checked against that window's DocumentTimeline, not the top window's.
+  const onDocumentTimeline = (animation, rootDocument) => {
     try {
       const timeline = animation.timeline
-      if (typeof DocumentTimeline === 'function') {
-        return timeline instanceof DocumentTimeline
+      const ownClass = read(() => rootDocument.defaultView.DocumentTimeline, undefined)
+      const timelineClass = typeof ownClass === 'function' ? ownClass : globalThis.DocumentTimeline
+      if (typeof timelineClass === 'function') {
+        return timeline instanceof timelineClass
       }
-      return typeof timeline === 'object' && timeline !== null && timeline === document.timeline
+      return isObject(timeline) && timeline === rootDocument.timeline
     } catch {
       return false
     }
@@ -159,12 +190,14 @@ export const endStateFunction = `(context) => {
 
   const animationsOf = (roots) => {
     const animations = new Set()
-    for (const root of roots) {
+    for (const [root, rootDocument] of roots) {
       for (const animation of animationsIn(root)) {
-        animations.add(animation)
+        if (!animations.has(animation) && onDocumentTimeline(animation, rootDocument)) {
+          animations.add(animation)
+        }
       }
     }
-    return Array.from(animations).filter(onDocumentTimeline)
+    return Array.from(animations)
   }
 
   // Reading an animation, never throwing.
@@ -396,7 +429,7 @@ export const endStateFunction = `(context) => {
 
   // Freezes every video, inline SVG and GIF in an image in the roots.
   const freezeMedia = (roots) => {
-    const elements = (selector) => Array.from(roots).flatMap((root) => elementsOf(root, selector))
+    const elements = (selector) => Array.from(roots.keys()).flatMap((root) => elementsOf(root, selector))
     return [
       ...elements('video').map(freezeVideo),
       ...elements('svg').map(freezeSvg),
@@ -458,7 +491,7 @@ export const endStateFunction = `(context) => {
       let quietChecks = 0
       let roots
       for (;;) {
-        roots = rootsOf(document, shadowRoots)
+        roots = allRoots()
         const running = animationsOf(roots).filter(
           (animation) =>
             !unfinishable.has(animation) && playStateOf(animation) === 'running' && isFiniteAnimation(animation),
