@@ -41,9 +41,9 @@ const stateGlobal = '__visualCheck'
  *   `document.fonts.ready`. One time limit covers both. A page without an API it uses, such as `document.fonts`, has
  *   nothing to wait for there;
  * - gives `bringToEndState`, which the end state expression calls at capture. It brings every animation in the
- *   document and in every shadow root to its end state, then freezes their videos, inline SVGs and GIFs, then brings
- *   the animations that freezing them started to their end state too, as `endStateFunction` says, telling the
- *   animations Storybook 11 parked apart with the Storybook adapter's predicate;
+ *   document and in every shadow root to its end state, then freezes their videos, SVGs, inline or as CSS images, and
+ *   GIFs, then brings the animations that freezing them started to their end state too, as `endStateFunction` says,
+ *   telling the animations Storybook 11 parked apart with the Storybook adapter's predicate;
  * - gives `findRemoteContent`, which finds the remote content the page shows: images, CSS images and cross-origin
  *   frames from an origin other than Storybook's, in the document, in every shadow root and in same-origin frames, as
  *   `remoteContentFunction` says;
@@ -53,8 +53,9 @@ const stateGlobal = '__visualCheck'
  *   `prepareCaptureFunction` says.
  *
  * It keeps the browser's own `setTimeout`, `clearTimeout` and `requestAnimationFrame`, so a story that fakes or
- * replaces timers or frames doesn't stall the wait, the end state or the remote content search, and its own
- * `JSON.stringify`, so a page that replaces it can't change what is sent. It takes and hides the message function
+ * replaces timers or frames doesn't stall the wait, the end state or the remote content search, its own `fetch`, so a
+ * story that mocks it doesn't answer the end state's requests for SVG files, and its own `JSON.stringify`, so a page
+ * that replaces it can't change what is sent. It takes and hides the message function
  * before anything else runs, so a failure anywhere still leaves the page's own scripts without it. The adapter's
  * script runs next, so a failure in the rest can't keep the story wait from running and show as a page script that
  * didn't run.
@@ -74,6 +75,7 @@ ${storybookPageScript};
     typeof globalThis.requestAnimationFrame === 'function'
       ? globalThis.requestAnimationFrame.bind(globalThis)
       : undefined
+  const fetchResource = typeof globalThis.fetch === 'function' ? globalThis.fetch.bind(globalThis) : undefined
   const shadowRoots = []
   const messages = []
 
@@ -299,6 +301,7 @@ ${storybookPageScript};
     setTimer,
     clearTimer,
     requestFrame,
+    fetchResource,
     parkedByStorybook: ${parkedByStorybookSource},
   })
 

@@ -9,8 +9,17 @@ import {
 } from '../storybook/preview-script.fixture.js'
 import { parkedByStorybookSource } from '../storybook/preview-script.js'
 import {
+  cssSvgGlobals,
+  type FakeStyledElement,
+  type FakeSvgFile,
+  fakeFetch,
+  fakeStyledElement,
+  markupOf,
+} from './css-svg.fixture.js'
+import {
   animationsTimedOutAnswer,
   FakeFrames,
+  type FakeRoot,
   fakeDocument,
   fakeRoot,
   mediaTimedOutAnswer,
@@ -48,6 +57,10 @@ interface EndStatePageParts {
    * by default.
    */
   requestFrame?: ((callback: () => void) => void) | undefined
+  /**
+   * The page's `fetch` as the page script kept it: `undefined`, as in a page without one, by default.
+   */
+  fetchResource?: (url: string) => Promise<Response>
 }
 
 /**
@@ -95,7 +108,7 @@ interface EndStatePage {
  * parked animations.
  */
 function openEndState(parts: EndStatePageParts = {}): EndStatePage {
-  const { animations = [], media = [], shadowRoots = [], globals = animationClasses } = parts
+  const { animations = [], media = [], shadowRoots = [], globals = animationClasses, fetchResource } = parts
   const document = parts.document ?? fakeDocument({ animations, media })
   const frames = new FakeFrames()
   const requestFrame = 'requestFrame' in parts ? parts.requestFrame : frames.requestFrame
@@ -111,6 +124,7 @@ function openEndState(parts: EndStatePageParts = {}): EndStatePage {
     setTimer,
     clearTimer,
     requestFrame,
+    fetchResource,
     parkedByStorybook: run(parkedByStorybookSource),
   })
 
@@ -948,6 +962,284 @@ describe('media', () => {
       })
       expect(await endStateOf({ document })).toEqual(settledAnswer(false))
       expect(image.actions).toEqual([])
+    })
+  })
+
+  describe('an SVG with SMIL animation as a CSS image', () => {
+    /**
+     * An SVG icon with a spinning path and a pulsing circle, as a stylesheet inlines one.
+     */
+    const spinnerSvg =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">' +
+      '<path d="M8 1v3"><animateTransform attributeName="transform" type="rotate" from="0 8 8" to="360 8 8" dur="1s" repeatCount="indefinite"/></path>' +
+      '<circle cx="8" cy="8" r="2"><animate attributeName="r" values="2;4;2" keyTimes="0;0.5;1" dur="2s" end="10s" repeatDur="20s" max="30s" repeatCount="indefinite"/></circle>' +
+      '<rect width="2" height="2"><set attributeName="fill" to="red" begin="1s" end="2s"/></rect>' +
+      '</svg>'
+
+    /**
+     * The spinner held on the values it starts with.
+     */
+    const heldSpinnerSvg =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">' +
+      '<path d="M8 1v3"><animateTransform attributeName="transform" type="rotate" from="0 8 8" to="360 8 8" dur="1000000000s" repeatCount="indefinite" calcMode="discrete"/></path>' +
+      '<circle cx="8" cy="8" r="2"><animate attributeName="r" values="2;4;2" keyTimes="0;0.5;1" dur="1000000000s" repeatCount="indefinite" calcMode="discrete"/></circle>' +
+      '<rect width="2" height="2"><set attributeName="fill" to="red" begin="1s" dur="1000000000s"/></rect>' +
+      '</svg>'
+
+    /**
+     * A static SVG icon.
+     */
+    const staticSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M8 1v3"/></svg>'
+
+    /**
+     * The spinner as a percent-encoded data URL.
+     */
+    const spinnerUrl = `data:image/svg+xml,${encodeURIComponent(spinnerSvg)}`
+
+    /**
+     * The spinner held, as the data URL the end state shows in its place.
+     */
+    const heldSpinnerUrl = `data:image/svg+xml,${encodeURIComponent(heldSpinnerSvg)}`
+
+    /**
+     * The spinner as a file on Storybook's own origin.
+     */
+    const spinnerFile = 'http://localhost:6006/icons/spinner.svg'
+
+    /**
+     * A URL as a computed value serializes it.
+     */
+    function cssUrl(url: string): string {
+      return `url("${url}")`
+    }
+
+    /**
+     * Throws, as a page whose element or root refuses a call does.
+     */
+    function fail(): never {
+      throw new Error('unreadable')
+    }
+
+    /**
+     * The fake page's parts for these elements in the document: the globals, the document and the browser's own fetch,
+     * which serves the spinner file, and the sheets the page made.
+     */
+    function cssSvgPage(styled: FakeStyledElement[], files: Record<string, FakeSvgFile> = {}) {
+      const { globals, sheets } = cssSvgGlobals()
+      const document = fakeDocument({ styled })
+      const fetchResource = fakeFetch({ [spinnerFile]: { text: spinnerSvg }, ...files })
+
+      return { parts: { globals: { ...animationClasses, ...globals }, document, fetchResource }, document, sheets }
+    }
+
+    it("shown by a pseudo-element's background is held on the values it starts with, in a sheet the document adopts", async () => {
+      const button = fakeStyledElement({
+        '::before': { content: '""', 'background-image': `linear-gradient(red, blue), ${cssUrl(spinnerUrl)}` },
+      })
+      const { parts, document, sheets } = cssSvgPage([button])
+      const page = openEndState(parts)
+      const run = page.bringToEndState(1000)
+
+      // The held SVG's image loads 10 ms later, then the frame for the media events, the two checks and the last frames.
+      await vi.advanceTimersByTimeAsync(9)
+      expect(page.frames.requestFrame).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(page.frames.requestFrame).toHaveBeenCalledOnce()
+      await vi.runAllTimersAsync()
+      expect(await run.answer).toEqual(settledAnswer(true))
+      expect(button.attributes).toEqual(new Map([['data-visual-check-frozen-svg', '1']]))
+      expect(sheets.map(({ text }) => text)).toEqual([
+        `@layer { [data-visual-check-frozen-svg="1"]::before { background-image: linear-gradient(red, blue), ${cssUrl(heldSpinnerUrl)} !important; } }`,
+      ])
+      expect(document.adoptedStyleSheets).toEqual(sheets)
+      expect(markupOf(heldSpinnerUrl)).toBe(heldSpinnerSvg)
+    })
+
+    it.each([
+      ['content', '::after', `${cssUrl(spinnerFile)} / "Loading"`, `${cssUrl(heldSpinnerUrl)} / "Loading"`],
+      ['mask-image', '::after', cssUrl(spinnerFile), cssUrl(heldSpinnerUrl)],
+      ['border-image-source', '', cssUrl(spinnerFile), cssUrl(heldSpinnerUrl)],
+      ['background-image', '', cssUrl(`${spinnerFile}#icon`), cssUrl(`${heldSpinnerUrl}#icon`)],
+    ] as const)(
+      'in %s of the element%s is held, fetched from its file, with its fragment',
+      async (property, pseudoElement, value, held) => {
+        const element = fakeStyledElement({ [pseudoElement]: { content: '""', [property]: value } })
+        const { parts, sheets } = cssSvgPage([element])
+
+        expect(await endStateOf(parts)).toEqual(settledAnswer(true))
+        expect(sheets.map(({ text }) => text)).toEqual([
+          `@layer { [data-visual-check-frozen-svg="1"]${pseudoElement} { ${property}: ${held} !important; } }`,
+        ])
+      },
+    )
+
+    it("in a list item's list style image is held, and one a child inherits is left alone", async () => {
+      const item = fakeStyledElement({ '': { display: 'list-item', 'list-style-image': cssUrl(spinnerUrl) } }, 'li')
+      const child = fakeStyledElement({ '': { display: 'inline', 'list-style-image': cssUrl(spinnerUrl) } }, 'span')
+      const { parts, sheets } = cssSvgPage([item, child])
+
+      expect(await endStateOf(parts)).toEqual(settledAnswer(true))
+      expect(sheets.map(({ text }) => text)).toEqual([
+        `@layer { [data-visual-check-frozen-svg="1"] { list-style-image: ${cssUrl(heldSpinnerUrl)} !important; } }`,
+      ])
+      expect(child.attributes.size).toBe(0)
+    })
+
+    it('shown by many elements is fetched and held once, each element and pseudo-element getting its own rule', async () => {
+      const first = fakeStyledElement({
+        '': { 'background-image': cssUrl(spinnerFile) },
+        '::after': { content: cssUrl(spinnerFile), 'mask-image': cssUrl(spinnerFile) },
+      })
+      const second = fakeStyledElement({
+        '::before': { content: 'none', 'background-image': cssUrl(spinnerFile) },
+        '': { 'background-image': cssUrl(spinnerFile) },
+      })
+      const { parts, sheets } = cssSvgPage([first, second])
+
+      expect(await endStateOf(parts)).toEqual(settledAnswer(true))
+      expect(parts.fetchResource).toHaveBeenCalledOnce()
+      expect(sheets.map(({ text }) => text)).toEqual([
+        '@layer { ' +
+          `[data-visual-check-frozen-svg="1"] { background-image: ${cssUrl(heldSpinnerUrl)} !important; } ` +
+          `[data-visual-check-frozen-svg="1"]::after { content: ${cssUrl(heldSpinnerUrl)} !important; mask-image: ${cssUrl(heldSpinnerUrl)} !important; } ` +
+          `[data-visual-check-frozen-svg="2"] { background-image: ${cssUrl(heldSpinnerUrl)} !important; } }`,
+      ])
+    })
+
+    it('read from a computed value with escapes is held', async () => {
+      // A computed value escapes quotes and backslashes, and a code point by its hex, which Chromium does for controls.
+      const noted = spinnerSvg.replace('<svg', '<svg data-note="a\\b\u00e9"')
+      const escaped = `data:image/svg+xml;utf8,${noted}`
+        .replaceAll('\\', '\\\\')
+        .replaceAll('"', '\\"')
+        .replace('\u00e9', '\\e9 ')
+      const element = fakeStyledElement({ '': { 'background-image': `url("${escaped}")` } })
+      const { parts, sheets } = cssSvgPage([element])
+
+      expect(await endStateOf(parts)).toEqual(settledAnswer(true))
+      expect(markupOf(/url\("([^"]*)"\)/.exec(sheets[0]?.text ?? '')?.[1] ?? '')).toBe(
+        heldSpinnerSvg.replace('<svg', '<svg data-note="a\\b\u00e9"'),
+      )
+    })
+
+    it('in a recorded closed shadow root is held in a sheet that root adopts', async () => {
+      const element = fakeStyledElement({ '': { 'background-image': cssUrl(spinnerUrl) } })
+      const closed = fakeRoot({ styled: [element] })
+      const { parts, document, sheets } = cssSvgPage([])
+
+      expect(await endStateOf({ ...parts, shadowRoots: [closed] })).toEqual(settledAnswer(true))
+      expect(closed.adoptedStyleSheets).toEqual(sheets)
+      expect(document.adoptedStyleSheets).toEqual([])
+    })
+
+    it('is held once in a page, its element keeping its mark when another of its images is held later', async () => {
+      const element = fakeStyledElement({ '': { 'background-image': cssUrl(spinnerUrl) } })
+      const { parts, sheets } = cssSvgPage([element])
+      const page = openEndState(parts)
+      const first = page.bringToEndState(1000)
+
+      await vi.runAllTimersAsync()
+      expect(await first.answer).toEqual(settledAnswer(true))
+      // The adopted sheet now shows the held SVG, and the page adds another.
+      element.styles = { '': { 'background-image': cssUrl(heldSpinnerUrl), 'mask-image': cssUrl(spinnerFile) } }
+      const second = page.bringToEndState(1000)
+
+      await vi.runAllTimersAsync()
+      expect(await second.answer).toEqual(settledAnswer(true))
+      expect(sheets.map(({ text }) => text)).toEqual([
+        `@layer { [data-visual-check-frozen-svg="1"] { background-image: ${cssUrl(heldSpinnerUrl)} !important; } }`,
+        `@layer { [data-visual-check-frozen-svg="1"] { mask-image: ${cssUrl(heldSpinnerUrl)} !important; } }`,
+      ])
+      element.styles = { '': { 'background-image': cssUrl(heldSpinnerUrl), 'mask-image': cssUrl(heldSpinnerUrl) } }
+      const third = page.bringToEndState(1000)
+
+      await vi.runAllTimersAsync()
+      expect(await third.answer).toEqual(settledAnswer(false))
+      expect(sheets).toHaveLength(2)
+    })
+
+    it.each([
+      ['a static SVG', { 'background-image': cssUrl(`data:image/svg+xml,${encodeURIComponent(staticSvg)}`) }],
+      [
+        "an SVG that doesn't parse",
+        { 'background-image': cssUrl(`data:image/svg+xml,${encodeURIComponent(`oops${spinnerSvg}`)}`) },
+      ],
+      ['a PNG', { 'background-image': cssUrl('data:image/png;base64,iVBORw0KGgo=') }],
+      [
+        'an image whose path only names .svg in its query',
+        { 'background-image': cssUrl('http://localhost:6006/icon?name=.svg') },
+      ],
+      ['an SVG file the server answers 404 for', { 'background-image': cssUrl('http://localhost:6006/missing.svg') }],
+      ['a cross-origin SVG file without CORS', { 'background-image': cssUrl('https://cdn.example.com/spinner.svg') }],
+      [
+        'a list style image of an element that is no list item',
+        { display: 'block', 'list-style-image': cssUrl(spinnerUrl) },
+      ],
+      ['an image in a property not looked through', { cursor: `${cssUrl(spinnerUrl)}, auto` }],
+      ['no image', { 'background-image': 'none' }],
+    ])('leaves %s alone, changing nothing', async (_what, styles) => {
+      const element = fakeStyledElement({ '': styles })
+      const { parts, sheets } = cssSvgPage([element], {
+        'http://localhost:6006/missing.svg': { text: '', status: 404 },
+      })
+      const page = openEndState(parts)
+      const run = page.bringToEndState(1000)
+
+      await vi.runAllTimersAsync()
+      expect(await run.answer).toEqual(settledAnswer(false))
+      expect(sheets).toEqual([])
+      expect(element.attributes.size).toBe(0)
+      expect(page.frames.requestFrame).not.toHaveBeenCalled()
+    })
+
+    it.each(['none', 'normal', ''])(
+      "leaves alone a pseudo-element whose content is %j, as it isn't drawn",
+      async (content) => {
+        const element = fakeStyledElement({ '::before': { content, 'background-image': cssUrl(spinnerUrl) } })
+        const { parts, sheets } = cssSvgPage([element])
+
+        expect(await endStateOf(parts)).toEqual(settledAnswer(false))
+        expect(sheets).toEqual([])
+      },
+    )
+
+    it('are left alone in a page without fetch', async () => {
+      const element = fakeStyledElement({ '': { 'background-image': cssUrl(spinnerUrl) } })
+      const { parts, sheets } = cssSvgPage([element])
+
+      expect(await endStateOf({ globals: parts.globals, document: parts.document })).toEqual(settledAnswer(false))
+      expect(sheets).toEqual([])
+    })
+
+    it.each([
+      [
+        'its element takes no attribute',
+        (element: FakeStyledElement) => Object.assign(element, { setAttribute: fail }),
+      ],
+      [
+        "its root's sheets can't be set",
+        (_element: FakeStyledElement, document: FakeRoot) =>
+          Object.defineProperty(document, 'adoptedStyleSheets', { get: () => [], set: fail }),
+      ],
+      [
+        "its computed style can't be read",
+        (element: FakeStyledElement) =>
+          Object.defineProperty(element, 'styles', {
+            get: () => ({
+              '': {
+                get 'background-image'() {
+                  return fail()
+                },
+              },
+            }),
+          }),
+      ],
+    ])('is left as it was when %s', async (_what, breakIt) => {
+      const element = fakeStyledElement({ '': { 'background-image': cssUrl(spinnerUrl) } })
+      const { parts, document } = cssSvgPage([element])
+
+      breakIt(element, document)
+      expect(await endStateOf(parts)).toEqual(settledAnswer(false))
     })
   })
 

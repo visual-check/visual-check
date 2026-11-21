@@ -5,7 +5,7 @@ Storybook sleeps a fixed 100 ms per story before `storyRendered`, about half of 
 1. It calls `finish()` on every running finite animation, CSS or script, in the document and in every shadow root.
 2. It lets a frame pass, so end events run page logic.
 3. It repeats until two checks a frame apart find nothing finite running and no end events pending from a `finish()` call.
-4. It puts infinite animations on their first keyframe, and video, inline SVG animation and GIFs on their first frame.
+4. It puts infinite animations on their first keyframe, and video, SVG animation, inline or as a CSS image, and GIFs on their first frame.
 
 Three alternatives lost ([Animations frozen at their end state](https://github.com/visual-check/visual-check/issues/44)):
 

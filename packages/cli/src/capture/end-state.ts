@@ -11,9 +11,40 @@ const maxRounds = 20
 const taskFrameMs = 16
 
 /**
+ * The SMIL animation elements an SVG holds.
+ */
+const smilElements = 'animate, animateMotion, animateTransform, set'
+
+/**
+ * The CSS properties whose images the end state looks through for SVG with SMIL animation.
+ */
+const cssImageProperties = ['background-image', 'border-image-source', 'content', 'list-style-image', 'mask-image']
+
+/**
+ * The attribute that marks an element whose CSS images, or whose pseudo-elements' ones, the end state froze.
+ */
+const frozenSvgAttribute = 'data-visual-check-frozen-svg'
+
+/**
+ * How long a frozen SVG's animations last, about 31 years, so none moves on while the page is open.
+ */
+const heldDuration = '1000000000s'
+
+/**
+ * Matches a `url("…")` token as a computed value serializes it, giving its escaped URL.
+ */
+const cssUrlPattern = String.raw`/url\("((?:[^"\\]|\\[^])*)"\)/g`
+
+/**
+ * Matches an escape in a CSS string, giving its hex code point or the character it escapes.
+ */
+const cssEscapePattern = String.raw`/\\(?:([0-9a-fA-F]{1,6}) ?|([^]))/g`
+
+/**
  * The source of a function, evaluated in the page as part of the page script, that creates the end state. It takes
- * what the page script kept at document start: `shadowRoots`, the browser's own `setTimer`, `clearTimer` and
- * `requestFrame` (`undefined` in a page without `requestAnimationFrame`), and `parkedByStorybook`, the Storybook
+ * what the page script kept at document start: `shadowRoots`, the browser's own `setTimer`, `clearTimer`,
+ * `requestFrame` (`undefined` in a page without `requestAnimationFrame`) and `fetchResource` (`undefined` in a page
+ * without `fetch`), and `parkedByStorybook`, the Storybook
  * adapter's predicate for the animations Storybook 11 parked. It gives a function that takes a time limit in ms and
  * brings the page to its end state, in the document and in every shadow root: the recorded ones, and every open one
  * found by walking each root's elements, again at every check.
@@ -56,6 +87,21 @@ const taskFrameMs = 16
  *      CORS, as it taints the canvas. A GIF that isn't animated, such as a logo or a spacer, is replaced too and
  *      counts as a change, though it shows the same pixels: there's no cheap way to tell an animated GIF from a still
  *      one.
+ *    - It freezes every SVG with SMIL animation that an element, or its `::before` or `::after`, shows as a CSS
+ *      image: in `background-image`, `border-image-source`, `content`, `list-style-image` (drawn only by a list item)
+ *      or `mask-image`, by a `data:image/svg+xml` URL or a URL whose path ends in `.svg`. An SVG image runs a clock no
+ *      script reaches, so it fetches the SVG with the browser's own `fetch` and rewrites it, each URL once: every
+ *      `animate`, `animateMotion`, `animateTransform` and `set` element gets `calcMode="discrete"`, `set` aside, a
+ *      duration of about 31 years and no `end`, `repeatDur` or `max`, so it holds the value it starts with. The
+ *      rewritten SVG becomes a data URL, with the original's fragment, and once an image of it loaded, it's shown in
+ *      place of the original, in the computed value it was found in. A pseudo-element takes no inline style, so the
+ *      element gets a numbered `data-visual-check-frozen-svg` attribute and its root, the document or a shadow root,
+ *      adopts a sheet whose rules set the values `!important`, in a layer, so they win over the page's own unlayered
+ *      `!important` ones. It counts as a change once the sheet is adopted. An SVG without SMIL animation elements,
+ *      one that doesn't parse, and one whose fetch fails, such as a cross-origin one without CORS, are left as they
+ *      are. A later end state in the page leaves the SVGs it froze alone. An animation that begins later, such as at
+ *      `begin="1s"` or at another one's end, shows the page's value until it begins, so the SVG is at time 0 only
+ *      when every animation begins at 0. CSS animations inside the SVG are left too.
  * 5. When step 4 changed anything, lets a frame pass, so the events freezing media fired, such as a video's `pause`
  *    and `seeked` or a replaced GIF's `load`, run page logic: a custom player's controls fading in when its video
  *    pauses, say. Then it runs steps 1 to 3 once more, with 20 rounds of its own, the settling going on until two
@@ -70,13 +116,14 @@ const taskFrameMs = 16
  * tasks of 16 ms. Only animations on the document's timeline are touched: scroll-driven and view-driven ones, and
  * those with no timeline, are left alone, and so are those the page paused itself, Storybook 11's aside.
  *
- * Left to the project, through a mask or a `wait` hook: SVG in `<img>`, GIFs as CSS backgrounds or cross-origin
+ * Left to the project, through a mask or a `wait` hook: SVG in `<img>`, SVG with SMIL animation behind a URL whose
+ * path doesn't end in `.svg`, or as a CSS image of another property or pseudo-element, GIFs as CSS backgrounds or cross-origin
  * without CORS, APNG, animated WebP, canvas, Lottie and other script-driven motion, and a video that hasn't loaded
  * anything. An `<img>` inside `<picture>` keeps showing what its `<source>` picks.
  *
  * It answers `{ outcome: 'settled', changed }`, where `changed` says whether it changed anything that was moving: it
  * finished, parked or pinned an animation, paused a playing video or seeked a moving one, paused an SVG holding SMIL
- * animation elements, or replaced a GIF the image then shows. Waiting for end events pending from a `finish()` call
+ * animation elements, replaced a GIF the image then shows, or froze an SVG shown as a CSS image. Waiting for end events pending from a `finish()` call
  * counts too, as page logic ran on them: an exit may unmount, a mount may bring images. When the time limit passes
  * while it settles the animations, or, after media changed, during the frame that lets media events run or the
  * settling after it, it answers `{ outcome: 'timed-out', step: 'animations' }`. While it waits for media, or for the
@@ -84,7 +131,7 @@ const taskFrameMs = 16
  * after only animations changed, `step: 'animations'`. It never throws: every call into the page is guarded.
  */
 export const endStateFunction = `(context) => {
-  const { shadowRoots, setTimer, clearTimer, requestFrame, parkedByStorybook } = context
+  const { shadowRoots, setTimer, clearTimer, requestFrame, fetchResource, parkedByStorybook } = context
   const timedOut = Symbol('timed out')
 
   // Noting finish() calls: their end events are pending until two animation frames passed since the latest call.
@@ -135,7 +182,7 @@ export const endStateFunction = `(context) => {
 
   // Collecting the animations: every root, then every animation on the document's timeline in them, each once.
 
-  const { elementsOf, rootsOf } = (${pageRootsFunction})()
+  const { elementsOf, rootsOf, read } = (${pageRootsFunction})()
 
   const animationsIn = (root) => {
     try {
@@ -304,7 +351,7 @@ export const endStateFunction = `(context) => {
       svg.setCurrentTime(0)
     } catch {}
     try {
-      return svg.querySelector('animate, animateMotion, animateTransform, set') !== null
+      return svg.querySelector('${smilElements}') !== null
     } catch {
       return false
     }
@@ -394,13 +441,209 @@ export const endStateFunction = `(context) => {
     }
   }
 
-  // Freezes every video, inline SVG and GIF in an image in the roots.
+  // Freezing SVG with SMIL animation used as a CSS image. An SVG image runs its own clock, which no script reaches, so
+  // the SVG is rewritten with every animation held on the value it starts with, and shown in place of the original.
+
+  // The URLs the end state froze SVG into, so a later end state in the page doesn't freeze them again.
+  const frozenSvgUrls = new Set()
+  // How many elements the end state marked, to number the next one.
+  let markedElements = 0
+
+  // Reads a CSS string, as a computed value serializes it, undoing its escapes.
+  const unescapedCss = (text) =>
+    text.replace(${cssEscapePattern}, (_escape, hex, character) => {
+      if (hex === undefined) {
+        return character
+      }
+      const codePoint = Number.parseInt(hex, 16)
+      return codePoint > 0 && codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : '\\ufffd'
+    })
+
+  // The url("…") tokens of a computed value, each with its URL.
+  const urlsIn = (value) => {
+    try {
+      return Array.from(value.matchAll(${cssUrlPattern}), (match) => ({ token: match[0], url: unescapedCss(match[1]) }))
+    } catch {
+      return []
+    }
+  }
+
+  // Whether a URL is an SVG's: a data:image/svg+xml URL, or a URL whose path ends in .svg.
+  const isSvgUrl = (source) => {
+    try {
+      const url = new URL(source, document.baseURI)
+      return url.protocol === 'data:'
+        ? url.pathname.split(/[;,]/)[0].trim().toLowerCase() === 'image/svg+xml'
+        : url.pathname.toLowerCase().endsWith('.svg')
+    } catch {
+      return false
+    }
+  }
+
+  // Holds a SMIL animation element on the value it starts with: discrete, so it doesn't move towards the next value,
+  // over about 31 years, and with no end, repeat duration or maximum that would cut it short.
+  const holdAnimation = (animation) => {
+    if (animation.localName !== 'set') {
+      animation.setAttribute('calcMode', 'discrete')
+    }
+    animation.setAttribute('dur', '${heldDuration}')
+    for (const name of ['end', 'repeatDur', 'max']) {
+      animation.removeAttribute(name)
+    }
+  }
+
+  // Waits until an image of the URL loaded or failed, so the CSS image showing it is drawn at once.
+  const loaded = (source) =>
+    new Promise((resolve) => {
+      try {
+        const image = document.createElement('img')
+        image.addEventListener('load', () => resolve(), { once: true })
+        image.addEventListener('error', () => resolve(), { once: true })
+        image.src = source
+      } catch {
+        resolve()
+      }
+    })
+
+  // Fetches an SVG, with the browser's own fetch, and gives a data URL of it with every SMIL animation held, keeping
+  // its fragment, once that loaded. Gives undefined when it holds no SMIL animation or can't be fetched or parsed, such
+  // as a cross-origin one without CORS.
+  const frozenSvgOf = async (source) => {
+    try {
+      const url = new URL(source, document.baseURI)
+      const fragment = url.hash
+      url.hash = ''
+      const response = await fetchResource(url.href)
+      if (!response.ok) {
+        return undefined
+      }
+      const svg = new DOMParser().parseFromString(await response.text(), 'image/svg+xml')
+      const animations = Array.from(svg.querySelectorAll('${smilElements}'))
+      if (animations.length === 0 || svg.querySelector('parsererror') !== null) {
+        return undefined
+      }
+      animations.forEach(holdAnimation)
+      const frozen = 'data:image/svg+xml,' + encodeURIComponent(new XMLSerializer().serializeToString(svg)) + fragment
+      frozenSvgUrls.add(frozen)
+      await loaded(frozen)
+      return frozen
+    } catch {
+      return undefined
+    }
+  }
+
+  // The CSS images of an element, or of its pseudo-element, that show an SVG not frozen yet: each property, its
+  // computed value and its url("…") tokens of such SVGs. A pseudo-element without content isn't drawn, and the list
+  // style image, which is inherited, is drawn only by a list item.
+  const svgImagesOf = (element, pseudoElement) => {
+    let style
+    try {
+      style = getComputedStyle(element, pseudoElement)
+    } catch {
+      return []
+    }
+    const valueOf = (property) => read(() => style.getPropertyValue(property), '')
+    if (pseudoElement !== null && ['', 'none', 'normal'].includes(valueOf('content'))) {
+      return []
+    }
+    return ${JSON.stringify(cssImageProperties)}.flatMap((property) => {
+      if (property === 'list-style-image' && !valueOf('display').includes('list-item')) {
+        return []
+      }
+      const value = valueOf(property)
+      const urls = urlsIn(value).filter(({ url }) => isSvgUrl(url) && !frozenSvgUrls.has(url))
+      return urls.length === 0 ? [] : [{ property, value, urls }]
+    })
+  }
+
+  // The declaration that shows a CSS image's SVGs frozen, or undefined when none of them could be.
+  const frozenDeclarationOf = async ({ property, value, urls }, frozenSvgOnce) => {
+    let frozenValue = value
+    let frozenAny = false
+    for (const { token, url } of urls) {
+      const frozen = await frozenSvgOnce(url)
+      if (frozen !== undefined) {
+        frozenValue = frozenValue.replaceAll(token, () => 'url("' + frozen + '")')
+        frozenAny = true
+      }
+    }
+    return frozenAny ? property + ': ' + frozenValue + ' !important;' : undefined
+  }
+
+  // The selector of an element, marked with a number unless it already is, or of its pseudo-element.
+  const selectorOf = (element, pseudoElement) => {
+    let mark = read(() => element.getAttribute('${frozenSvgAttribute}'), null)
+    if (mark === null) {
+      markedElements += 1
+      mark = String(markedElements)
+      element.setAttribute('${frozenSvgAttribute}', mark)
+    }
+    return '[${frozenSvgAttribute}="' + mark + '"]' + (pseudoElement ?? '')
+  }
+
+  // Shows the SVGs with SMIL animation that a root's elements and their ::before and ::after show as CSS images
+  // frozen, through a sheet adopted by the root: a pseudo-element takes no inline style. Its rules are !important in a
+  // layer, so they win over the page's own, unlayered !important ones too. Gives whether it adopted one.
+  const freezeCssSvgsIn = async (root, frozenSvgOnce) => {
+    const rules = []
+    for (const element of elementsOf(root, '*')) {
+      for (const pseudoElement of [null, '::before', '::after']) {
+        const images = svgImagesOf(element, pseudoElement)
+        if (images.length > 0) {
+          rules.push({ element, pseudoElement, declarations: images.map((image) => frozenDeclarationOf(image, frozenSvgOnce)) })
+        }
+      }
+    }
+    const cssRules = []
+    for (const { element, pseudoElement, declarations } of rules) {
+      const frozen = (await Promise.all(declarations)).filter((declaration) => declaration !== undefined)
+      if (frozen.length > 0) {
+        try {
+          cssRules.push(selectorOf(element, pseudoElement) + ' { ' + frozen.join(' ') + ' }')
+        } catch {}
+      }
+    }
+    if (cssRules.length === 0) {
+      return false
+    }
+    try {
+      const sheet = new CSSStyleSheet()
+      sheet.replaceSync('@layer { ' + cssRules.join(' ') + ' }')
+      root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet]
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  // Freezes the SVGs with SMIL animation shown as CSS images in every root, fetching and rewriting each SVG once.
+  const freezeCssSvgs = async (roots) => {
+    if (typeof fetchResource !== 'function') {
+      return false
+    }
+    const frozenSvgs = new Map()
+    const frozenSvgOnce = (url) => {
+      if (!frozenSvgs.has(url)) {
+        frozenSvgs.set(url, frozenSvgOf(url))
+      }
+      return frozenSvgs.get(url)
+    }
+    try {
+      const adopted = await Promise.all(Array.from(roots, (root) => freezeCssSvgsIn(root, frozenSvgOnce)))
+      return adopted.includes(true)
+    } catch {
+      return false
+    }
+  }
+
+  // Freezes every video, inline SVG, GIF in an image and SVG with SMIL animation as a CSS image in the roots.
   const freezeMedia = (roots) => {
     const elements = (selector) => Array.from(roots).flatMap((root) => elementsOf(root, selector))
     return [
       ...elements('video').map(freezeVideo),
       ...elements('svg').map(freezeSvg),
       ...elements('img').map(freezeGif),
+      freezeCssSvgs(roots),
     ]
   }
 
@@ -540,9 +783,9 @@ export type EndState =
        */
       outcome: 'settled'
       /**
-       * Whether it changed anything that was moving: an animation, a video, an SVG's SMIL animation or a GIF. Waiting
-       * for the end events of animations the page finished counts too, as page logic ran on them. Images that came
-       * into view then may need loading; a replaced GIF is already decoded.
+       * Whether it changed anything that was moving: an animation, a video, an SVG's SMIL animation, inline or as a CSS
+       * image, or a GIF. Waiting for the end events of animations the page finished counts too, as page logic ran on
+       * them. Images that came into view then may need loading; a replaced GIF and a frozen SVG are already loaded.
        */
       changed: boolean
     }

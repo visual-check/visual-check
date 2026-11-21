@@ -1,5 +1,6 @@
 import { vi } from 'vitest'
 import { animationClasses, type FakeAnimation } from '../storybook/preview-script.fixture.js'
+import type { FakeStyledElement } from './css-svg.fixture.js'
 import { type FakeImageFile, type FakeMedia, fakeCreateElement } from './media.fixture.js'
 
 /**
@@ -18,6 +19,10 @@ interface FakeRootParts {
    * The videos, inline SVGs and images in the root.
    */
   media?: FakeMedia[]
+  /**
+   * The elements with computed styles in the root.
+   */
+  styled?: FakeStyledElement[]
 }
 
 /**
@@ -38,6 +43,10 @@ export interface FakeRoot {
    * The animations in the root, cancelled ones included. A test can add some as the page would.
    */
   readonly animations: FakeAnimation[]
+  /**
+   * The sheets the root adopted.
+   */
+  adoptedStyleSheets: object[]
 }
 
 /**
@@ -51,14 +60,21 @@ export interface FakeDocument extends FakeRoot {
 }
 
 /**
- * Builds a fake shadow root holding these animations, open shadow roots and media. It lists its animations, leaving
- * out cancelled ones as the browser does. For `*`, it lists its elements: one hosting each open shadow root, one
- * hosting none, and its media. For a tag name, it lists its media of that name.
+ * Builds a fake shadow root holding these animations, open shadow roots, media and elements with computed styles,
+ * adopting no sheet. It lists its animations, leaving out cancelled ones as the browser does. For `*`, it lists its
+ * elements: one hosting each open shadow root, one hosting none, its media and its elements with computed styles. For
+ * a tag name, it lists its media of that name.
  */
-export function fakeRoot({ animations = [], openShadowRoots = [], media = [] }: FakeRootParts = {}): FakeRoot {
-  const elements = [...openShadowRoots.map((shadowRoot) => ({ shadowRoot })), { shadowRoot: null }, ...media]
+export function fakeRoot({
+  animations = [],
+  openShadowRoots = [],
+  media = [],
+  styled = [],
+}: FakeRootParts = {}): FakeRoot {
+  const elements = [...openShadowRoots.map((shadowRoot) => ({ shadowRoot })), { shadowRoot: null }, ...media, ...styled]
   const root = {
     animations,
+    adoptedStyleSheets: [],
     getAnimations: () => animations.filter((animation) => animation.playState !== 'idle'),
     querySelectorAll: (selector: string) =>
       selector === '*' ? elements : media.filter((element) => element.localName === selector),
