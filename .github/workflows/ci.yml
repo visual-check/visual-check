@@ -532,3 +532,12 @@ jobs:
   pack:
     name: Pack
     uses: ./.github/workflows/pack.yml
+
+  # The test apps (docs/prd/17-test-apps.md) on this commit's packed packages, through test-apps' reusable workflow. It
+  # runs test-apps' main, so a change there shows up here before release day.
+  test-apps:
+    name: Test apps
+    needs: pack
+    uses: visual-check/test-apps/.github/workflows/test-apps.yml@main
+    with:
+      artifact: visual-check-packages
