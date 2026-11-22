@@ -128,7 +128,7 @@ export function rowOf(snapshot: AddonSnapshot): SnapshotRow {
 }
 
 /**
- * Gives the row whose image shows: the picked one, else the first that isn't passed, else the first. One picked in an
+ * Gives the row whose images show: the picked one, else the first that isn't passed, else the first. One picked in an
  * earlier result counts only while it isn't passed, so a check that mends it goes on to what is left.
  */
 export function selectedRowOf(rows: SnapshotRow[], resultId: string, picked?: PickedRow): SnapshotRow | undefined {

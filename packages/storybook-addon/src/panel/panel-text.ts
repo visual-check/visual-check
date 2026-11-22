@@ -45,6 +45,46 @@ export function statusLineOf(run: StoryRun | null, storyId: string | null, resul
 }
 
 /**
+ * What the line beside the buttons is about, and whether it says the latest run was cancelled.
+ */
+export interface StatusSubject {
+  /**
+   * The run in flight, or `null`.
+   */
+  run: StoryRun | null
+  /**
+   * The current story's ID, or `null` when there is none.
+   */
+  storyId: string | null
+  /**
+   * The current story's latest result, or `undefined` when it has none.
+   */
+  result: StoryResult | undefined
+  /**
+   * Whether the story's latest run was cancelled, with nothing changed since.
+   */
+  cancelled: boolean
+}
+
+/**
+ * Whether the story's latest run was cancelled, with nothing changed since, by what the line was about last. A run that
+ * was being cancelled but completed left a result of its own.
+ */
+export function isCancelled(last: StatusSubject, next: Omit<StatusSubject, 'cancelled'>): boolean {
+  const changed =
+    next.run !== null ||
+    last.storyId !== next.storyId ||
+    last.result?.id !== next.result?.id ||
+    last.result?.stale !== next.result?.stale
+
+  if (changed) {
+    return false
+  }
+
+  return last.run === null ? last.cancelled : last.run.cancelling && last.run.storyId === next.storyId
+}
+
+/**
  * Gives the text of a run's log, without the empty line that says the line before it is complete.
  */
 export function logTextOf(log: readonly string[]): string {

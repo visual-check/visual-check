@@ -11,7 +11,9 @@ function statusColoursOf({ base, color }: StorybookTheme): { positive: string; n
 
 /**
  * Gives the panel's CSS. It reads only what the theme of every Storybook 10 has. The list's style is an empty string,
- * since Safari takes a list without a style for no list.
+ * since Safari takes a list without a style for no list. The layers of the slider are opaque, so the snapshot's never
+ * shows the baseline, hatched where the other image is larger, and plain below an image that is faded. Forced colours
+ * leave out box shadows and gradients, so there a thicker border marks what is pressed.
  */
 export function panelCssOf(theme: StorybookTheme): string {
   const { appBorderColor, appBorderRadius, background, barSelectedColor, color, textMutedColor, typography } = theme
@@ -25,7 +27,7 @@ export function panelCssOf(theme: StorybookTheme): string {
   line-height: 1.5;
 }
 :where([data-visual-check="panel"]) * { box-sizing: border-box; }
-:where([data-visual-check="panel"]) :is(p, pre, ul) { margin: 0; padding: 0; }
+:where([data-visual-check="panel"]) :is(p, pre, ul, figure, fieldset) { margin: 0; padding: 0; }
 :where([data-visual-check="panel"]) :is(code, pre) {
   font-family: ${typography.fonts.mono};
   font-size: ${typography.size.s1}px;
@@ -104,15 +106,58 @@ export function panelCssOf(theme: StorybookTheme): string {
   overflow-wrap: anywhere;
 }
 [data-visual-check="details"] { color: ${textMutedColor}; }
-[data-visual-check="image"] {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 100%;
-  height: auto;
-  border: 1px solid ${appBorderColor};
+[data-visual-check="viewer"] { flex: 0 1 auto; min-width: 0; max-width: 100%; }
+[data-visual-check="views"] { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; border: 0; }
+:is([data-visual-check="view-slider"], [data-visual-check="view-diff"]) { padding: 2px 10px; background: transparent; }
+:is([data-visual-check="view-slider"], [data-visual-check="view-diff"]):is(:hover, [aria-pressed="true"]) {
+  background: ${background.content};
 }
+:is([data-visual-check="view-slider"], [data-visual-check="view-diff"])[aria-pressed="true"] {
+  border-color: ${barSelectedColor};
+  box-shadow: inset 0 -3px ${barSelectedColor};
+}
+[data-visual-check="caption"] {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0 16px;
+  margin-bottom: 4px;
+  color: ${textMutedColor};
+}
+[data-visual-check="viewer"] img { display: block; max-width: 100%; height: auto; }
+:is([data-visual-check="viewer"] img, [data-visual-check="stage"]) { outline: 1px solid ${appBorderColor}; }
+[data-visual-check="stage"] { position: relative; max-width: 100%; }
+[data-visual-check="stage"] > * { position: absolute; inset: 0; }
+[data-visual-check^="layer-"] {
+  background: repeating-linear-gradient(45deg, ${appBorderColor} 0 1px, transparent 1px 6px) ${background.app};
+}
+[data-visual-check="stage"] > [data-visual-check="divider"] {
+  right: auto;
+  border-left: 2px solid #fff;
+  box-shadow: 0 0 0 1px #000;
+  transform: translateX(-50%);
+}
+[data-visual-check="slider"] {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  appearance: none;
+  background: transparent;
+  cursor: ew-resize;
+}
+[data-visual-check="slider"]:focus-visible { outline: 2px solid ${barSelectedColor}; outline-offset: 1px; }
+[data-visual-check="slider"]::-webkit-slider-runnable-track { height: 100%; background: transparent; }
+[data-visual-check="slider"]::-webkit-slider-thumb { width: 1px; height: 100%; appearance: none; background: transparent; }
+[data-visual-check="slider"]::-moz-range-track { height: 100%; background: transparent; }
+[data-visual-check="slider"]::-moz-range-thumb { width: 1px; height: 100%; border: 0; background: transparent; }
 [data-dimmed] { color: ${textMutedColor}; }
 [data-dimmed] :is([data-visual-check="status"], [data-visual-check="flaky"]) { color: inherit; }
-[data-dimmed] [data-visual-check="image"] { opacity: 0.55; }
+[data-dimmed] [data-visual-check^="image-"] { opacity: 0.55; }
+[data-dimmed] [data-visual-check^="layer-"] { background: ${background.app}; }
+@media (forced-colors: active) {
+  :is([data-visual-check="row"], [data-visual-check="view-slider"], [data-visual-check="view-diff"])[aria-pressed="true"] {
+    border: 3px solid Highlight;
+  }
+}
 `
 }

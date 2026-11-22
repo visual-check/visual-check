@@ -1,7 +1,7 @@
-import React, { type ReactNode, type RefObject, useLayoutEffect, useRef } from 'react'
+import React, { type ReactNode, type RefObject, useLayoutEffect, useRef, useState } from 'react'
 import type { StoryResult, StoryRun } from '../channel-events/events.js'
 import type { ManagerState } from '../manager-state/manager-state.js'
-import { logTextOf, statusLineOf } from './panel-text.js'
+import { isCancelled, logTextOf, type StatusSubject, statusLineOf } from './panel-text.js'
 
 /**
  * What the toolbar takes.
@@ -96,6 +96,11 @@ function CancelButton({ run, checkButton, actions }: CancelButtonProps): ReactNo
  */
 export function Toolbar({ storyId, run, result, actions }: ToolbarProps): ReactNode {
   const checkButton = useRef<HTMLButtonElement>(null)
+  const [last, setLast] = useState<StatusSubject>({ run, storyId, result, cancelled: false })
+
+  if (last.run !== run || last.storyId !== storyId || last.result !== result) {
+    setLast({ run, storyId, result, cancelled: isCancelled(last, { run, storyId, result }) })
+  }
 
   return (
     <>
@@ -111,7 +116,7 @@ export function Toolbar({ storyId, run, result, actions }: ToolbarProps): ReactN
         </button>
         {run !== null && <CancelButton run={run} checkButton={checkButton} actions={actions} />}
         <p role="status" data-visual-check="run">
-          {statusLineOf(run, storyId, result)}
+          {last.cancelled ? 'Cancelled' : statusLineOf(run, storyId, result)}
         </p>
       </div>
       {run?.step === 'browser' && <pre data-visual-check="log">{logTextOf(run.log)}</pre>}

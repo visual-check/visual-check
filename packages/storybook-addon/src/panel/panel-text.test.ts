@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { StoryRun } from '../channel-events/events.js'
 import { checkedWith, runWith, snapshotWith, stateWith, stoppedWith } from '../channel-events/state.fixture.js'
-import { logTextOf, otherStoryLineOf, runLineOf, statusLineOf } from './panel-text.js'
+import { isCancelled, logTextOf, otherStoryLineOf, runLineOf, type StatusSubject, statusLineOf } from './panel-text.js'
 
 describe('runLineOf', () => {
   it.each<[line: string, fields: Partial<StoryRun>]>([
@@ -53,6 +53,35 @@ describe('statusLineOf', () => {
 
   it('is empty without either', () => {
     expect(statusLineOf(null, story, undefined)).toBe('')
+  })
+})
+
+describe('isCancelled', () => {
+  const storyId = 'card--default'
+  const result = stateWith(checkedWith([snapshotWith()])).results[storyId]
+  const cancelling = runWith({ cancelling: true })
+  const during: StatusSubject = { run: cancelling, storyId, result, cancelled: false }
+  const after: StatusSubject = { run: null, storyId, result, cancelled: true }
+
+  it.each<[name: string, last: StatusSubject]>([
+    ['once a run that was being cancelled is over', during],
+    ['with nothing changed since', after],
+  ])('is so %s', (_name, last) => {
+    expect(isCancelled(last, { run: null, storyId, result })).toBe(true)
+    expect(isCancelled({ ...last, result: undefined }, { run: null, storyId, result: undefined })).toBe(true)
+  })
+
+  it.each<[name: string, last: StatusSubject, next: Partial<StatusSubject>]>([
+    ['while it is being cancelled', during, { run: cancelling }],
+    ['when the run completed after all', during, { result: result && { ...result, id: 'click-2' } }],
+    ['when nobody cancelled the run', { ...during, run: runWith() }, {}],
+    ["when it was another story's run", { ...during, run: runWith({ storyId: 'a--b', cancelling: true }) }, {}],
+    ['when another story is selected', after, { storyId: 'a--b' }],
+    ['when the next run starts', after, { run: runWith() }],
+    ['when the result gets stale', after, { result: result && { ...result, stale: true } }],
+    ['when the results are cleared', after, { result: undefined }],
+  ])('is not so %s', (_name, last, next) => {
+    expect(isCancelled(last, { run: null, storyId, result, ...next })).toBe(false)
   })
 })
 

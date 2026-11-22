@@ -9,6 +9,12 @@ describe('panelCssOf', () => {
     expect(css).not.toMatch(/undefined|NaN|\[object/)
   })
 
+  it('fades nothing but the images of a dimmed result', () => {
+    const css = panelCssOf(convert(themes.light))
+
+    expect(css.match(/^.*opacity.*$/gm)).toEqual(['[data-dimmed] [data-visual-check^="image-"] { opacity: 0.55; }'])
+  })
+
   it("draws the statuses in colours that stand out from the theme's background", () => {
     const { color } = convert(themes.light)
 

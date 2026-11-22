@@ -1,8 +1,8 @@
 import React, { type ReactNode, useState } from 'react'
 import { type StorybookTheme, useTheme } from 'storybook/theming'
 import type { StoryOutcome, StoryResult, VisualCheckState } from '../channel-events/events.js'
-import { imageUrlOf } from '../channel-events/image-url.js'
 import type { ManagerState } from '../manager-state/manager-state.js'
+import { ImageViewer } from './image-viewer.js'
 import { panelCssOf } from './panel-css.js'
 import { type PickedRow, rowOf, type SnapshotRow, selectedRowOf } from './snapshot-row.js'
 import { Toolbar } from './toolbar.js'
@@ -90,31 +90,13 @@ interface RowItemProps {
    */
   row: SnapshotRow
   /**
-   * Whether the panel shows this row's image.
+   * Whether the panel shows this row's images.
    */
   isSelected: boolean
   /**
-   * Shows this row's image.
+   * Shows this row's images.
    */
   select: () => void
-}
-
-/**
- * What `SnapshotImage` takes.
- */
-interface SnapshotImageProps {
-  /**
-   * The story.
-   */
-  story: PanelStory
-  /**
-   * The ID of the result the row is of.
-   */
-  resultId: string
-  /**
-   * The row.
-   */
-  row: SnapshotRow
 }
 
 /**
@@ -166,24 +148,7 @@ function RowItem({ row, isSelected, select }: RowItemProps): ReactNode {
 }
 
 /**
- * The snapshot of a row, when it has one.
- */
-function SnapshotImage({ story, resultId, row: { label, images } }: SnapshotImageProps): ReactNode {
-  if (images.snapshot === null) {
-    return null
-  }
-
-  return (
-    <img
-      data-visual-check="image"
-      src={imageUrlOf(resultId, images.snapshot)}
-      alt={`${story.name}, ${label}: snapshot`}
-    />
-  )
-}
-
-/**
- * The rows of a check that finished, and the image of the selected one.
+ * The rows of a check that finished, and the images of the selected one.
  */
 function Rows({ story, result, rows }: RowsProps): ReactNode {
   const [picked, setPicked] = useState<PickedRow>()
@@ -201,7 +166,7 @@ function Rows({ story, result, rows }: RowsProps): ReactNode {
           />
         ))}
       </ul>
-      {selected && <SnapshotImage story={story} resultId={result.id} row={selected} />}
+      {selected && <ImageViewer key={selected.key} storyName={story.name} resultId={result.id} row={selected} />}
     </div>
   )
 }

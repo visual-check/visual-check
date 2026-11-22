@@ -94,12 +94,20 @@ describe('PanelView', () => {
     ])
     expect(markup).toContain('<ul data-visual-check="rows">')
     expect(markup.match(/<img[^>]*>/g)).toEqual([
-      '<img data-visual-check="image" src="__visual-check/images/click-1/snapshots/web/a.mobile.snapshot.png"' +
+      '<img data-visual-check="image-snapshot" src="__visual-check/images/click-1/snapshots/web/a.mobile.snapshot.png"' +
         ' alt="Card / Default, mobile: snapshot"/>',
     ])
     expect(tagOf(markup, 'check')).toContain('aria-disabled="false"')
     expect(partsOf(markup, 'cancel')).toEqual([])
     expect(textsOf(markup, 'run')).toEqual(['1 visual diff, 1 missing baseline'])
+  })
+
+  it('shows the images of a visual diff under the slider', () => {
+    const markup = renderChecked([passed, differs])
+
+    expect(markup).toContain('src="__visual-check/images/click-1/snapshots/web/a.dark.baseline.png"')
+    expect(markup).toContain('src="__visual-check/images/click-1/snapshots/web/a.dark.snapshot.png"')
+    expect(markup).toContain('data-visual-check="slider"')
   })
 
   it('selects the first row when every one passed, with no image when it has none', () => {
