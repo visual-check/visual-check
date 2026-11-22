@@ -56,6 +56,9 @@
       { "name": "storybook-addon/channel-events", "patterns": ["packages/storybook-addon/src/channel-events/**"] },
       { "name": "storybook-addon/check-relay", "patterns": ["packages/storybook-addon/src/check-relay/**"] },
       { "name": "storybook-addon/engine-process", "patterns": ["packages/storybook-addon/src/engine-process/**"] },
+      { "name": "storybook-addon/manager-state", "patterns": ["packages/storybook-addon/src/manager-state/**"] },
+      { "name": "storybook-addon/panel", "patterns": ["packages/storybook-addon/src/panel/**"] },
+      { "name": "storybook-addon/sidebar", "patterns": ["packages/storybook-addon/src/sidebar/**"] },
       { "name": "repo-checks/workspace", "patterns": ["packages/repo-checks/src/workspace/**"] },
       { "name": "repo-checks/lockstep", "patterns": ["packages/repo-checks/src/lockstep/**"] },
       { "name": "repo-checks/chromium-checksums", "patterns": ["packages/repo-checks/src/chromium-checksums/**"] },
@@ -120,6 +123,15 @@
         "allow": ["cli/addon-child", "storybook-addon/channel-events", "storybook-addon/engine-process"]
       },
       { "from": "storybook-addon/engine-process", "allow": ["cli/addon-child"] },
+      { "from": "storybook-addon/manager-state", "allow": ["storybook-addon/channel-events"] },
+      {
+        "from": "storybook-addon/panel",
+        "allow": ["cli/addon-child", "storybook-addon/channel-events", "storybook-addon/manager-state"]
+      },
+      {
+        "from": "storybook-addon/sidebar",
+        "allow": ["storybook-addon/channel-events", "storybook-addon/manager-state"]
+      },
       { "from": "repo-checks/workspace", "allow": [] },
       { "from": "repo-checks/lockstep", "allow": ["repo-checks/workspace"] },
       { "from": "repo-checks/chromium-checksums", "allow": ["repo-checks/workspace"] },
