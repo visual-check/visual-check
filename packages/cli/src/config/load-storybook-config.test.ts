@@ -196,6 +196,92 @@ describe('loadStorybookConfig and the config file', () => {
   })
 })
 
+describe('loadStorybookConfig and the baselines folder', () => {
+  /**
+   * Gives a config of one Storybook in `apps/web` with those baselines, relative to it.
+   */
+  const configWith = (baselines: string): Record<string, string> => ({
+    'visual-check.config.ts': `export default { storybooks: {
+  web: { url: 'http://127.0.0.1:6006', dir: 'apps/web', baselines: '${baselines}' },
+} }\n`,
+  })
+
+  it.each([
+    ['.visual-check/snapshots', ''],
+    ['.visual-check/diffs', ''],
+    ['.visual-check/snapshots/web', 'inside apps/web/.visual-check/snapshots, '],
+    ['.visual-check/diffs/a/b', 'inside apps/web/.visual-check/diffs, '],
+    ['.visual-check/snapshots/..hidden', 'inside apps/web/.visual-check/snapshots, '],
+  ])('fails on baselines in %s, whether or not the folder is there', async (baselines, inside) => {
+    const root = createProject(configWith(baselines))
+    const message =
+      `storybooks.web.baselines is apps/web/${baselines}, ${inside}` +
+      'where the Storybook addon writes its own images. Set another folder.'
+    const error = await configErrorOf(load(root, 'apps/web/.storybook'))
+
+    expect(error.message).toBe(message)
+    expect(error.configPath).toBe(join(root, 'visual-check.config.ts'))
+
+    mkdirSync(join(root, 'apps/web', baselines), { recursive: true })
+    expect((await configErrorOf(load(root, 'apps/web/.storybook'))).message).toBe(message)
+  })
+
+  it.each(['linked', 'linked/web'])('fails on baselines in %s, a link to snapshots', async (baselines) => {
+    const root = createProject({ ...configWith(baselines), 'apps/web/.visual-check/snapshots/a.png': '' })
+
+    symlinkSync(join(root, 'apps/web/.visual-check/snapshots'), join(root, 'apps/web/linked'), 'dir')
+    expect((await configErrorOf(load(root, 'apps/web/.storybook'))).message).toBe(
+      `storybooks.web.baselines is apps/web/${baselines}, inside apps/web/.visual-check/snapshots, ` +
+        'where the Storybook addon writes its own images. Set another folder.',
+    )
+  })
+
+  it('fails on baselines that snapshots links to', async () => {
+    const root = createProject({ ...configWith('baselines'), 'apps/web/baselines/a.png': '' })
+
+    mkdirSync(join(root, 'apps/web/.visual-check'))
+    symlinkSync(join(root, 'apps/web/baselines'), join(root, 'apps/web/.visual-check/snapshots'), 'dir')
+    await configErrorOf(load(root, 'apps/web/.storybook'))
+  })
+
+  it('fails on baselines not there yet, under a link to the Storybook’s folder', async () => {
+    const root = createProject({ ...configWith('../link/.visual-check/snapshots/web'), 'apps/web/package.json': '{}' })
+
+    symlinkSync(join(root, 'apps/web'), join(root, 'apps/link'), 'dir')
+    await configErrorOf(load(root, 'apps/web/.storybook'))
+  })
+
+  it.runIf(existsSync(import.meta.filename.toUpperCase()))(
+    'fails on baselines in snapshots in another letter case, where that is the same folder',
+    async () => {
+      const root = createProject({
+        ...configWith('.visual-check/Snapshots/web'),
+        'apps/web/.visual-check/Snapshots/web/a.png': '',
+      })
+
+      await configErrorOf(load(root, 'apps/web/.storybook'))
+    },
+  )
+
+  it.each([
+    '.visual-check/baselines',
+    '.visual-check/snapshots-old',
+    '.visual-check',
+    '../.visual-check/snapshots',
+    'snapshots',
+  ])('takes baselines in %s', async (baselines) => {
+    const root = createProject(configWith(baselines))
+
+    expect((await load(root, 'apps/web/.storybook')).storybook.baselines).toBe(join(root, 'apps/web', baselines))
+  })
+
+  it('leaves the CLI’s own load alone', async () => {
+    const root = createProject(configWith('.visual-check/snapshots'))
+
+    expect((await loadConfig({ cwd: root, ci: false })).storybooks).toHaveLength(1)
+  })
+})
+
 describe('loadStorybookConfig failures', () => {
   it.each([
     ['throws', "throw new Error('No Storybook here')\n"],

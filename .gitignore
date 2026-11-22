@@ -9,6 +9,8 @@ node_modules
 lefthook-local.yml
 
 **/.visual-check/report/
+**/.visual-check/snapshots/
+**/.visual-check/diffs/
 
 # Storybook writes it into a package folder when a start fails.
 debug-storybook.log

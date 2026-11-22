@@ -13,7 +13,7 @@ Review covers the rest.
 ## Entries and modules
 
 - `src/` holds **entries** and **modules**. _Enforced: Fallow fails on a file outside every module._
-- An **entry** is a file package.json names: `bin`, `exports` or a script. It reads arguments and environment, hands them to modules, writes what they return and sets the exit code. The logic, parsing included, lives in modules. List each entry by name in `.fallowrc.json` › `boundaries.coverage.allowUnmatched`, the list of files allowed outside a module. Tool config files that fall under coverage go there by name too.
+- An **entry** is a file package.json names: `bin`, `exports` or a script. It reads arguments and environment, hands them to modules, writes what they return and sets the exit code. The logic, parsing included, lives in modules. List each entry by name in `.fallowrc.json` › `boundaries.coverage.allowUnmatched`, the list of files allowed outside a module. Tool config files that fall under coverage go there by name too. A types-only `exports` subpath for another of our packages may name a module's file, as `@visual-check/cli/internal/addon-protocol` does, so its `@public` tags hold there.
 - A file a package ships as it is, outside `src/`, such as the agent skill's runner script `packages/cli/skill/scripts/run.mjs`, is plain JavaScript that imports only Node's built-in modules. It is typed with JSDoc that `tsc` checks, through `allowJs` and `checkJs` in the package's `tsconfig.json`. List it in `allowUnmatched` like an entry. Its tests live in `<package>/test/` and import the functions it tags `@public`.
 - A **module** is a kebab-case folder. Name a domain module with its [GLOSSARY.md](../../GLOSSARY.md) term. When the domain concept has no term yet, add it to the glossary in the same change. Name a module with no domain concept for what it does: `commands/`, `config/`, `child-process/`, or in `repo-checks` the check it runs. _Enforced (the source-layout check): `utils`, `util`, `helpers`, `helper`, `common`, `shared`, `lib`, `types`, `services`, `models` and `misc` are never folder names._
 - Keep modules **deep**: a few `@public` exports with a lot behind them. Merge modules that always change together. A helper lives in the module that uses it.
@@ -62,7 +62,9 @@ A guide, not a commitment: each ticket names its modules from the glossary.
 packages/cli/src/
   bin.ts                entry
   index.ts              entry: the public config API
-  commands/             init, test, update
+  addon-child.ts        entry: the child process the Storybook addon forks
+  commands/             init, test, update, and the Storybook addon's check of one story
+  addon-child/          the addon's child process: its messages, one check at a time, and its images' files
   init/                 what init detects, asks, writes and installs; adapter: git ls-files and Fallow's check
   agent-skill/          writes and refreshes the agent skill's files (SKILL.md, the runner script, setup.json) from packages/cli/skill/
   terminal-ui/          adapter: Ink and React: init's questions, steps and summary, and the live reporter

@@ -34,6 +34,7 @@
       { "name": "cli/capture", "patterns": ["packages/cli/src/capture/**"] },
       { "name": "cli/container", "patterns": ["packages/cli/src/container/**"] },
       { "name": "cli/browser-process", "patterns": ["packages/cli/src/browser-process/**"] },
+      { "name": "cli/addon-child", "patterns": ["packages/cli/src/addon-child/**"] },
       { "name": "cli/affected-stories", "patterns": ["packages/cli/src/affected-stories/**"] },
       { "name": "cli/agent-skill", "patterns": ["packages/cli/src/agent-skill/**"] },
       { "name": "cli/baselines", "patterns": ["packages/cli/src/baselines/**"] },
@@ -64,6 +65,7 @@
       { "from": "cli/capture", "allow": ["cli/capture/driver", "cli/storybook"] },
       { "from": "cli/container", "allow": ["cli/capture/driver"] },
       { "from": "cli/browser-process", "allow": ["cli/capture/driver"] },
+      { "from": "cli/addon-child", "allow": ["cli/commands", "cli/config", "cli/report"] },
       { "from": "cli/affected-stories", "allow": ["cli/baselines"] },
       { "from": "cli/agent-skill", "allow": ["cli/system-error"] },
       { "from": "cli/baselines", "allow": ["cli/system-error"] },
@@ -118,6 +120,7 @@
     "coverage": {
       "requireAllFiles": true,
       "allowUnmatched": [
+        "packages/cli/src/addon-child.ts",
         "packages/cli/src/bin.ts",
         "packages/cli/src/index.ts",
         "packages/storybook/src/index.ts",

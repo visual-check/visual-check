@@ -1,4 +1,6 @@
 import { realpathSync } from 'node:fs'
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
+import { addonImageFolders } from './addon-image-folders.js'
 import { ConfigError } from './config-error.js'
 import type { Config, StorybookSettings } from './define-config.js'
 import { displayPathOf, namingConfig, searchConfig } from './load-config.js'
@@ -61,14 +63,49 @@ export interface StorybookConfig {
 }
 
 /**
- * Returns the real path of a folder, in the letter case it has on disk, or the path itself when it can't be read.
+ * Returns the real path of a folder, in the letter case it has on disk. The part of it that can't be read stays as it
+ * is.
  */
 function realPathOf(path: string): string {
   try {
     return realpathSync.native(path)
   } catch {
-    return path
+    const parent = dirname(path)
+
+    return parent === path ? path : join(realPathOf(parent), basename(path))
   }
+}
+
+/**
+ * Whether a path is the folder's or lies under it.
+ */
+function isWithin(path: string, folder: string): boolean {
+  const fromFolder = relative(folder, path)
+
+  return fromFolder !== '..' && !fromFolder.startsWith(`..${sep}`) && !isAbsolute(fromFolder)
+}
+
+/**
+ * Checks that a Storybook's baselines aren't where the addon writes its images, which it also removes.
+ *
+ * @throws {ConfigError} When they are.
+ */
+function checkBaselinesFolder({ name, dir, baselines }: ResolvedStorybook, cwd: string): void {
+  const realBaselines = realPathOf(baselines)
+  const folder = addonImageFolders
+    .map((imageFolder) => join(dir, '.visual-check', imageFolder))
+    .find((path) => isWithin(realBaselines, realPathOf(path)))
+
+  if (folder === undefined) {
+    return
+  }
+
+  const inside = baselines === folder ? '' : `inside ${displayPathOf(folder, cwd)}, `
+
+  throw new ConfigError(
+    `storybooks.${name}.baselines is ${displayPathOf(baselines, cwd)}, ${inside}` +
+      'where the Storybook addon writes its own images. Set another folder.',
+  )
 }
 
 /**
@@ -103,8 +140,8 @@ function findStorybook(
  * it for that Storybook alone, at the address it's served at.
  *
  * @throws {ConfigError} When no config is found, when the config can't be loaded, when it's invalid or can't be used,
- * and when it lists no Storybook with that config folder. Once the config is found, the error names its path as
- * `configPath`.
+ * when it lists no Storybook with that config folder, and when that Storybook's baselines are where the addon writes its
+ * images. Once the config is found, the error names its path as `configPath`.
  * @throws {unknown} The signal's reason, when it aborts first.
  *
  * @public
@@ -119,6 +156,8 @@ export async function loadStorybookConfig(options: StorybookConfigOptions): Prom
     const resolved = resolveConfig(config, { path, cwd, ci, storybook: name, url })
     // `resolveConfig` gives the one Storybook it's narrowed to.
     const [storybook] = resolved.storybooks as [ResolvedStorybook]
+
+    checkBaselinesFolder(storybook, cwd)
 
     return { config: resolved, storybook, configUrl: urlSideOf(settings, ci) }
   })

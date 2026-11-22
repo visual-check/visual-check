@@ -18,6 +18,11 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./internal/addon-child": "./dist/addon-child.js",
+    "./internal/addon-protocol": {
+      "types": "./dist/addon-child/protocol.d.ts",
+      "default": "./dist/addon-child/protocol.js"
     }
   },
   "scripts": {
