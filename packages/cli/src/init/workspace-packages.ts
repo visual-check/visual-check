@@ -2,7 +2,7 @@ import { join, posix } from 'node:path'
 import { isFile } from '../config/find-config.js'
 import { isAbsoluteFolder } from './find-storybooks.js'
 import { isJsonObject, lockfileNames, type Manifest, scriptsOf } from './package-manager.js'
-import { configDirOf, type StorybookCall, storybookCallsOf } from './storybook-scripts.js'
+import { callConfigDir, type StorybookCall, storybookCallsOf } from './storybook-scripts.js'
 import { readTextFile } from './workspace.js'
 
 /**
@@ -137,7 +137,7 @@ export function packageRelativeOf(packageDir: string, folder: string): string {
  * same folder from there. An absolute folder stays as it is.
  */
 export function rootRelativeCallOf(packageDir: string, call: StorybookCall): StorybookCall {
-  const configDir = configDirOf(call)
+  const configDir = callConfigDir(call)
 
   return { ...call, configDir: isAbsoluteFolder(configDir) ? configDir : posix.join(packageDir, configDir) }
 }

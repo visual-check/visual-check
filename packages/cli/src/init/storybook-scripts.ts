@@ -37,7 +37,7 @@ const commandSeparator = /&&|\|\||[;|&]/
 /**
  * Returns the config folder a call uses: its own, or `.storybook`.
  */
-export function configDirOf(call: StorybookCall): string {
+export function callConfigDir(call: StorybookCall): string {
   return call.configDir ?? defaultConfigDir
 }
 
@@ -160,7 +160,7 @@ export function storybookCallsOf(scripts: Record<string, string>): StorybookCall
  * else in the first script that has one. `storybook build` never starts a Storybook.
  */
 export function startScriptOf(calls: readonly StorybookCall[], configDir: string): StorybookCall | undefined {
-  const candidates = calls.filter((call) => call.subcommand === 'dev' && configDirOf(call) === configDir)
+  const candidates = calls.filter((call) => call.subcommand === 'dev' && callConfigDir(call) === configDir)
 
   return candidates.find((call) => call.script === 'storybook') ?? candidates[0]
 }

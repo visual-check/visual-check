@@ -206,17 +206,38 @@ export function listNames(names: string[]): string {
 }
 
 /**
+ * Returns the absolute folder a Storybook runs in. `configPath` is the absolute path of the config file.
+ */
+function dirOf(settings: StorybookSettings, configPath: string): string {
+  return resolve(dirname(configPath), settings.dir ?? '.')
+}
+
+/**
+ * Returns the absolute path of a Storybook's config folder. `configPath` is the absolute path of the config file.
+ */
+export function configDirOf(settings: StorybookSettings, configPath: string): string {
+  return resolve(dirOf(settings, configPath), settings.configDir ?? defaultConfigDir)
+}
+
+/**
+ * Returns the URL the config gives a Storybook for the current environment, or `undefined` when it gives none.
+ */
+export function urlSideOf(settings: StorybookSettings, ci: boolean): string | undefined {
+  return pickSide(settings.url, ci)
+}
+
+/**
  * Resolves one Storybook's paths and picks its URL, which is `undefined` when it has none for the current environment.
  */
 function resolveStorybook(name: string, settings: StorybookSettings, options: ResolveOptions): PendingStorybook {
-  const dir = resolve(dirname(options.path), settings.dir ?? '.')
+  const dir = dirOf(settings, options.path)
 
   return {
     name,
     dir,
-    configDir: resolve(dir, settings.configDir ?? defaultConfigDir),
+    configDir: configDirOf(settings, options.path),
     baselines: settings.baselines === undefined ? defaultBaselinesIn(dir) : resolve(dir, settings.baselines),
-    url: pickSide(settings.url, options.ci),
+    url: urlSideOf(settings, options.ci),
   }
 }
 
