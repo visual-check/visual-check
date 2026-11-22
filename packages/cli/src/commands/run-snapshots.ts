@@ -554,6 +554,7 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
           command: 'test',
           visualDiff,
           retries: run.config.retries,
+          captureMissing: false,
           writeImages: (item, images) =>
             writeReportImages(reportFolder, item.storybook.name, baselineStemOf(item.key), images),
         }

@@ -36,6 +36,10 @@ _Avoid_: Stale baseline, obsolete baseline
 Comparing the baselines the current stories and config call for with the ones that exist, which finds missing baselines and orphans without capturing anything.
 _Avoid_: Integrity check, baseline check
 
+**Check**:
+What the Storybook addon does with the current story when asked: it captures the story's default capture and every mode it lists, those with no baseline too, and compares each snapshot with its baseline. It writes no baseline.
+_Avoid_: Test (the command), run
+
 **Shard**:
 One of several CI jobs a test run is split across, and the share of snapshots it captures.
 _Avoid_: Worker, partition, chunk

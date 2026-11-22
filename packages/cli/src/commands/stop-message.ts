@@ -18,7 +18,7 @@ import type { FirstBrowserExit } from './run-browser.js'
 import { SnapshotDecodeError } from './snapshot-result.js'
 
 /**
- * What the exit-2 messages need to know about a run, apart from the error that stopped it.
+ * What the exit-2 messages need to know about a run or a check, apart from the error that stopped it.
  */
 export interface StopContext {
   /**
@@ -228,7 +228,7 @@ export function crashOf(error: unknown): { stderr: string; message: string } {
  * that is `host`, instead of the next step. A failed launch on the host whose output names a missing library gives that
  * library and both ways out. Any other error gives `undefined`.
  *
- * `capturedAny` is whether a snapshot has been captured, which a broken or missing one hasn't.
+ * `capturedAny` is whether a snapshot has been captured, which a broken one hasn't, nor a missing one `test` reports.
  */
 export function stopMessageOf(error: unknown, context: StopContext, capturedAny: boolean): string | undefined {
   if (error instanceof BaselineError) {

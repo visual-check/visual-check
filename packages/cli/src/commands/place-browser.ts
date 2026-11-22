@@ -14,7 +14,7 @@ import { dockerProblemOf } from './docker-problem.js'
 import { readImageFit } from './read-image-fit.js'
 
 /**
- * What a run's caller gives for placing the browser, each with its default when the caller gives none.
+ * What the caller of a run or a check gives for placing the browser, each with its default when the caller gives none.
  */
 export interface PlaceBrowserOptions {
   /**
@@ -54,7 +54,7 @@ export interface PlaceBrowserOptions {
 }
 
 /**
- * Where a run's browser runs, with what it has there.
+ * Where the browser of a run or a check runs, with what it has there.
  */
 export interface BrowserPlacement {
   /**
@@ -68,11 +68,11 @@ export interface BrowserPlacement {
 }
 
 /**
- * Decides where the run's browser runs and reads the CPUs and memory there: inside visual-check's image and on the
- * host the machine's own, with no Docker used, and in visual-check's container Docker's engine's, which the Docker
- * probe reads. In a container, the route to a Storybook comes from the container the CLI runs in, whether the engine
- * is Docker Desktop's, and the OS. Gives the place with them, or what to print when the browser has no place to run or
- * Docker can't run it.
+ * Decides where the browser of a run or a check runs and reads the CPUs and memory there: inside visual-check's image
+ * and on the host the machine's own, with no Docker used, and in visual-check's container Docker's engine's, which the
+ * Docker probe reads. In a container, the route to a Storybook comes from the container the CLI runs in, whether the
+ * engine is Docker Desktop's, and the OS. Gives the place with them, or what to print when the browser has no place to
+ * run or Docker can't run it.
  *
  * @throws {Error} Any error the probe throws besides a `ContainerError`.
  */

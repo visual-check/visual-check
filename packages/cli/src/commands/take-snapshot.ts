@@ -5,8 +5,8 @@ import { type UpdateTools, updateSnapshot } from './update-snapshot.js'
 
 /**
  * What each snapshot of a run is taken with, by command: the visual diff both commands compare snapshots with, for
- * `test` alone how many more times it captures a snapshot that differs and what writes the images of each differing or
- * broken one, and for `update` alone how long it waits before it captures a snapshot's page again.
+ * `test` alone how many more times it captures a snapshot that differs, whether it captures one with no baseline and
+ * what writes a snapshot's images, and for `update` alone how long it waits before it captures a snapshot's page again.
  */
 export type SnapshotTools =
   | (TestTools & {
