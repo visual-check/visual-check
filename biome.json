@@ -164,6 +164,48 @@
       }
     },
     {
+      "includes": ["packages/storybook-addon/**"],
+      "javascript": { "jsxRuntime": "reactClassic" },
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "pixelmatch": "Only packages/cli/src/visual-diff/ compares images, through pixelmatch.",
+                  "sharp": "Only packages/cli/src/visual-diff/ decodes and encodes images, through sharp.",
+                  "yauzl": "Only packages/cli/src/browser-download/ unzips, through yauzl.",
+                  "storybook/manager-api": {
+                    "importNames": [
+                      "experimental_UniversalStore",
+                      "experimental_useUniversalStore",
+                      "experimental_MockUniversalStore",
+                      "internal_universalStatusStore",
+                      "internal_universalTestProviderStore",
+                      "internal_universalChecklistStore"
+                    ],
+                    "message": "The addon never uses UniversalStore, which Storybook 11 makes internal."
+                  },
+                  "storybook/internal/core-server": {
+                    "importNames": [
+                      "experimental_UniversalStore",
+                      "experimental_useUniversalStore",
+                      "experimental_MockUniversalStore",
+                      "internal_universalStatusStore",
+                      "internal_universalTestProviderStore",
+                      "internal_universalChecklistStore"
+                    ],
+                    "message": "The addon never uses UniversalStore, which Storybook 11 makes internal."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["packages/cli/skill/SKILL.md"],
       "formatter": { "enabled": false }
     }
