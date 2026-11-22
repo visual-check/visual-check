@@ -2,8 +2,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
+import { baselineStemOf } from '../baselines/baseline-files.js'
 import type { BrokenStory, StoryCapture } from '../capture/capture-session.js'
 import type { ConsoleMessage } from '../capture/driver/driver.js'
+import { writeReportImages } from '../report/report-folder.js'
 import { greyPng, whitePixels } from '../visual-diff/images.fixture.js'
 import { createVisualDiff } from '../visual-diff/visual-diff.js'
 import type { SnapshotToCapture } from './plan-snapshots.js'
@@ -115,7 +117,12 @@ function setupOf(baseline: Uint8Array | undefined, retries: number): TestSetup {
       globals: {},
     },
     reportFolder,
-    tools: { visualDiff, reportFolder, retries },
+    tools: {
+      visualDiff,
+      writeImages: (item, images) =>
+        writeReportImages(reportFolder, item.storybook.name, baselineStemOf(item.key), images),
+      retries,
+    },
   }
 }
 
