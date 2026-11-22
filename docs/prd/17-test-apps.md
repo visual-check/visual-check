@@ -6,20 +6,22 @@ The public repo `visual-check/test-apps` proves that the packages about to be pu
 
 ## The apps
 
-| App                                                                           | Storybook                | Shape                                    | Package manager | Stories  |
-| ----------------------------------------------------------------------------- | ------------------------ | ---------------------------------------- | --------------- | -------- |
-| [storybookjs/react-inspector](https://github.com/storybookjs/react-inspector) | 9.1                      | Single repo                              | Yarn 4          | About 76 |
-| [freeCodeCamp/ui](https://github.com/freeCodeCamp/ui)                         | 10.6                     | Single repo                              | pnpm            | 112      |
-| [TrigenSoftware/masonry-grid](https://github.com/TrigenSoftware/masonry-grid) | 9.1                      | Monorepo with 5 Storybooks               | pnpm            | About 14 |
-| `sb11`                                                                        | The newest 11 prerelease | A copy of the Storybook 10 app, upgraded | pnpm            | 112      |
+| App                                                                           | Storybook                | Shape                                    | Package manager | Stories   |
+| ----------------------------------------------------------------------------- | ------------------------ | ---------------------------------------- | --------------- | --------- |
+| [storybookjs/react-inspector](https://github.com/storybookjs/react-inspector) | 9.1                      | Single repo                              | Yarn 4          | About 76  |
+| [freeCodeCamp/ui](https://github.com/freeCodeCamp/ui)                         | 10.6                     | Single repo                              | pnpm            | 112       |
+| [clauderic/dnd-kit](https://github.com/clauderic/dnd-kit)                     | 9.1                      | Monorepo with 5 Storybooks               | Bun             | About 111 |
+| `sb11`                                                                        | The newest 11 prerelease | A copy of the Storybook 10 app, upgraded | pnpm            | 112       |
 
-- The first three are real open-source projects, each copied at a pinned commit, with every story and no filters. They're MIT or BSD-3, so their baselines can be committed.
+- The first three are real open-source projects, each copied at a pinned commit, with every story and no filters, apart from any stories they disable. They're MIT or BSD-3, so their baselines can be committed.
 - `sb11` exists so visual-check is ready when Storybook 11 turns stable. Its prerelease is pinned and Renovate bumps it. When 11 is stable, it moves to the stable release.
 - visual-check comes set up in each app: the config, the per-Storybook files and the baselines are committed. `init` doesn't run here.
 - Baselines are written once on Linux amd64 and checked on both OSes. They're rewritten only for a browser bump ([Release process](19-release.md)).
-- Each app lists the broken stories it expects, if any.
+- A story that breaks, or doesn't render the same way twice, is disabled with `disable: true` in its options ([Per-story options](07-per-story-options.md)) in that app's copy, and the app lists it with its reason.
+- The monorepo installs with Bun, the one package manager here that `init` doesn't test ([Config and init](03-config-and-init.md)).
+- react-inspector's copy pins Yarn 4.17.1, the oldest Yarn 4 the CLI installs with ([Config and init](03-config-and-init.md)).
 - The monorepo's five Storybooks each get their own port from the app's config.
-- No Vue or Angular app joins, and no app renders the grid.
+- No Angular app joins, and no app renders the grid. The monorepo's Vue Storybook is the test apps' only Vue.
 
 ## A run
 

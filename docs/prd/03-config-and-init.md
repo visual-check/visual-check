@@ -102,7 +102,8 @@ Rules for the keys:
 
   Run inside a package, `init` works at the workspace root and says so, naming the root's folder: `init sets up the workspace in acme-monorepo, where the config goes and the next steps run.` A workspace root without a `package.json`, such as Rush's, stops `init`: it needs the root's scripts and a place for the CLI.
 - **Package manager:** `rush.json`'s `pnpmVersion`, `npmVersion` or `yarnVersion`, then the `packageManager` or `devEngines.packageManager` field, then the lockfile.
-  - npm, pnpm, Yarn 1 and Yarn 4 are supported. Bun works but isn't tested.
+  - npm, pnpm, Yarn 1 and Yarn 4 are supported. Bun works, and is tested only through the test apps' monorepo ([Test apps](17-test-apps.md)).
+  - Yarn 4 means 4.17.1 or later. Earlier Yarn 4 releases fail to install the CLI: their built-in TypeScript patch doesn't fit TypeScript 7, which the CLI depends on through Fallow.
   - Yarn counts as Yarn 2 or later when there's a `.yarnrc.yml`, `yarn.lock` opens with Yarn 2's `__metadata:` entry, or the declared version is 2 or later.
   - With nothing found, `init` asks, with npm as the default.
 - **Storybooks:** `git ls-files` for `**/.storybook/main.{ts,js,mjs,cjs,mts,cts}`, plus any `-c <dir>` in scripts. That skips ignored worktrees and copies.
