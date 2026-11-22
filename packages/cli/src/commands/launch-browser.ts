@@ -68,6 +68,10 @@ export type BrowserLaunch =
        */
       executable: string
       /**
+       * Stops a pull in progress, and no launch follows.
+       */
+      signal?: AbortSignal
+      /**
        * Writes the progress of a pull as it happens.
        */
       progress: (text: string) => void
@@ -109,11 +113,13 @@ export type BrowserLaunch =
  * container the CLI runs in, or through a SOCKS proxy in the CLI that lives as long as the driver, which the browser is
  * checked to reach before the driver resolves.
  *
+ * @public
  * @throws {ContainerError} When Docker can't be run, the image can't be pulled, or the browser can't reach the proxy.
  * @throws {BrowserDownloadError} When the headless shell can't be downloaded to the host.
  * @throws {BrowserLaunchError} When the browser doesn't connect, or fails any other way while it is checked to reach
  * the proxy.
  * @throws {BrowserExitedError} When the browser exits while it is checked to reach the proxy.
+ * @throws {unknown} The reason of the launch's signal, when it aborts before the browser is launched.
  */
 export type LaunchBrowser = (launch: BrowserLaunch) => Promise<Driver>
 
@@ -196,13 +202,14 @@ async function launchCdpInContainer(
  * Pulls the image when Docker doesn't have it for the platform, then starts the browser in visual-check's container
  * and connects to it over CDP. The route decides how it reaches a Storybook: `host` uses the machine's network,
  * `container:<id>` joins the network of the container the CLI runs in, and `proxy` goes through a SOCKS proxy in the
- * CLI.
+ * CLI. When the launch's signal aborts first, the pull stops and nothing is launched.
  */
 async function launchBrowserInContainer(
   launchDriver: (options: CdpDriverOptions) => Promise<Driver>,
   launch: Extract<BrowserLaunch, { in: 'container' }>,
 ): Promise<Driver> {
-  await pullMissingImage(launch.image, launch.platform, launch.progress)
+  await pullMissingImage(launch.image, launch.platform, launch.progress, launch.signal)
+  launch.signal?.throwIfAborted()
 
   if (launch.route === 'proxy') {
     // On the bridge network every request, loopback included, goes through the proxy, so the Storybook is reached from
@@ -224,6 +231,8 @@ async function launchBrowserInContainer(
  *   does where the OS doesn't allow the sandbox, it starts again without it, printing nothing. Whichever launch first
  *   connects settles the sandbox for the run, and every later launch keeps it, with no fallback. It never uses Docker
  *   or the proxy.
+ *
+ * @public
  */
 export function createLaunchBrowser(seams: LauncherSeams = {}): LaunchBrowser {
   const install = seams.install ?? installHeadlessShell

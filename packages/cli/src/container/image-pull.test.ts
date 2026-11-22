@@ -105,6 +105,30 @@ describe('pullMissingImage', () => {
     await expect(failure).rejects.toHaveProperty('fix', 'docker')
   })
 
+  it('kills a pull that is running when the signal aborts, and rejects with its reason', async () => {
+    const docker = installFakeDocker({ imagePresent: false, pullHangs: true })
+
+    fake = docker
+
+    const controller = new AbortController()
+    const reason = new Error('The check was cancelled.')
+    const pull = pullMissingImage(image, 'linux/arm64', () => controller.abort(reason), controller.signal)
+
+    await expect(pull).rejects.toBe(reason)
+    await expect.poll(() => docker.pullIsRunning()).toBe(false)
+  })
+
+  it('runs no docker when the signal has already aborted', async () => {
+    fake = installFakeDocker({ imagePresent: false })
+
+    const reason = new Error('The check was cancelled.')
+
+    await expect(pullMissingImage(image, 'linux/arm64', () => undefined, AbortSignal.abort(reason))).rejects.toBe(
+      reason,
+    )
+    expect(fake.calls()).toEqual([])
+  })
+
   it('says there is no docker command when it is not on PATH', async () => {
     restorePath = removeDockerFromPath()
 

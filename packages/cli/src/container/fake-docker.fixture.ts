@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 
@@ -8,9 +8,11 @@ import { delimiter, join } from 'node:path'
 const fakeKeys = [
   'FAKE_DOCKER_DIR',
   'FAKE_DOCKER_PRESENT',
+  'FAKE_DOCKER_HOLD_INSPECT',
   'FAKE_DOCKER_IMAGE_PLATFORM',
   'FAKE_DOCKER_ENGINE',
   'FAKE_DOCKER_PULL_EXIT',
+  'FAKE_DOCKER_PULL_HANGS',
   'FAKE_DOCKER_KILL',
   'FAKE_DOCKER_CONTAINERS',
   'FAKE_DOCKER_INFO',
@@ -29,6 +31,11 @@ export interface FakeDockerBehaviour {
    */
   imagePresent?: boolean
   /**
+   * Whether the output of `docker image inspect` stays open after its process has exited, until `releaseInspect` is
+   * called. False by default.
+   */
+  holdInspect?: boolean
+  /**
    * The platform the present image is for. `linux/amd64` by default.
    */
   imagePlatform?: string
@@ -42,6 +49,10 @@ export interface FakeDockerBehaviour {
    * The exit code of `docker pull`. 0 by default.
    */
   pullExitCode?: number
+  /**
+   * Whether `docker pull` keeps running after its progress and ignores SIGTERM, as real Docker's does. False by default.
+   */
+  pullHangs?: boolean
   /**
    * What `docker kill` does: `stop` signals the matching `docker run`, which exits with 137 a moment later, as with
    * real Docker, `fail` exits 1 and leaves it running, and `ignore` exits 0 and leaves it running. `stop` by default.
@@ -99,6 +110,8 @@ export interface FakeDockerBehaviour {
 
 /**
  * A fake `docker` on PATH, and what it recorded.
+ *
+ * @public
  */
 export interface FakeDocker {
   /**
@@ -106,7 +119,19 @@ export interface FakeDocker {
    */
   calls: () => string[][]
   /**
-   * Puts PATH back as it was and removes the fake.
+   * Whether the process of the last `docker image inspect` is running. Fails when there was none.
+   */
+  inspectIsRunning: () => boolean
+  /**
+   * Lets the held output of `docker image inspect` end.
+   */
+  releaseInspect: () => void
+  /**
+   * Whether the process of the last `docker pull` is running. Fails when there was none.
+   */
+  pullIsRunning: () => boolean
+  /**
+   * Puts PATH back as it was and removes the fake, killing a pull that hangs.
    */
   remove: () => void
 }
@@ -118,11 +143,19 @@ export interface FakeDocker {
 const script = `#!/usr/bin/env node
 const fs = require('node:fs')
 const path = require('node:path')
+const { spawn } = require('node:child_process')
 const args = process.argv.slice(2)
 const dir = process.env.FAKE_DOCKER_DIR
 fs.appendFileSync(path.join(dir, 'calls.log'), JSON.stringify(args) + '\\n')
 
 if (args[0] === 'image' && args[1] === 'inspect') {
+  fs.writeFileSync(path.join(dir, 'inspect.pid'), String(process.pid))
+  if (process.env.FAKE_DOCKER_HOLD_INSPECT === '1') {
+    const hold = path.join(dir, 'inspect.hold')
+    const waitForRelease = 'setInterval(() => require("node:fs").existsSync(process.argv[1]) || process.exit(), 20)'
+    fs.writeFileSync(hold, '')
+    spawn(process.execPath, ['-e', waitForRelease, hold], { stdio: ['ignore', 'inherit', 'ignore'] })
+  }
   const engine = process.env.FAKE_DOCKER_ENGINE
   const platformFlag = args.indexOf('--platform')
   const held = process.env.FAKE_DOCKER_IMAGE_PLATFORM
@@ -167,8 +200,17 @@ if (args[0] === 'image' && args[1] === 'inspect') {
     process.stdout.write(stdout === undefined ? JSON.stringify(answer) + '\\n' : stdout, () => process.exit(exitCode))
   }, Number(process.env.FAKE_DOCKER_INFO_DELAY))
 } else if (args[0] === 'pull') {
+  fs.writeFileSync(path.join(dir, 'pull.pid'), String(process.pid))
+  if (process.env.FAKE_DOCKER_PULL_HANGS === '1') {
+    process.on('SIGTERM', () => undefined)
+    setInterval(() => undefined, 1000)
+  }
   process.stdout.write('pull progress 1\\npull progress 2\\n')
-  process.stderr.write('pull progress 3\\n', () => process.exit(Number(process.env.FAKE_DOCKER_PULL_EXIT)))
+  process.stderr.write('pull progress 3\\n', () => {
+    if (process.env.FAKE_DOCKER_PULL_HANGS !== '1') {
+      process.exit(Number(process.env.FAKE_DOCKER_PULL_EXIT))
+    }
+  })
 } else if (args[0] === 'run') {
   const name = args[args.indexOf('--name') + 1]
   fs.writeFileSync(path.join(dir, name + '.pid'), String(process.pid))
@@ -208,7 +250,37 @@ function infoEnvironmentOf(info: FakeDockerBehaviour['info'] = {}): Record<strin
 }
 
 /**
+ * Whether the process with this ID is running.
+ */
+function isRunning(pid: number): boolean {
+  try {
+    return process.kill(pid, 0)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Kills the fake pull of the folder when it's running.
+ */
+function killPullOf(dir: string): void {
+  const pidFile = join(dir, 'pull.pid')
+
+  if (!existsSync(pidFile)) {
+    return
+  }
+
+  const pid = Number(readFileSync(pidFile, 'utf8'))
+
+  if (isRunning(pid)) {
+    process.kill(pid, 'SIGKILL')
+  }
+}
+
+/**
  * Puts a fake `docker` first on PATH, acting as `behaviour` says. The test calls `remove` afterwards.
+ *
+ * @public
  */
 export function installFakeDocker(behaviour: FakeDockerBehaviour = {}): FakeDocker {
   const dir = mkdtempSync(join(tmpdir(), 'fake-docker-'))
@@ -221,9 +293,11 @@ export function installFakeDocker(behaviour: FakeDockerBehaviour = {}): FakeDock
 
   process.env.FAKE_DOCKER_DIR = dir
   process.env.FAKE_DOCKER_PRESENT = behaviour.imagePresent === false ? '0' : '1'
+  process.env.FAKE_DOCKER_HOLD_INSPECT = behaviour.holdInspect === true ? '1' : '0'
   process.env.FAKE_DOCKER_IMAGE_PLATFORM = behaviour.imagePlatform ?? 'linux/amd64'
   process.env.FAKE_DOCKER_ENGINE = behaviour.engine ?? 'classic'
   process.env.FAKE_DOCKER_PULL_EXIT = String(behaviour.pullExitCode ?? 0)
+  process.env.FAKE_DOCKER_PULL_HANGS = behaviour.pullHangs === true ? '1' : '0'
   process.env.FAKE_DOCKER_KILL = behaviour.kill ?? 'stop'
   process.env.FAKE_DOCKER_CONTAINERS = (behaviour.containers ?? []).join(',')
   Object.assign(process.env, infoEnvironmentOf(behaviour.info))
@@ -235,6 +309,9 @@ export function installFakeDocker(behaviour: FakeDockerBehaviour = {}): FakeDock
         .split('\n')
         .filter((line) => line !== '')
         .map((line) => JSON.parse(line) as string[]),
+    inspectIsRunning: () => isRunning(Number(readFileSync(join(dir, 'inspect.pid'), 'utf8'))),
+    releaseInspect: () => rmSync(join(dir, 'inspect.hold')),
+    pullIsRunning: () => isRunning(Number(readFileSync(join(dir, 'pull.pid'), 'utf8'))),
     remove: () => {
       if (oldPath === undefined) {
         delete process.env.PATH
@@ -244,6 +321,11 @@ export function installFakeDocker(behaviour: FakeDockerBehaviour = {}): FakeDock
 
       for (const key of fakeKeys) {
         delete process.env[key]
+      }
+
+      // A pull that doesn't hang has exited by itself, and its ID may be another process's by now.
+      if (behaviour.pullHangs === true) {
+        killPullOf(dir)
       }
 
       rmSync(dir, { recursive: true, force: true })
