@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "init-check": "node init-check.ts",
-    "test:type": "tsc --noEmit"
+    "test:type": "tsc --noEmit",
+    "test:unit": "vitest run"
   },
   "devDependencies": {
     "@types/node": "22.20.5",
@@ -14,6 +15,7 @@
     "@visual-check/storybook": "workspace:*",
     "@visual-check/storybook-addon": "workspace:*",
     "@visual-check/typescript-config": "workspace:*",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
   }
 }

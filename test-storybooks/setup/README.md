@@ -75,7 +75,7 @@ CI's Setup job runs every package manager with each fixture, and its macOS job r
 
 ## Trying a local build in another project
 
-`try-local.ts` sets up one of your own projects with this checkout's packages, for a manual test before they're on npm. It builds and packs the packages of the checkout it runs from, a worktree included, with its uncommitted changes. It serves them the way the check does, and runs `init` through `pnpm dlx` in the project. The registry is named for the `@visual-check` scope through the environment, so the project's `.npmrc` doesn't change. Then it adds the browser image to the config.
+`try-local.ts` sets up one of your own projects with this checkout's packages, for a manual test before they're on npm. It builds and packs the packages of the checkout it runs from, a worktree included, with its uncommitted changes. Each package but `@visual-check/chromium` gets a version of the try's own, such as `0.0.0-local.20261123153045` (the UTC time), in its packed `package.json`, and so does each dependency between them, so a project that installed an earlier try's build can't keep it: at one version, a package manager may reuse what it installed. The checkout's `package.json` files don't change. The browser package keeps its version, since the CLI only takes a plain release in its peer range. The Setup check needs none of this: its project and package store are new on every run. The try serves the packages the way the check does, and runs `init` through `pnpm dlx` in the project. The registry is named for the `@visual-check` scope through the environment, so the project's `.npmrc` doesn't change. Then it adds the browser image to the config.
 
 ```sh
 pnpm try-local ~/code/my-app                # init asks its questions

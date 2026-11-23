@@ -27,6 +27,14 @@ export interface PackedManifest {
    * The peer dependencies, with the range of each.
    */
   peerDependencies?: Record<string, string>
+  /**
+   * The dependencies, with the spec of each.
+   */
+  dependencies?: Record<string, string>
+  /**
+   * The optional dependencies, with the spec of each.
+   */
+  optionalDependencies?: Record<string, string>
 }
 
 /**
@@ -188,6 +196,43 @@ export async function startRegistry(tarballs: readonly Tarball[]): Promise<Regis
       await new Promise((resolve) => server.close(resolve))
     },
   }
+}
+
+/**
+ * The fields of a manifest whose dependencies another packed package can be in.
+ */
+const dependencyFields = ['dependencies', 'peerDependencies', 'optionalDependencies'] as const
+
+/**
+ * Gives a version of its own for one try of a packed package: its version with `local.` and the UTC time, to the
+ * second, as a prerelease, such as `1.2.0-local.20261123153045`. A version that is a prerelease already gets `.local.`
+ * and the time added to it.
+ */
+export function localVersionOf(version: string, date: Date): string {
+  const time = date.toISOString().replace(/\D/g, '').slice(0, 14)
+
+  return `${version}${version.includes('-') ? '.' : '-'}local.${time}`
+}
+
+/**
+ * Gives a packed `package.json` with the versions in `versions`, keyed by package name: its own `version` when its name
+ * is there, and the spec of each dependency, peer dependency and optional dependency that is there, which becomes that
+ * exact version. Every other field stays as it was.
+ */
+export function manifestWithVersions(manifest: PackedManifest, versions: ReadonlyMap<string, string>): PackedManifest {
+  const rewritten: PackedManifest = { ...manifest, version: versions.get(manifest.name) ?? manifest.version }
+
+  for (const field of dependencyFields) {
+    const specs = manifest[field]
+
+    if (specs !== undefined) {
+      rewritten[field] = Object.fromEntries(
+        Object.entries(specs).map(([name, spec]) => [name, versions.get(name) ?? spec]),
+      )
+    }
+  }
+
+  return rewritten
 }
 
 /**
