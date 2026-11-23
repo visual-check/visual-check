@@ -1,8 +1,10 @@
 import { checkStory } from '../commands/check-story.js'
 import { createLaunchBrowser, type LaunchBrowser } from '../commands/launch-browser.js'
+import type { StoryRunOptions } from '../commands/story-run.js'
+import { updateStory } from '../commands/update-story.js'
 import { createWarmBrowser } from '../commands/warm-browser.js'
 import { createImageFiles } from './image-files.js'
-import type { AddonMessage, AddonOutcome, CheckRequest } from './protocol.js'
+import type { AddonMessage, AddonOutcome, StoryRequest } from './protocol.js'
 import { readAddonRequest } from './read-request.js'
 
 /**
@@ -20,7 +22,7 @@ export interface AddonChildOptions {
    */
   cwd: string
   /**
-   * The environment the checks read.
+   * The environment the checks and the updates read.
    */
   environment: Record<string, string | undefined>
   /**
@@ -35,6 +37,10 @@ export interface AddonChildOptions {
    * Checks one story. `checkStory` by default. A test gives a fake.
    */
   check?: typeof checkStory
+  /**
+   * Updates one story's baselines. `updateStory` by default. A test gives a fake.
+   */
+  update?: typeof updateStory
 }
 
 /**
@@ -48,16 +54,16 @@ export interface AddonChild {
    */
   receive: (message: unknown) => void
   /**
-   * Aborts the running check, waits for it to end and closes the browser. Every check asked for afterwards ends
-   * cancelled. Calling it again gives the same promise.
+   * Aborts the running check or update, waits for it to end and closes the browser. Every check or update asked for
+   * afterwards ends cancelled. Calling it again gives the same promise.
    */
   close: () => Promise<void>
 }
 
 /**
- * The check that runs.
+ * The check or the update that runs.
  */
-interface RunningCheck {
+interface RunningStory {
   /**
    * The request's ID.
    */
@@ -73,8 +79,8 @@ interface RunningCheck {
 }
 
 /**
- * Makes what the child process of the Storybook addon runs, and sends `ready` at once. It runs one check at a time, and
- * keeps one browser and its images' files between them.
+ * Makes what the child process of the Storybook addon runs, and sends `ready` at once. It runs one check or update at a
+ * time, and keeps one browser between runs, and the images' files of checks.
  *
  * @public
  */
@@ -86,34 +92,40 @@ export function createAddonChild({
   // A launcher remembers the executable it installed, so each launch over the child's life has its own.
   launchBrowser = (launch) => createLaunchBrowser()(launch),
   check = checkStory,
+  update = updateStory,
 }: AddonChildOptions): AddonChild {
   const warmBrowser = createWarmBrowser(launchBrowser)
   const images = createImageFiles()
-  let running: RunningCheck | undefined
+  let running: RunningStory | undefined
   let closing: Promise<void> | undefined
 
   const finish = (id: string, outcome: AddonOutcome): void => {
     send({ kind: 'finished', id, outcome })
   }
 
-  const run = async ({ id, storyId, configDir, url }: CheckRequest, signal: AbortSignal): Promise<void> => {
-    const outcome = await check({
+  const run = async ({ kind, id, storyId, configDir, url }: StoryRequest, signal: AbortSignal): Promise<void> => {
+    const story: StoryRunOptions = {
       storyId,
       configDir,
       url,
       cwd,
       environment,
       launchBrowser: warmBrowser.launcherFor(signal),
-      images,
       signal,
       progress: (progress) => send({ kind: 'progress', id, progress }),
-    })
+    }
+    let outcome: AddonOutcome
 
-    running = undefined
+    try {
+      outcome = kind === 'check' ? await check({ ...story, images }) : await update(story)
+    } finally {
+      running = undefined
+    }
+
     finish(id, outcome)
   }
 
-  const start = (request: CheckRequest): void => {
+  const start = (request: StoryRequest): void => {
     if (closing !== undefined) {
       finish(request.id, { result: 'cancelled' })
 
@@ -121,7 +133,7 @@ export function createAddonChild({
     }
 
     if (running !== undefined) {
-      const message = 'visual-check is already checking a story.'
+      const message = 'visual-check is already running a check or an update.'
 
       finish(request.id, { result: 'stopped', cause: 'run', message, notices: [] })
 
@@ -152,6 +164,7 @@ export function createAddonChild({
 
       switch (request?.kind) {
         case 'check':
+        case 'update':
           start(request)
           break
         case 'cancel':

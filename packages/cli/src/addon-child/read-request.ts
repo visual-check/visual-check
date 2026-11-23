@@ -21,7 +21,7 @@ export function readAddonRequest(message: unknown): AddonRequest | undefined {
 
   const { kind }: { kind?: unknown } = message
 
-  if (kind === 'check' && hasTexts(message, ['id', 'storyId', 'configDir', 'url'])) {
+  if ((kind === 'check' || kind === 'update') && hasTexts(message, ['id', 'storyId', 'configDir', 'url'])) {
     const { id, storyId, configDir, url } = message
 
     return { kind, id, storyId, configDir, url }

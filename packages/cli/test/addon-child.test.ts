@@ -75,6 +75,13 @@ function checkRequestOf(project: string, id: string): { kind: string; id: string
 }
 
 /**
+ * Gives a request for an update in the project, with the click's ID.
+ */
+function updateRequestOf(project: string, id: string): { kind: string; id: string } & Record<string, string> {
+  return { ...checkRequestOf(project, id), kind: 'update' }
+}
+
+/**
  * A forked child.
  */
 interface ForkedChild {
@@ -97,16 +104,16 @@ interface ForkedChild {
 }
 
 /**
- * Forks the built entry in the project, as the addon does.
+ * Forks the built entry in the project, as the addon does, with `environmentOf` the project and the given variables.
  */
-function forkIn(project: string): ForkedChild {
+function forkIn(project: string, variables: NodeJS.ProcessEnv = {}): ForkedChild {
   const child = fork(entryPath, [], {
     execArgv: [],
     serialization: 'json',
     stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
     windowsHide: true,
     cwd: project,
-    env: environmentOf(project),
+    env: { ...environmentOf(project), ...variables },
   })
   const messages: AddonMessage[] = []
   const checks: (() => void)[] = []
@@ -178,6 +185,42 @@ describe("the addon's child process", { timeout: testTimeout }, () => {
         outcome: { result: 'stopped', cause: 'config', message: expect.stringContaining('init'), notices: [] },
       })
     }
+  })
+
+  it('stops an update with no config, as a check', async () => {
+    const project = createProject()
+    const child = forkIn(project)
+
+    child.process.send(updateRequestOf(project, 'click-1'))
+
+    expect(await child.message('finished', 'click-1')).toEqual({
+      kind: 'finished',
+      id: 'click-1',
+      outcome: { result: 'stopped', cause: 'config', message: expect.stringContaining('init'), notices: [] },
+    })
+  })
+
+  it('refuses an update with CI set, and takes a check', async () => {
+    const project = createProject()
+    const child = forkIn(project, { CI: 'true' })
+
+    child.process.send(updateRequestOf(project, 'click-1'))
+
+    expect(await child.message('finished', 'click-1')).toEqual({
+      kind: 'finished',
+      id: 'click-1',
+      outcome: {
+        result: 'stopped',
+        cause: 'run',
+        message: expect.stringContaining('visual-check update only runs locally'),
+        notices: [],
+      },
+    })
+    expect(child.messages.filter((message) => message.kind === 'progress')).toEqual([])
+
+    child.process.send(checkRequestOf(project, 'click-2'))
+
+    expect(await child.message('finished', 'click-2')).toMatchObject({ outcome: { cause: 'config' } })
   })
 
   it('stops a check with both fixes when there is no docker command, and takes the next one', async () => {
