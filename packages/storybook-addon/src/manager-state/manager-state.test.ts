@@ -92,14 +92,19 @@ describe('createManagerState', () => {
     logged.mockRestore()
   })
 
-  it('asks for a check and for the results to be cleared', () => {
+  it('asks for a check, an update and for the results to be cleared', () => {
     const { state, emit } = start()
 
     emit.mockClear()
     state.check('card--default')
+    state.update('card--default')
     state.clear()
 
-    expect(emit.mock.calls).toEqual([[channelEvents.check, { storyId: 'card--default' }], [channelEvents.clear]])
+    expect(emit.mock.calls).toEqual([
+      [channelEvents.check, { storyId: 'card--default' }],
+      [channelEvents.update, { storyId: 'card--default' }],
+      [channelEvents.clear],
+    ])
   })
 
   it('cancels the run in flight, and nothing without one', () => {

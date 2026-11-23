@@ -17,12 +17,12 @@ function readId(value: unknown, field: string): string | undefined {
 }
 
 /**
- * Reads the payload of a `check` event, which anyone who reaches Storybook's WebSocket may have sent. Gives `undefined`
- * for one that names no story.
+ * Reads the payload of a `check` or `update` event, which anyone who reaches Storybook's WebSocket may have sent. Gives
+ * `undefined` for one that names no story.
  *
  * @public
  */
-export function readCheckPayload(value: unknown): { storyId: string } | undefined {
+export function readStoryPayload(value: unknown): { storyId: string } | undefined {
   const storyId = readId(value, 'storyId')
 
   return storyId === undefined ? undefined : { storyId }

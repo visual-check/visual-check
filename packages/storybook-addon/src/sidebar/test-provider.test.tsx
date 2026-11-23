@@ -25,6 +25,7 @@ function build(current: VisualCheckState = { run: null, results: {} }) {
       subscribe: () => () => undefined,
       getState: () => current,
       check: (...values: unknown[]) => calls.push(['check', ...values]),
+      update: (...values: unknown[]) => calls.push(['update', ...values]),
       cancel: vi.fn(),
       clear: vi.fn(),
     },

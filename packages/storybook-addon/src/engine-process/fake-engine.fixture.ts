@@ -9,7 +9,7 @@ function send(message: AddonMessage): void {
 }
 
 /**
- * Ends a check as stopped, with this process's ID as its message.
+ * Ends a check or an update as stopped, with this process's ID as its message.
  */
 function finish(id: string): void {
   send({
@@ -20,7 +20,7 @@ function finish(id: string): void {
 }
 
 /**
- * What a check does, by the ID of its story. Any other story's hangs until it's cancelled.
+ * What a check or an update does, by the ID of its story. Any other story's hangs until it's cancelled.
  */
 const behaviours: Partial<Record<string, (id: string) => void>> = {
   ends: (id) => {
@@ -61,13 +61,13 @@ const behaviours: Partial<Record<string, (id: string) => void>> = {
 }
 
 /**
- * The ID of the story of the latest check.
+ * The ID of the story of the latest check or update.
  */
 let latest = ''
 
 process.on('disconnect', () => process.exit(0))
 process.on('message', (request: AddonRequest) => {
-  if (request.kind === 'check') {
+  if (request.kind === 'check' || request.kind === 'update') {
     latest = request.storyId
     behaviours[latest]?.(request.id)
   } else if (latest !== 'ignores a cancel') {

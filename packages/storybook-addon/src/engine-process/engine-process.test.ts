@@ -17,9 +17,9 @@ const fakeEntry = fileURLToPath(new URL('./fake-engine.fixture.ts', import.meta.
 const testTimeout = 30_000
 
 /**
- * A check's listener, and what it heard.
+ * A check's or an update's listener, and what it heard.
  */
-interface HeardCheck extends EngineListener {
+interface HeardRun extends EngineListener {
   /**
    * Its progress, in order.
    */
@@ -41,7 +41,7 @@ interface HeardCheck extends EngineListener {
 /**
  * Makes a listener that keeps what it hears.
  */
-function listen(): HeardCheck {
+function listen(): HeardRun {
   const steps: AddonProgress[] = []
   const outcomes: AddonOutcome[] = []
   let resolveStart: () => void = () => undefined
@@ -72,10 +72,17 @@ function listen(): HeardCheck {
 /**
  * Asks for a check of a story, whose ID says what the fake child does, and gives what its listener heard.
  */
-function check(engine: EngineProcess, storyId: string, id = 'click-1'): HeardCheck {
+function check(engine: EngineProcess, storyId: string, id = 'click-1'): HeardRun {
+  return runOf(engine, 'check', storyId, id)
+}
+
+/**
+ * Asks for a check or an update of a story, whose ID says what the fake child does, and gives what its listener heard.
+ */
+function runOf(engine: EngineProcess, kind: 'check' | 'update', storyId: string, id = 'click-1'): HeardRun {
   const heard = listen()
 
-  engine.check({ id, storyId, configDir: '/project/.storybook', url: 'http://127.0.0.1:6006' }, heard)
+  engine.run({ kind, id, storyId, configDir: '/project/.storybook', url: 'http://127.0.0.1:6006' }, heard)
 
   return heard
 }
@@ -154,6 +161,18 @@ describe('createEngineProcess', { timeout: testTimeout }, () => {
 
     expect(heard.steps).toEqual([{ step: 'preparing' }, { step: 'capturing', finished: 0, total: 1 }])
     expect(heard.outcomes).toHaveLength(1)
+  })
+
+  it("passes on an update's progress, then its end", async () => {
+    const engine = createFake()
+    const heard = runOf(engine, 'update', 'ends')
+
+    await heard.end
+
+    expect(heard.steps).toEqual([{ step: 'preparing' }, { step: 'capturing', finished: 0, total: 1 }])
+    expect(heard.outcomes).toEqual([
+      { result: 'stopped', cause: 'run', message: String(children()[0]?.pid), notices: [] },
+    ])
   })
 
   it('ignores junk, other checks and a second end', async () => {
@@ -237,6 +256,12 @@ describe('createEngineProcess', { timeout: testTimeout }, () => {
     })
     expect(await check(engine, 'ends', 'click-2').end).toMatchObject({ message: String(children()[1]?.pid) })
     expect(heard.outcomes).toHaveLength(1)
+  })
+
+  it("stops an update whose child exits, saying it updated the story's baselines", async () => {
+    expect(await runOf(createFake(), 'update', 'crashes').end).toMatchObject({
+      message: "visual-check's process exited with code 7 while it updated the story's baselines.",
+    })
   })
 
   it('keeps the last 16000 characters of what the child wrote', async () => {
@@ -351,9 +376,15 @@ describe('createEngineProcess', { timeout: testTimeout }, () => {
     try {
       const engine = createFake()
       const first = listen()
-      const second = new Promise<HeardCheck>((resolve) => {
-        engine.check(
-          { id: 'click-1', storyId: 'ends', configDir: '/project/.storybook', url: 'http://127.0.0.1:6006' },
+      const second = new Promise<HeardRun>((resolve) => {
+        engine.run(
+          {
+            kind: 'check',
+            id: 'click-1',
+            storyId: 'ends',
+            configDir: '/project/.storybook',
+            url: 'http://127.0.0.1:6006',
+          },
           {
             progress: first.progress,
             finished: (outcome) => {

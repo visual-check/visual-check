@@ -21,6 +21,18 @@ const checked: AddonOutcome = {
 const checkedStory = { result: 'checked', storybook: 'web', snapshots: [], disabled: false, notices: ['A notice.'] }
 
 /**
+ * How an update that finished ended.
+ */
+const updated: AddonOutcome = {
+  result: 'updated',
+  storybook: 'web',
+  snapshots: [],
+  disabled: false,
+  notices: ['A notice.'],
+  warnings: [{ kind: 'real-requests', host: 'example.com', stories: [], message: 'A warning.' }],
+}
+
+/**
  * How a check that a problem stopped ended.
  */
 const stopped: AddonOutcome = { result: 'stopped', cause: 'config', message: 'No config.', notices: [] }
@@ -47,10 +59,17 @@ function stateAfter(...actions: RelayAction[]): RelayState {
 }
 
 /**
- * Asks for the run of a story.
+ * Asks for the check of a story.
  */
 function requested(id: string, storyId = 'a'): RelayAction {
-  return { type: 'requested', id, storyId }
+  return { type: 'requested', kind: 'check', id, storyId }
+}
+
+/**
+ * Asks for the update of a story's baselines.
+ */
+function requestedUpdate(id: string, storyId = 'a'): RelayAction {
+  return { type: 'requested', kind: 'update', id, storyId }
 }
 
 /**
@@ -65,10 +84,31 @@ describe('reduce', () => {
     expect(stateAfter(requested('1'))).toEqual({ run: startedRun, results: {}, runStaled: false })
   })
 
-  it('ignores a request while a run is in flight', () => {
+  it('starts an update', () => {
+    expect(stateAfter(requestedUpdate('1')).run).toEqual({ ...startedRun, kind: 'update' })
+  })
+
+  it('ignores a request while a run is in flight, whatever their kinds', () => {
     const state = stateAfter(requested('1'))
+    const updating = stateAfter(requestedUpdate('1'))
 
     expect(reduce(state, requested('2', 'b'))).toBe(state)
+    expect(reduce(state, requestedUpdate('2', 'b'))).toBe(state)
+    expect(reduce(updating, requested('2', 'b'))).toBe(updating)
+  })
+
+  it("keeps an update's result as the story's, with the fields managers get", () => {
+    const withMore = { ...updated, imagesFolder: '/project/.visual-check' } as AddonOutcome
+    const state = stateAfter(requested('1'), finished('1'), requestedUpdate('2'), finished('2', withMore))
+
+    expect(state.results).toEqual({ a: { id: '2', storyId: 'a', stale: false, outcome: updated } })
+  })
+
+  it("keeps the story's earlier result when an update was cancelled", () => {
+    const before = stateAfter(requested('1'), finished('1'))
+    const after = [requestedUpdate('2'), finished('2', { result: 'cancelled' })].reduce(reduce, before)
+
+    expect(after).toEqual(before)
   })
 
   it('keeps how far the run is', () => {

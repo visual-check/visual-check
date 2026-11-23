@@ -6,7 +6,7 @@ import type { AddonMessage, AddonOutcome, AddonProgress } from '@visual-check/cl
 type Fields = Partial<Record<string, unknown>>
 
 /**
- * How a check ends whose outcome can't be read.
+ * How a check or an update ends whose outcome can't be read.
  */
 const unreadableOutcome: AddonOutcome = {
   result: 'stopped',
@@ -85,7 +85,27 @@ function isChecked({ storybook, imagesFolder, snapshots, disabled, notices }: Fi
 }
 
 /**
- * Whether the fields are those of a check that a problem stopped.
+ * Whether a value is a list of warnings by host, each with its message.
+ */
+function isWarnings(value: unknown): boolean {
+  return Array.isArray(value) && value.every((warning) => isObject(warning) && typeof warning.message === 'string')
+}
+
+/**
+ * Whether the fields are those of an update that finished.
+ */
+function isUpdated({ storybook, snapshots, disabled, notices, warnings }: Fields): boolean {
+  return (
+    typeof storybook === 'string' &&
+    typeof disabled === 'boolean' &&
+    isSnapshots(snapshots) &&
+    isTexts(notices) &&
+    isWarnings(warnings)
+  )
+}
+
+/**
+ * Whether the fields are those of a check or an update that a problem stopped.
  */
 function isStopped({ cause, message, notices }: Fields): boolean {
   return (cause === 'config' || cause === 'run') && typeof message === 'string' && isTexts(notices)
@@ -102,6 +122,8 @@ function isOutcome(value: unknown): value is AddonOutcome {
   switch (value.result) {
     case 'checked':
       return isChecked(value)
+    case 'updated':
+      return isUpdated(value)
     case 'stopped':
       return isStopped(value)
     default:
@@ -110,9 +132,9 @@ function isOutcome(value: unknown): value is AddonOutcome {
 }
 
 /**
- * Reads a message about a check. One that says it ended always ends it.
+ * Reads a message about a check or an update. One that says it ended always ends it.
  */
-function readCheckMessage({ kind, id, progress, outcome }: Fields): AddonMessage | undefined {
+function readRunMessage({ kind, id, progress, outcome }: Fields): AddonMessage | undefined {
   if (typeof id !== 'string') {
     return undefined
   }
@@ -127,7 +149,7 @@ function readCheckMessage({ kind, id, progress, outcome }: Fields): AddonMessage
 /**
  * Reads a message from the child process, which may be of another version. Gives `undefined` for anything else than a
  * message it knows: an unknown `kind`, or progress that can't be read. An end whose outcome can't be read gives a
- * stopped check.
+ * stopped run.
  */
 export function readAddonMessage(message: unknown): AddonMessage | undefined {
   if (!isObject(message)) {
@@ -140,5 +162,5 @@ export function readAddonMessage(message: unknown): AddonMessage | undefined {
     return protocol === 1 && typeof version === 'string' ? { kind, protocol, version } : undefined
   }
 
-  return readCheckMessage(message)
+  return readRunMessage(message)
 }

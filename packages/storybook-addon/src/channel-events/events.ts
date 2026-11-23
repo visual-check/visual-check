@@ -1,4 +1,4 @@
-import type { AddonSnapshot } from '@visual-check/cli/internal/addon-protocol'
+import type { AddonSnapshot, AddonUpdateSnapshot, AddonWarning } from '@visual-check/cli/internal/addon-protocol'
 
 /**
  * The names of visual-check's events on Storybook's channel.
@@ -10,6 +10,10 @@ export const channelEvents = {
    * A manager asks for a check of a story. Payload: `{ storyId: string }`.
    */
   check: 'visual-check/check',
+  /**
+   * A manager asks for an update of a story's baselines. Payload: `{ storyId: string }`.
+   */
+  update: 'visual-check/update',
   /**
    * A manager cancels the run. Payload: `{ id: string }`.
    */
@@ -47,9 +51,9 @@ export interface StoryRun {
    */
   id: string
   /**
-   * What runs.
+   * What runs: a check of the story, or an update of its baselines.
    */
-  kind: 'check'
+  kind: 'check' | 'update'
   /**
    * The story's ID.
    */
@@ -106,7 +110,34 @@ export type StoryOutcome =
     }
   | {
       /**
-       * A problem stopped the check.
+       * The update finished, whatever its snapshots came to.
+       */
+      result: 'updated'
+      /**
+       * The name the config gives the Storybook.
+       */
+      storybook: string
+      /**
+       * The story's snapshots: its default capture, then its modes in order.
+       */
+      snapshots: AddonUpdateSnapshot[]
+      /**
+       * Whether the story is disabled, so the update took no snapshot.
+       */
+      disabled: boolean
+      /**
+       * What else the update says.
+       */
+      notices: string[]
+      /**
+       * The warnings by host: the hosts the story sent real network requests to, then those whose remote content it
+       * shows.
+       */
+      warnings: AddonWarning[]
+    }
+  | {
+      /**
+       * A problem stopped the check or the update.
        */
       result: 'stopped'
       /**
@@ -118,7 +149,7 @@ export type StoryOutcome =
        */
       message: string
       /**
-       * What else the check says.
+       * What else the run says.
        */
       notices: string[]
     }

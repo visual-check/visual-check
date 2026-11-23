@@ -12,7 +12,7 @@ import { createEngineProcess } from './engine-process/engine-process.js'
 let relay: CheckRelay | undefined
 
 /**
- * Starts the relay on the channel of a Storybook in `storybook dev`. Nothing is forked before the first check.
+ * Starts the relay on the channel of a Storybook in `storybook dev`. Nothing is forked before the first run.
  */
 export function experimental_serverChannel(channel: Channel, options: Options): Channel {
   const { version } = createRequire(import.meta.url)('../package.json') as { version: string }

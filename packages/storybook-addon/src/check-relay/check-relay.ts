@@ -3,8 +3,8 @@ import { join } from 'node:path'
 import type { AddonOutcome } from '@visual-check/cli/internal/addon-protocol'
 import type { Channel } from 'storybook/internal/channels'
 import { STORY_HOT_UPDATED, STORY_INDEX_INVALIDATED } from 'storybook/internal/core-events'
-import { channelEvents, type VisualCheckState } from '../channel-events/events.js'
-import { readCancelPayload, readCheckPayload } from '../channel-events/read-payload.js'
+import { channelEvents, type StoryRun, type VisualCheckState } from '../channel-events/events.js'
+import { readCancelPayload, readStoryPayload } from '../channel-events/read-payload.js'
 import type { EngineProcess } from '../engine-process/engine-process.js'
 import { emptyState, type RelayAction, reduce } from './state.js'
 
@@ -25,7 +25,7 @@ interface CheckRelayOptions {
    */
   address: string
   /**
-   * Runs the checks.
+   * Runs the checks and the updates.
    */
   engine: EngineProcess
   /**
@@ -48,7 +48,7 @@ export interface CheckRelay {
 }
 
 /**
- * Gives the absolute path of each image a check's snapshots list, by the path they list.
+ * Gives the absolute path of each image a check's snapshots list, by the path they list. An update lists none.
  */
 function imagesOf(outcome: AddonOutcome): Map<string, string> {
   const images = new Map<string, string>()
@@ -120,16 +120,16 @@ export function startCheckRelay({
     dropOldImages()
   }
 
-  const check = (storyId: string): void => {
+  const start = (kind: StoryRun['kind'], storyId: string): void => {
     if (state.run !== null) {
       return
     }
 
     const id = newId()
 
-    dispatch({ type: 'requested', id, storyId })
-    engine.check(
-      { id, storyId, configDir, url: address },
+    dispatch({ type: 'requested', kind, id, storyId })
+    engine.run(
+      { kind, id, storyId, configDir, url: address },
       {
         progress: (progress) => dispatch({ type: 'progress', id, progress }),
         finished: (outcome) => finish(id, outcome),
@@ -146,13 +146,16 @@ export function startCheckRelay({
 
   const markStale = (): void => dispatch({ type: 'staled' })
 
-  channel.on(channelEvents.check, (payload: unknown) => {
-    const request = readCheckPayload(payload)
+  for (const kind of ['check', 'update'] as const) {
+    channel.on(channelEvents[kind], (payload: unknown) => {
+      const request = readStoryPayload(payload)
 
-    if (request !== undefined) {
-      check(request.storyId)
-    }
-  })
+      if (request !== undefined) {
+        start(kind, request.storyId)
+      }
+    })
+  }
+
   channel.on(channelEvents.cancel, (payload: unknown) => {
     const request = readCancelPayload(payload)
 

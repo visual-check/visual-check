@@ -46,8 +46,8 @@ function programSourceOf(entry: string): string {
     })
     const server = setInterval(() => undefined, 60_000)
 
-    engine.check(
-      { id: 'click-1', storyId: 'a', configDir: '/project/.storybook', url: 'http://127.0.0.1:6006' },
+    engine.run(
+      { kind: 'check', id: 'click-1', storyId: 'a', configDir: '/project/.storybook', url: 'http://127.0.0.1:6006' },
       {
         progress: () => {
           engine.cancel('click-1')

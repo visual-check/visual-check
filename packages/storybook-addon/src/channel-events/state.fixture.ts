@@ -1,4 +1,4 @@
-import type { AddonSnapshot } from '@visual-check/cli/internal/addon-protocol'
+import type { AddonSnapshot, AddonUpdateSnapshot } from '@visual-check/cli/internal/addon-protocol'
 import type { StoryOutcome, StoryResult, StoryRun, VisualCheckState } from './events.js'
 
 /**
@@ -59,6 +59,61 @@ export function checkedWith(
   fields: Partial<StoryOutcome & { result: 'checked' }> = {},
 ): StoryOutcome {
   return { result: 'checked', storybook: 'web', snapshots, disabled: false, notices: [], ...fields }
+}
+
+/**
+ * The status and the reason of an update's snapshot, as one of the pairs it may have.
+ */
+type UpdateVerdict = AddonUpdateSnapshot extends infer Snapshot
+  ? Snapshot extends AddonUpdateSnapshot
+    ? Pick<Snapshot, 'status' | 'reason'>
+    : never
+  : never
+
+/**
+ * Builds a snapshot of an update of `card--default`, its default capture, with the fields and the verdict given: by
+ * default, its missing baseline was written.
+ *
+ * @public
+ */
+export function updateSnapshotWith(
+  fields: Partial<Omit<AddonUpdateSnapshot, 'status' | 'reason'>> = {},
+  verdict: UpdateVerdict = { status: 'written', reason: 'missing' },
+): AddonUpdateSnapshot {
+  return {
+    storybook: 'web',
+    id: 'card--default',
+    kind: 'story',
+    story: 'card--default',
+    importPath: './card.stories.tsx',
+    mode: null,
+    message: 'Written: missing',
+    flaky: false,
+    attempts: 2,
+    pixels: null,
+    size: null,
+    details: null,
+    hints: [],
+    console: [],
+    baseline: '.visual-check/baselines/card--default.png',
+    images: { baseline: null, snapshot: null, diff: null },
+    realRequestHosts: [],
+    remoteContentHosts: [],
+    ...fields,
+    ...verdict,
+  }
+}
+
+/**
+ * Builds the outcome of an update that finished with the snapshots and the fields given.
+ *
+ * @public
+ */
+export function updatedWith(
+  snapshots: AddonUpdateSnapshot[],
+  fields: Partial<StoryOutcome & { result: 'updated' }> = {},
+): StoryOutcome {
+  return { result: 'updated', storybook: 'web', snapshots, disabled: false, notices: [], warnings: [], ...fields }
 }
 
 /**

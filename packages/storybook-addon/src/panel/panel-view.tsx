@@ -208,7 +208,8 @@ function Outcome(props: ResultProps): ReactNode {
     )
   }
 
-  return <Rows {...props} rows={outcome.snapshots.map(rowOf)} />
+  // An update's rows come with the Update button, which asks for one.
+  return outcome.result === 'checked' && <Rows {...props} rows={outcome.snapshots.map(rowOf)} />
 }
 
 /**

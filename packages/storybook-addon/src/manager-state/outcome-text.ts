@@ -37,5 +37,10 @@ export function outcomeTextOf(outcome: StoryOutcome): string {
     return 'Stopped'
   }
 
-  return outcome.disabled ? 'Disabled' : countsTextOf(outcome)
+  if (outcome.disabled) {
+    return 'Disabled'
+  }
+
+  // The words of an update's counts come with its rows in the panel.
+  return outcome.result === 'updated' ? 'Updated' : countsTextOf(outcome)
 }

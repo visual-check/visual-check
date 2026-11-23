@@ -1,7 +1,7 @@
 import { type ChildProcess, fork } from 'node:child_process'
 import { createRequire } from 'node:module'
 import type { Socket } from 'node:net'
-import type { AddonOutcome, AddonProgress, AddonRequest, CheckRequest } from '@visual-check/cli/internal/addon-protocol'
+import type { AddonOutcome, AddonProgress, AddonRequest, StoryRequest } from '@visual-check/cli/internal/addon-protocol'
 import { readAddonMessage } from './read-message.js'
 
 /**
@@ -20,34 +20,34 @@ const keptCharacters = 16_000
 const drainTimeoutMs = 1_000
 
 /**
- * Takes what a check says.
+ * Takes what a check or an update says.
  *
  * @public
  */
 export interface EngineListener {
   /**
-   * Takes how far the check is.
+   * Takes how far it is.
    */
   progress: (progress: AddonProgress) => void
   /**
-   * Takes how the check ended. Called once, and maybe before `check` returns, when no child could be started.
+   * Takes how it ended. Called once, and maybe before `run` returns, when no child could be started.
    */
   finished: (outcome: AddonOutcome) => void
 }
 
 /**
- * The CLI's child process, which runs checks.
+ * The CLI's child process, which runs checks and updates.
  *
  * @public
  */
 export interface EngineProcess {
   /**
-   * Asks the child for a check, starting it first when none runs.
+   * Asks the child for a check or an update, starting it first when none runs.
    */
-  check: (request: Omit<CheckRequest, 'kind'>, listener: EngineListener) => void
+  run: (request: StoryRequest, listener: EngineListener) => void
   /**
-   * Cancels the check with this ID. One that doesn't end within the timeout is cancelled by killing the child. Ignored
-   * when it isn't running.
+   * Cancels the check or the update with this ID. One that doesn't end within the timeout is cancelled by killing the
+   * child. Ignored when it isn't running.
    */
   cancel: (id: string) => void
 }
@@ -61,7 +61,7 @@ interface EngineProcessOptions {
    */
   version: string
   /**
-   * How long a cancelled check may take to end, in milliseconds. 10 s by default.
+   * How long a cancelled check or update may take to end, in milliseconds. 10 s by default.
    */
   cancelTimeoutMs?: number
   /**
@@ -71,15 +71,19 @@ interface EngineProcessOptions {
 }
 
 /**
- * A check in flight.
+ * A check or an update in flight.
  */
 interface Run {
+  /**
+   * What runs.
+   */
+  kind: StoryRequest['kind']
   /**
    * Takes what it says.
    */
   listener: EngineListener
   /**
-   * Kills the child when the check was cancelled and hasn't ended.
+   * Kills the child when the run was cancelled and hasn't ended.
    */
   cancelTimer?: NodeJS.Timeout
 }
@@ -97,7 +101,7 @@ interface Engine {
    */
   lastOutput: string
   /**
-   * Its checks in flight, by ID.
+   * Its checks and updates in flight, by ID.
    */
   runs: Map<string, Run>
 }
@@ -119,7 +123,7 @@ function firstLineOf(error: unknown): string {
 }
 
 /**
- * The outcome of a check that had no child to run it, or lost it.
+ * The outcome of a run that had no child to run it, or lost it.
  */
 function stoppedBy(message: string): AddonOutcome {
   return { result: 'stopped', cause: 'run', message, notices: [] }
@@ -133,19 +137,27 @@ function startMessageOf(error: unknown): string {
 }
 
 /**
- * Says that the child exited during a check, and what it last wrote.
+ * What the child was doing during a run of each kind.
  */
-function exitMessageOf({ child, lastOutput }: Engine): string {
+const doing: Record<StoryRequest['kind'], string> = {
+  check: 'checked the story',
+  update: "updated the story's baselines",
+}
+
+/**
+ * Says that the child exited during a run of the kind, and what it last wrote.
+ */
+function exitMessageOf({ child, lastOutput }: Engine, kind: StoryRequest['kind']): string {
   const { exitCode, signalCode } = child
   const end = signalCode === null ? `exited with code ${exitCode}` : `was killed by signal ${signalCode}`
   const lines = lastOutput.trimEnd().split('\n').slice(-keptLines)
-  const message = `visual-check's process ${end} while it checked the story.`
+  const message = `visual-check's process ${end} while it ${doing[kind]}.`
 
   return lines.join('') === '' ? message : [message, 'Its last output:', ...lines].join('\n')
 }
 
 /**
- * Ends a check of the child, unless it has ended.
+ * Ends a run of the child, unless it has ended.
  */
 function finish({ runs }: Engine, id: string, outcome: AddonOutcome): void {
   const run = runs.get(id)
@@ -158,23 +170,23 @@ function finish({ runs }: Engine, id: string, outcome: AddonOutcome): void {
 }
 
 /**
- * Ends every check of the child.
+ * Ends every run of the child with the outcome its kind gets.
  */
-function finishAll(engine: Engine, outcome: AddonOutcome): void {
-  for (const id of [...engine.runs.keys()]) {
-    finish(engine, id, outcome)
+function finishAll(engine: Engine, outcomeOf: (kind: StoryRequest['kind']) => AddonOutcome): void {
+  for (const [id, { kind }] of [...engine.runs]) {
+    finish(engine, id, outcomeOf(kind))
   }
 }
 
 /**
- * Whether the child takes no check any more, or never started.
+ * Whether the child takes no run any more, or never started.
  */
 function isGone({ child }: Engine): boolean {
   return child.pid === undefined || child.exitCode !== null || child.signalCode !== null || !child.connected
 }
 
 /**
- * Passes a message of the child on to the check it's about.
+ * Passes a message of the child on to the run it's about.
  */
 function receive(engine: Engine, received: unknown): void {
   const message = readAddonMessage(received)
@@ -200,7 +212,7 @@ function send({ child }: Engine, request: AddonRequest): void {
 }
 
 /**
- * Ends the child's checks once it has exited and its last messages and output have been read. A process it started may
+ * Ends the child's runs once it has exited and its last messages and output have been read. A process it started may
  * hold its standard error open, so that takes 1 s at most.
  */
 function watchExit(engine: Engine): void {
@@ -209,7 +221,7 @@ function watchExit(engine: Engine): void {
 
   const end = (): void => {
     clearTimeout(timer)
-    finishAll(engine, stoppedBy(exitMessageOf(engine)))
+    finishAll(engine, (kind) => stoppedBy(exitMessageOf(engine, kind)))
   }
 
   child.on('exit', () => {
@@ -247,7 +259,9 @@ function startEngine(entryPath: string): Engine {
   child.on('error', (error) => {
     // The other errors, such as of a kill that fails, don't end the child.
     if (child.pid === undefined) {
-      finishAll(engine, stoppedBy(startMessageOf(error)))
+      const outcome = stoppedBy(startMessageOf(error))
+
+      finishAll(engine, () => outcome)
     }
   })
 
@@ -255,8 +269,8 @@ function startEngine(entryPath: string): Engine {
 }
 
 /**
- * Makes what runs checks in the CLI's child process. It starts the child at the first check, and at the next one after
- * the child has exited.
+ * Makes what runs checks and updates in the CLI's child process. It starts the child at the first run, and at the next
+ * one after the child has exited.
  *
  * @public
  */
@@ -306,11 +320,11 @@ export function createEngineProcess({
       current = undefined
     }
 
-    finishAll(engine, { result: 'cancelled' })
+    finishAll(engine, () => ({ result: 'cancelled' }))
   }
 
   return {
-    check: (request, listener) => {
+    run: (request, listener) => {
       const started = engineOrProblem()
 
       if ('problem' in started) {
@@ -319,8 +333,8 @@ export function createEngineProcess({
         return
       }
 
-      started.engine.runs.set(request.id, { listener })
-      send(started.engine, { kind: 'check', ...request })
+      started.engine.runs.set(request.id, { kind: request.kind, listener })
+      send(started.engine, request)
     },
     cancel: (id) => {
       const engine = current
