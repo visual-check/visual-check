@@ -50,7 +50,7 @@ What CI checks there:
 - Every grid port renders on 9.1, 10 and 11.
 - One grid through every port gives identical images.
 - A deliberate change is caught.
-- **The addon, end to end, on 10:** `storybook dev` with the addon, and Check driven in the real manager. Update comes with [#88][88]. The Own Storybooks job runs it on Docker, and the macOS one with `host`. The manager's mobile layout, the Webpack builder and Storybook 10.0 aren't run. v1 doesn't need the addon on 11 ([Storybook addon](15-storybook-addon.md)).
+- **The addon, end to end, on 10:** `storybook dev` with the addon, and Check and Update driven in the real manager: Update with `CI` unset, an unstable story's Update writing nothing, and Update refused with `CI` set. Then a static build's panel, with the commands on 127.0.0.1 and nothing on the machine's LAN address. The Own Storybooks job runs it on Docker, and the macOS one with `host`. The manager's mobile layout, the Webpack builder and Storybook 10.0 aren't run. v1 doesn't need the addon on 11 ([Storybook addon](15-storybook-addon.md)).
 
 ## Setup under each package manager
 
@@ -100,4 +100,3 @@ These rest on source reading, or on measurements made with Playwright before the
 [47]: https://github.com/visual-check/visual-check/issues/47
 [50]: https://github.com/visual-check/visual-check/issues/50
 [51]: https://github.com/visual-check/visual-check/issues/51
-[88]: https://github.com/visual-check/visual-check/issues/88

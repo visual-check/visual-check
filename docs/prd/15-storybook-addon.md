@@ -59,6 +59,10 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
   - a capture identical to the file, byte for byte, leaves the file untouched;
   - with `CI` set it's refused;
   - the panel lists every written path, the flaky snapshots, and `update`'s warnings by host.
+- The panel shows one row per snapshot: Written, Untouched or Broken story, with the baseline's path. A row marks a flaky snapshot and shows the remote-content hint when there is one. A broken story's row gives its reason and details. The warnings by host come below the rows.
+- Its result replaces the story's result, and its images. The story's status icon is an error when any snapshot is a broken story, otherwise success. A stale Update says something changed since this update: check or update again.
+- A cancel before the baselines are written writes nothing, and the story's earlier result stays. One that comes once they're being written is too late and ends with the result. A write that fails stops the update with the CLI's message, and may leave the baselines it wrote before that one.
+- It also runs from the story's menu in the sidebar: "Update baselines with visual-check". It shares Check's one run at a time.
 - It never deletes orphans. That stays with the CLI's `update`.
 - It works on a dev server with no special handling.
 
@@ -103,19 +107,21 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
 ## Static builds
 
 - No Node side runs in a static build. The manager detects one with `CONFIG_TYPE === 'PRODUCTION'`.
-- On a loopback host (`127.0.0.1`, `localhost` or `::1`), the panel shows the exact `test` and `update` commands for the current story, with copy buttons. The Storybook's name is resolved at build time, through the preset's `env` hook. Example: `visual-check update --storybook web --filter '^components-button--primary$' --url http://127.0.0.1:6006`.
+- On a loopback host (`127.0.0.1`, `localhost` or `::1`), the panel shows the exact `test` and `update` commands for the current story, with copy buttons. The Storybook's name is resolved once per build, through the preset's `env` hook, which does nothing outside a static build. Example: `visual-check update --storybook web --filter '^components-button--primary$' --url http://127.0.0.1:6006`.
 - That `update` also writes the Storybook's other missing baselines and deletes its orphans, as every `update` does ([Baselines and update](10-baselines-and-update.md)).
+- When the name can't be resolved, the build logs a warning, and the panel says to run `visual-check init` and build again.
 - On any other host, the addon shows nothing.
 
 ## Versions and install
 
 - The addon and the CLI release in lockstep. The addon peer-depends on exactly its own version of the CLI, and on a mismatch the panel says which package to upgrade.
+  - The child says its version first, in its `ready` message. On a mismatch the click's run stops, the panel names the older package to upgrade, or says to install one version of both when the two can't be ordered, and the child is disconnected.
 - `init` offers it for each Storybook on 10. It installs it with the package manager's exact add, registers it with `storybook add --skip-install`, then sets its spec back to the exact version ([Config and init](03-config-and-init.md)).
 - The addon has no postinstall.
 
 ## Tests
 
-- This repo's own test Storybook on 10 runs it end to end, in `storybook dev`: Check now, and Update with [#88][88] ([CI for this repo](18-repo-ci.md)).
+- This repo's own test Storybook on 10 runs it end to end ([CI for this repo](18-repo-ci.md)): Check and Update in `storybook dev`, with `CI` unset for Update, an unstable story's Update, Update refused with `CI` set, and a static build's commands on 127.0.0.1 and on another address.
 
 ## Kept addable
 
@@ -128,6 +134,7 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
 - [Storybook addon][41], [Failure report format][39], [Baseline updates without a local capture][42], [Docker's role][13], [Test apps repo][34], [Storybook 9 floor and Storybook 11][48].
 - Decided while writing this PRD: the slider view, counting browser exits per click, and v1 needing the addon on Storybook 10 only.
 - Decided while building Check: one check at a time, reading the current story's options only, the images' names and when they're replaced, what turns results stale, where results live, the image route's checks, a thread per config load, what Cancel does, the 10 s limits, and the own address's rules.
+- Decided while building Update and static builds ([#88][88]): Update's rows and status icon, its result replacing the story's, when a cancel comes too late, running it from the story's menu, reading the version from the child's `ready` message, resolving the name once per build and what the panel says without one.
 
 [13]: https://github.com/visual-check/visual-check/issues/13
 [34]: https://github.com/visual-check/visual-check/issues/34
