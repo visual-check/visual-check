@@ -1,4 +1,5 @@
-import type { CheckOutcome, CheckProgress } from '../commands/check-story.js'
+import type { CheckOutcome } from '../commands/check-story.js'
+import type { StoryProgress } from '../commands/story-run.js'
 import type { TestReportEntry } from '../report/report-document.js'
 
 /**
@@ -14,7 +15,7 @@ export type AddonSnapshot = TestReportEntry
  *
  * @public
  */
-export type AddonProgress = CheckProgress
+export type AddonProgress = StoryProgress
 
 /**
  * How a check ended.

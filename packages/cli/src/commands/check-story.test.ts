@@ -6,7 +6,7 @@ import { DockerMissingError } from '../container/container-error.js'
 import { reportImagePathOf } from '../report/report-document.js'
 import { ReportError, type ReportImageBytes } from '../report/report-folder.js'
 import { previewUrlOf } from '../storybook/read-stories.js'
-import { type CheckOutcome, type CheckProgress, checkStory, type StoryCheck } from './check-story.js'
+import { type CheckOutcome, checkStory, type StoryCheck } from './check-story.js'
 import {
   absentMarkerPath,
   browserPackage,
@@ -23,6 +23,7 @@ import {
   storyIdsOf,
   takeUnusedUrl,
 } from './run-cli.fixture.js'
+import type { StoryProgress } from './story-run.js'
 import { createWarmBrowser } from './warm-browser.js'
 
 /**
@@ -76,7 +77,7 @@ interface CheckSetup {
   /**
    * Every progress, in order.
    */
-  progress: CheckProgress[]
+  progress: StoryProgress[]
   /**
    * Every replacement of a story's images, in order.
    */
@@ -120,7 +121,7 @@ function checkOf(
   url: string,
   overrides: Partial<StoryCheck> & Pick<StoryCheck, 'launchBrowser'>,
 ): CheckSetup {
-  const progress: CheckProgress[] = []
+  const progress: StoryProgress[] = []
   const replaced: ReplacedImages[] = []
   const imagesFolder = join(project, 'images')
 
