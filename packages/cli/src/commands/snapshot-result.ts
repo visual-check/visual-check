@@ -90,9 +90,10 @@ export interface SnapshotResult {
    */
   images?: ReportImages
   /**
-   * Why `update` wrote the baseline: it was missing, or the snapshot differed from it.
+   * Why `update` wrote the baseline: it was missing, the snapshot differed from it, or it was within tolerance of the
+   * baseline, which only the addon's Update rewrites.
    */
-  writtenFor?: 'missing' | 'differs'
+  writtenFor?: 'missing' | 'differs' | 'within-tolerance'
 }
 
 /**

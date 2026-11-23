@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -780,6 +780,153 @@ describe('updateSnapshot', () => {
     const fake = fakeCapturesOf([{ snapshot: black }])
 
     await expect(updateSnapshot(item, fake.captureStory, tools)).rejects.toMatchObject({
+      name: 'BaselineError',
+      action: 'decode',
+    })
+  })
+})
+
+describe('updateSnapshot with rewrite', () => {
+  /**
+   * What the addon's Update gives: the real visual diff, no wait before it captures a page again, and `rewrite`.
+   */
+  const rewriteTools: UpdateTools = { ...tools, rewrite: true }
+
+  it('rewrites a baseline within tolerance from the second load after capturing the first again', async () => {
+    const { item, path } = snapshotOf(black)
+    const fake = fakeCapturesOf([{ snapshot: threeWhite }, { snapshot: tenWhite }])
+
+    expect(await updateSnapshot(item, fake.captureStory, rewriteTools)).toEqual({
+      status: 'written',
+      detail: 'written: within tolerance',
+      attempts: 2,
+      writtenFor: 'within-tolerance',
+      console: [],
+    })
+    expect(bytesAt(path)).toEqual(tenWhite)
+    expect(fake.answers).toEqual([true])
+    expect(fake.stories).toHaveLength(2)
+  })
+
+  it('writes a baseline the second load is within tolerance of, when the first differed', async () => {
+    const { item, path } = snapshotOf(black, { color: 0.01, pixels: 15 })
+    const fake = fakeCapturesOf([{ snapshot: twentyFiveWhite }, { snapshot: tenWhite }])
+
+    expect(await updateSnapshot(item, fake.captureStory, rewriteTools)).toEqual({
+      status: 'written',
+      detail: 'written: differs: 25 differ, 15 allowed',
+      attempts: 2,
+      writtenFor: 'differs',
+      comparison: { ...allDifferComparison, message: '25 differ, 15 allowed', differ: 25, allowed: 15 },
+      console: [],
+    })
+    expect(bytesAt(path)).toEqual(tenWhite)
+  })
+
+  it('writes a missing baseline as without rewrite', async () => {
+    const { item, path } = snapshotOf()
+    const fake = fakeCapturesOf([{ snapshot: black }, { snapshot: threeWhite }])
+
+    expect(await updateSnapshot(item, fake.captureStory, rewriteTools)).toEqual({
+      status: 'written',
+      detail: 'written: missing',
+      attempts: 2,
+      writtenFor: 'missing',
+      console: [],
+    })
+    expect(bytesAt(path)).toEqual(threeWhite)
+  })
+
+  it('leaves a baseline identical byte for byte to the capture to write untouched, after 2 loads', async () => {
+    const { item, path } = snapshotOf(black)
+    const past = new Date('2020-01-01T00:00:00Z')
+
+    utimesSync(path, past, past)
+
+    const fake = fakeCapturesOf([{ snapshot: black }, { snapshot: black }])
+    const writes: string[] = []
+    const writeBaseline = async (to: string): Promise<void> => {
+      writes.push(to)
+    }
+
+    expect(await updateSnapshot(item, fake.captureStory, { ...rewriteTools, writeBaseline })).toEqual({
+      status: 'kept',
+      detail: 'kept: identical',
+      attempts: 2,
+      console: [],
+    })
+    expect(writes).toEqual([])
+    expect(bytesAt(path)).toEqual(black)
+    expect(statSync(path).mtimeMs).toBe(past.getTime())
+    expect(fake.stories).toHaveLength(2)
+  })
+
+  it('keeps an identical baseline, flaky, when the third load decided', async () => {
+    const { item, path } = snapshotOf(black)
+    const fake = fakeCapturesOf([{ snapshot: black }, { snapshot: white }, { snapshot: black }])
+
+    expect(await updateSnapshot(item, fake.captureStory, rewriteTools)).toEqual({
+      status: 'kept',
+      detail: 'kept: identical · flaky',
+      attempts: 3,
+      flaky: true,
+      console: [],
+    })
+    expect(bytesAt(path)).toEqual(black)
+  })
+
+  it('breaks a story whose page changed after its first capture, leaving the baseline untouched', async () => {
+    const kept = snapshotOf(black)
+    const keptFake = fakeCapturesOf([{ snapshot: black, later: white }])
+
+    expect(await updateSnapshot(kept.item, keptFake.captureStory, rewriteTools)).toStrictEqual(changedResult)
+    expect(bytesAt(kept.path)).toEqual(black)
+
+    const missing = snapshotOf()
+    const missingFake = fakeCapturesOf([{ snapshot: black, later: white }])
+
+    expect(await updateSnapshot(missing.item, missingFake.captureStory, rewriteTools)).toStrictEqual(changedResult)
+    expect(existsSync(missing.path)).toBe(false)
+  })
+
+  it('breaks a story none of whose 3 loads agree, leaving the baseline untouched', async () => {
+    const kept = snapshotOf(black)
+    const keptFake = fakeCapturesOf([{ snapshot: black }, { snapshot: white }, { snapshot: grey }])
+
+    expect(await updateSnapshot(kept.item, keptFake.captureStory, rewriteTools)).toStrictEqual(unstableResult)
+    expect(bytesAt(kept.path)).toEqual(black)
+
+    const missing = snapshotOf()
+    const missingFake = fakeCapturesOf([{ snapshot: black }, { snapshot: white }, { snapshot: grey }])
+
+    expect(await updateSnapshot(missing.item, missingFake.captureStory, rewriteTools)).toStrictEqual(unstableResult)
+    expect(existsSync(missing.path)).toBe(false)
+  })
+
+  it('writes with the writer it is given, never to the file system', async () => {
+    const { item, path } = snapshotOf()
+    const fake = fakeCapturesOf([{ snapshot: black }, { snapshot: threeWhite }])
+    const writes: [string, Uint8Array][] = []
+    const writeBaseline = async (to: string, bytes: Uint8Array): Promise<void> => {
+      writes.push([to, bytes])
+    }
+
+    expect(await updateSnapshot(item, fake.captureStory, { ...rewriteTools, writeBaseline })).toEqual({
+      status: 'written',
+      detail: 'written: missing',
+      attempts: 2,
+      writtenFor: 'missing',
+      console: [],
+    })
+    expect(writes).toEqual([[path, threeWhite]])
+    expect(existsSync(path)).toBe(false)
+  })
+
+  it("rejects with the baseline's decode error from the first load's comparison", async () => {
+    const { item } = snapshotOf(new TextEncoder().encode('not a PNG file'))
+    const fake = fakeCapturesOf([{ snapshot: black }])
+
+    await expect(updateSnapshot(item, fake.captureStory, rewriteTools)).rejects.toMatchObject({
       name: 'BaselineError',
       action: 'decode',
     })
