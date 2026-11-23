@@ -10,6 +10,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "default": "./dist/react.js"
     }
   },
   "scripts": {
@@ -38,7 +42,11 @@
     }
   },
   "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
     "@visual-check/typescript-config": "workspace:*",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
     "storybook": "10.6.7",
     "typescript": "7.0.2",
     "vitest": "5.1.0"

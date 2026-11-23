@@ -44,7 +44,7 @@ Done when `pnpm lint:fallow`, `pnpm lint:biome` and `pnpm test` pass.
 
 ## Outside systems
 
-- Each outside system is reached through one **adapter** module, which returns visual-check's own types: Storybook, Chromium over CDP, Docker, the Chrome for Testing download and yauzl, git and Fallow's graph, sharp and pixelmatch, Ink and React, GitHub.
+- Each outside system is reached through one **adapter** module, which returns visual-check's own types: Storybook, Chromium over CDP, Docker, the Chrome for Testing download and yauzl, git and Fallow's graph, sharp and pixelmatch, Ink and React (the CLI's terminal UI), React (the grid's React port), GitHub.
 - The change that adds an adapter bans its package everywhere else with Biome `noRestrictedImports`, plus an override that allows it in the adapter's folder. An override's options replace the root list rather than merging with it. So each adapter's override lists every other banned package, and adding an adapter updates every existing adapter override. When other workspaces use the library, scope the ban to one package with an override, as `packages/cli/**` does for Ink and React.
 - Put a **seam** (an interface that adapters satisfy) between a module and its adapters once two adapters exist or are planned. The driver interface is one, because the capture engine spec plans more browsers behind it. One adapter needs no seam.
 
@@ -91,6 +91,8 @@ packages/cli/src/
 ```
 packages/storybook/src/
   index.ts              entry: defineVisualCheck and the framework-free grid module
+  react.ts              entry: the React port, @visual-check/storybook/react
   per-story-options/    defineVisualCheck: a story's visualCheck parameter and its types
   grid-story/           the framework-free grid: rows, captions and every element's inline styles
+  react-port/           adapter: React: <Combinations>
 ```
