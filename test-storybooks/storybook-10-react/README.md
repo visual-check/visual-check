@@ -284,6 +284,9 @@ This Storybook lists visual-check's addon in its `.storybook/main.ts`, which the
 - With the browser's container killed between two checks, the next one passes in another. With `--host` this isn't run.
 - Once `SIGKILL` or `SIGTERM` has ended Storybook, the addon's process, the browser and its container are gone.
 - Neither Storybook's start nor the panel runs docker. With no docker, the check shows the CLI's message.
+- At the end no container is left. With `--host` this isn't run.
+
+The manager's mobile layout, the Webpack builder and Storybook 10.0 aren't run.
 
 ```sh
 TEST_STORYBOOK_IMAGE=visual-check-chromium:amd64 pnpm turbo run e2e:addon --filter @visual-check/test-storybook-10-react

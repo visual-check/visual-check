@@ -23,7 +23,9 @@ The three packages of the lockstep group always share one version and release to
 - It supports Node 22.17 and later: Fallow needs 22, and `path.matchesGlob`, which reads `affected.selectAll` and `affected.ignore`, stops warning that it is experimental in 22.17.
 - It depends on `sharp` and `pixelmatch` ([Visual diff](09-visual-diff.md)), on Fallow at one exact version ([Affected stories](11-affected-stories.md)), on `yauzl` for the `host` download ([Browser and platform](05-browser-and-platform.md)), and on Ink and React for `init`'s terminal UI and later `test`'s live reporter, loaded only when used.
 - Nothing in it calls Playwright, and it has no `playwright-core` dependency or peer.
-- It has an internal entry that the addon forks as a child process. That protocol is internal.
+- It has two internal subpaths, for the addon alone:
+  - `/internal/addon-child` is the script the addon forks as a child process;
+  - `/internal/addon-protocol` has the types of the messages between the two. The addon imports nothing but types from the CLI, so a missing CLI doesn't break Storybook's start.
 - It has no `@visual-check/cli/storybook` subpath.
 - The Storybook adapter, the capture-source seam, the driver interface and the affected-stories graph interface are internal modules, not packages, until a second implementation exists. The engine can split into `@visual-check/core` later, with `cli` re-exporting it.
 

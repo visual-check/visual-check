@@ -10,10 +10,10 @@ This repo's CI checks the code, runs the built CLI against the repo's own small 
 | -------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Code                 | Linux, Node 24       | Biome, typecheck, Fallow, unit tests, and the Agent Skills validator (`skills-ref` 0.1.1, `agentskills validate`) on the agent skill's `SKILL.md`                                                                                                                                                                                                                      |
 | Node 22              | Linux, Node 22       | Unit tests and one end-to-end run, because 22 is the minimum                                                                                                                                                                                                                                                                                                           |
-| Own Storybooks       | Linux                | The built CLI against this repo's test Storybooks (below)                                                                                                                                                                                                                                                                                                              |
+| Own Storybooks       | Linux                | The built CLI against this repo's test Storybooks, and on 10 the addon's end-to-end check (below)                                                                                                                                                                                                                                                                      |
 | Setup                | Linux                | `init` under each package manager, and on a monorepo (below)                                                                                                                                                                                                                                                                                                           |
 | Test apps            | Linux and Windows    | test-apps' reusable workflow, on the packed packages ([Test apps](17-test-apps.md))                                                                                                                                                                                                                                                                                    |
-| macOS without Docker | macOS, Apple Silicon | `init`, affected stories, baseline files, the skill script's own tests, starting and stopping Storybook, the no-Docker error, and one `host` capture                                                                                                                                                                                                                   |
+| macOS without Docker | macOS, Apple Silicon | `init`, affected stories, baseline files, the skill script's own tests, starting and stopping Storybook, the no-Docker error, one `host` capture, and the addon's end-to-end check with `host`                                                                                                                                                                         |
 | Ubuntu `host`        | Linux                | One `host` capture, where Chromium's sandbox can't start and visual-check relaunches without it                                                                                                                                                                                                                                                                        |
 | Windows skill script | Windows              | The skill script's and the agent skill's own tests, then, through Docker Desktop installed in the job: the script starts and stops Storybook, reuses one already running, stops at a port mismatch, starts only the Storybook a change reaches, and an interrupt mid-run stops Storybook, the CLI and the browser. Killing the CLI mid-run leaves no browser container |
 | Oldest browser       | Linux                | A smoke run with the oldest browser package in the CLI's range: it launches and captures, with no image comparison                                                                                                                                                                                                                                                     |
@@ -25,7 +25,7 @@ This repo's CI checks the code, runs the built CLI against the repo's own small 
 
 - Every job runs Node 24, except the Node 22 job.
 - The Windows runner's own Docker runs only Windows containers, so the Windows skill script job stops it and installs Docker Desktop, about 6 minutes.
-- GitHub Actions sets `CI`. Steps that test local-only behaviour run with `CI` unset: the Setup job's `update`, the addon's Update, the affected-stories check and the skill refresh.
+- GitHub Actions sets `CI`. Steps that test local-only behaviour run with `CI` unset: the Setup job's `update`, the addon's end-to-end check, the affected-stories check and the skill refresh.
 
 Nightly, and not blocking:
 
@@ -33,7 +33,7 @@ Nightly, and not blocking:
 
 ## This repo's own test Storybooks
 
-Small private workspace packages on Storybook 9.1, 10 and 11. Each version has one React Storybook, which holds the hazard stories and runs the addon, and one small Storybook for each other port: Vue, Angular and plain DOM. Until 11 is stable, it's the same pinned prerelease the test apps use.
+Small private workspace packages on Storybook 9.1, 10 and 11. Each version has one React Storybook, which holds the hazard stories and, on 10, runs the addon, and one small Storybook for each other port: Vue, Angular and plain DOM. Until 11 is stable, it's the same pinned prerelease the test apps use.
 
 Each one lives in `test-storybooks/storybook-<major>-<framework>/`, apart from the packages in `packages/`, as the package `@visual-check/test-storybook-<major>-<framework>`. For example, `storybook-10-react` and `storybook-9-vue`.
 
@@ -49,7 +49,7 @@ What CI checks there:
 - Every grid port renders on 9.1, 10 and 11.
 - One grid through every port gives identical images.
 - A deliberate change is caught.
-- **The addon, end to end, on 10:** `storybook dev` with the addon, then Check and Update on one story. v1 doesn't need the addon on 11 ([Storybook addon](15-storybook-addon.md)).
+- **The addon, end to end, on 10:** `storybook dev` with the addon, and Check driven in the real manager. Update comes with [#88][88]. The Own Storybooks job runs it on Docker, and the macOS one with `host`. The manager's mobile layout, the Webpack builder and Storybook 10.0 aren't run. v1 doesn't need the addon on 11 ([Storybook addon](15-storybook-addon.md)).
 
 ## Setup under each package manager
 
@@ -99,3 +99,4 @@ These rest on source reading, or on measurements made with Playwright before the
 [47]: https://github.com/visual-check/visual-check/issues/47
 [50]: https://github.com/visual-check/visual-check/issues/50
 [51]: https://github.com/visual-check/visual-check/issues/51
+[88]: https://github.com/visual-check/visual-check/issues/88

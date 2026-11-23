@@ -41,7 +41,7 @@ What the Storybook addon does with the current story when asked: it captures the
 _Avoid_: Test (the command), run
 
 **Stale result**:
-A Check's result from before the latest hot reload or change to the story index, which may not show the story as it is now.
+The result of a Check that started before the latest hot reload, reload of the preview or change to the story index, so it may not show the story as it is now.
 _Avoid_: Outdated, expired
 
 **Shard**:
