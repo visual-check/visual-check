@@ -33,7 +33,7 @@ function browserExitingWith(lines: readonly string[]): FakeBrowser {
  * Launches a driver on the fake browser, with the sandbox off unless the options say otherwise.
  */
 function launch(browser: FakeBrowser, options: Partial<CdpDriverOptions> = {}) {
-  return launchCdpDriver({ sandbox: false, profileDir, system: 'linux', start: browser.start, ...options })
+  return launchCdpDriver({ sandbox: false, profileDir, start: browser.start, ...options })
 }
 
 /**

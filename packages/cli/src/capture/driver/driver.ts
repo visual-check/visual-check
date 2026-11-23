@@ -62,13 +62,6 @@ export interface BrowserProcess {
 export type StartBrowser = (browserArguments: readonly string[]) => BrowserProcess
 
 /**
- * The OS a browser runs on, which picks the font table its pages use.
- *
- * @public
- */
-export type BrowserSystem = 'linux' | 'macos' | 'windows'
-
-/**
  * A running browser that snapshots are captured in.
  *
  * @public

@@ -2,7 +2,6 @@ import { setFlagsFromString } from 'node:v8'
 import { runInNewContext } from 'node:vm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  type BrowserSystem,
   CaptureTooLargeError,
   type ConsoleMessage,
   consoleMessageFunction,
@@ -84,18 +83,6 @@ const networkEnableParams = { maxTotalBufferSize: 0, maxResourceBufferSize: 0, m
 const apiUrl = 'https://api.example.com/users'
 
 /**
- * The fonts a page on Linux uses.
- */
-const linuxFonts = {
-  standard: 'Times New Roman',
-  fixed: 'Monospace',
-  serif: 'Times New Roman',
-  sansSerif: 'Arial',
-  cursive: 'Comic Sans MS',
-  fantasy: 'Impact',
-}
-
-/**
  * A command as the tests compare it: without its id.
  */
 type SentCommand = Omit<ReceivedCommand, 'id'>
@@ -103,15 +90,11 @@ type SentCommand = Omit<ReceivedCommand, 'id'>
 /**
  * Launches a driver on a fake browser with these options.
  */
-async function launch(
-  options: FakeBrowserOptions = {},
-  system: BrowserSystem = 'linux',
-): Promise<{ browser: FakeBrowser; driver: Driver }> {
+async function launch(options: FakeBrowserOptions = {}): Promise<{ browser: FakeBrowser; driver: Driver }> {
   const browser = new FakeBrowser(options)
   const driver = await launchCdpDriver({
     sandbox: false,
     profileDir: '/tmp/visual-check-profile',
-    system,
     start: browser.start,
   })
 
@@ -121,11 +104,8 @@ async function launch(
 /**
  * Launches a driver on a fake browser with these options and opens a page with the tests' setup.
  */
-async function openPage(
-  options: FakeBrowserOptions = {},
-  system: BrowserSystem = 'linux',
-): Promise<{ browser: FakeBrowser; page: Page }> {
-  const { browser, driver } = await launch(options, system)
+async function openPage(options: FakeBrowserOptions = {}): Promise<{ browser: FakeBrowser; page: Page }> {
+  const { browser, driver } = await launch(options)
 
   return { browser, page: await driver.newPage(pageSetup) }
 }
@@ -352,17 +332,12 @@ describe('Driver.newPage', () => {
     ])
   })
 
-  it('sets the page up once, in its session, with the Linux fonts and no per-script ones', async () => {
+  it('sets the page up once, in its session', async () => {
     const { browser } = await openPage()
 
     expect(sent(browser).slice(5)).toEqual([
       { method: 'Page.enable', params: {}, sessionId },
       { method: 'Inspector.enable', params: {}, sessionId },
-      {
-        method: 'Page.setFontFamilies',
-        params: { fontFamilies: linuxFonts },
-        sessionId,
-      },
       {
         method: 'Emulation.setUserAgentOverride',
         params: { userAgent: `${defaultVersionReply.userAgent} StorybookTestRunner`, acceptLanguage: 'pl-PL' },
@@ -401,143 +376,17 @@ describe('Driver.newPage', () => {
     ])
   })
 
-  it("sets macOS's fonts, with its per-script fonts", async () => {
-    const { browser } = await openPage({}, 'macos')
+  // A beyond-viewport capture resets the page's web preferences, which drops a font table set through
+  // `Page.setFontFamilies`, and Chromium takes the table once per page. With one, a page would be measured with the
+  // table's fonts and painted with the system's, so its boxes and its pixels would disagree.
+  it('sets no font table, so a page is measured with the fonts it is captured with', async () => {
+    const { browser, page } = await openPage()
 
-    expect(sentOf(browser, 'Page.setFontFamilies')).toEqual([
-      {
-        method: 'Page.setFontFamilies',
-        params: {
-          fontFamilies: {
-            standard: 'Times',
-            fixed: 'Courier',
-            serif: 'Times',
-            sansSerif: 'Helvetica',
-            cursive: 'Apple Chancery',
-            fantasy: 'Papyrus',
-          },
-          forScripts: [
-            {
-              script: 'jpan',
-              fontFamilies: {
-                standard: 'Hiragino Kaku Gothic ProN',
-                fixed: 'Osaka-Mono',
-                serif: 'Hiragino Mincho ProN',
-                sansSerif: 'Hiragino Kaku Gothic ProN',
-              },
-            },
-            {
-              script: 'hang',
-              fontFamilies: {
-                standard: 'Apple SD Gothic Neo',
-                serif: 'AppleMyungjo',
-                sansSerif: 'Apple SD Gothic Neo',
-              },
-            },
-            {
-              script: 'hans',
-              fontFamilies: {
-                standard: ',PingFang SC,STHeiti',
-                serif: 'Songti SC',
-                sansSerif: ',PingFang SC,STHeiti',
-                cursive: 'Kaiti SC',
-              },
-            },
-            {
-              script: 'hant',
-              fontFamilies: {
-                standard: ',PingFang TC,Heiti TC',
-                serif: 'Songti TC',
-                sansSerif: ',PingFang TC,Heiti TC',
-                cursive: 'Kaiti TC',
-              },
-            },
-          ],
-        },
-        sessionId,
-      },
-    ])
-  })
+    await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1, touch: false })
+    await page.goto(storyUrl, 1000)
+    await page.capture('full-page')
 
-  it("sets Windows's fonts, with its per-script fonts", async () => {
-    const { browser } = await openPage({}, 'windows')
-
-    expect(sentOf(browser, 'Page.setFontFamilies')).toEqual([
-      {
-        method: 'Page.setFontFamilies',
-        params: {
-          fontFamilies: {
-            standard: 'Times New Roman',
-            fixed: 'Consolas',
-            serif: 'Times New Roman',
-            sansSerif: 'Arial',
-            cursive: 'Comic Sans MS',
-            fantasy: 'Impact',
-          },
-          forScripts: [
-            {
-              script: 'cyrl',
-              fontFamilies: {
-                standard: 'Times New Roman',
-                fixed: 'Courier New',
-                serif: 'Times New Roman',
-                sansSerif: 'Arial',
-              },
-            },
-            { script: 'arab', fontFamilies: { fixed: 'Courier New', sansSerif: 'Segoe UI' } },
-            {
-              script: 'grek',
-              fontFamilies: {
-                standard: 'Times New Roman',
-                fixed: 'Courier New',
-                serif: 'Times New Roman',
-                sansSerif: 'Arial',
-              },
-            },
-            {
-              script: 'jpan',
-              fontFamilies: {
-                standard: ',Meiryo,Yu Gothic',
-                fixed: 'MS Gothic',
-                serif: ',Yu Mincho,MS PMincho',
-                sansSerif: ',Meiryo,Yu Gothic',
-              },
-            },
-            {
-              script: 'hang',
-              fontFamilies: {
-                standard: 'Malgun Gothic',
-                fixed: 'Gulimche',
-                serif: 'Batang',
-                sansSerif: 'Malgun Gothic',
-                cursive: 'Gungsuh',
-              },
-            },
-            {
-              script: 'hans',
-              fontFamilies: {
-                standard: 'Microsoft YaHei',
-                fixed: 'NSimsun',
-                serif: 'Simsun',
-                sansSerif: 'Microsoft YaHei',
-                cursive: 'KaiTi',
-              },
-            },
-            {
-              script: 'hant',
-              fontFamilies: {
-                standard: 'Microsoft JhengHei',
-                fixed: 'MingLiU',
-                serif: 'PMingLiU',
-                sansSerif: 'Microsoft JhengHei',
-                cursive: 'DFKai-SB',
-              },
-            },
-          ],
-        },
-        sessionId,
-      },
-    ])
+    expect(sentOf(browser, 'Page.setFontFamilies')).toEqual([])
   })
 
   it.each([['Emulation.setTimezoneOverride'], ['Target.attachToTarget']])(
@@ -654,7 +503,6 @@ describe('Page', () => {
         'Target.attachToTarget',
         'Page.enable',
         'Inspector.enable',
-        'Page.setFontFamilies',
         'Emulation.setUserAgentOverride',
         'Emulation.setTimezoneOverride',
         'Emulation.setLocaleOverride',

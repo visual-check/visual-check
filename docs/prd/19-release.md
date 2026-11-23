@@ -53,7 +53,7 @@ Two checks can't run on hosted runners. Each runs before a release that changes 
 - A scheduled job runs every two weeks. When Chrome for Testing's Stable build has changed, major or point release, it opens a PR with the new version and the new checksums.
 - On that PR, CI builds the image and runs the test apps with the new browser package.
 - For a new Chromium major, the same PR raises the upper bound of the CLI's browser range, so the CLI packed on that PR accepts the new package. The next CLI minor ships that range.
-- A maintainer reviews the launch arguments, the font table and the pixel changes, then merges.
+- A maintainer reviews the launch arguments and the pixel changes, then merges.
 - When the new build moves pixels, the test apps' committed baselines no longer match. The maintainer rewrites them with `update` on a branch of `visual-check/test-apps`, and the bump's PR runs the test apps from that branch. Both merge once every job passes.
 - Merging publishes the image, then the package, in a workflow separate from the lockstep release. The image published is the one the PR built and tested, by digest. It isn't built again.
 
@@ -67,7 +67,7 @@ The image:
 The first browser package:
 
 - It holds the Stable build current when it's built, and the CLI's range starts at that major.
-- Its launch arguments and font table are copied from the Playwright release for the same Chromium major, or the nearest one. The file and version are recorded beside the data. The comparison against Playwright on 300 real stories is run once on that build before the first publish.
+- Its launch arguments are copied from the Playwright release for the same Chromium major, or the nearest one. The file and version are recorded beside the data. The comparison against Playwright on 300 real stories is run once on that build before the first publish.
 
 If Google objects to shipping its headless shell inside the image, the fallback is a download at run time or Debian's Chromium, shipped as a new browser package version.
 

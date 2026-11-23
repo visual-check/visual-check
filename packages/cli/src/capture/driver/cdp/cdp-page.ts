@@ -1,5 +1,4 @@
 import {
-  type BrowserSystem,
   type CaptureArea,
   type CaptureBox,
   CaptureTooLargeError,
@@ -15,7 +14,6 @@ import {
   readConsoleMessage,
 } from '../driver.js'
 import { type CdpConnection, type CdpEvent, isRecord } from './cdp-connection.js'
-import { fontFamiliesOf } from './font-families.js'
 import { LoadedDocument } from './loaded-document.js'
 import { MainFrameNavigation } from './main-frame-navigation.js'
 import { RequestWatch } from './request-watch.js'
@@ -380,19 +378,18 @@ class CdpPage implements Page {
   }
 
   /**
-   * Sets the page up once: the font table of the browser's OS, the user agent, the emulated time zone, locale, colour
-   * scheme, motion and focus, the message function and the init script, and denies downloads and every permission in
-   * the page's browser context. When the page watches requests, it also turns the Network domain on in its session and
-   * has the session report service workers. A failed discovery never fails the setup. The commands go in parallel, but
-   * the browser takes a session's commands in order, so the message function is in every document before the init
-   * script runs there, including after a navigation.
+   * Sets the page up once: the user agent, the emulated time zone, locale, colour scheme, motion and focus, the message
+   * function and the init script, and denies downloads and every permission in the page's browser context. When the
+   * page watches requests, it also turns the Network domain on in its session and has the session report service
+   * workers. A failed discovery never fails the setup. The commands go in parallel, but the browser takes a session's
+   * commands in order, so the message function is in every document before the init script runs there, including after
+   * a navigation.
    */
-  async setUp(browserUserAgent: string, system: BrowserSystem, setup: PageSetup): Promise<void> {
+  async setUp(browserUserAgent: string, setup: PageSetup): Promise<void> {
     await this.unlessFailed(
       Promise.all([
         this.send('Page.enable'),
         this.send('Inspector.enable'),
-        this.send('Page.setFontFamilies', fontFamiliesOf(system)),
         this.send('Emulation.setUserAgentOverride', {
           userAgent: `${browserUserAgent}${setup.userAgentSuffix}`,
           acceptLanguage: setup.locale,
@@ -837,7 +834,6 @@ async function openInContext(
   connection: CdpConnection,
   browserContextId: string,
   browserUserAgent: string,
-  system: BrowserSystem,
   setup: PageSetup,
   limit: TimeLimit,
 ): Promise<Page> {
@@ -852,7 +848,7 @@ async function openInContext(
     const sessionId = readString(attachReply, 'sessionId', 'Target.attachToTarget')
 
     page = new CdpPage(connection, { browserContextId, targetId, sessionId }, setup.watchRequests)
-    await limit.race(page.setUp(browserUserAgent, system, setup))
+    await limit.race(page.setUp(browserUserAgent, setup))
 
     return page
   } catch (error) {
@@ -887,14 +883,13 @@ async function createContext(connection: CdpConnection, limit: TimeLimit): Promi
 
 /**
  * Opens a page over CDP: creates a target in a fresh browser context, attaches to it in a flat session, and sets it up
- * once. It gets the font table of `system`, the OS the browser runs on, and the browser's own user agent with the
- * setup's suffix, and watches its requests when the setup says so. From then on the page handles its hazards itself.
+ * once. It gets the browser's own user agent with the setup's suffix, and watches its requests when the setup says
+ * so. From then on the page handles its hazards itself.
  * When a step fails, or the page isn't open within 30 s, it disposes the context and rethrows.
  */
 export async function openCdpPage(
   connection: CdpConnection,
   browserUserAgent: string,
-  system: BrowserSystem,
   setup: PageSetup,
 ): Promise<Page> {
   const limit = startTimeLimit(
@@ -905,7 +900,7 @@ export async function openCdpPage(
   try {
     const browserContextId = await createContext(connection, limit)
 
-    return await openInContext(connection, browserContextId, browserUserAgent, system, setup, limit)
+    return await openInContext(connection, browserContextId, browserUserAgent, setup, limit)
   } finally {
     limit.clear()
   }

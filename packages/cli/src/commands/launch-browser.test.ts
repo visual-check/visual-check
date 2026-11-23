@@ -154,7 +154,7 @@ describe('createLaunchBrowser on the host', () => {
       },
     ])
     expect(launches).toEqual([
-      { sandbox: true, system: 'linux', profileDir: expect.stringContaining(tmpdir()), start: expect.any(Function) },
+      { sandbox: true, profileDir: expect.stringContaining(tmpdir()), start: expect.any(Function) },
     ])
   })
 
@@ -231,20 +231,6 @@ describe('createLaunchBrowser on the host', () => {
     expect(launches.map(({ sandbox }) => sandbox)).toEqual([true, false, true])
   })
 
-  it.each([
-    ['linux64', 'linux'],
-    ['linux-arm64', 'linux'],
-    ['mac-x64', 'macos'],
-    ['mac-arm64', 'macos'],
-    ['win64', 'windows'],
-  ] as const)('gives the %s headless shell the %s font table', async (platform, system) => {
-    const { launchBrowser, launches } = fakeLauncher([driver])
-
-    await launchBrowser(hostLaunch([], platform))
-
-    expect(launches[0]?.system).toBe(system)
-  })
-
   it("throws the download's error without launching", async () => {
     const error = new BrowserDownloadError('The download of Chromium 157.0.8103.78 (linux64) failed.')
     const { launchBrowser, launches } = fakeLauncher([driver], error)
@@ -263,7 +249,7 @@ describe("createLaunchBrowser inside visual-check's image", () => {
     )
     expect(installs).toEqual([])
     expect(launches).toEqual([
-      { sandbox: false, system: 'linux', profileDir: expect.stringContaining(tmpdir()), start: expect.any(Function) },
+      { sandbox: false, profileDir: expect.stringContaining(tmpdir()), start: expect.any(Function) },
     ])
   })
 })

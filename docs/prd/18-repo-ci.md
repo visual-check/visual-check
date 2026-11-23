@@ -79,7 +79,7 @@ These rest on source reading, or on measurements made with Playwright before the
 - installing `@visual-check/storybook` with no React, Vue or Angular present;
 - the Angular port on Angular 18 to 20;
 - Storybook 11's own animation pause followed by visual-check's end state;
-- the launch arguments and font table on the first browser build, against Playwright on the 300 real stories.
+- the launch arguments on the first browser build, against Playwright on the 300 real stories.
 
 ## Existing setup
 
