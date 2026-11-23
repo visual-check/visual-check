@@ -5,7 +5,7 @@ import { convert, ThemeProvider, themes } from 'storybook/theming'
 import { describe, expect, it, vi } from 'vitest'
 import type { VisualCheckState } from '../channel-events/events.js'
 import { runWith } from '../channel-events/state.fixture.js'
-import { checkFromMenu } from './check-menu-item.js'
+import { runFromMenu } from './run-menu-item.js'
 import { testProviderOf } from './test-provider.js'
 
 /**
@@ -50,18 +50,25 @@ function render(node: ReactNode): string {
 }
 
 describe('testProviderOf', () => {
-  it('adds an item to the menu of a story', () => {
-    expect(render(menuOf('story'))).toContain(
+  it('adds an item that checks and one that updates to the menu of a story', () => {
+    const markup = render(menuOf('story'))
+
+    expect(markup.match(/<style>/g)).toHaveLength(1)
+    expect(markup).toContain(
       '<button type="button" data-visual-check="menu-check" aria-disabled="false">Check with visual-check</button>',
+    )
+    expect(markup).toContain(
+      '<button type="button" data-visual-check="menu-update" aria-disabled="false">' +
+        'Update baselines with visual-check</button>',
     )
   })
 
-  it('disables it while a run is in flight, whichever story it checks', () => {
+  it('disables both while a run is in flight, whichever story it runs on', () => {
     const run = runWith({ storyId: 'button--primary' })
+    const markup = render(menuOf('story', { run, results: {} }))
 
-    expect(render(menuOf('story', { run, results: {} }))).toContain(
-      'data-visual-check="menu-check" aria-disabled="true"',
-    )
+    expect(markup).toContain('data-visual-check="menu-check" aria-disabled="true"')
+    expect(markup).toContain('data-visual-check="menu-update" aria-disabled="true"')
   })
 
   it.each(['docs', 'component', 'group', 'root'])('adds nothing to the menu of a %s', (type) => {
@@ -72,7 +79,7 @@ describe('testProviderOf', () => {
     const { api, state } = build()
     const { render: Line } = testProviderOf(api, state)
 
-    expect(render(<Line />)).toContain('Check one story at a time, from its Visual check panel or its menu.')
+    expect(render(<Line />)).toContain('Check or update one story at a time, from its Visual check panel or its menu.')
   })
 
   it('clears the results with the statuses', () => {
@@ -84,24 +91,24 @@ describe('testProviderOf', () => {
   })
 })
 
-describe('checkFromMenu', () => {
-  it('selects the story, shows the panel and asks for a check', () => {
+describe('runFromMenu', () => {
+  it.each(['check', 'update'] as const)('selects the story, shows the panel and asks for a %s', (kind) => {
     const { api, state, calls } = build()
 
-    checkFromMenu({ storyId: 'card--default', api, state })
+    runFromMenu({ kind, storyId: 'card--default', api, state })
 
     expect(calls).toEqual([
       ['selectStory', 'card--default'],
       ['setSelectedPanel', 'visual-check/panel'],
       ['togglePanel', true],
-      ['check', 'card--default'],
+      [kind, 'card--default'],
     ])
   })
 
-  it('does nothing while a run is in flight', () => {
+  it.each(['check', 'update'] as const)('does nothing while a run is in flight, for a %s', (kind) => {
     const { api, state, calls } = build({ run: runWith(), results: {} })
 
-    checkFromMenu({ storyId: 'card--default', api, state })
+    runFromMenu({ kind, storyId: 'card--default', api, state })
 
     expect(calls).toEqual([])
   })

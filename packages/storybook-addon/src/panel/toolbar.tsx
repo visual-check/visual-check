@@ -22,7 +22,7 @@ interface ToolbarProps {
   /**
    * What the buttons do.
    */
-  actions: Pick<ManagerState, 'check' | 'cancel'>
+  actions: Pick<ManagerState, 'check' | 'update' | 'cancel'>
 }
 
 /**
@@ -34,13 +34,25 @@ interface CancelButtonProps {
    */
   run: StoryRun
   /**
-   * The Check button, which gets the focus when this one goes.
+   * The Check and the Update buttons: the one of the run's kind gets the focus when this one goes.
    */
-  checkButton: RefObject<HTMLButtonElement | null>
+  runButtons: RunButtons
   /**
    * What the button does.
    */
   actions: Pick<ManagerState, 'cancel'>
+}
+
+/**
+ * The buttons that start a run, by the run's kind.
+ */
+export type RunButtons<Button = RefObject<HTMLButtonElement | null>> = Record<StoryRun['kind'], Button>
+
+/**
+ * Gives the button that starts a run of the kind, which gets the focus from the Cancel button when the run ends.
+ */
+export function runButtonOf<Button>(kind: StoryRun['kind'], buttons: RunButtons<Button>): Button {
+  return buttons[kind]
 }
 
 /**
@@ -49,6 +61,15 @@ interface CancelButtonProps {
 export function checkFromPanel({ storyId, run, actions }: Pick<ToolbarProps, 'storyId' | 'run' | 'actions'>): void {
   if (storyId !== null && run === null) {
     actions.check(storyId)
+  }
+}
+
+/**
+ * Asks for an update of the story's baselines, unless there is no story or a run is in flight.
+ */
+export function updateFromPanel({ storyId, run, actions }: Pick<ToolbarProps, 'storyId' | 'run' | 'actions'>): void {
+  if (storyId !== null && run === null) {
+    actions.update(storyId)
   }
 }
 
@@ -62,20 +83,22 @@ export function cancelFromPanel({ run, actions }: Pick<CancelButtonProps, 'run' 
 }
 
 /**
- * The button that cancels the run. It hands the focus on to the Check button when it goes with the run's end.
+ * The button that cancels the run. It hands the focus on to the button of the run's kind when it goes with the run's
+ * end.
  */
-function CancelButton({ run, checkButton, actions }: CancelButtonProps): ReactNode {
+function CancelButton({ run, runButtons, actions }: CancelButtonProps): ReactNode {
   const ownButton = useRef<HTMLButtonElement>(null)
+  const nextButton = runButtonOf(run.kind, runButtons)
 
   useLayoutEffect(() => {
     const button = ownButton.current
 
     return () => {
       if (button !== null && button === button.ownerDocument.activeElement) {
-        checkButton.current?.focus()
+        nextButton.current?.focus()
       }
     }
-  }, [checkButton])
+  }, [nextButton])
 
   return (
     <button
@@ -96,6 +119,7 @@ function CancelButton({ run, checkButton, actions }: CancelButtonProps): ReactNo
  */
 export function Toolbar({ storyId, run, result, actions }: ToolbarProps): ReactNode {
   const checkButton = useRef<HTMLButtonElement>(null)
+  const updateButton = useRef<HTMLButtonElement>(null)
   const [last, setLast] = useState<StatusSubject>({ run, storyId, result, cancelled: false })
 
   if (last.run !== run || last.storyId !== storyId || last.result !== result) {
@@ -114,7 +138,18 @@ export function Toolbar({ storyId, run, result, actions }: ToolbarProps): ReactN
         >
           Check
         </button>
-        {run !== null && <CancelButton run={run} checkButton={checkButton} actions={actions} />}
+        <button
+          ref={updateButton}
+          type="button"
+          data-visual-check="update"
+          aria-disabled={storyId === null || run !== null}
+          onClick={() => updateFromPanel({ storyId, run, actions })}
+        >
+          Update
+        </button>
+        {run !== null && (
+          <CancelButton run={run} runButtons={{ check: checkButton, update: updateButton }} actions={actions} />
+        )}
         <p role="status" data-visual-check="run">
           {last.cancelled ? 'Cancelled' : statusLineOf(run, storyId, result)}
         </p>

@@ -47,12 +47,20 @@ export function panelCssOf(theme: StorybookTheme): string {
   cursor: default;
 }
 [data-visual-check="toolbar"] { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-:is([data-visual-check="check"], [data-visual-check="cancel"]) {
+:is(
+  [data-visual-check="check"],
+  [data-visual-check="update"],
+  [data-visual-check="cancel"]
+) {
   padding: 4px 12px;
   background: ${background.content};
   font-weight: ${typography.weight.bold};
 }
-:is([data-visual-check="check"], [data-visual-check="cancel"]):hover:not([aria-disabled="true"]) {
+:is(
+  [data-visual-check="check"],
+  [data-visual-check="update"],
+  [data-visual-check="cancel"]
+):hover:not([aria-disabled="true"]) {
   border-color: currentColor;
 }
 :is([data-visual-check="run"], [data-visual-check="empty"], [data-visual-check="disabled"]) { color: ${textMutedColor}; }
@@ -61,7 +69,8 @@ export function panelCssOf(theme: StorybookTheme): string {
   [data-visual-check="log"],
   [data-visual-check="notice"],
   [data-visual-check="stale"],
-  [data-visual-check="error"]
+  [data-visual-check="error"],
+  [data-visual-check="warning"]
 ) {
   margin-top: 12px;
   padding: 8px 12px;
@@ -71,11 +80,15 @@ export function panelCssOf(theme: StorybookTheme): string {
 }
 [data-visual-check="stale"] { border-color: ${warning}; }
 [data-visual-check="error"] { border-color: ${negative}; }
-:is([data-visual-check="notice"], [data-visual-check="error"]) { white-space: pre-wrap; overflow-wrap: anywhere; }
+[data-visual-check="warning"] { border-color: ${warning}; }
+:is([data-visual-check="notice"], [data-visual-check="error"], [data-visual-check="warning"]) {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 [data-visual-check="snapshots"] { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; margin-top: 12px; }
 [data-visual-check="rows"] { flex: 1 1 260px; min-width: 0; list-style-type: ''; }
 [data-visual-check="rows"] > li { padding-bottom: 8px; }
-[data-visual-check="row"] {
+:is([data-visual-check="row"], [data-visual-check="update-row"]) {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
@@ -85,6 +98,7 @@ export function panelCssOf(theme: StorybookTheme): string {
   background: transparent;
   text-align: start;
 }
+[data-visual-check="update-row"] { border: 1px solid transparent; }
 [data-visual-check="row"]:is(:hover, [aria-pressed="true"]) { background: ${background.content}; }
 [data-visual-check="row"][aria-pressed="true"] {
   border-color: ${barSelectedColor};
@@ -94,9 +108,12 @@ export function panelCssOf(theme: StorybookTheme): string {
 [data-visual-check="label"] { flex: 1 1 auto; overflow-wrap: anywhere; }
 [data-visual-check="flaky"] { color: ${warning}; }
 [data-status="passed"] > [data-visual-check="status"] { color: ${positive}; }
+[data-status="written"] > [data-visual-check="status"] { color: ${positive}; }
 [data-status="missing"] > [data-visual-check="status"] { color: ${warning}; }
+[data-status="kept"] > [data-visual-check="status"] { color: ${textMutedColor}; }
 :is([data-status="differs"], [data-status="broken"]) > [data-visual-check="status"] { color: ${negative}; }
 :is(
+  [data-visual-check="path"],
   [data-visual-check="message"],
   [data-visual-check="reason"],
   [data-visual-check="details"],
@@ -105,6 +122,7 @@ export function panelCssOf(theme: StorybookTheme): string {
   margin: 4px 10px 0;
   overflow-wrap: anywhere;
 }
+[data-visual-check="path"] { display: block; }
 [data-visual-check="details"] { color: ${textMutedColor}; }
 [data-visual-check="viewer"] { flex: 0 1 auto; min-width: 0; max-width: 100%; }
 [data-visual-check="views"] { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; border: 0; }

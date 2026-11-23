@@ -15,14 +15,20 @@ export const statusTypeId = 'visual-check'
 type Verdict = Pick<Status, 'value' | 'description'>
 
 /**
- * Gives the value of how a run ended: of its most severe snapshot. One that isn't known has no icon.
+ * The status of a snapshot of a check or an update.
+ */
+type SnapshotStatus = Exclude<StoryOutcome, { result: 'stopped' }>['snapshots'][number]['status']
+
+/**
+ * Gives the value of how a run ended: of its most severe snapshot. One that isn't known has no icon. An update fails
+ * only with a broken story.
  */
 function valueOfOutcome(outcome: StoryOutcome): StatusValue {
   if (outcome.result === 'stopped' || outcome.disabled) {
     return 'status-value:unknown'
   }
 
-  const statuses = outcome.snapshots.map(({ status }) => status)
+  const statuses: SnapshotStatus[] = outcome.snapshots.map(({ status }) => status)
 
   if (statuses.includes('differs') || statuses.includes('broken')) {
     return 'status-value:error'
@@ -41,7 +47,7 @@ function verdictOf({ stale, outcome }: StoryResult): Verdict {
 }
 
 /**
- * Gives the status of every story that has a result or is checked now.
+ * Gives the status of every story that has a result or a run in flight.
  */
 export function statusesOf({ run, results }: VisualCheckState): Status[] {
   const verdicts = new Map<string, Verdict>(
@@ -49,7 +55,10 @@ export function statusesOf({ run, results }: VisualCheckState): Status[] {
   )
 
   if (run !== null) {
-    verdicts.set(run.storyId, { value: 'status-value:pending', description: 'Checking…' })
+    verdicts.set(run.storyId, {
+      value: 'status-value:pending',
+      description: run.kind === 'update' ? 'Updating…' : 'Checking…',
+    })
   }
 
   return [...verdicts].map(([storyId, verdict]) => ({

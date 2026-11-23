@@ -1,3 +1,4 @@
+import type { AddonWarning } from '@visual-check/cli/internal/addon-protocol'
 import React, { type ReactNode, useState } from 'react'
 import { type StorybookTheme, useTheme } from 'storybook/theming'
 import type { StoryOutcome, StoryResult, VisualCheckState } from '../channel-events/events.js'
@@ -6,6 +7,7 @@ import { ImageViewer } from './image-viewer.js'
 import { panelCssOf } from './panel-css.js'
 import { type PickedRow, rowOf, type SnapshotRow, selectedRowOf } from './snapshot-row.js'
 import { Toolbar } from './toolbar.js'
+import { type UpdateRow, updateRowOf } from './update-row.js'
 
 /**
  * The story the panel is about.
@@ -36,7 +38,7 @@ interface PanelViewProps {
   /**
    * What the buttons do.
    */
-  actions: Pick<ManagerState, 'check' | 'cancel'>
+  actions: Pick<ManagerState, 'check' | 'update' | 'cancel'>
 }
 
 /**
@@ -66,7 +68,7 @@ interface StoryBodyProps {
    */
   result: StoryResult | undefined
   /**
-   * Whether the story is checked now.
+   * Whether the story has a run in flight.
    */
   isRunning: boolean
 }
@@ -100,6 +102,20 @@ interface RowItemProps {
 }
 
 /**
+ * What `UpdateRows` takes.
+ */
+interface UpdateRowsProps {
+  /**
+   * The rows.
+   */
+  rows: UpdateRow[]
+  /**
+   * The warnings by host.
+   */
+  warnings: AddonWarning[]
+}
+
+/**
  * Gives a story's result, or `undefined` when it has none.
  */
 function resultOf({ results }: VisualCheckState, storyId: string): StoryResult | undefined {
@@ -114,6 +130,18 @@ function RowNotes({ row: { status, flaky, message, reason, details, hints } }: P
     return null
   }
 
+  return <Notes message={message} reason={reason} details={details} hints={hints} />
+}
+
+/**
+ * A snapshot's message, the code of its reason, its details and its hints.
+ */
+function Notes({
+  message,
+  reason,
+  details,
+  hints,
+}: Pick<SnapshotRow, 'message' | 'reason' | 'details' | 'hints'>): ReactNode {
   return (
     <>
       <p data-visual-check="message">{message}</p>
@@ -172,7 +200,43 @@ function Rows({ story, result, rows }: RowsProps): ReactNode {
 }
 
 /**
- * What a check that a problem stopped says.
+ * The rows of an update that finished, each with its baseline's path unless its story is broken, then the warnings by
+ * host. An update writes no images.
+ */
+function UpdateRows({ rows, warnings }: UpdateRowsProps): ReactNode {
+  return (
+    <>
+      <div data-visual-check="snapshots">
+        <ul data-visual-check="rows">
+          {rows.map(({ key, label, status, statusText, flaky, message, reason, details, hints, path }) => (
+            <li key={key}>
+              <p data-visual-check="update-row" data-status={status}>
+                <span data-visual-check="label">{label}</span>
+                {flaky && (
+                  <>
+                    {' '}
+                    <span data-visual-check="flaky">Flaky</span>
+                  </>
+                )}{' '}
+                <span data-visual-check="status">{statusText}</span>
+              </p>
+              {status !== 'broken' && <code data-visual-check="path">{path}</code>}
+              <Notes message={message} reason={reason} details={details} hints={hints} />
+            </li>
+          ))}
+        </ul>
+      </div>
+      {warnings.map(({ kind, host, message }) => (
+        <p key={`${kind} ${host}`} data-visual-check="warning">
+          Warning: {message}
+        </p>
+      ))}
+    </>
+  )
+}
+
+/**
+ * What a check or an update that a problem stopped says.
  */
 function Stopped({ cause, message }: StoryOutcome & { result: 'stopped' }): ReactNode {
   return (
@@ -208,19 +272,27 @@ function Outcome(props: ResultProps): ReactNode {
     )
   }
 
-  // An update's rows come with the Update button, which asks for one.
-  return outcome.result === 'checked' && <Rows {...props} rows={outcome.snapshots.map(rowOf)} />
+  return outcome.result === 'checked' ? (
+    <Rows {...props} rows={outcome.snapshots.map(rowOf)} />
+  ) : (
+    <UpdateRows rows={outcome.snapshots.map(updateRowOf)} warnings={outcome.warnings} />
+  )
 }
 
 /**
- * A story's latest result, dimmed while it's stale or the story is checked again.
+ * A story's latest result, dimmed while it's stale or the story has a run in flight.
  */
 function Result({ story, result, isRunning }: ResultProps & { isRunning: boolean }): ReactNode {
   const { stale, outcome } = result
 
   return (
     <>
-      {stale && <p data-visual-check="stale">Stale: something changed since this check. Check again.</p>}
+      {stale && (
+        <p data-visual-check="stale">
+          Stale: something changed since this {outcome.result === 'updated' ? 'update' : 'check'}. Check or update
+          again.
+        </p>
+      )}
       <div data-visual-check="results" data-dimmed={stale || isRunning || undefined}>
         {[...new Set(outcome.notices)].map((notice) => (
           <p key={notice} data-visual-check="notice">
