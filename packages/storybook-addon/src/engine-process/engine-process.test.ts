@@ -339,6 +339,34 @@ describe('createEngineProcess', { timeout: testTimeout }, () => {
     expect(await check(engine, 'ends', 'click-2').end).toMatchObject({ message: String(children()[1]?.pid) })
   })
 
+  it.each([
+    { version: '1.3.0', upgrade: '@visual-check/cli to 1.3.0' },
+    { version: '1.2.0', upgrade: '@visual-check/storybook-addon to 1.2.3' },
+  ])('stops a run when the CLI is not at version $version, naming $upgrade', async ({ version, upgrade }) => {
+    const engine = createEngineProcess({ version, entry: () => fakeEntry })
+    const heard = check(engine, 'hangs')
+
+    expect(await heard.end).toEqual({
+      result: 'stopped',
+      cause: 'run',
+      message: expect.stringContaining(`Upgrade ${upgrade}, then restart Storybook.`),
+      notices: [],
+    })
+
+    const [child] = children()
+
+    if (child === undefined) {
+      throw new Error('No child was started.')
+    }
+
+    await exitOf(child)
+
+    expect(child.exitCode).toBe(0)
+    expect(await check(engine, 'hangs', 'click-2').end).toMatchObject({ result: 'stopped' })
+    expect(children()).toHaveLength(2)
+    expect(heard.outcomes).toHaveLength(1)
+  })
+
   it('stops a check when the CLI is not there, and looks for it again at the next one', async () => {
     const missing = new Error(
       "Cannot find module '@visual-check/cli/internal/addon-child'\nRequire stack:\n- /addon.js",

@@ -3,6 +3,7 @@ import { createRequire } from 'node:module'
 import type { Socket } from 'node:net'
 import type { AddonOutcome, AddonProgress, AddonRequest, StoryRequest } from '@visual-check/cli/internal/addon-protocol'
 import { readAddonMessage } from './read-message.js'
+import { versionProblemOf } from './version-mismatch.js'
 
 /**
  * How many of the last lines of the child's standard error are kept.
@@ -186,12 +187,27 @@ function isGone({ child }: Engine): boolean {
 }
 
 /**
- * Passes a message of the child on to the run it's about.
+ * Passes a message of the child on to the run it's about. A child of another version than the addon's stops its runs
+ * with what to upgrade, and is disconnected, which makes it shut down.
  */
-function receive(engine: Engine, received: unknown): void {
+function receive(engine: Engine, version: string, received: unknown): void {
   const message = readAddonMessage(received)
 
   switch (message?.kind) {
+    case 'ready': {
+      const problem = versionProblemOf(version, message.version)
+
+      if (problem !== undefined) {
+        finishAll(engine, () => stoppedBy(problem))
+
+        if (engine.child.connected) {
+          engine.child.disconnect()
+        }
+      }
+
+      break
+    }
+
     case 'progress':
       engine.runs.get(message.id)?.listener.progress(message.progress)
       break
@@ -232,11 +248,12 @@ function watchExit(engine: Engine): void {
 }
 
 /**
- * Forks the script. The child, its channel and its standard error never keep this process alive.
+ * Forks the script, which must be of the addon's version. The child, its channel and its standard error never keep this
+ * process alive.
  *
  * @throws {Error} When the system refuses at once.
  */
-function startEngine(entryPath: string): Engine {
+function startEngine(entryPath: string, version: string): Engine {
   const child = fork(entryPath, [], {
     execArgv: [],
     serialization: 'json',
@@ -254,7 +271,7 @@ function startEngine(entryPath: string): Engine {
   })
   // A read error is dropped: the child's exit says what happened.
   stderr?.on('error', () => undefined)
-  child.on('message', (message) => receive(engine, message))
+  child.on('message', (message) => receive(engine, version, message))
   watchExit(engine)
   child.on('error', (error) => {
     // The other errors, such as of a kill that fails, don't end the child.
@@ -305,7 +322,7 @@ export function createEngineProcess({
     }
 
     try {
-      current = startEngine(found.path)
+      current = startEngine(found.path, version)
 
       return { engine: current }
     } catch (error) {

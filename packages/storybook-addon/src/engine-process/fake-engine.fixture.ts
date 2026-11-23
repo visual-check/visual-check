@@ -75,4 +75,4 @@ process.on('message', (request: AddonRequest) => {
   }
 })
 
-send({ kind: 'ready', protocol: 1, version: '0.0.0' })
+send({ kind: 'ready', protocol: 1, version: '1.2.3' })
