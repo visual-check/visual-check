@@ -85,6 +85,16 @@ export function panelCssOf(theme: StorybookTheme): string {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+[data-visual-check="static-command"] {
+  margin: 4px 0;
+  padding: 8px 12px;
+  border: 1px solid ${appBorderColor};
+  border-radius: ${appBorderRadius}px;
+  background: ${background.content};
+}
+[data-visual-check="copy"] { margin-bottom: 12px; padding: 2px 10px; background: transparent; }
+[data-visual-check="copy"]:hover { background: ${background.content}; }
+[data-visual-check="static-note"] { color: ${textMutedColor}; }
 [data-visual-check="snapshots"] { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; margin-top: 12px; }
 [data-visual-check="rows"] { flex: 1 1 260px; min-width: 0; list-style-type: ''; }
 [data-visual-check="rows"] > li { padding-bottom: 8px; }

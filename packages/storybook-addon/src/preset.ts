@@ -5,6 +5,7 @@ import { type CheckRelay, startCheckRelay } from './check-relay/check-relay.js'
 import { imageMiddleware } from './check-relay/image-route.js'
 import { ownAddressOf } from './check-relay/own-address.js'
 import { createEngineProcess } from './engine-process/engine-process.js'
+import { storybookNameEnvOf } from './static-build/storybook-name-env.js'
 
 /**
  * The relay of this Storybook, once its channel is there.
@@ -32,4 +33,12 @@ export function experimental_serverChannel(channel: Channel, options: Options): 
  */
 export function experimental_devServer(app: ServerApp): ServerApp {
   return app.use(imageMiddleware((id, path) => relay?.imageAt(id, path)))
+}
+
+/**
+ * Adds the Storybook's name from visual-check's config to the manager's environment of a static build, whose panel
+ * shows the commands for the current story.
+ */
+export function env(config: Record<string, string>, options: Options): Promise<Record<string, string>> {
+  return storybookNameEnvOf(config, options)
 }

@@ -4,7 +4,7 @@
   "tasks": {
     "build-storybook": {
       "dependsOn": ["^build"],
-      "inputs": [".storybook/**", "stories/**", "static/**", "package.json", "tsconfig.json"],
+      "inputs": [".storybook/**", "stories/**", "static/**", "package.json", "tsconfig.json", "visual-check.config.ts"],
       "outputs": ["storybook-static/**"]
     },
     "e2e": {

@@ -61,6 +61,15 @@ async function load(configType: string): Promise<LoadedManager> {
   return { added, api, emitted: () => emit.mock.calls.map(([event]) => event) }
 }
 
+/**
+ * Gives the props the panel the manager added renders with, when it is active.
+ */
+function panelPropsOf(added: Map<string, object>): unknown {
+  const { render } = added.get('visual-check/panel') as { render: (props: { active: boolean }) => { props: unknown } }
+
+  return render({ active: true }).props
+}
+
 beforeEach(() => {
   vi.resetModules()
   storeListeners.clear()
@@ -69,6 +78,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
 })
 
 describe('the manager', () => {
@@ -105,7 +115,23 @@ describe('the manager', () => {
     expect(api.togglePanel.mock.calls).toEqual([[true]])
   })
 
-  it('adds nothing in a static build', async () => {
+  it.each(['127.0.0.1', 'localhost', '[::1]'])('adds the panel alone in a static build on %s', async (hostname) => {
+    vi.stubGlobal('location', { hostname, href: `http://${hostname}:6006/?path=/story/a--b` })
+    vi.stubEnv('VISUAL_CHECK_STORYBOOK', 'web')
+
+    const { added, emitted } = await load('PRODUCTION')
+
+    expect([...added.keys()]).toEqual(['visual-check/panel'])
+    expect(added.get('visual-check/panel')).toMatchObject({ type: 'panel', title: 'Visual check' })
+    expect(panelPropsOf(added)).toEqual({ active: true, storybook: 'web', address: `http://${hostname}:6006` })
+    expect(emitted()).toEqual([])
+    expect([...storeListeners.keys()]).toEqual([])
+  })
+
+  it('registers nothing in a static build on any other host', async () => {
+    vi.stubGlobal('location', { hostname: 'storybook.example.com', href: 'https://storybook.example.com/' })
+    vi.stubEnv('VISUAL_CHECK_STORYBOOK', 'web')
+
     const { added, emitted } = await load('PRODUCTION')
 
     expect(addons.register).not.toHaveBeenCalled()
