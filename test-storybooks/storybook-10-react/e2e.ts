@@ -563,10 +563,16 @@ const captureAreaLines: [storyId: string, says: string][] = [
 ]
 
 /**
- * What the report's entry of each broken readiness, per-story options and capture area story holds: its reason, an
- * image of its page but for the story too tall to capture and the ones whose file failed to load, and the details its
- * reason gives. The story whose `play` threw has its stack, which shows the stack reaches visual-check through
- * Storybook's channel, and the one whose `play` left an unhandled error keeps it as a console message of level `error`.
+ * What the line of each broken grid story says, in its reason's own wording: that the grid is wider than the viewport.
+ */
+const gridLines: [storyId: string, says: string][] = [['grid--too-wide', 'wider than the 1280 px viewport']]
+
+/**
+ * What the report's entry of each broken readiness, per-story options, capture area and grid story holds: its reason,
+ * an image of its page but for the story too tall to capture and the ones whose file failed to load, and the details
+ * its reason gives: the grid too wide gives its width and the viewport's. The story whose `play` threw has its stack,
+ * which shows the stack reaches visual-check through Storybook's channel, and the one whose `play` left an unhandled
+ * error keeps it as a console message of level `error`.
  */
 const brokenEntries: BrokenEntry[] = [
   { storyId: 'readiness--render-throws', reason: 'error', pageImage: true },
@@ -608,6 +614,13 @@ const brokenEntries: BrokenEntry[] = [
     pageImage: false,
     holds: 'details.size',
     has: (entry) => entry.details?.size?.length === 2,
+  },
+  {
+    storyId: 'grid--too-wide',
+    reason: 'grid-too-wide',
+    pageImage: true,
+    holds: 'details.grid of 1400 and 1280',
+    has: (entry) => entry.details?.grid?.width === 1400 && entry.details.grid.viewportWidth === 1280,
   },
   ...['load-fails--first', 'load-fails--second'].map(
     (storyId): BrokenEntry => ({
@@ -2179,15 +2192,15 @@ function storiesFilesOf(run: CliRun, storiesFiles: ReadonlyMap<string, string>):
 
 /**
  * Lists what is wrong with a run of `test --all` against the committed baselines. It gives exactly the expected
- * outcomes. Each broken readiness, per-story options and capture area story that has an expected outcome has a line
- * that says why, and standard error has no test-path warning, since every page is on Storybook's test path. The
+ * outcomes. Each broken readiness, per-story options, capture area and grid story that has an expected outcome has a
+ * line that says why, and standard error has no test-path warning, since every page is on Storybook's test path. The
  * disabled stories, which `index.json` lists, have no line, and the header counts exactly the snapshots with an
  * expected outcome, the modes' included. The story that lists `dark` and `mobile` has exactly 3 lines, and the story
  * with its own list of modes has no line for the meta's `dark`. Outside the Storybook 10 test Storybook, the committed
  * animation baselines are byte-identical to its own. Its stdout's last line is the report line of the config in
  * `configFolder`, and the report there counts and lists exactly the expected outcomes, has exactly the images its
- * entries list, and the entry of each broken readiness, per-story options and capture area story that has an expected
- * outcome holds what `brokenEntries` gives.
+ * entries list, and the entry of each broken readiness, per-story options, capture area and grid story that has an
+ * expected outcome holds what `brokenEntries` gives.
  */
 function committedBaselinesProblems(run: CliRun, expected: Outcomes, configFolder: string): string[] {
   return [
@@ -2200,7 +2213,7 @@ function committedBaselinesProblems(run: CliRun, expected: Outcomes, configFolde
       ),
     ]),
     ...expectedRunProblems('test', run, expected),
-    ...[...readinessLines, ...perStoryOptionsLines, ...captureAreaLines]
+    ...[...readinessLines, ...perStoryOptionsLines, ...captureAreaLines, ...gridLines]
       .filter(([storyId]) => !loadFailsFilter.test(storyId) || expected[storyId] !== undefined)
       .flatMap(([storyId, says]) => lineSaysProblems(run, storyId, says)),
     ...noTestPathWarningProblems(run.stderr),
@@ -4605,7 +4618,7 @@ if (setupProblems.length > 0) {
   const expected = withoutLoadFails(everyOutcome)
   const passed = await runCases([
     {
-      name: "committed baselines: test gives the expected outcomes, each broken readiness, per-story options and capture area story's line says why, no line for a disabled story, the header counts the expected outcomes, a story listing two modes has 3 lines, a story's own modes leave out the meta's, no test-path warning, the animation baselines are byte-identical to storybook-10-react's",
+      name: "committed baselines: test gives the expected outcomes, each broken readiness, per-story options, capture area and grid story's line says why, no line for a disabled story, the header counts the expected outcomes, a story listing two modes has 3 lines, a story's own modes leave out the meta's, no test-path warning, the animation baselines are byte-identical to storybook-10-react's",
       run: () => checkCommittedBaselines(everyOutcome),
     },
     {

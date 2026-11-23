@@ -24,6 +24,8 @@
   "capture-area--too-tall": "broken",
   "card--default": "passed",
   "disabled--brought-back": "passed",
+  "grid--every-combination": "passed",
+  "grid--too-wide": "broken",
   "hazards--alert": "passed",
   "hazards--before-unload": "passed",
   "hazards--confirm": "passed",
