@@ -117,7 +117,7 @@ function checkBaselinesFolder({ name, dir, baselines }: ResolvedStorybook, cwd: 
 function findStorybook(
   config: Config,
   path: string,
-  { configDir, cwd }: StorybookConfigOptions,
+  { configDir, cwd }: Pick<StorybookConfigOptions, 'configDir' | 'cwd'>,
 ): [name: string, settings: StorybookSettings] {
   const storybooks = Object.entries(config.storybooks)
   const realConfigDir = realPathOf(configDir)
@@ -160,5 +160,28 @@ export async function loadStorybookConfig(options: StorybookConfigOptions): Prom
     checkBaselinesFolder(storybook, cwd)
 
     return { config: resolved, storybook, configUrl: urlSideOf(settings, ci) }
+  })
+}
+
+/**
+ * Finds the config from a Storybook's config folder, loads it and all it imports as they are now, and gives the name of
+ * the first Storybook it lists with that config folder. A static build has no address, so it needs no URL.
+ *
+ * @throws {ConfigError} When no config is found, when the config can't be loaded or is invalid, and when it lists no
+ * Storybook with that config folder. Once the config is found, the error names its path as `configPath`.
+ * @throws {unknown} The signal's reason, when it aborts first.
+ *
+ * @public
+ */
+export async function storybookNameOf(
+  options: Pick<StorybookConfigOptions, 'configDir' | 'cwd' | 'signal'>,
+): Promise<string> {
+  const path = searchConfig(options.configDir)
+
+  return await namingConfig(path, async () => {
+    const config = await readConfigAfresh(path, options.cwd, options.signal)
+    const [name] = findStorybook(config, path, options)
+
+    return name
   })
 }

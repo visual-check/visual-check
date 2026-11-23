@@ -63,6 +63,7 @@ packages/cli/src/
   bin.ts                entry
   index.ts              entry: the public config API
   addon-child.ts        entry: the child process the Storybook addon forks
+  addon-build.ts        entry: what the Storybook addon's preset reads while Storybook builds
   commands/             init, test, update, and the Storybook addon's check of one story
   addon-child/          the addon's child process: its messages, one check at a time, and its images' files
   init/                 what init detects, asks, writes and installs; adapter: git ls-files and Fallow's check

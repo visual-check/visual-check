@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ConfigError } from './config-error.js'
 import { loadConfig } from './load-config.js'
-import { loadStorybookConfig, type StorybookConfigOptions } from './load-storybook-config.js'
+import { loadStorybookConfig, type StorybookConfigOptions, storybookNameOf } from './load-storybook-config.js'
 
 /**
  * The projects the tests made, removed after each test.
@@ -351,5 +351,63 @@ describe('loadStorybookConfig failures', () => {
       'visual-check.config.ts lists no Storybook whose config folder is apps/ui/.storybook. ' +
         'It lists web (apps/web/.storybook) and docs (apps/docs/.storybook).',
     )
+  })
+})
+
+describe('storybookNameOf', () => {
+  /**
+   * Names the Storybook whose config folder is `configDir`, relative to the project, from the project's folder unless the
+   * options say otherwise.
+   */
+  function nameOf(root: string, configDir: string, options: { signal?: AbortSignal } = {}) {
+    return storybookNameOf({ configDir: join(root, configDir), cwd: root, ...options })
+  }
+
+  it('gives the name of the Storybook whose config folder it is', async () => {
+    const root = createProject({ 'visual-check.config.ts': twoStorybooks })
+
+    expect(await nameOf(root, 'apps/docs/.storybook')).toBe('docs')
+  })
+
+  it('gives the first of several with that config folder', async () => {
+    const root = createProject({
+      'visual-check.config.ts': `export default { storybooks: {
+  light: { url: 'http://127.0.0.1:6006', baselines: 'light' },
+  dark: { url: 'http://127.0.0.1:6007', baselines: 'dark' },
+} }\n`,
+    })
+
+    expect(await nameOf(root, '.storybook')).toBe('light')
+  })
+
+  it('fails with the CLI’s message when no config is found', async () => {
+    const root = createProject({ 'apps/web/.git': 'gitdir: elsewhere\n' })
+    const error = await configErrorOf(nameOf(root, 'apps/web/.storybook'))
+
+    expect(error.message).toBe(
+      'No visual-check.config.ts (or .mts, .js, .mjs) found in the current folder or its parents. ' +
+        'Run visual-check init to create one.',
+    )
+  })
+
+  it('fails with the CLI’s message when no Storybook has that config folder', async () => {
+    const root = createProject({ 'visual-check.config.ts': twoStorybooks })
+    const error = await configErrorOf(nameOf(root, 'apps/ui/.storybook'))
+
+    expect(error.message).toBe(
+      'visual-check.config.ts lists no Storybook whose config folder is apps/ui/.storybook. ' +
+        'It lists web (apps/web/.storybook) and docs (apps/docs/.storybook).',
+    )
+    expect(error.configPath).toBe(join(root, 'visual-check.config.ts'))
+  })
+
+  it('stops loading when its signal aborts', async () => {
+    const reason = new Error('cancelled')
+    const root = createProject({ 'visual-check.config.ts': 'while (true);\n' })
+    const controller = new AbortController()
+    const loading = nameOf(root, '.storybook', { signal: controller.signal })
+
+    controller.abort(reason)
+    await expect(loading).rejects.toBe(reason)
   })
 })

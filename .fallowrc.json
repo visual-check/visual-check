@@ -141,6 +141,7 @@
     "coverage": {
       "requireAllFiles": true,
       "allowUnmatched": [
+        "packages/cli/src/addon-build.ts",
         "packages/cli/src/addon-child.ts",
         "packages/cli/src/bin.ts",
         "packages/cli/src/index.ts",

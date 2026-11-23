@@ -19,6 +19,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./internal/addon-build": {
+      "types": "./dist/addon-build.d.ts",
+      "default": "./dist/addon-build.js"
+    },
     "./internal/addon-child": "./dist/addon-child.js",
     "./internal/addon-protocol": {
       "types": "./dist/addon-child/protocol.d.ts",
