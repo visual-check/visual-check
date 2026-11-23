@@ -35,13 +35,13 @@ The public repo `visual-check/test-apps` proves that the packages about to be pu
 
 ## Jobs
 
-| Runner         | Runs                                                                                                                                                          |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ubuntu-24.04` | Every app. One app also runs from a `node` job container with the `docker` CLI added, which tests the browser joining that container's network                |
-| `windows-2025` | Every app, from the Windows host. The job installs Docker Desktop first. One app also runs from inside a WSL distro, through Docker Desktop's WSL integration |
+| Runner         | Runs                                                                                                                                                                                                |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ubuntu-24.04` | Every app. One app also runs from a `node` job container with the `docker` CLI added, which tests the browser joining that container's network                                                      |
+| `windows-2025` | Every app, from the Windows host, each in a job of its own that installs Docker Desktop first. One app also runs from inside a WSL distro, in another job, through Docker Desktop's WSL integration |
 
 - There are no macOS jobs here.
-- The Windows job's setup takes about 6 minutes: the runner's own Docker service is stopped first, then Docker Desktop is installed and started.
+- A Windows job's setup takes up to 3 minutes: Docker Desktop is installed, the runner's own Docker service is stopped, then Docker Desktop is started. This repo holds that step as an action, with the version it pins.
 
 ## When they run
 

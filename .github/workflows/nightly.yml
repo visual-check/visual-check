@@ -1,0 +1,138 @@
+# The nightly checks (docs/prd/18-repo-ci.md), too slow for every pull request. They block none: no other workflow calls
+# this one, and the only pull request that runs it is one that changes it.
+name: Nightly
+
+on:
+  schedule:
+    # Off the hour, when GitHub delays fewer scheduled runs.
+    - cron: "37 2 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths: [.github/workflows/nightly.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # The packages packed from this commit, and the browser image built from it, as the test apps get them.
+  pack:
+    name: Pack
+    uses: ./.github/workflows/pack.yml
+
+  # The macOS path, through Colima, the runtime supported on Intel Macs. The smallest test app, react-inspector, runs
+  # through the Action as in the test apps' CI, with the browser behind the SOCKS proxy. Then the skill script's
+  # end-to-end cases check process cleanup: an interrupt mid-run leaves no process or container, and a killed CLI leaves
+  # no container. The VM is 6 to 8 times slower than a Linux runner.
+  intel-mac:
+    name: Intel Mac
+    needs: pack
+    runs-on: macos-26-intel
+    timeout-minutes: 120
+    steps:
+      # Side by side, so that neither checkout is an untracked folder in the other.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: visual-check
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: visual-check/test-apps
+          path: test-apps
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          package_json_file: visual-check/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: visual-check-packages
+          path: ${{ runner.temp }}/packages
+      # Pinned binaries, each checked against its checksum: Homebrew no longer builds bottles for Intel Macs. The
+      # checksums of Colima and Lima are on their GitHub releases. Docker publishes none for its static binaries, so
+      # that one was taken from the file.
+      - name: Install Colima and the docker CLI
+        env:
+          COLIMA_VERSION: 0.10.3
+          COLIMA_SHA256: 3082737fe8a98afda11cba7d9a20b6e56fe80c6153464beda04bec630758770b
+          LIMA_VERSION: 2.2.0
+          LIMA_SHA256: 0d6f99c19f6e4bc3c92730c4c29d929e6927f0cb0a0ba1a84383367135a8ff31
+          DOCKER_VERSION: 29.7.2
+          DOCKER_SHA256: fb1f1aa7ac7af4364165b9eadfda92e96c8ced508fca74f53079719891367438
+        run: |
+          tools="$RUNNER_TEMP/colima"
+          mkdir -p "$tools/bin"
+          # Downloads a file's URL under a name, and checks it against its checksum.
+          fetch() {
+            curl -fsSL --retry 5 -o "$tools/$2" "$3"
+            echo "$1  $tools/$2" | shasum -a 256 -c -
+          }
+          colima=https://github.com/abiosoft/colima/releases/download/v$COLIMA_VERSION
+          lima=https://github.com/lima-vm/lima/releases/download/v$LIMA_VERSION
+          docker=https://download.docker.com/mac/static/stable/x86_64
+          fetch "$COLIMA_SHA256" colima "$colima/colima-Darwin-x86_64"
+          fetch "$LIMA_SHA256" lima.tar.gz "$lima/lima-$LIMA_VERSION-Darwin-x86_64.tar.gz"
+          fetch "$DOCKER_SHA256" docker.tgz "$docker/docker-$DOCKER_VERSION.tgz"
+          # Lima's bin/limactl finds its templates and guest agents in the share folder beside bin.
+          tar -xzf "$tools/lima.tar.gz" -C "$tools"
+          tar -xzf "$tools/docker.tgz" -C "$tools"
+          install -m 0755 "$tools/colima" "$tools/docker/docker" "$tools/bin"
+          echo "$tools/bin" >> "$GITHUB_PATH"
+      # Colima switches docker's context to itself. Its VM runs on Apple's Virtualization framework.
+      - name: Start Colima
+        id: colima
+        timeout-minutes: 30
+        run: |
+          colima start --cpu 4 --memory 10 --disk 40
+          docker info --format '{{.OperatingSystem}}, Docker {{.ServerVersion}}, {{.Architecture}}, {{.NCPU}} CPUs'
+      # Lima's logs of the VM, its serial console's included. There may be none, if the VM was never created.
+      - name: Show Colima's logs
+        if: ${{ failure() && steps.colima.outcome == 'failure' }}
+        run: tail -n +1 ~/.colima/_lima/colima/*.log || true
+      - name: Set up react-inspector
+        id: setup
+        working-directory: test-apps/apps/react-inspector
+        run: ../../scripts/setup-app.sh "$RUNNER_TEMP/packages"
+      # The app's own config, with longer for each story and fewer at once, for the slow VM.
+      - name: Write the run's config
+        working-directory: test-apps/apps/react-inspector
+        run: |
+          cat > visual-check.nightly.config.ts <<'CONFIG'
+          import config from './visual-check.config.ts'
+
+          export default { ...config, workers: 2, readyTimeout: 60_000 }
+          CONFIG
+      # The timeout leaves the rest of the job's time to the steps after, should the run hang.
+      - name: visual-check
+        timeout-minutes: 60
+        uses: visual-check/action@d22b2b78c1f46774f69318e08a855300c9df4fee # main
+        with:
+          working-directory: test-apps/apps/react-inspector
+          args: --config visual-check.nightly.config.ts
+      # Once react-inspector's setup passed, the rest runs whatever its visual-check run gave. The second install links
+      # the `visual-check` command, which pnpm skips while the CLI's `dist/bin.js` doesn't exist yet, and the skill's
+      # `pnpm exec visual-check` needs it.
+      - name: Build the CLI and the Storybook
+        id: build
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        working-directory: visual-check
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm turbo run build build-storybook --filter '@visual-check/test-storybook-10-react...'
+          pnpm install --frozen-lockfile --offline
+      # setup-app.sh loaded the image, and named it in TEST_APPS_IMAGE.
+      - name: Process cleanup
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        working-directory: visual-check
+        env:
+          TEST_STORYBOOK_IMAGE: ${{ env.TEST_APPS_IMAGE }}
+        run: pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --skill-script

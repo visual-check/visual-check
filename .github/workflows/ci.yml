@@ -259,10 +259,11 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
-  # The runner image's Docker runs Windows containers only, so the job stops it and installs Docker Desktop with its
-  # WSL 2 backend, about 6 minutes in all. It runs the skill script's and the agent skill's own tests, builds the
-  # browser image, then the end-to-end check's skill script cases: they start and stop the test Storybooks through
-  # `cmd.exe` and `taskkill`, and check that an interrupt mid-capture and a killed CLI leave no browser container.
+  # The runner image's Docker runs Windows containers only, so the job installs Docker Desktop with its WSL 2 backend,
+  # stops the image's Docker and starts Docker Desktop, which takes up to 3 minutes in all. It runs the skill script's
+  # and the agent skill's own tests, builds the browser image, then the end-to-end check's skill script cases: they
+  # start and stop the test Storybooks through `cmd.exe` and `taskkill`, and check that an interrupt mid-capture and a
+  # killed CLI leave no browser container.
   windows-skill-script:
     name: Windows skill script
     runs-on: windows-2025
@@ -284,57 +285,8 @@ jobs:
       # agent skill's tests copy the skill to `.claude` on NTFS.
       - name: Skill script and agent skill tests
         run: pnpm --filter @visual-check/cli exec vitest run test/skill-run src/agent-skill
-      # Docker Desktop 4.98.0, the version research #33 ran on this runner. To bump it, take the build number from
-      # Docker Desktop's release notes, and the checksum from checksums.txt beside the installer.
       - name: Install Docker Desktop
-        shell: pwsh
-        run: |
-          $build = '245422'
-          $checksum = 'cd6273d9eaa4f07fa7593fc6813d37e1004381cebc3f26047a2554fa5db24388'
-          $installer = "$env:RUNNER_TEMP\DockerDesktopInstaller.exe"
-          $ProgressPreference = 'SilentlyContinue'
-          $url = "https://desktop.docker.com/win/main/amd64/$build/Docker%20Desktop%20Installer.exe"
-          Invoke-WebRequest -Uri $url -OutFile $installer -MaximumRetryCount 3 -RetryIntervalSec 10
-          $hash = (Get-FileHash $installer -Algorithm SHA256).Hash
-          if ($hash -ne $checksum) { throw "The Docker Desktop installer's checksum is $hash, not $checksum." }
-          $arguments = 'install', '--quiet', '--accept-license', '--backend=wsl-2', '--always-run-service'
-          $process = Start-Process $installer -ArgumentList $arguments -PassThru
-          # Reading the handle keeps it open, so ExitCode isn't null once the installer exits.
-          $null = $process.Handle
-          if (-not $process.WaitForExit(300000)) { throw 'The Docker Desktop installer ran over 5 minutes.' }
-          "Installer exit code: $($process.ExitCode)"
-          if ($null -eq $process.ExitCode -or $process.ExitCode -ne 0) {
-            throw "The Docker Desktop installer exited with code '$($process.ExitCode)'."
-          }
-          # The runner's own Docker service holds \\.\pipe\docker_engine, which Docker Desktop needs.
-          Stop-Service docker -Force
-          Start-Process 'C:\Program Files\Docker\Docker\Docker Desktop.exe'
-          $docker = 'C:\Program Files\Docker\Docker\resources\bin\docker.exe'
-          for ($attempt = 0; $attempt -lt 60; $attempt++) {
-            & $docker --context desktop-linux info *> $null
-            if (-not $LASTEXITCODE) { break }
-            Start-Sleep 5
-          }
-          if ($LASTEXITCODE) {
-            # What the engine, the services, WSL and Docker Desktop's logs say, for the log.
-            try {
-              & $docker --context desktop-linux info
-              Get-Service com.docker.service, docker -ErrorAction SilentlyContinue | Format-Table | Out-String
-              (wsl.exe -l -v | Out-String) -replace "`0", ''
-              $logs = Get-ChildItem "$env:LOCALAPPDATA\Docker\log" -Recurse -File -ErrorAction SilentlyContinue
-              foreach ($log in $logs) {
-                "--- $($log.FullName)"
-                Get-Content $log.FullName -Tail 50 -ErrorAction SilentlyContinue
-              }
-            } catch {
-              "Couldn't gather the diagnostics: $_"
-            }
-            throw "Docker Desktop's engine didn't answer within 5 minutes."
-          }
-          & $docker --context desktop-linux info --format '{{.OSType}}'
-          & $docker context use desktop-linux
-          if ($LASTEXITCODE) { throw "Couldn't switch docker to the desktop-linux context." }
-          'C:\Program Files\Docker\Docker\resources\bin' | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+        uses: ./.github/actions/docker-desktop
       - name: Check Docker runs Linux containers
         shell: bash
         run: |

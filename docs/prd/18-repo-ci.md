@@ -24,12 +24,13 @@ This repo's CI checks the code, runs the built CLI against the repo's own small 
 | Lockstep versions    | Linux                | The three lockstep packages have one version                                                                                                                                                                                                                                                                                                                           |
 
 - Every job runs Node 24, except the Node 22 job.
-- The Windows runner's own Docker runs only Windows containers, so the Windows skill script job stops it and installs Docker Desktop, about 6 minutes.
+- The Windows runner's own Docker runs only Windows containers, so the Windows skill script job installs Docker Desktop, stops the runner's own Docker service, then starts Docker Desktop, which takes up to 3 minutes in all.
 - GitHub Actions sets `CI`. Steps that test local-only behaviour run with `CI` unset: the Setup job's `update`, the addon's end-to-end check, the affected-stories check and the skill refresh.
 
 Nightly, and not blocking:
 
-- An Intel Mac runs the browser container through Colima, on one small test app. It covers the macOS path: the proxy and process cleanup. It's 6–8 times slower than Linux, and its runner image retires in August 2027.
+- An Intel Mac runs the browser container through Colima. One small test app, react-inspector, covers the proxy, and the skill script's end-to-end cases on this repo's own test Storybook cover process cleanup. It's 6–8 times slower than Linux, so the app runs with 2 workers and gives each story 60 s to be ready. GitHub retires the macOS 15 Intel runner in August 2027. It has announced no firm date for macOS 26, which this uses.
+- A pull request that changes the nightly workflow runs it too.
 
 ## This repo's own test Storybooks
 
