@@ -767,6 +767,69 @@ describe('the caret', () => {
   })
 })
 
+describe('the grids', () => {
+  /**
+   * The selector of the grids, as `@visual-check/storybook`'s grid marks its element.
+   */
+  const gridSelector = '[data-visual-check-grid]'
+
+  it("gives the widest grid's width and the tallest grid's height, not rounded", async () => {
+    const grids = [boxed({ x: 0, y: 0, width: 300.5, height: 40 }), boxed({ x: 0, y: 50, width: 120, height: 900.25 })]
+    const { document } = fakeCaptureDocument({ matches: { [gridSelector]: grids } })
+
+    expect(await openPreparation(document).prepare({})).toStrictEqual({
+      outcome: 'ready',
+      box: null,
+      grid: { width: 300.5, height: 900.25 },
+    })
+  })
+
+  it('gives no grid when the page shows none', async () => {
+    const { document } = fakeCaptureDocument()
+
+    expect(await openPreparation(document).prepare({})).toStrictEqual({ outcome: 'ready', box: null })
+  })
+
+  it('skips a grid whose box cannot be read', async () => {
+    const unreadable = fakeElement('div', {
+      properties: {
+        getBoundingClientRect: () => {
+          throw new Error('TypeError: Illegal invocation.')
+        },
+      },
+    })
+    const { document } = fakeCaptureDocument({ matches: { [gridSelector]: [unreadable] } })
+
+    expect(await openPreparation(document).prepare({})).toStrictEqual({ outcome: 'ready', box: null })
+  })
+
+  it("gives the element's box and the grid together", async () => {
+    const { document } = fakeCaptureDocument({
+      matches: {
+        '#card': [boxed({ x: 10, y: 20, width: 30, height: 40 })],
+        [gridSelector]: [boxed({ x: 0, y: 0, width: 1400, height: 500 })],
+      },
+    })
+
+    expect(await openPreparation(document).prepare({ element: '#card' })).toStrictEqual({
+      outcome: 'ready',
+      box: { x: 10, y: 20, width: 30, height: 40 },
+      grid: { width: 1400, height: 500 },
+    })
+  })
+
+  it('gives no grid when the element is missing', async () => {
+    const { document } = fakeCaptureDocument({
+      matches: { [gridSelector]: [boxed({ x: 0, y: 0, width: 1400, height: 500 })] },
+    })
+
+    expect(await openPreparation(document).prepare({ element: '#card' })).toStrictEqual({
+      outcome: 'element-missing',
+      found: 'nothing',
+    })
+  })
+})
+
 describe('readCapturePrep', () => {
   it('reads a capture ready for the full page', () => {
     expect(readCapturePrep({ outcome: 'ready', box: null })).toEqual({ outcome: 'ready', box: null })
@@ -800,6 +863,12 @@ describe('readCapturePrep', () => {
       box: null,
       remote: [],
     })
+  })
+
+  it("reads a capture ready with its grid, keeping only the grid's width and height", () => {
+    expect(
+      readCapturePrep({ outcome: 'ready', box: null, grid: { width: 300.5, height: 900.25, extra: true } }),
+    ).toStrictEqual({ outcome: 'ready', box: null, grid: { width: 300.5, height: 900.25 } })
   })
 
   it.each(['nothing', 'zero-size'])('reads an element that is missing, having found %s', (found) => {
@@ -861,6 +930,9 @@ describe('readCapturePrep', () => {
       'a remote item of zero height',
       { outcome: 'ready', box: null, remote: [{ host: 'a.example.com', x: 0, y: 0, width: 1, height: 0 }] },
     ],
+    ['a grid of negative width', { outcome: 'ready', box: null, grid: { width: -1, height: 2 } }],
+    ['a grid whose width is text', { outcome: 'ready', box: null, grid: { width: 'x', height: 2 } }],
+    ['a grid that is null', { outcome: 'ready', box: null, grid: null }],
     ['a missing element that found something else', { outcome: 'element-missing', found: 'hidden' }],
     ['an invalid selector of something else', { outcome: 'invalid-selector', of: 'story', message: 'bad' }],
     ['an invalid element selector without a message', { outcome: 'invalid-selector', of: 'element' }],

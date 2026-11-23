@@ -78,12 +78,30 @@ export interface PageRemoteContent {
 }
 
 /**
+ * The grids the page shows, as the capture preparation measures them: the widest grid's border-box width and the
+ * tallest grid's height, in CSS pixels, not rounded.
+ */
+export interface PageGrid {
+  /**
+   * The widest grid's border-box width, in CSS pixels, not rounded.
+   */
+  width: number
+  /**
+   * The tallest grid's border-box height, in CSS pixels, not rounded.
+   */
+  height: number
+}
+
+/**
  * The source of a function, evaluated in the page as part of the page script, that creates the capture preparation.
  * It takes what the page script kept at document start: `shadowRoots`, `findRemoteContent`, the remote content search,
  * and `stateGlobal`, the name of the global it keeps its state under in every document. It gives a function that takes
  * a request, `{ element, masks, maskColor, findRemote }`, and a time limit in ms, and prepares the page for its capture.
  * Creating it reads nothing in the page. It reads the page's scroll once.
  *
+ * 0. Measures the grids: every element of the top document with `data-visual-check-grid`, the attribute
+ *    `@visual-check/storybook`'s grid puts on its element, by its border box. It keeps the widest grid's width and the
+ *    tallest grid's height, in CSS pixels, not rounded. A grid whose box can't be read, or isn't finite, is left out.
  * 1. Measures the element, when `element` isn't `null`: the first match of the selector in the top document. A
  *    selector that throws gives `{ outcome: 'invalid-selector', of: 'element', message }`. No match gives
  *    `{ outcome: 'element-missing', found: 'nothing' }`. Its box is the border box, with the page's scroll, out to
@@ -120,7 +138,8 @@ export interface PageRemoteContent {
  * It answers `{ outcome: 'ready', box }`, where `box` is the element's box, or `null` for the full page. When
  * `findRemote` is true and the search answered, it adds `remote`, the remote content found, maybe none: each item's
  * `host`, with its port when the URL has one, and its box, `x`, `y`, `width` and `height`, in CSS pixels of the top
- * document, as the search gives them. Without `remote`, the remote content is unknown. When the element is missing, a
+ * document, as the search gives them. Without `remote`, the remote content is unknown. When the top document shows a
+ * grid, it adds `grid`, the widest grid's width and the tallest grid's height. When the element is missing, a
  * selector is invalid or the search for a host mask timed out, it paints nothing and hides no caret. It never throws. A
  * mask must never fail open: when finding the masks' boxes or painting them throws, as when the search for a host mask
  * rejects or an element can't be created, it answers `{ outcome: 'paint-failed', message }` and hides no caret, with
@@ -134,6 +153,10 @@ export const prepareCaptureFunction = `(context) => {
 
   // The tag name of the element that holds the painted masks. An unknown name with a hyphen gives an HTMLElement.
   const masksTagName = 'visual-check-masks'
+
+  // The attribute @visual-check/storybook's grid puts on its element, gridAttribute there. The CLI can't import that
+  // package, so it's repeated here.
+  const gridSelector = '[data-visual-check-grid]'
 
   // The highest z-index, for a host that couldn't go in the top layer.
   const topZIndex = 2147483647
@@ -149,6 +172,24 @@ export const prepareCaptureFunction = `(context) => {
   const pageScrollOf = () => {
     const view = read(() => document.defaultView, undefined)
     return { x: scrollOf(view, 'scrollX'), y: scrollOf(view, 'scrollY') }
+  }
+
+  // The widest grid's border-box width and the tallest grid's height, in CSS pixels, or undefined when the top document
+  // shows no grid whose box can be read.
+  const gridOf = () => {
+    let grid
+    for (const element of read(() => Array.from(document.querySelectorAll(gridSelector)), [])) {
+      const rect = read(() => element.getBoundingClientRect(), undefined)
+      const sides = read(() => [rect.width, rect.height], [])
+      if (sides.length === 2 && sides.every((side) => Number.isFinite(side) && side >= 0)) {
+        const [width, height] = sides
+        grid =
+          grid === undefined
+            ? { width, height }
+            : { width: Math.max(grid.width, width), height: Math.max(grid.height, height) }
+      }
+    }
+    return grid
   }
 
   // The size of the top document's scrollable area, or undefined when it can't be read.
@@ -381,6 +422,7 @@ export const prepareCaptureFunction = `(context) => {
   return async (request, timeoutMs) => {
     const { element, masks, maskColor, findRemote } = request
     const scroll = pageScrollOf()
+    const grid = gridOf()
     const measured = element === null ? { box: null } : elementBoxOf(element, scroll)
     if (measured.outcome !== undefined) {
       return measured
@@ -393,7 +435,11 @@ export const prepareCaptureFunction = `(context) => {
       hideCaretIn(document, shadowRoots)
     } catch {}
     const ready = { outcome: 'ready', box: measured.box }
-    return painted.remote === undefined ? ready : { ...ready, remote: painted.remote }
+    return {
+      ...ready,
+      ...(painted.remote === undefined ? {} : { remote: painted.remote }),
+      ...(grid === undefined ? {} : { grid }),
+    }
   }
 }`
 
@@ -415,6 +461,10 @@ export type CapturePrep =
        * remote content is unknown.
        */
       remote?: PageRemoteContent[]
+      /**
+       * The grids the page shows, when it shows any: the widest grid's width and the tallest grid's height.
+       */
+      grid?: PageGrid
     }
   | {
       /**
@@ -535,14 +585,37 @@ function readRemote(value: unknown): { remote: PageRemoteContent[] | undefined }
 }
 
 /**
- * Reads an answer of the page that's ready, with the element's box or none, and the remote content when it gives one.
- * Gives `undefined` for any other answer.
+ * Reads the grids the page gives with an answer that's ready, keeping their width and height only. Gives
+ * `{ grid: undefined }` when there's none, and `undefined` when it's not finite sides of 0 or more.
+ */
+function readGrid(value: unknown): { grid: PageGrid | undefined } | undefined {
+  if (value === undefined) {
+    return { grid: undefined }
+  }
+
+  if (typeof value !== 'object' || value === null) {
+    return undefined
+  }
+
+  const { width, height }: Record<string, unknown> = { ...value }
+
+  if (typeof width !== 'number' || typeof height !== 'number') {
+    return undefined
+  }
+
+  return [width, height].every((side) => Number.isFinite(side) && side >= 0) ? { grid: { width, height } } : undefined
+}
+
+/**
+ * Reads an answer of the page that's ready, with the element's box or none, and the remote content and the grids when
+ * it gives them. Gives `undefined` for any other answer.
  */
 function readReady(answer: Record<string, unknown>): CapturePrep | undefined {
   const { box } = answer
   const read = readRemote(answer.remote)
+  const readGrids = readGrid(answer.grid)
 
-  if (answer.outcome !== 'ready' || read === undefined) {
+  if (answer.outcome !== 'ready' || read === undefined || readGrids === undefined) {
     return undefined
   }
 
@@ -555,7 +628,11 @@ function readReady(answer: Record<string, unknown>): CapturePrep | undefined {
     box: box === null ? null : { x: box.x, y: box.y, width: box.width, height: box.height },
   }
 
-  return read.remote === undefined ? ready : { ...ready, remote: read.remote }
+  return {
+    ...ready,
+    ...(read.remote === undefined ? {} : { remote: read.remote }),
+    ...(readGrids.grid === undefined ? {} : { grid: readGrids.grid }),
+  }
 }
 
 /**

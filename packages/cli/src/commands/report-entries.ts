@@ -26,9 +26,7 @@ import type { ReportedComparison, SnapshotResult, SnapshotStatus } from './snaps
 
 /**
  * The report's code for each reason a story is broken: the same code. It fails to compile when the capture has a reason
- * the report lacks, or the map misses or keeps one the capture doesn't have. The report's `grid-too-wide` is the one
- * code with no capture reason: the document lists every code of the readiness and stability rules, and grid stories,
- * which break that way, aren't captured yet.
+ * the report lacks, or the map misses or keeps one the capture doesn't have.
  */
 export const reportReasons: Record<BrokenReason, ReportBrokenReason> = {
   'load-failed': 'load-failed',
@@ -41,6 +39,7 @@ export const reportReasons: Record<BrokenReason, ReportBrokenReason> = {
   crashed: 'crashed',
   'too-tall': 'too-tall',
   'element-missing': 'element-missing',
+  'grid-too-wide': 'grid-too-wide',
   'browser-exited': 'browser-exited',
   'changed-after-capture': 'changed-after-capture',
   unstable: 'unstable',
@@ -161,6 +160,8 @@ export function detailsOf(broken: BrokenStory): ReportBrokenDetails {
       return { timeoutMs: broken.readyTimeoutMs, pendingFonts: broken.faces }
     case 'too-tall':
       return { size: [broken.size.width, broken.size.height] }
+    case 'grid-too-wide':
+      return { grid: { width: broken.grid.width, viewportWidth: broken.grid.viewportWidth } }
     case 'load-failed':
       return {
         ...(broken.readyTimeoutMs === undefined ? {} : { timeoutMs: broken.readyTimeoutMs }),

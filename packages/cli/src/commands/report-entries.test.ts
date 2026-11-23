@@ -607,6 +607,11 @@ describe('detailsOf', () => {
     ],
     ['too-tall', { reason: 'too-tall', message: '', size: { width: 1280, height: 40_000 } }, { size: [1280, 40_000] }],
     [
+      'grid-too-wide',
+      { reason: 'grid-too-wide', message: '', grid: { width: 1400, viewportWidth: 1280 } },
+      { grid: { width: 1400, viewportWidth: 1280 } },
+    ],
+    [
       'load-failed that timed out',
       { reason: 'load-failed', message: '', loadError: undefined, readyTimeoutMs: 15_000 },
       { timeoutMs: 15_000 },

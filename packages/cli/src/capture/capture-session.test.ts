@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { finishedAnswer, timedOutAnswer } from '../storybook/preview-script.fixture.js'
 import { storyWaitExpression } from '../storybook/preview-script.js'
 import { waitHookExpression } from '../storybook/wait-hook.js'
-import { type CaptureSettings, openCaptureSession, remoteContentBoxesOf, remoteHostsOf } from './capture-session.js'
+import {
+  type CaptureSettings,
+  gridProblemOf,
+  openCaptureSession,
+  remoteContentBoxesOf,
+  remoteHostsOf,
+} from './capture-session.js'
 import {
   BrowserExitedError,
   CaptureTooLargeError,
@@ -1767,6 +1773,129 @@ describe('a broken story', () => {
   })
 })
 
+describe('a grid', () => {
+  /**
+   * The message of a grid too wide for the 1280 px viewport, at 1281 px.
+   */
+  const tooWideMessage =
+    'The grid is 1281 px wide, wider than the 1280 px viewport. Give the story its own viewport width, list modes without the narrow ones, or set a smaller cellWidth.'
+
+  /**
+   * A page whose capture preparation answers that it shows a grid of this size, with this box.
+   */
+  const showingGrid = (grid: { width: number; height: number }, box: object | null = null): FakePageBehaviour => ({
+    capturePrep: async () => ({ outcome: 'ready', box, grid }),
+  })
+
+  it('is no problem when the page shows none', () => {
+    expect(gridProblemOf(undefined, primary.viewport)).toBeUndefined()
+  })
+
+  it('is no problem when it is as wide as the viewport', () => {
+    expect(gridProblemOf({ width: 1280, height: 500 }, primary.viewport)).toBeUndefined()
+  })
+
+  it('is too wide when it is wider than the viewport, rounded up', () => {
+    expect(gridProblemOf({ width: 1280.25, height: 500 }, primary.viewport)).toEqual({
+      reason: 'grid-too-wide',
+      message: tooWideMessage,
+      grid: { width: 1281, viewportWidth: 1280 },
+    })
+  })
+
+  it("is too tall when it's over 32,767 device pixels on a side at the viewport's scale", () => {
+    expect(gridProblemOf({ width: 600, height: 20_000 }, primary.viewport)).toEqual({
+      reason: 'too-tall',
+      message: 'The grid is 1200 × 40000 device pixels, over 32,767 on a side. Split the grid into several stories.',
+      size: { width: 1200, height: 40_000 },
+    })
+  })
+
+  it('is no problem when it fits at a smaller scale', () => {
+    expect(gridProblemOf({ width: 600, height: 20_000 }, { ...primary.viewport, deviceScaleFactor: 1 })).toBeUndefined()
+  })
+
+  it('is too wide rather than too tall when it is both', () => {
+    expect(gridProblemOf({ width: 1400, height: 40_000 }, { ...primary.viewport, deviceScaleFactor: 1 })).toMatchObject(
+      { reason: 'grid-too-wide' },
+    )
+  })
+
+  it('breaks a story whose grid is wider than the viewport, capturing nothing, and its page is closed', async () => {
+    const driver = new FakeDriver({ pages: [showingGrid({ width: 1400, height: 500 })] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'grid-too-wide',
+        message:
+          'The grid is 1400 px wide, wider than the 1280 px viewport. Give the story its own viewport width, list modes without the narrow ones, or set a smaller cellWidth.',
+        grid: { width: 1400, viewportWidth: 1280 },
+      },
+      console: [],
+    })
+    expect(driver.methods().filter((method) => method.endsWith(':capture'))).toEqual([])
+    expect(driver.methods()).toContain('1:close')
+  })
+
+  it("breaks a story whose grid is wider than the viewport when it captures an element's box", async () => {
+    const box = { x: 0, y: 0, width: 300, height: 200 }
+    const driver = new FakeDriver({ pages: [showingGrid({ width: 1400, height: 500 }, box)] })
+
+    expect(await openCaptureSession(driver, settings).capture({ ...primary, element: '#grid' })).toMatchObject({
+      broken: { reason: 'grid-too-wide', grid: { width: 1400, viewportWidth: 1280 } },
+    })
+    expect(driver.methods().filter((method) => method.endsWith(':capture'))).toEqual([])
+  })
+
+  it("names the snapshot's own viewport width", async () => {
+    const driver = new FakeDriver({ pages: [showingGrid({ width: 600, height: 500 })] })
+
+    expect(await openCaptureSession(driver, settings).capture(secondary)).toMatchObject({
+      broken: {
+        reason: 'grid-too-wide',
+        message:
+          'The grid is 600 px wide, wider than the 375 px viewport. Give the story its own viewport width, list modes without the narrow ones, or set a smaller cellWidth.',
+        grid: { width: 600, viewportWidth: 375 },
+      },
+    })
+  })
+
+  it('breaks a story whose element is missing as element-missing, even when its page shows a grid too wide', async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          capturePrep: async () => ({
+            outcome: 'element-missing',
+            found: 'nothing',
+            grid: { width: 1400, height: 500 },
+          }),
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture({ ...primary, element: '#grid' })).toMatchObject({
+      broken: { reason: 'element-missing' },
+    })
+    expect(driver.methods().filter((method) => method.endsWith(':capture'))).toEqual([])
+  })
+
+  it("breaks a story whose grid is too tall at the viewport's scale, capturing nothing", async () => {
+    const driver = new FakeDriver({ pages: [showingGrid({ width: 600, height: 20_000 })] })
+    const capture = await openCaptureSession(driver, settings).capture({ ...primary, imageWhenBroken: true })
+
+    expect(capture).toEqual({
+      broken: {
+        reason: 'too-tall',
+        message: 'The grid is 1200 × 40000 device pixels, over 32,767 on a side. Split the grid into several stories.',
+        size: { width: 1200, height: 40_000 },
+      },
+      console: [],
+    })
+    expect(driver.methods().filter((method) => method.endsWith(':capture'))).toEqual([])
+    expect(driver.methods()).toContain('1:close')
+  })
+})
+
 describe('a story that navigates away', () => {
   /**
    * A page whose story navigates away to `url` as it loads.
@@ -2430,6 +2559,10 @@ describe('the image of a broken story', () => {
     ['fonts-not-loaded', { assetsWait: async () => fontsTimedOutAnswer(['Inter 400 normal']) }],
     ['wait-threw', { waitHook: async () => ({ outcome: 'threw', text: 'Error: no data' }) }],
     ['element-missing', { capturePrep: async () => ({ outcome: 'element-missing', found: 'nothing' }) }],
+    [
+      'grid-too-wide',
+      { capturePrep: async () => ({ outcome: 'ready', box: null, grid: { width: 1400, height: 500 } }) },
+    ],
   ])(
     'is the full page captured once a story is broken with %s, before its page is closed',
     async (reason, breaking) => {
