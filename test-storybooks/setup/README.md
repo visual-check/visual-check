@@ -73,6 +73,22 @@ Turbo builds the packages first. Port 6106 must be free: the Storybook step fail
 
 CI's Setup job runs every package manager with each fixture, and its macOS job runs pnpm on the single fixture with `--init-only`.
 
+## The no-framework check
+
+`no-framework-check.ts` checks that a missing framework never breaks the install of `@visual-check/storybook` ([PRD 01](../../docs/prd/01-packages.md#visual-checkstorybook)): only importing that framework's entry fails. It packs the package and installs it alone, with npm and with pnpm, each in a new project whose only dependency it is. In each project:
+
+- no framework (`react`, `react-dom`, `vue`, `@angular/core`) resolves from the installed package;
+- the root entry, `@visual-check/storybook`, imports;
+- each framework's entry, such as `@visual-check/storybook/react`, fails with `ERR_MODULE_NOT_FOUND` for its framework, and for nothing else, so a missing export doesn't pass.
+
+npm and pnpm both install a missing peer that isn't optional, so either catches a framework peer that lost `optional`. Yarn installs no peers, so it would add nothing. From the repo root:
+
+```sh
+pnpm turbo run no-framework-check --filter @visual-check/test-setup
+```
+
+Turbo builds the package first. It prints one line per package manager, then each of its problems, and exits 1 on any. CI's Code job runs it. A new framework port adds its entry, with its framework, to `packageEntries` in `no-framework.ts`.
+
 ## Trying a local build in another project
 
 `try-local.ts` sets up one of your own projects with this checkout's packages, for a manual test before they're on npm. It builds and packs the packages of the checkout it runs from, a worktree included, with its uncommitted changes. Each package but `@visual-check/chromium` gets a version of the try's own, such as `0.0.0-local.20261123153045` (the UTC time), in its packed `package.json`, and so does each dependency between them, so a project that installed an earlier try's build can't keep it: at one version, a package manager may reuse what it installed. The checkout's `package.json` files don't change. The browser package keeps its version, since the CLI only takes a plain release in its peer range. The Setup check needs none of this: its project and package store are new on every run. The try serves the packages the way the check does, and runs `init` through `pnpm dlx` in the project. The registry is named for the `@visual-check` scope through the environment, so the project's `.npmrc` doesn't change. Then it adds the browser image to the config.

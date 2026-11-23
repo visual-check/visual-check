@@ -41,6 +41,11 @@ jobs:
           pipx run --spec skills-ref==0.1.1 agentskills validate "$RUNNER_TEMP/visual-check"
       - name: Unit tests
         run: pnpm turbo run test:unit
+      # @visual-check/storybook alone, packed and installed with npm and with pnpm, which both install a peer that isn't
+      # optional: no framework comes with it, the root entry imports, and each framework's entry fails only for its
+      # missing framework.
+      - name: No-framework install
+        run: pnpm turbo run no-framework-check --filter @visual-check/test-setup
 
   node-22:
     name: Node 22
