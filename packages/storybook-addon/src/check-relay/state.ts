@@ -32,9 +32,13 @@ export interface RelayState extends VisualCheckState {
 export type RelayAction =
   | {
       /**
-       * A manager asked for a check. Ignored while a run is in flight.
+       * A manager asked for a check or an update. Ignored while a run is in flight.
        */
       type: 'requested'
+      /**
+       * What runs.
+       */
+      kind: StoryRun['kind']
       /**
        * The click's ID.
        */
@@ -137,6 +141,13 @@ function storyOutcomeOf(outcome: AddonOutcome): StoryOutcome | undefined {
 
       return { result, storybook, snapshots, disabled, notices }
     }
+
+    case 'updated': {
+      const { result, storybook, snapshots, disabled, notices, warnings } = outcome
+
+      return { result, storybook, snapshots, disabled, notices, warnings }
+    }
+
     case 'stopped':
       return outcome
     case 'cancelled':
@@ -209,14 +220,14 @@ function reduceRun(
 /**
  * Starts a run, unless one is in flight.
  */
-function withRun(state: RelayState, id: string, storyId: string): RelayState {
+function withRun(state: RelayState, { kind, id, storyId }: RelayAction & { type: 'requested' }): RelayState {
   if (state.run !== null) {
     return state
   }
 
   const run: StoryRun = {
     id,
-    kind: 'check',
+    kind,
     storyId,
     step: 'preparing',
     finished: 0,
@@ -235,7 +246,7 @@ function withRun(state: RelayState, id: string, storyId: string): RelayState {
 export function reduce(state: RelayState, action: RelayAction): RelayState {
   switch (action.type) {
     case 'requested':
-      return withRun(state, action.id, action.storyId)
+      return withRun(state, action)
     case 'staled':
       return staled(state)
     case 'cleared':

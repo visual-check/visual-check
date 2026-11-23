@@ -21,6 +21,10 @@ export interface ManagerState {
    */
   check: (storyId: string) => void
   /**
+   * Asks for an update of a story's baselines. The server ignores it while a run is in flight.
+   */
+  update: (storyId: string) => void
+  /**
    * Cancels the run in flight, if there is one.
    */
   cancel: () => void
@@ -84,6 +88,7 @@ export function createManagerState(channel: Pick<Channel, 'on' | 'emit'>): Manag
     },
     getState: () => state,
     check: (storyId) => channel.emit(channelEvents.check, { storyId }),
+    update: (storyId) => channel.emit(channelEvents.update, { storyId }),
     cancel: () => {
       if (state.run !== null) {
         channel.emit(channelEvents.cancel, { id: state.run.id })

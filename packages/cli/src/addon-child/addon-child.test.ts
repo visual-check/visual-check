@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { CheckOutcome, StoryCheck } from '../commands/check-story.js'
 import type { LaunchBrowser } from '../commands/launch-browser.js'
+import type { StoryUpdate, UpdateOutcome } from '../commands/update-story.js'
 import { type AddonChild, type AddonChildOptions, createAddonChild } from './addon-child.js'
-import type { AddonMessage, CheckRequest, FinishedMessage } from './protocol.js'
+import type { AddonMessage, CheckRequest, FinishedMessage, UpdateRequest } from './protocol.js'
 
 /**
  * The launch the fake checks make.
@@ -27,6 +28,25 @@ const checked: CheckOutcome = {
 const stopped: CheckOutcome = { result: 'stopped', cause: 'config', message: 'No config.', notices: [] }
 
 /**
+ * How a fake update that finishes ends.
+ */
+const updated: UpdateOutcome = {
+  result: 'updated',
+  storybook: 'web',
+  snapshots: [],
+  disabled: false,
+  notices: [],
+  warnings: [],
+}
+
+/**
+ * Gives a request for an update of story `a`, with the click's ID.
+ */
+function updateRequestOf(id: string): UpdateRequest {
+  return { ...checkRequestOf(id), kind: 'update' }
+}
+
+/**
  * Gives a request for a check of story `a`, with the click's ID.
  */
 function checkRequestOf(id: string): CheckRequest {
@@ -48,7 +68,21 @@ interface FakeCheck {
 }
 
 /**
- * A child whose checks the test ends, and what it did.
+ * One fake update in flight.
+ */
+interface FakeUpdate {
+  /**
+   * What the child gave it.
+   */
+  update: StoryUpdate
+  /**
+   * Ends it.
+   */
+  end: (outcome: UpdateOutcome) => void
+}
+
+/**
+ * A child whose checks and updates the test ends, and what it did.
  */
 interface ChildSetup {
   /**
@@ -59,6 +93,10 @@ interface ChildSetup {
    * Every check started, in order.
    */
   checks: FakeCheck[]
+  /**
+   * Every update started, in order.
+   */
+  updates: FakeUpdate[]
   /**
    * Every message sent, in order.
    */
@@ -74,10 +112,12 @@ interface ChildSetup {
 }
 
 /**
- * Makes a child with fake checks, each of which ends when the test says, and cancelled once its signal aborts.
+ * Makes a child with fake checks and updates, each of which ends when the test says, and cancelled once its signal
+ * aborts.
  */
 function setUp(options: Partial<AddonChildOptions> = {}): ChildSetup {
   const checks: FakeCheck[] = []
+  const updates: FakeUpdate[] = []
   const messages: AddonMessage[] = []
   const finishes: FinishedMessage[] = []
   const waiting: { index: number; resolve: (message: FinishedMessage) => void }[] = []
@@ -104,12 +144,18 @@ function setUp(options: Partial<AddonChildOptions> = {}): ChildSetup {
         checks.push({ check, end })
         check.signal.addEventListener('abort', () => end({ result: 'cancelled' }))
       }),
+    update: (update) =>
+      new Promise((end) => {
+        updates.push({ update, end })
+        update.signal.addEventListener('abort', () => end({ result: 'cancelled' }))
+      }),
     ...options,
   })
 
   return {
     child,
     checks,
+    updates,
     messages,
     checkAt: (index) => {
       const check = checks[index]
@@ -148,9 +194,9 @@ function fakeLauncher(): { launchBrowser: LaunchBrowser; count: { launched: numb
 }
 
 /**
- * Launches a check's browser, opens a page in it and closes it, as a check does.
+ * Launches the browser of a check or an update, opens a page in it and closes it, as they do.
  */
-async function openPageAndClose({ launchBrowser }: StoryCheck): Promise<void> {
+async function openPageAndClose({ launchBrowser }: Pick<StoryCheck, 'launchBrowser'>): Promise<void> {
   const driver = await launchBrowser(launch)
 
   await driver.newPage({} as never)
@@ -190,6 +236,87 @@ describe('createAddonChild', () => {
     ])
   })
 
+  it("runs an update with the request's fields and the warm browser, and sends its progress and end", async () => {
+    const { launchBrowser, count } = fakeLauncher()
+    const { child, checks, checkAt, updates, messages, finished } = setUp({ launchBrowser })
+
+    child.receive(updateRequestOf('click-1'))
+
+    expect(checks).toEqual([])
+    expect(updates).toHaveLength(1)
+
+    const { update, end } = updates[0] as FakeUpdate
+
+    expect(update).toMatchObject({
+      storyId: 'a',
+      configDir: '/project/.storybook',
+      url: 'http://127.0.0.1:6006',
+      cwd: '/project',
+      environment: { CI: 'true' },
+    })
+    expect(update).not.toHaveProperty('images')
+
+    await openPageAndClose(update)
+    update.progress({ step: 'preparing' })
+    end(updated)
+    await finished(0)
+
+    expect(messages.slice(1)).toEqual([
+      { kind: 'progress', id: 'click-1', progress: { step: 'preparing' } },
+      { kind: 'finished', id: 'click-1', outcome: updated },
+    ])
+
+    child.receive(checkRequestOf('click-2'))
+    await openPageAndClose(checkAt(0).check)
+
+    expect(count).toEqual({ launched: 1, closed: 0 })
+  })
+
+  it('refuses an update while a check runs, and a check while an update runs', async () => {
+    const { child, checks, updates, checkAt, finished } = setUp()
+    const refused = {
+      result: 'stopped',
+      cause: 'run',
+      message: 'visual-check is already running a check or an update.',
+      notices: [],
+    }
+
+    child.receive(checkRequestOf('click-1'))
+    child.receive(updateRequestOf('click-2'))
+
+    expect(await finished(0)).toEqual({ kind: 'finished', id: 'click-2', outcome: refused })
+    expect(updates).toEqual([])
+
+    checkAt(0).end(checked)
+    await finished(1)
+    child.receive(updateRequestOf('click-3'))
+    child.receive(checkRequestOf('click-4'))
+
+    expect(await finished(2)).toEqual({ kind: 'finished', id: 'click-4', outcome: refused })
+    expect(checks).toHaveLength(1)
+    expect(updates[0]?.update.signal.aborted).toBe(false)
+  })
+
+  it('cancels the running update by its ID', async () => {
+    const { child, updates, finished } = setUp()
+
+    child.receive(updateRequestOf('click-1'))
+    child.receive({ kind: 'cancel', id: 'click-1' })
+
+    expect(updates[0]?.update.signal.aborted).toBe(true)
+    expect(await finished(0)).toEqual({ kind: 'finished', id: 'click-1', outcome: { result: 'cancelled' } })
+  })
+
+  it('aborts the running update when it closes', async () => {
+    const { child, updates, messages } = setUp()
+
+    child.receive(updateRequestOf('click-1'))
+    await child.close()
+
+    expect(updates[0]?.update.signal.aborted).toBe(true)
+    expect(messages.at(-1)).toEqual({ kind: 'finished', id: 'click-1', outcome: { result: 'cancelled' } })
+  })
+
   it('refuses a check while one runs, which goes on', async () => {
     const { child, checks, checkAt, finished } = setUp()
 
@@ -202,7 +329,7 @@ describe('createAddonChild', () => {
       outcome: {
         result: 'stopped',
         cause: 'run',
-        message: 'visual-check is already checking a story.',
+        message: 'visual-check is already running a check or an update.',
         notices: [],
       },
     })

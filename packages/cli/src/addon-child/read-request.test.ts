@@ -12,9 +12,18 @@ const check = {
   url: 'http://127.0.0.1:1',
 }
 
+/**
+ * A valid request for an update.
+ */
+const update = { ...check, kind: 'update' }
+
 describe('readAddonRequest', () => {
   it('reads a request for a check', () => {
     expect(readAddonRequest(check)).toEqual(check)
+  })
+
+  it('reads a request for an update', () => {
+    expect(readAddonRequest(update)).toEqual(update)
   })
 
   it('reads a request to cancel', () => {
@@ -31,6 +40,11 @@ describe('readAddonRequest', () => {
     expect(readAddonRequest({ ...check, [field]: '' })).toBeUndefined()
     expect(readAddonRequest({ ...check, [field]: 1 })).toBeUndefined()
     expect(readAddonRequest({ ...check, [field]: null })).toBeUndefined()
+  })
+
+  it.each(['id', 'storyId', 'configDir', 'url'])("takes no update whose %s isn't a non-empty string", (field) => {
+    expect(readAddonRequest({ ...update, [field]: undefined })).toBeUndefined()
+    expect(readAddonRequest({ ...update, [field]: '' })).toBeUndefined()
   })
 
   it.each([undefined, '', 1])('takes no cancel whose id is %j', (id) => {

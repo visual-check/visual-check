@@ -4,7 +4,7 @@ import { outcomeTextOf } from '../manager-state/outcome-text.js'
 /**
  * Gives the line on how far a run is.
  */
-export function runLineOf({ step, finished, total, cancelling }: StoryRun): string {
+export function runLineOf({ kind, step, finished, total, cancelling }: StoryRun): string {
   if (cancelling) {
     return 'Cancelling…'
   }
@@ -15,15 +15,17 @@ export function runLineOf({ step, finished, total, cancelling }: StoryRun): stri
     case 'browser':
       return 'Getting the browser…'
     case 'capturing':
-      return `Capturing ${Math.min(finished + 1, total)} of ${total}…`
+      return `${kind === 'update' ? 'Updating' : 'Capturing'} ${Math.min(finished + 1, total)} of ${total}…`
   }
 }
 
 /**
- * Gives the line that says the run is another story's.
+ * Gives the line that says the run is another story's, and what it does.
  */
-export function otherStoryLineOf(storyId: string): string {
-  return `Another story is being checked: ${storyId}.`
+export function otherStoryLineOf({ kind, storyId }: StoryRun): string {
+  return kind === 'update'
+    ? `Another story's baselines are being updated: ${storyId}.`
+    : `Another story is being checked: ${storyId}.`
 }
 
 /**
@@ -32,7 +34,7 @@ export function otherStoryLineOf(storyId: string): string {
  */
 export function statusLineOf(run: StoryRun | null, storyId: string | null, result: StoryResult | undefined): string {
   if (run !== null) {
-    return run.storyId === storyId ? runLineOf(run) : `${otherStoryLineOf(run.storyId)} ${runLineOf(run)}`
+    return run.storyId === storyId ? runLineOf(run) : `${otherStoryLineOf(run)} ${runLineOf(run)}`
   }
 
   if (result === undefined) {

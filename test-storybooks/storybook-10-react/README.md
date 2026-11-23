@@ -281,9 +281,13 @@ This Storybook lists visual-check's addon in its `.storybook/main.ts`, which the
 - The item of a story's menu checks it and its status icon shows, "Run tests" runs nothing, and a reload of the manager keeps the results.
 - A check cancelled while its config loads, or while it captures, leaves the story's result as it was.
 - A config for another Storybook, or none, shows the CLI's message and the hint, and a good one again needs no restart. A `url` at another port makes a notice.
+- Update of a story with a baseline within tolerance, one that differs and a missing one writes the three, a check then passes, and a second Update leaves every file's bytes and modification time as they were. Outside `--host` the baselines it writes equal the committed ones byte for byte.
+- Update of a story whose clock ticks says it's broken, since it changed in the second after its capture, and writes no baseline.
+- With `CI` set for Storybook, Update shows the CLI's refusal and writes nothing. Every other case starts Storybook without `CI`, so Update runs there in CI too.
 - With the browser's container killed between two checks, the next one passes in another. With `--host` this isn't run.
 - Once `SIGKILL` or `SIGTERM` has ended Storybook, the addon's process, the browser and its container are gone.
 - Neither Storybook's start nor the panel runs docker. With no docker, the check shows the CLI's message.
+- A static build, made with `storybook build` and served on `127.0.0.1`, shows the story's `test` and `update` commands with copy buttons, and served on the machine's network address shows no Visual check tab.
 - At the end no container is left. With `--host` this isn't run.
 
 The manager's mobile layout, the Webpack builder and Storybook 10.0 aren't run.

@@ -1,10 +1,18 @@
-import type { AddonSnapshot } from '@visual-check/cli/internal/addon-protocol'
+import type { AddonSnapshot, AddonWarning } from '@visual-check/cli/internal/addon-protocol'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { convert, ThemeProvider, themes } from 'storybook/theming'
 import { describe, expect, it } from 'vitest'
 import type { StoryOutcome, StoryResult, VisualCheckState } from '../channel-events/events.js'
-import { checkedWith, runWith, snapshotWith, stateWith, stoppedWith } from '../channel-events/state.fixture.js'
+import {
+  checkedWith,
+  runWith,
+  snapshotWith,
+  stateWith,
+  stoppedWith,
+  updatedWith,
+  updateSnapshotWith,
+} from '../channel-events/state.fixture.js'
 import { type PanelStory, PanelView } from './panel-view.js'
 
 const story: PanelStory = { id: 'card--default', name: 'Card / Default' }
@@ -36,7 +44,11 @@ const missing = snapshotWith({
 function render(state: VisualCheckState, current: PanelStory | null = story): string {
   const markup = renderToStaticMarkup(
     <ThemeProvider theme={convert(themes.light)}>
-      <PanelView story={current} state={state} actions={{ check: () => undefined, cancel: () => undefined }} />
+      <PanelView
+        story={current}
+        state={state}
+        actions={{ check: () => undefined, update: () => undefined, cancel: () => undefined }}
+      />
     </ThemeProvider>,
   )
 
@@ -98,6 +110,8 @@ describe('PanelView', () => {
         ' alt="Card / Default, mobile: snapshot"/>',
     ])
     expect(tagOf(markup, 'check')).toContain('aria-disabled="false"')
+    expect(tagOf(markup, 'update')).toContain('aria-disabled="false"')
+    expect(textsOf(markup, 'update')).toEqual(['Update'])
     expect(partsOf(markup, 'cancel')).toEqual([])
     expect(textsOf(markup, 'run')).toEqual(['1 visual diff, 1 missing baseline'])
   })
@@ -157,6 +171,7 @@ describe('PanelView', () => {
     expect(tagOf(markup, 'run')).toContain('role="status"')
     expect(textsOf(markup, 'run')).toEqual(['Capturing 2 of 3…'])
     expect(tagOf(markup, 'check')).toContain('aria-disabled="true"')
+    expect(tagOf(markup, 'update')).toContain('aria-disabled="true"')
     expect(tagOf(markup, 'cancel')).toContain('aria-disabled="false"')
     expect(markup).toContain('<div data-visual-check="results" data-dimmed="true">')
     expect(partsOf(markup, 'stale')).toEqual([])
@@ -214,7 +229,7 @@ describe('PanelView', () => {
     const markup = renderChecked([differs], { stale: true })
 
     expect(textsOf(markup, 'run')).toEqual(['Stale: 1 visual diff'])
-    expect(textsOf(markup, 'stale')).toEqual(['Stale: something changed since this check. Check again.'])
+    expect(textsOf(markup, 'stale')).toEqual(['Stale: something changed since this check. Check or update again.'])
     expect(markup).toContain('<div data-visual-check="results" data-dimmed="true">')
     expect(textsOf(markup, 'status')).toEqual(['Visual diff'])
   })
@@ -224,6 +239,7 @@ describe('PanelView', () => {
     ['init-hint', stoppedWith({ cause: 'config', notices: ['A notice.'] })],
     ['disabled', checkedWith([], { disabled: true, notices: ['A notice.'] })],
     ['rows', checkedWith([differs], { notices: ['A notice.'] })],
+    ['update-row', updatedWith([updateSnapshotWith()], { notices: ['A notice.'] })],
   ])('dims the notices and the %s of an earlier result, not what makes it stale', (part, outcome) => {
     const dimmed = '<div data-visual-check="results" data-dimmed="true">'
     const stale = render(stateWith(outcome, { stale: true }))
@@ -277,5 +293,114 @@ describe('PanelView', () => {
     expect(textsOf(markup, 'run')).toEqual(['Another story is being checked: card--default. Starting…'])
     expect(tagOf(markup, 'check')).toContain('aria-disabled="true"')
     expect(tagOf(render({ run: null, results: {} }, null), 'check')).toContain('aria-disabled="true"')
+    expect(tagOf(render({ run: null, results: {} }, null), 'update')).toContain('aria-disabled="true"')
+  })
+
+  describe('of an update', () => {
+    const written = updateSnapshotWith({ flaky: true, attempts: 3 })
+    const kept = updateSnapshotWith(
+      {
+        id: 'card--default.dark',
+        mode: 'dark',
+        message: 'Untouched: identical, byte for byte',
+        baseline: '.visual-check/baselines/card--default.dark.png',
+      },
+      { status: 'kept', reason: null },
+    )
+    const broken = updateSnapshotWith(
+      {
+        id: 'card--default.mobile',
+        mode: 'mobile',
+        message: 'The story changed after its capture.',
+        details: { timeoutMs: 5000 },
+        baseline: '.visual-check/baselines/card--default.mobile.png',
+      },
+      { status: 'broken', reason: 'changed-after-capture' },
+    )
+
+    it('lists each row with its status, the paths it wrote or left, and the flaky marker', () => {
+      const markup = render(stateWith(updatedWith([written, kept, written])))
+
+      expect(textsOf(markup, 'update-row')).toEqual([
+        'Default Flaky Written',
+        'dark Untouched',
+        'Default Flaky Written',
+      ])
+      expect(partsOf(markup, 'update-row').map(({ tag }) => /data-status="(\w+)"/.exec(tag)?.[1])).toEqual([
+        'written',
+        'kept',
+        'written',
+      ])
+      expect(textsOf(markup, 'path')).toEqual([
+        '.visual-check/baselines/card--default.png',
+        '.visual-check/baselines/card--default.dark.png',
+        '.visual-check/baselines/card--default.png',
+      ])
+      expect(textsOf(markup, 'message')).toEqual([
+        'Written: missing',
+        'Untouched: identical, byte for byte',
+        'Written: missing',
+      ])
+      expect(partsOf(markup, 'reason')).toEqual([])
+      expect(partsOf(markup, 'row')).toEqual([])
+      expect(markup).not.toContain('<img')
+      expect(textsOf(markup, 'run')).toEqual(['2 written, 1 untouched'])
+    })
+
+    it("shows a broken story's reason and details, and no path", () => {
+      const markup = render(stateWith(updatedWith([written, broken])))
+
+      expect(textsOf(markup, 'status')).toEqual(['Written', 'Broken story'])
+      expect(textsOf(markup, 'path')).toEqual(['.visual-check/baselines/card--default.png'])
+      expect(textsOf(markup, 'message')[1]).toBe('The story changed after its capture.')
+      expect(textsOf(markup, 'reason')).toEqual(['Reason: changed-after-capture'])
+      expect(textsOf(markup, 'details')).toEqual(['Timeout: 5000 ms'])
+      expect(textsOf(markup, 'run')).toEqual(['1 written, 1 broken'])
+    })
+
+    it('shows the warnings by host', () => {
+      const warnings: AddonWarning[] = [
+        { kind: 'real-requests', host: 'a.test', stories: [], message: 'a.test: 1 story (card--default).' },
+        { kind: 'remote-content', host: 'b.test', stories: [], message: 'b.test: 1 story (card--default).' },
+      ]
+      const markup = render(stateWith(updatedWith([written], { warnings })))
+
+      expect(textsOf(markup, 'warning')).toEqual([
+        'Warning: a.test: 1 story (card--default).',
+        'Warning: b.test: 1 story (card--default).',
+      ])
+    })
+
+    it('shows a stale update dimmed', () => {
+      const markup = render(stateWith(updatedWith([written]), { stale: true }))
+
+      expect(textsOf(markup, 'stale')).toEqual(['Stale: something changed since this update. Check or update again.'])
+      expect(textsOf(markup, 'run')).toEqual(['Stale: 1 written'])
+      expect(markup).toContain('<div data-visual-check="results" data-dimmed="true">')
+    })
+
+    it('says a story is disabled', () => {
+      const markup = render(stateWith(updatedWith([], { disabled: true })))
+
+      expect(partsOf(markup, 'disabled')).toHaveLength(1)
+      expect(textsOf(markup, 'run')).toEqual(['Disabled'])
+      expect(markup).not.toContain('<ul')
+    })
+
+    it('shows its run', () => {
+      const run = runWith({ kind: 'update', step: 'capturing', finished: 0, total: 2 })
+
+      expect(textsOf(render({ run, results: {} }), 'run')).toEqual(['Updating 1 of 2…'])
+      expect(textsOf(render({ run: { ...run, storyId: 'a--b' }, results: {} }), 'run')).toEqual([
+        "Another story's baselines are being updated: a--b. Updating 1 of 2…",
+      ])
+    })
+
+    it('shows what stopped it, and names init when the config did', () => {
+      const markup = render(stateWith(stoppedWith({ cause: 'config', message: 'No config.' })))
+
+      expect(textsOf(markup, 'error')).toEqual(['No config.'])
+      expect(textsOf(markup, 'init-hint')).toEqual(['Run visual-check init to set this Storybook up.'])
+    })
   })
 })

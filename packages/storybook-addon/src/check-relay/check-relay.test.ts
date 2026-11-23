@@ -55,15 +55,31 @@ function checkedWith(stem: string): AddonOutcome {
 }
 
 /**
- * A check the fake engine was asked for.
+ * Builds the outcome of an update with one snapshot written, which lists images as a check's would.
  */
-interface AskedCheck {
+function updatedOutcomeOf(stem: string): AddonOutcome {
+  const { status: _status, reason: _reason, ...fields } = differingSnapshot(stem)
+
+  return {
+    result: 'updated',
+    storybook: 'web',
+    snapshots: [{ ...fields, status: 'written', reason: 'differs', realRequestHosts: [], remoteContentHosts: [] }],
+    disabled: false,
+    notices: [],
+    warnings: [],
+  }
+}
+
+/**
+ * A check or an update the fake engine was asked for.
+ */
+interface AskedRun {
   /**
    * The request.
    */
   request: unknown
   /**
-   * Takes what the check says.
+   * Takes what it says.
    */
   listener: EngineListener
 }
@@ -77,9 +93,9 @@ interface RelaySetup {
    */
   relay: CheckRelay
   /**
-   * Every check asked for, in order.
+   * Every check and update asked for, in order.
    */
-  checks: AskedCheck[]
+  runs: AskedRun[]
   /**
    * The ID of every check cancelled, in order.
    */
@@ -106,7 +122,7 @@ interface RelaySetup {
  * Starts a relay whose clicks' IDs are `1`, `2` and so on.
  */
 function setUp(): RelaySetup {
-  const checks: AskedCheck[] = []
+  const runs: AskedRun[] = []
   const cancelled: string[] = []
   const emitted: [string, unknown][] = []
   const listeners = new Map<string, (payload: unknown) => void>()
@@ -124,8 +140,8 @@ function setUp(): RelaySetup {
     configDir: '/project/.storybook',
     address: 'http://127.0.0.1:6006',
     engine: {
-      check: (request, listener) => {
-        checks.push({ request, listener })
+      run: (request, listener) => {
+        runs.push({ request, listener })
       },
       cancel: (id) => {
         cancelled.push(id)
@@ -142,7 +158,7 @@ function setUp(): RelaySetup {
 
   return {
     relay,
-    checks,
+    runs,
     cancelled,
     emitted,
     receive,
@@ -155,35 +171,73 @@ function setUp(): RelaySetup {
     },
     checkAs: (storyId, outcome) => {
       receive('visual-check/check', { storyId })
-      checks.at(-1)?.listener.finished(outcome)
+      runs.at(-1)?.listener.finished(outcome)
     },
   }
 }
 
 describe('startCheckRelay', () => {
   it('says nothing before it is asked', () => {
-    const { checks, emitted } = setUp()
+    const { runs, emitted } = setUp()
 
-    expect(checks).toEqual([])
+    expect(runs).toEqual([])
     expect(emitted).toEqual([])
   })
 
   it('checks a story of this Storybook and tells the managers of the run', () => {
-    const { checks, receive, lastState } = setUp()
+    const { runs, receive, lastState } = setUp()
 
     receive('visual-check/check', { storyId: 'a' })
 
-    expect(checks.map(({ request }) => request)).toEqual([
-      { id: '1', storyId: 'a', configDir: '/project/.storybook', url: 'http://127.0.0.1:6006' },
+    expect(runs.map(({ request }) => request)).toEqual([
+      { kind: 'check', id: '1', storyId: 'a', configDir: '/project/.storybook', url: 'http://127.0.0.1:6006' },
     ])
     expect(lastState()).toMatchObject({ run: { id: '1', storyId: 'a', step: 'preparing' }, results: {} })
   })
 
+  it("updates a story's baselines and tells the managers of the run", () => {
+    const { runs, receive, lastState } = setUp()
+
+    receive('visual-check/update', { storyId: 'a' })
+
+    expect(runs.map(({ request }) => request)).toEqual([
+      { kind: 'update', id: '1', storyId: 'a', configDir: '/project/.storybook', url: 'http://127.0.0.1:6006' },
+    ])
+    expect(lastState()).toMatchObject({ run: { id: '1', kind: 'update', storyId: 'a' }, results: {} })
+  })
+
+  it.each([
+    { first: 'check', second: 'update' },
+    { first: 'update', second: 'check' },
+  ])('ignores an $second while a $first runs', ({ first, second }) => {
+    const { runs, emitted, receive } = setUp()
+
+    receive(`visual-check/${first}`, { storyId: 'a' })
+    receive(`visual-check/${second}`, { storyId: 'b' })
+
+    expect(runs).toHaveLength(1)
+    expect(emitted).toHaveLength(1)
+  })
+
+  it("lists no image for an update's result, and drops the images of the result it replaced", () => {
+    const { relay, runs, receive, checkAs, lastState } = setUp()
+
+    checkAs('a', checkedWith('a'))
+    expect(relay.imageAt('1', 'snapshots/web/a.baseline.png')).toBeDefined()
+
+    receive('visual-check/update', { storyId: 'a' })
+    runs.at(-1)?.listener.finished(updatedOutcomeOf('a'))
+
+    expect(lastState().results.a).toMatchObject({ id: '2', outcome: { result: 'updated' } })
+    expect(relay.imageAt('1', 'snapshots/web/a.baseline.png')).toBeUndefined()
+    expect(relay.imageAt('2', 'snapshots/web/a.baseline.png')).toBeUndefined()
+  })
+
   it('tells the managers of the progress as the run alone', () => {
-    const { checks, emitted, receive } = setUp()
+    const { runs, emitted, receive } = setUp()
 
     receive('visual-check/check', { storyId: 'a' })
-    checks[0]?.listener.progress({ step: 'capturing', finished: 1, total: 2 })
+    runs[0]?.listener.progress({ step: 'capturing', finished: 1, total: 2 })
 
     expect(emitted).toHaveLength(2)
     expect(emitted[1]).toEqual([
@@ -193,19 +247,19 @@ describe('startCheckRelay', () => {
   })
 
   it('ignores a check while one runs, and takes the next one after it', () => {
-    const { checks, emitted, receive, lastState } = setUp()
+    const { runs, emitted, receive, lastState } = setUp()
 
     receive('visual-check/check', { storyId: 'a' })
     receive('visual-check/check', { storyId: 'a' })
     receive('visual-check/check', { storyId: 'b' })
 
-    expect(checks).toHaveLength(1)
+    expect(runs).toHaveLength(1)
     expect(emitted).toHaveLength(1)
 
-    checks[0]?.listener.finished(checkedWith('a'))
+    runs[0]?.listener.finished(checkedWith('a'))
     receive('visual-check/check', { storyId: 'b' })
 
-    expect(checks).toHaveLength(2)
+    expect(runs).toHaveLength(2)
     expect(lastState()).toMatchObject({ run: { id: '2', storyId: 'b' }, results: { a: { id: '1' } } })
   })
 
@@ -225,7 +279,7 @@ describe('startCheckRelay', () => {
       configDir: '/project/.storybook',
       address: 'http://127.0.0.1:6006',
       engine: {
-        check: (_request, listener) =>
+        run: (_request, listener) =>
           listener.finished({ result: 'stopped', cause: 'run', message: 'No CLI.', notices: [] }),
         cancel: () => undefined,
       },
@@ -283,7 +337,7 @@ describe('startCheckRelay', () => {
   it.each(['visual-check/stale', 'storyIndexInvalidated', 'storyHotUpdated'])(
     'marks every result stale on %s, the coming one too',
     (event) => {
-      const { checks, checkAs, emitted, receive, lastState } = setUp()
+      const { runs, checkAs, emitted, receive, lastState } = setUp()
 
       receive(event)
       expect(emitted).toEqual([])
@@ -300,7 +354,7 @@ describe('startCheckRelay', () => {
       receive(event)
       expect(emitted).toHaveLength(count)
 
-      checks[1]?.listener.finished(checkedWith('b'))
+      runs[1]?.listener.finished(checkedWith('b'))
       expect(lastState().results.b?.stale).toBe(true)
     },
   )
@@ -350,7 +404,7 @@ describe('startCheckRelay', () => {
   })
 
   it('clears the results and drops their images, and keeps the run', () => {
-    const { relay, checks, checkAs, receive, lastState } = setUp()
+    const { relay, runs, checkAs, receive, lastState } = setUp()
 
     checkAs('a', checkedWith('a'))
     receive('visual-check/check', { storyId: 'b' })
@@ -359,7 +413,7 @@ describe('startCheckRelay', () => {
     expect(lastState()).toMatchObject({ run: { id: '2' }, results: {} })
     expect(relay.imageAt('1', 'snapshots/web/a.baseline.png')).toBeUndefined()
 
-    checks[1]?.listener.finished(checkedWith('b'))
+    runs[1]?.listener.finished(checkedWith('b'))
 
     expect(Object.keys(lastState().results)).toEqual(['b'])
     expect(relay.imageAt('2', 'snapshots/web/b.baseline.png')).toBeDefined()
@@ -368,12 +422,13 @@ describe('startCheckRelay', () => {
   it.each([undefined, null, 'a', 1, [], { storyId: '' }, { storyId: {} }, { id: 1 }, { id: '' }])(
     'ignores a payload that is junk: %j',
     (payload) => {
-      const { checks, cancelled, emitted, receive } = setUp()
+      const { runs, cancelled, emitted, receive } = setUp()
 
       receive('visual-check/check', payload)
+      receive('visual-check/update', payload)
       receive('visual-check/cancel', payload)
 
-      expect(checks).toEqual([])
+      expect(runs).toEqual([])
       expect(cancelled).toEqual([])
       expect(emitted).toEqual([])
     },

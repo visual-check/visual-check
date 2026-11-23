@@ -29,7 +29,10 @@
         "noReExportAll": "error"
       },
       "suspicious": {
-        "noUndeclaredEnvVars": { "level": "on", "options": { "allowedEnvVars": ["SystemRoot"] } }
+        "noUndeclaredEnvVars": {
+          "level": "on",
+          "options": { "allowedEnvVars": ["SystemRoot", "VISUAL_CHECK_STORYBOOK"] }
+        }
       },
       "style": {
         "noRestrictedImports": {

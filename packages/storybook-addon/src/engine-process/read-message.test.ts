@@ -14,6 +14,18 @@ const checked = {
 }
 
 /**
+ * The outcome of an update that finished.
+ */
+const updated = {
+  result: 'updated',
+  storybook: 'web',
+  snapshots: [{ id: 'a', status: 'written', images: { baseline: null, snapshot: null, diff: null } }],
+  disabled: false,
+  notices: ['A notice.'],
+  warnings: [{ kind: 'real-requests', host: 'example.com', stories: [], message: 'A warning.' }],
+}
+
+/**
  * The outcome of a check that a problem stopped.
  */
 const stopped = { result: 'stopped', cause: 'config', message: 'No config.', notices: [] }
@@ -26,6 +38,8 @@ describe('readAddonMessage', () => {
     { message: { kind: 'progress', id: 'click-1', progress: { step: 'capturing', finished: 1, total: 2 } } },
     { message: { kind: 'finished', id: 'click-1', outcome: checked } },
     { message: { kind: 'finished', id: 'click-1', outcome: { ...checked, snapshots: [] } } },
+    { message: { kind: 'finished', id: 'click-1', outcome: updated } },
+    { message: { kind: 'finished', id: 'click-1', outcome: { ...updated, snapshots: [], warnings: [] } } },
     { message: { kind: 'finished', id: 'click-1', outcome: stopped } },
     { message: { kind: 'finished', id: 'click-1', outcome: { result: 'cancelled' } } },
   ])('reads $message', ({ message }) => {
@@ -77,6 +91,13 @@ describe('readAddonMessage', () => {
     { outcome: { ...checked, snapshots: [{ id: 'a', images: { snapshot: 1 } }] } },
     { outcome: { ...checked, disabled: undefined } },
     { outcome: { ...checked, notices: undefined } },
+    { outcome: { ...updated, storybook: 1 } },
+    { outcome: { ...updated, snapshots: [{ id: 'a' }] } },
+    { outcome: { ...updated, disabled: 'no' } },
+    { outcome: { ...updated, notices: undefined } },
+    { outcome: { ...updated, warnings: undefined } },
+    { outcome: { ...updated, warnings: [null] } },
+    { outcome: { ...updated, warnings: [{ host: 'example.com' }] } },
     { outcome: { ...stopped, cause: 'docker' } },
     { outcome: { ...stopped, message: undefined } },
     { outcome: { ...stopped, notices: [1] } },

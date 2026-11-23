@@ -2,7 +2,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { baselinePathOf, readBaseline, writeBaseline } from '../baselines/baseline-files.js'
 import type { BrokenStory, StoryCapture } from '../capture/capture-session.js'
 import type { ConsoleMessage } from '../capture/driver/driver.js'
-import type { VisualDiff, VisualDiffFailure, VisualDiffResult } from '../visual-diff/visual-diff.js'
+import type { VisualDiff, VisualDiffResult } from '../visual-diff/visual-diff.js'
 import type { SnapshotToCapture } from './plan-snapshots.js'
 import {
   brokenResultOf,
@@ -29,6 +29,16 @@ export interface UpdateTools {
    * capture comes at least that long after the first.
    */
   recaptureDelayMs: number
+  /**
+   * Whether a baseline within tolerance of the first capture is rewritten too, as the Storybook addon's Update does.
+   * Each snapshot then takes the stability checks a missing baseline takes. `false` by default.
+   */
+  rewrite?: boolean
+  /**
+   * Writes a baseline. `writeBaseline` by default. The addon's Update gives one that holds the bytes until every
+   * snapshot is taken.
+   */
+  writeBaseline?: (path: string, bytes: Uint8Array) => Promise<void>
 }
 
 /**
@@ -58,7 +68,7 @@ interface Baseline {
 
 /**
  * What a snapshot's first load came to: a broken story; a snapshot within tolerance of the baseline, which keeps it;
- * or a snapshot that needs the stability checks, with its page captured again and how it differs from the baseline.
+ * or a snapshot that needs the stability checks, with its page captured again and how it compares with the baseline.
  */
 type FirstLoad =
   | {
@@ -91,9 +101,10 @@ type FirstLoad =
        */
       capturedAgain: Uint8Array
       /**
-       * How the snapshot differs from the baseline, for the attempt that gave it. `undefined` for a missing baseline.
+       * How the snapshot compares with the baseline, for the attempt that gave it. `undefined` for a missing baseline.
+       * It passed only when baselines within tolerance are rewritten.
        */
-      comparison: VisualDiffFailure | undefined
+      comparison: VisualDiffResult | undefined
     }
 
 /**
@@ -108,11 +119,12 @@ interface LatestCheck {
 
 /**
  * Captures a snapshot's first load, asking the capture session to capture the same page again unless the snapshot is
- * within tolerance of the baseline. The session asks right after the first capture and the reading of its hosts. The
- * snapshot is then compared with the baseline, when there is one. When they agree, nothing more is captured, and the
- * baseline is kept. Otherwise the page is captured again `recaptureDelayMs` after the session asked, so at least that
- * long after the first capture: the comparison runs during that wait, not before it. The session asks once per attempt
- * that captured a snapshot, so only the latest attempt's comparison counts.
+ * within tolerance of the baseline and `rewrite` isn't set. The session asks right after the first capture and the
+ * reading of its hosts. The snapshot is then compared with the baseline, when there is one. When they agree and
+ * `rewrite` isn't set, nothing more is captured and the baseline is kept. Otherwise the page is captured again
+ * `recaptureDelayMs` after the session asked, so at least that long after the first capture: the comparison runs
+ * during that wait, not before it. The session asks once per attempt that captured a snapshot, so only the latest
+ * attempt's comparison counts.
  *
  * @throws {BaselineError} When the files differ and the baseline can't be decoded, through the session's capture.
  * @throws {SnapshotDecodeError} When the snapshot can't be decoded, which the browser's PNG files rule out.
@@ -122,14 +134,14 @@ interface LatestCheck {
 async function firstLoadOf(
   item: SnapshotToCapture,
   captureStory: CaptureStory,
-  { visualDiff, recaptureDelayMs }: UpdateTools,
+  { visualDiff, recaptureDelayMs, rewrite = false }: UpdateTools,
   baseline: Baseline | undefined,
 ): Promise<FirstLoad> {
   const latest: LatestCheck = { comparison: undefined }
 
   /**
    * Compares the snapshot with the baseline, when there is one, keeping what it found. Resolves false when they
-   * agree, else true once `recaptureDelayMs` has passed since it was called.
+   * agree and `rewrite` isn't set, else true once `recaptureDelayMs` has passed since it was called.
    */
   const captureAgainIf = async (snapshot: Uint8Array): Promise<boolean> => {
     const asked = performance.now()
@@ -140,7 +152,7 @@ async function firstLoadOf(
 
     latest.comparison = comparison
 
-    if (comparison?.outcome === 'passed') {
+    if (comparison?.outcome === 'passed' && !rewrite) {
       return false
     }
 
@@ -156,7 +168,7 @@ async function firstLoadOf(
 
   const { comparison } = latest
 
-  if (comparison?.outcome === 'passed') {
+  if (comparison?.outcome === 'passed' && !rewrite) {
     return { kept: true, capture }
   }
 
@@ -219,6 +231,61 @@ const unstableStory: BrokenStory = {
 }
 
 /**
+ * Gives the result of a baseline to write: `written` once `write` wrote `snapshot` to `path`. When the file read at the
+ * start holds the same bytes, it writes nothing and gives the baseline `kept`, with the detail `kept: identical`, and
+ * ` · flaky` for a flaky snapshot, carrying what `written` carries besides why it was written.
+ *
+ * @throws {BaselineError} When `write` can't write the baseline, as `writeBaseline` throws it.
+ */
+async function writtenOrKeptOf(
+  baseline: Baseline | undefined,
+  path: string,
+  snapshot: Uint8Array,
+  written: SnapshotResult,
+  write: (path: string, bytes: Uint8Array) => Promise<void>,
+): Promise<SnapshotResult> {
+  if (baseline === undefined || Buffer.compare(baseline.bytes, snapshot) !== 0) {
+    await write(path, snapshot)
+
+    return written
+  }
+
+  const { attempts, completingMs, hosts, flaky, console } = written
+
+  return {
+    status: 'kept',
+    detail: flaky === true ? 'kept: identical · flaky' : 'kept: identical',
+    attempts,
+    completingMs,
+    hosts,
+    ...(flaky === undefined ? {} : { flaky }),
+    ...(console === undefined ? {} : { console }),
+  }
+}
+
+/**
+ * Gives why a baseline is written, from the first load's comparison with it: it was missing, it was within tolerance,
+ * which only `rewrite` writes, or it differed, with what the report keeps of how. Gives the detail that says so too.
+ */
+function writtenReasonOf(
+  comparison: VisualDiffResult | undefined,
+): Pick<SnapshotResult, 'writtenFor' | 'comparison' | 'detail'> {
+  if (comparison === undefined) {
+    return { writtenFor: 'missing', detail: 'written: missing' }
+  }
+
+  if (comparison.outcome === 'passed') {
+    return { writtenFor: 'within-tolerance', detail: 'written: within tolerance' }
+  }
+
+  return {
+    writtenFor: 'differs',
+    comparison: reportedComparisonOf(comparison),
+    detail: `written: differs: ${comparison.message}`,
+  }
+}
+
+/**
  * Updates one snapshot's baseline, writing it only once the story renders the same way twice. It reads the baseline
  * before any capture. A first capture within the story's tolerance of its baseline leaves the baseline untouched,
  * `kept`, after one load and one capture. Otherwise, a missing baseline or one that differs beyond tolerance or in
@@ -241,6 +308,12 @@ const unstableStory: BrokenStory = {
  * the first load's comparison with the baseline it differed from, and the console messages of the load written or
  * broken on: the third for a story whose loads never agreed, the first for one that changed after its capture.
  *
+ * With `rewrite`, as the Storybook addon's Update runs it, a baseline within tolerance of the first capture isn't kept:
+ * every snapshot takes the stability checks a missing baseline takes, without the `kept · flaky` of a second load
+ * within tolerance, and one within tolerance is written with the detail `written: within tolerance`. In either mode, a
+ * snapshot to write whose bytes equal the baseline's leaves the file untouched, `kept: identical`, which only
+ * `rewrite` reaches in practice. Baselines are written by `tools.writeBaseline`, `writeBaseline` when not given.
+ *
  * @throws {BaselineError} When the baseline can't be read, decoded or written.
  * @throws {SnapshotDecodeError} When a snapshot can't be decoded, which the browser's PNG files rule out.
  * @throws {VisualDiffError} When sharp can't be loaded, or a visual diff thread stops mid-comparison.
@@ -251,7 +324,7 @@ export async function updateSnapshot(
   captureStory: CaptureStory,
   tools: UpdateTools,
 ): Promise<SnapshotResult> {
-  const { visualDiff } = tools
+  const { visualDiff, rewrite = false, writeBaseline: write = writeBaseline } = tools
   const path = baselinePathOf(item.storybook.baselines, item.key)
   const bytes = await readBaseline(path)
   const baseline = bytes === undefined ? undefined : { bytes, path }
@@ -281,6 +354,7 @@ export async function updateSnapshot(
   }
 
   const keptByBaseline =
+    !rewrite &&
     baseline !== undefined &&
     (await compareWithBaseline(visualDiff, item, baseline.bytes, secondCapture.snapshot, path)).outcome === 'passed'
 
@@ -288,19 +362,16 @@ export async function updateSnapshot(
     return { status: 'kept', detail: 'kept · flaky', attempts: 2, completingMs, hosts, flaky: true }
   }
 
-  const writtenDetail = comparison === undefined ? 'written: missing' : `written: differs: ${comparison.message}`
-  const written = {
-    completingMs,
-    hosts,
-    ...(comparison === undefined
-      ? { writtenFor: 'missing' as const }
-      : { comparison: reportedComparisonOf(comparison), writtenFor: 'differs' as const }),
-  }
+  const reason = writtenReasonOf(comparison)
 
   if (await capturesAgree(visualDiff, item, firstCapture.snapshot, secondCapture.snapshot)) {
-    await writeBaseline(path, secondCapture.snapshot)
-
-    return { status: 'written', detail: writtenDetail, attempts: 2, ...written, console: secondCapture.console }
+    return await writtenOrKeptOf(
+      baseline,
+      path,
+      secondCapture.snapshot,
+      { status: 'written', attempts: 2, completingMs, hosts, ...reason, console: secondCapture.console },
+      write,
+    )
   }
 
   const thirdCapture = await captureStory(storyToCaptureOf(item))
@@ -314,16 +385,22 @@ export async function updateSnapshot(
     (await capturesAgree(visualDiff, item, firstCapture.snapshot, thirdCapture.snapshot))
 
   if (thirdAgrees) {
-    await writeBaseline(path, thirdCapture.snapshot)
-
-    return {
-      status: 'written',
-      detail: `${writtenDetail} · flaky`,
-      attempts: 3,
-      ...written,
-      flaky: true,
-      console: thirdCapture.console,
-    }
+    return await writtenOrKeptOf(
+      baseline,
+      path,
+      thirdCapture.snapshot,
+      {
+        status: 'written',
+        attempts: 3,
+        completingMs,
+        hosts,
+        ...reason,
+        detail: `${reason.detail} · flaky`,
+        flaky: true,
+        console: thirdCapture.console,
+      },
+      write,
+    )
   }
 
   return brokenResultOf(unstableStory, { attempts: 3, console: thirdCapture.console })

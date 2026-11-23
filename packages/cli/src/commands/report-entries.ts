@@ -95,6 +95,20 @@ type EntryTail = Omit<ReportEntryFields, keyof EntryHead>
 type EntryHosts = Pick<UpdateReportEntry, 'realRequestHosts' | 'remoteContentHosts'>
 
 /**
+ * One snapshot of the addon's Update, in the report's shape. Unlike `update`'s document, it lists a baseline kept
+ * because the capture was identical to it, and one rewritten within tolerance.
+ *
+ * @public
+ */
+export type StoryUpdateEntry = ReportEntryFields &
+  EntryHosts &
+  (
+    | { status: 'written'; reason: 'missing' | 'differs' | 'within-tolerance' }
+    | { status: 'kept'; reason: null }
+    | { status: 'broken'; reason: ReportBrokenReason }
+  )
+
+/**
  * No images.
  */
 const noImages: ReportImages = { baseline: null, snapshot: null, diff: null }
@@ -296,28 +310,67 @@ function testVerdictOf(result: SnapshotResult): [VerdictOf<TestReportEntry>, str
 }
 
 /**
+ * Gives a written result's status, reason and message: written for a missing baseline, over one that differed, or over
+ * one within tolerance.
+ *
+ * @throws {Error} When the result lacks what its status carries.
+ */
+function writtenVerdictOf(result: SnapshotResult): [VerdictOf<StoryUpdateEntry> & { status: 'written' }, string] {
+  const writtenFor = carried(result.writtenFor, result.status, 'why it was written')
+
+  switch (writtenFor) {
+    case 'missing':
+      return [{ status: 'written', reason: 'missing' }, 'Written: missing']
+    case 'within-tolerance':
+      return [{ status: 'written', reason: 'within-tolerance' }, 'Written: within tolerance']
+    default: {
+      const { message } = carried(result.comparison, result.status, 'its first comparison')
+
+      return [{ status: 'written', reason: 'differs' }, `Written: differs: ${message}`]
+    }
+  }
+}
+
+/**
  * Gives an `update` result's status, reason and message.
  *
- * @throws {Error} When the result is `test`'s or a kept baseline, or lacks what its status carries.
+ * @throws {Error} When the result is `test`'s, a kept baseline or one written within tolerance, or lacks what its
+ * status carries.
  */
 function updateVerdictOf(result: SnapshotResult): [VerdictOf<UpdateReportEntry>, string] {
   switch (result.status) {
     case 'written': {
-      const writtenFor = carried(result.writtenFor, result.status, 'why it was written')
+      const [{ reason }, message] = writtenVerdictOf(result)
 
-      if (writtenFor === 'missing') {
-        return [{ status: 'written', reason: 'missing' }, 'Written: missing']
+      if (reason === 'within-tolerance') {
+        throw new Error('An update report has no snapshot written within tolerance.')
       }
 
-      const { message } = carried(result.comparison, result.status, 'its first comparison')
-
-      return [{ status: 'written', reason: 'differs' }, `Written: differs: ${message}`]
+      return [{ status: 'written', reason }, message]
     }
 
     case 'broken':
       return brokenVerdictOf(result)
     default:
       throw new Error(`An update report has no ${result.status} snapshot.`)
+  }
+}
+
+/**
+ * Gives the status, reason and message of a result of the addon's Update.
+ *
+ * @throws {Error} When the result is `test`'s, or lacks what its status carries.
+ */
+function storyUpdateVerdictOf(result: SnapshotResult): [VerdictOf<StoryUpdateEntry>, string] {
+  switch (result.status) {
+    case 'written':
+      return writtenVerdictOf(result)
+    case 'kept':
+      return [{ status: 'kept', reason: null }, 'Untouched: identical, byte for byte']
+    case 'broken':
+      return brokenVerdictOf(result)
+    default:
+      throw new Error(`The addon's Update has no ${result.status} snapshot.`)
   }
 }
 
@@ -371,6 +424,22 @@ function hostsOf(result: SnapshotResult | undefined): EntryHosts {
  */
 export function updateEntryOf(item: PlannedSnapshot, result: SnapshotResult, configFolder: string): UpdateReportEntry {
   const [verdict, message] = updateVerdictOf(result)
+
+  return { ...headOf(item), ...verdict, ...tailOf(item, result, configFolder, message), ...hostsOf(result) }
+}
+
+/**
+ * Gives a snapshot's entry of the addon's Update, with its baseline's path relative to `configFolder` and the hosts of
+ * its first load.
+ *
+ * @throws {Error} When the result is `test`'s, or lacks what its status carries.
+ */
+export function storyUpdateEntryOf(
+  item: PlannedSnapshot,
+  result: SnapshotResult,
+  configFolder: string,
+): StoryUpdateEntry {
+  const [verdict, message] = storyUpdateVerdictOf(result)
 
   return { ...headOf(item), ...verdict, ...tailOf(item, result, configFolder, message), ...hostsOf(result) }
 }

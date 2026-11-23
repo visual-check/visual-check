@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { StoryRun } from '../channel-events/events.js'
-import { checkedWith, runWith, snapshotWith, stateWith, stoppedWith } from '../channel-events/state.fixture.js'
+import {
+  checkedWith,
+  runWith,
+  snapshotWith,
+  stateWith,
+  stoppedWith,
+  updatedWith,
+  updateSnapshotWith,
+} from '../channel-events/state.fixture.js'
 import { isCancelled, logTextOf, otherStoryLineOf, runLineOf, type StatusSubject, statusLineOf } from './panel-text.js'
 
 describe('runLineOf', () => {
@@ -12,14 +20,21 @@ describe('runLineOf', () => {
     ['Capturing 3 of 3…', { step: 'capturing', finished: 3, total: 3 }],
     ['Cancelling…', { step: 'capturing', finished: 1, total: 3, cancelling: true }],
     ['Cancelling…', { step: 'preparing', cancelling: true }],
+    ['Updating 2 of 3…', { kind: 'update', step: 'capturing', finished: 1, total: 3 }],
+    ['Starting…', { kind: 'update', step: 'preparing' }],
   ])('gives "%s"', (line, fields) => {
     expect(runLineOf(runWith(fields))).toBe(line)
   })
 })
 
 describe('otherStoryLineOf', () => {
-  it('names the story', () => {
-    expect(otherStoryLineOf('button--primary')).toBe('Another story is being checked: button--primary.')
+  it('names the story and what the run does', () => {
+    expect(otherStoryLineOf(runWith({ storyId: 'button--primary' }))).toBe(
+      'Another story is being checked: button--primary.',
+    )
+    expect(otherStoryLineOf(runWith({ kind: 'update', storyId: 'button--primary' }))).toBe(
+      "Another story's baselines are being updated: button--primary.",
+    )
   })
 })
 
@@ -39,6 +54,9 @@ describe('statusLineOf', () => {
     expect(lineOf(differing)).toBe('1 visual diff')
     expect(lineOf(stoppedWith())).toBe('Stopped')
     expect(lineOf(differing, { stale: true })).toBe('Stale: 1 visual diff')
+    expect(lineOf(updatedWith([updateSnapshotWith(), updateSnapshotWith({}, { status: 'kept', reason: null })]))).toBe(
+      '1 written, 1 untouched',
+    )
   })
 
   it('says how far the run is while there is one', () => {
@@ -49,6 +67,9 @@ describe('statusLineOf', () => {
       'Another story is being checked: a--b. Starting…',
     )
     expect(statusLineOf(runWith(), null, undefined)).toBe(`Another story is being checked: ${story}. Starting…`)
+    expect(statusLineOf(runWith({ kind: 'update', storyId: 'a--b' }), story, result)).toBe(
+      "Another story's baselines are being updated: a--b. Starting…",
+    )
   })
 
   it('is empty without either', () => {

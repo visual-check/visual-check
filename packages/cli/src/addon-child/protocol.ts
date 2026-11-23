@@ -1,5 +1,8 @@
-import type { CheckOutcome, CheckProgress } from '../commands/check-story.js'
-import type { TestReportEntry } from '../report/report-document.js'
+import type { CheckOutcome } from '../commands/check-story.js'
+import type { StoryUpdateEntry } from '../commands/report-entries.js'
+import type { StoryProgress } from '../commands/story-run.js'
+import type { UpdateOutcome } from '../commands/update-story.js'
+import type { ReportWarning, TestReportEntry } from '../report/report-document.js'
 
 /**
  * One snapshot of a check, in the report's shape. Its image paths are relative to the outcome's `imagesFolder`, with
@@ -10,18 +13,32 @@ import type { TestReportEntry } from '../report/report-document.js'
 export type AddonSnapshot = TestReportEntry
 
 /**
- * How far a check is.
+ * One snapshot of an update, in the report's shape, with the update's own statuses.
  *
  * @public
  */
-export type AddonProgress = CheckProgress
+export type AddonUpdateSnapshot = StoryUpdateEntry
 
 /**
- * How a check ended.
+ * A warning by host of an update.
  *
  * @public
  */
-export type AddonOutcome = CheckOutcome
+export type AddonWarning = ReportWarning
+
+/**
+ * How far a check or an update is.
+ *
+ * @public
+ */
+export type AddonProgress = StoryProgress
+
+/**
+ * How a check or an update ended.
+ *
+ * @public
+ */
+export type AddonOutcome = CheckOutcome | UpdateOutcome
 
 /**
  * Asks for a check of one story.
@@ -52,7 +69,42 @@ export interface CheckRequest {
 }
 
 /**
- * Cancels a check. Ignored when it isn't the one running.
+ * Asks for an update of one story's baselines.
+ *
+ * @public
+ */
+export interface UpdateRequest {
+  /**
+   * What the request asks for.
+   */
+  kind: 'update'
+  /**
+   * The click's own ID, new each time, which every message about the update carries.
+   */
+  id: string
+  /**
+   * The story's ID.
+   */
+  storyId: string
+  /**
+   * The absolute path of Storybook's config folder.
+   */
+  configDir: string
+  /**
+   * The Storybook's own address.
+   */
+  url: string
+}
+
+/**
+ * Asks for a check or an update of one story.
+ *
+ * @public
+ */
+export type StoryRequest = CheckRequest | UpdateRequest
+
+/**
+ * Cancels a check or an update. Ignored when it isn't the one running.
  *
  * @public
  */
@@ -62,7 +114,7 @@ export interface CancelRequest {
    */
   kind: 'cancel'
   /**
-   * The check's ID.
+   * The ID of the check or the update.
    */
   id: string
 }
@@ -72,7 +124,7 @@ export interface CancelRequest {
  *
  * @public
  */
-export type AddonRequest = CheckRequest | CancelRequest
+export type AddonRequest = StoryRequest | CancelRequest
 
 /**
  * Says the child takes requests. Sent once, first.
@@ -95,7 +147,7 @@ export interface ReadyMessage {
 }
 
 /**
- * Says how far a check is.
+ * Says how far a check or an update is.
  *
  * @public
  */
@@ -105,7 +157,7 @@ export interface ProgressMessage {
    */
   kind: 'progress'
   /**
-   * The check's ID.
+   * The ID of the check or the update.
    */
   id: string
   /**
@@ -115,7 +167,7 @@ export interface ProgressMessage {
 }
 
 /**
- * Says how a check ended. Sent exactly once for each request for a check.
+ * Says how a check or an update ended. Sent exactly once for each request for a check or an update.
  *
  * @public
  */
@@ -125,7 +177,7 @@ export interface FinishedMessage {
    */
   kind: 'finished'
   /**
-   * The check's ID.
+   * The ID of the check or the update.
    */
   id: string
   /**

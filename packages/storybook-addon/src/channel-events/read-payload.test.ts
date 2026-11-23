@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { readCancelPayload, readCheckPayload } from './read-payload.js'
+import { readCancelPayload, readStoryPayload } from './read-payload.js'
 
 /**
  * Payloads neither reader takes.
  */
 const junk = [{ value: undefined }, { value: null }, { value: 'a' }, { value: 1 }, { value: [] }, { value: {} }]
 
-describe('readCheckPayload', () => {
+describe('readStoryPayload', () => {
   it('reads the story ID alone', () => {
-    expect(readCheckPayload({ storyId: 'button--primary', id: 'x' })).toEqual({ storyId: 'button--primary' })
-    expect(readCheckPayload({ storyId: 'a'.repeat(1000) })).toEqual({ storyId: 'a'.repeat(1000) })
+    expect(readStoryPayload({ storyId: 'button--primary', id: 'x' })).toEqual({ storyId: 'button--primary' })
+    expect(readStoryPayload({ storyId: 'a'.repeat(1000) })).toEqual({ storyId: 'a'.repeat(1000) })
   })
 
   it.each([
@@ -20,7 +20,7 @@ describe('readCheckPayload', () => {
     { value: { storyId: ['a'] } },
     { value: { storyId: 'a'.repeat(1001) } },
   ])('takes no junk: $value', ({ value }) => {
-    expect(readCheckPayload(value)).toBeUndefined()
+    expect(readStoryPayload(value)).toBeUndefined()
   })
 })
 

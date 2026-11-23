@@ -101,6 +101,8 @@ jobs:
         env:
           TEST_STORYBOOK_IMAGE: visual-check-chromium:ci
         run: pnpm turbo run e2e --filter @visual-check/test-${{ matrix.storybook }}
+      # The Storybook addon in `storybook dev`: Check, and Update, which runs since the script starts Storybook without
+      # `CI`, and a static build's commands.
       - name: Addon end-to-end check
         if: matrix.storybook == 'storybook-10-react'
         env:
@@ -243,7 +245,8 @@ jobs:
         env:
           VISUAL_CHECK_CACHE_DIR: ${{ runner.temp }}/visual-check-cache
         run: pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --host --skill-script
-      # The Storybook addon in `storybook dev`, with the browser on the host.
+      # The Storybook addon in `storybook dev`, with the browser on the host: Check, and Update, which runs since the
+      # script starts Storybook without `CI`, and a static build's commands.
       - name: Addon end-to-end check
         env:
           VISUAL_CHECK_CACHE_DIR: ${{ runner.temp }}/visual-check-cache

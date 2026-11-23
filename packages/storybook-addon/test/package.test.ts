@@ -1,6 +1,6 @@
 import { ChildProcess, spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { text } from 'node:stream/consumers'
@@ -46,8 +46,8 @@ function programSourceOf(entry: string): string {
     })
     const server = setInterval(() => undefined, 60_000)
 
-    engine.check(
-      { id: 'click-1', storyId: 'a', configDir: '/project/.storybook', url: 'http://127.0.0.1:6006' },
+    engine.run(
+      { kind: 'check', id: 'click-1', storyId: 'a', configDir: '/project/.storybook', url: 'http://127.0.0.1:6006' },
       {
         progress: () => {
           engine.cancel('click-1')
@@ -78,11 +78,44 @@ describe('the package', () => {
 })
 
 describe('the built preset', () => {
-  it('exports the two hooks alone', async () => {
+  it('exports the three hooks alone', async () => {
     expect(Object.keys(await import(builtUrl('preset.js'))).sort()).toEqual([
+      'env',
       'experimental_devServer',
       'experimental_serverChannel',
     ])
+  })
+
+  it("gives storybook dev's manager its environment unchanged", async () => {
+    const { env } = await import(builtUrl('preset.js'))
+    const config = { STORYBOOK_A: 'a' }
+
+    expect(await env(config, { configType: 'DEVELOPMENT', configDir: '/project/.storybook' })).toBe(config)
+  })
+
+  it.each([
+    ['names the Storybook', true, 'web'],
+    ['gives an empty name with no config', false, ''],
+  ])("%s in a static build's environment", async (_name, hasConfig, storybook) => {
+    const { env } = await import(builtUrl('preset.js'))
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'visual-check-static-build-')))
+
+    cleanups.push(() => rmSync(root, { recursive: true, force: true }))
+    mkdirSync(join(root, '.git'))
+    mkdirSync(join(root, '.storybook'))
+    writeFileSync(join(root, '.git/HEAD'), 'ref: refs/heads/main\n')
+
+    if (hasConfig) {
+      writeFileSync(
+        join(root, 'visual-check.config.mjs'),
+        "export default { storybooks: { web: { url: 'http://127.0.0.1:6006' } } }\n",
+      )
+    }
+
+    expect(await env({ STORYBOOK_A: 'a' }, { configType: 'PRODUCTION', configDir: join(root, '.storybook') })).toEqual({
+      STORYBOOK_A: 'a',
+      VISUAL_CHECK_STORYBOOK: storybook,
+    })
   })
 
   it('starts no process before the first check, which starts the installed CLI', async () => {
