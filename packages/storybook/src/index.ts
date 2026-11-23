@@ -1,4 +1,15 @@
 import {
+  type GridCaption,
+  type GridCell,
+  type GridInput,
+  type GridLayout,
+  type GridRow,
+  type GridStyle,
+  gridAttribute,
+  gridLayoutOf,
+  type PropValues,
+} from './grid-story/grid-layout.js'
+import {
   defineVisualCheck,
   type GlobalValue,
   type Mask,
@@ -15,8 +26,15 @@ import {
 
 export type {
   GlobalValue,
+  GridCaption,
+  GridCell,
+  GridInput,
+  GridLayout,
+  GridRow,
+  GridStyle,
   Mask,
   ModeDefinition,
+  PropValues,
   Tolerance,
   Viewport,
   VisualCheck,
@@ -26,4 +44,4 @@ export type {
   WaitHook,
   WrittenMask,
 }
-export { defineVisualCheck }
+export { defineVisualCheck, gridAttribute, gridLayoutOf }

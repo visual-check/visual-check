@@ -53,6 +53,7 @@
       { "name": "cli/terminal-ui", "patterns": ["packages/cli/src/terminal-ui/**"] },
       { "name": "cli/visual-diff", "patterns": ["packages/cli/src/visual-diff/**"] },
       { "name": "storybook/per-story-options", "patterns": ["packages/storybook/src/per-story-options/**"] },
+      { "name": "storybook/grid-story", "patterns": ["packages/storybook/src/grid-story/**"] },
       { "name": "storybook-addon/channel-events", "patterns": ["packages/storybook-addon/src/channel-events/**"] },
       { "name": "storybook-addon/check-relay", "patterns": ["packages/storybook-addon/src/check-relay/**"] },
       { "name": "storybook-addon/engine-process", "patterns": ["packages/storybook-addon/src/engine-process/**"] },
@@ -118,6 +119,7 @@
       { "from": "cli/terminal-ui", "allow": ["cli/init", "cli/reporter"] },
       { "from": "cli/visual-diff", "allow": ["cli/config"] },
       { "from": "storybook/per-story-options", "allow": [] },
+      { "from": "storybook/grid-story", "allow": [] },
       { "from": "storybook-addon/channel-events", "allow": ["cli/addon-child"] },
       {
         "from": "storybook-addon/check-relay",

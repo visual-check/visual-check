@@ -85,3 +85,12 @@ packages/cli/src/
   reporter/             the reporters' choice, progress stream, log lines and test's end block
   step-summary/         adapter: GitHub's step summary file
 ```
+
+## `@visual-check/storybook`, as it grows
+
+```
+packages/storybook/src/
+  index.ts              entry: defineVisualCheck and the framework-free grid module
+  per-story-options/    defineVisualCheck: a story's visualCheck parameter and its types
+  grid-story/           the framework-free grid: rows, captions and every element's inline styles
+```
