@@ -1,0 +1,101 @@
+# Docker Desktop on a Windows runner, so that `docker` runs Linux containers. The runner image's own Docker runs Windows
+# containers only. This repository's Windows job uses it, and so do the test apps' Windows jobs, from main
+# (visual-check/test-apps/.github/workflows/test-apps.yml), so they all run the one version pinned here.
+name: Docker Desktop
+description: Installs Docker Desktop with its WSL 2 backend on a Windows runner and starts it, in up to 3 minutes.
+
+inputs:
+  wsl-distro:
+    description: An installed WSL distro to give Docker Desktop's docker, through its WSL integration.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    # Docker Desktop 4.98.0, the version research #33 ran on this runner. To bump it, take the build number from
+    # Docker Desktop's release notes, and the checksum from checksums.txt beside the installer.
+    - name: Install Docker Desktop
+      shell: pwsh
+      env:
+        WSL_DISTRO: ${{ inputs.wsl-distro }}
+      run: |
+        $build = '245422'
+        $checksum = 'cd6273d9eaa4f07fa7593fc6813d37e1004381cebc3f26047a2554fa5db24388'
+        $installer = "$env:RUNNER_TEMP\DockerDesktopInstaller.exe"
+        $ProgressPreference = 'SilentlyContinue'
+        $url = "https://desktop.docker.com/win/main/amd64/$build/Docker%20Desktop%20Installer.exe"
+        Invoke-WebRequest -Uri $url -OutFile $installer -MaximumRetryCount 3 -RetryIntervalSec 10
+        $hash = (Get-FileHash $installer -Algorithm SHA256).Hash
+        if ($hash -ne $checksum) { throw "The Docker Desktop installer's checksum is $hash, not $checksum." }
+        $arguments = 'install', '--quiet', '--accept-license', '--backend=wsl-2', '--always-run-service'
+        $process = Start-Process $installer -ArgumentList $arguments -PassThru
+        # Reading the handle keeps it open, so ExitCode isn't null once the installer exits.
+        $null = $process.Handle
+        if (-not $process.WaitForExit(300000)) { throw 'The Docker Desktop installer ran over 5 minutes.' }
+        "Installer exit code: $($process.ExitCode)"
+        if ($null -eq $process.ExitCode -or $process.ExitCode -ne 0) {
+          throw "The Docker Desktop installer exited with code '$($process.ExitCode)'."
+        }
+        # Docker Desktop reads its settings as it starts. Docker documents the default distro as integrated, but 4.95
+        # was seen to integrate none until its settings named it.
+        $settingsFile = "$env:APPDATA\Docker\settings-store.json"
+        if ($env:WSL_DISTRO) {
+          $settings = @{}
+          if (Test-Path $settingsFile) { $settings = Get-Content $settingsFile -Raw | ConvertFrom-Json -AsHashtable }
+          # The file can be empty or hold `null`.
+          if ($null -eq $settings) { $settings = @{} }
+          $settings['EnableIntegrationWithDefaultWslDistro'] = $true
+          $settings['IntegratedWslDistros'] = @($env:WSL_DISTRO)
+          $null = New-Item -ItemType Directory -Force (Split-Path $settingsFile)
+          $settings | ConvertTo-Json -Depth 10 | Set-Content $settingsFile
+        }
+        # The runner's own Docker service holds \\.\pipe\docker_engine, which Docker Desktop needs.
+        Stop-Service docker -Force
+        Start-Process 'C:\Program Files\Docker\Docker\Docker Desktop.exe'
+        $docker = 'C:\Program Files\Docker\Docker\resources\bin\docker.exe'
+        for ($attempt = 0; $attempt -lt 60; $attempt++) {
+          & $docker --context desktop-linux info *> $null
+          if (-not $LASTEXITCODE) { break }
+          Start-Sleep 5
+        }
+        if ($LASTEXITCODE) {
+          # What the engine, the services, WSL and Docker Desktop's logs say, for the log.
+          try {
+            & $docker --context desktop-linux info
+            Get-Service com.docker.service, docker -ErrorAction SilentlyContinue | Format-Table | Out-String
+            (wsl.exe -l -v | Out-String) -replace "`0", ''
+            $logs = Get-ChildItem "$env:LOCALAPPDATA\Docker\log" -Recurse -File -ErrorAction SilentlyContinue
+            foreach ($log in $logs) {
+              "--- $($log.FullName)"
+              Get-Content $log.FullName -Tail 50 -ErrorAction SilentlyContinue
+            }
+          } catch {
+            "Couldn't gather the diagnostics: $_"
+          }
+          throw "Docker Desktop's engine didn't answer within 5 minutes."
+        }
+        & $docker --context desktop-linux info --format '{{.OSType}}'
+        & $docker context use desktop-linux
+        if ($LASTEXITCODE) { throw "Couldn't switch docker to the desktop-linux context." }
+        'C:\Program Files\Docker\Docker\resources\bin' | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+        if ($env:WSL_DISTRO) {
+          for ($attempt = 0; $attempt -lt 60; $attempt++) {
+            wsl.exe -d $env:WSL_DISTRO -u root -e docker info *> $null
+            if (-not $LASTEXITCODE) { break }
+            Start-Sleep 5
+          }
+          if ($LASTEXITCODE) {
+            # What the distro and Docker Desktop's settings say, for the log.
+            try {
+              (wsl.exe -l -v | Out-String) -replace "`0", ''
+              Get-Content $settingsFile
+              wsl.exe -d $env:WSL_DISTRO -u root -e ls -l /usr/bin/docker /var/run/docker.sock /mnt/wsl
+              wsl.exe -d $env:WSL_DISTRO -u root -e docker info
+              Get-Content "$env:LOCALAPPDATA\Docker\log\host\com.docker.backend.exe.log" -Tail 100
+            } catch {
+              "Couldn't gather the diagnostics: $_"
+            }
+            throw "Docker Desktop's docker didn't answer in $env:WSL_DISTRO within 5 minutes."
+          }
+        }
