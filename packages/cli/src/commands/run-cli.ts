@@ -44,6 +44,7 @@ import {
 import { runSnapshots, type SnapshotRunResult } from './run-snapshots.js'
 import { reportProblemOf } from './stop-message.js'
 import { crashedBy, type RunStop, stoppedBy, stoppedTestOf, stoppedUpdateOf, usageFailureOf } from './stopped-run.js'
+import { ciUpdateRefusal } from './update-baselines.js'
 import { defaultRecaptureDelayMs } from './update-snapshot.js'
 
 /**
@@ -318,11 +319,7 @@ async function runTestOrUpdate(
     })
   const outcome =
     command === 'update' && ci
-      ? stoppedBy(
-          'visual-check update only runs locally, and the CI environment variable is set. ' +
-            'Run it on your machine and commit the baselines, or unset CI.\n',
-          { configPath: undefined, storybooks: [] },
-        )
+      ? stoppedBy(`${ciUpdateRefusal}\n`, { configPath: undefined, storybooks: [] })
       : await runOutcomeOf({ command, options, environment, cwd, cliOptions, ci, elapsedMs, write })
 
   if ('finished' in outcome) {

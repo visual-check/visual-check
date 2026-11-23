@@ -48,6 +48,8 @@ export async function greyPng(
 
 /**
  * Encodes a PNG file again at another compression level: other bytes for the same pixels.
+ *
+ * @public
  */
 export async function reencodePng(file: Uint8Array, compressionLevel: number): Promise<Uint8Array> {
   return sharp(file).png({ compressionLevel }).toBuffer()

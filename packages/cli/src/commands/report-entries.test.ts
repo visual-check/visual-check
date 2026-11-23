@@ -13,6 +13,7 @@ import {
   pixelsOf,
   reportReasons,
   sizeOf,
+  storyUpdateEntryOf,
   testCountsOf,
   testEntryOf,
   updateCountsOf,
@@ -432,6 +433,80 @@ describe('updateEntryOf', () => {
   it("rejects a test's result and a kept baseline", () => {
     expect(() => updateEntryOf(itemOf(), { status: 'kept', detail: 'kept', attempts: 1 }, configFolder)).toThrow()
     expect(() => updateEntryOf(itemOf(), differsResult, configFolder)).toThrow()
+  })
+
+  it('rejects a baseline written within tolerance, which only the addon writes', () => {
+    const result: SnapshotResult = { status: 'written', detail: '', attempts: 2, writtenFor: 'within-tolerance' }
+
+    expect(() => updateEntryOf(itemOf(), result, configFolder)).toThrow(
+      'An update report has no snapshot written within tolerance.',
+    )
+  })
+})
+
+describe('storyUpdateEntryOf', () => {
+  const hosts = { requests: ['api.test'], remoteContent: ['cdn.test'] }
+
+  it.each([
+    ['missing', { writtenFor: 'missing' }, 'Written: missing'],
+    ['within-tolerance', { writtenFor: 'within-tolerance' }, 'Written: within tolerance'],
+    [
+      'differs',
+      { writtenFor: 'differs', comparison: pixelsComparison },
+      'Written: differs: 84 differ, 80 allowed (20 at scale 2)',
+    ],
+  ] as const)('describes a baseline written for %s, with the hosts of its first load', (reason, fields, message) => {
+    const result: SnapshotResult = { status: 'written', detail: '', attempts: 2, hosts, ...fields }
+    const entry = storyUpdateEntryOf(itemOf(), result, configFolder)
+
+    expect(entry).toMatchObject({
+      status: 'written',
+      reason,
+      message,
+      baseline: 'web/baselines/button--primary.png',
+      realRequestHosts: ['api.test'],
+      remoteContentHosts: ['cdn.test'],
+    })
+    expect(Object.keys(entry)).toEqual(updateEntryKeys)
+  })
+
+  it('describes a baseline identical to the capture as untouched, flaky when its loads disagreed', () => {
+    const result: SnapshotResult = {
+      status: 'kept',
+      detail: 'kept: identical · flaky',
+      attempts: 3,
+      flaky: true,
+      hosts,
+    }
+
+    expect(storyUpdateEntryOf(itemOf(), result, configFolder)).toMatchObject({
+      status: 'kept',
+      reason: null,
+      message: 'Untouched: identical, byte for byte',
+      flaky: true,
+      attempts: 3,
+      pixels: null,
+      realRequestHosts: ['api.test'],
+    })
+  })
+
+  it('describes a broken story with its reason and no hosts', () => {
+    const result: SnapshotResult = { status: 'broken', detail: '', attempts: 1, broken: brokenStory }
+
+    expect(storyUpdateEntryOf(itemOf(), result, configFolder)).toMatchObject({
+      status: 'broken',
+      reason: 'play-threw',
+      message: brokenStory.message,
+      details: { play: { message: 'Error: Boom', stack: ['at play (a.ts:1:1)'] } },
+      realRequestHosts: [],
+      remoteContentHosts: [],
+    })
+  })
+
+  it("rejects a test's result", () => {
+    expect(() => storyUpdateEntryOf(itemOf(), differsResult, configFolder)).toThrow(
+      "The addon's Update has no differs snapshot.",
+    )
   })
 })
 

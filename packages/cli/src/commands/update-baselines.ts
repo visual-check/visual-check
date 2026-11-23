@@ -9,6 +9,13 @@ import { checkConsistency, type StorybookBaselines } from './consistency-check.j
 import type { PlannedSnapshot } from './plan-snapshots.js'
 
 /**
+ * Why `update` stops when the CI environment variable is set, without a last newline.
+ */
+export const ciUpdateRefusal =
+  'visual-check update only runs locally, and the CI environment variable is set. ' +
+  'Run it on your machine and commit the baselines, or unset CI.'
+
+/**
  * What `update` takes and deletes.
  */
 interface UpdatePlan {
