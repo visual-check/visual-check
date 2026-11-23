@@ -101,6 +101,12 @@ jobs:
         env:
           TEST_STORYBOOK_IMAGE: visual-check-chromium:ci
         run: pnpm turbo run e2e --filter @visual-check/test-${{ matrix.storybook }}
+      - name: Addon end-to-end check
+        if: matrix.storybook == 'storybook-10-react'
+        env:
+          TEST_STORYBOOK_IMAGE: visual-check-chromium:ci
+          VISUAL_CHECK_CACHE_DIR: ${{ runner.temp }}/visual-check-cache
+        run: pnpm turbo run e2e:addon --filter @visual-check/test-storybook-10-react
       - name: Upload the end-to-end output
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -237,8 +243,21 @@ jobs:
         env:
           VISUAL_CHECK_CACHE_DIR: ${{ runner.temp }}/visual-check-cache
         run: pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --host --skill-script
+      # The Storybook addon in `storybook dev`, with the browser on the host.
+      - name: Addon end-to-end check
+        env:
+          VISUAL_CHECK_CACHE_DIR: ${{ runner.temp }}/visual-check-cache
+        run: pnpm turbo run e2e:addon --filter @visual-check/test-storybook-10-react -- --host
       - name: init without Docker
         run: pnpm turbo run init-check --filter @visual-check/test-setup -- --package-manager pnpm --init-only
+      - name: Upload the end-to-end output
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-output-${{ github.job }}
+          path: test-storybooks/storybook-10-react/e2e-output/
+          if-no-files-found: ignore
+          retention-days: 3
 
   # The runner image's Docker runs Windows containers only, so the job stops it and installs Docker Desktop with its
   # WSL 2 backend, about 6 minutes in all. It runs the skill script's and the agent skill's own tests, builds the

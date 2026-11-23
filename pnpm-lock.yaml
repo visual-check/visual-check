@@ -209,6 +209,9 @@ importers:
       '@visual-check/storybook':
         specifier: workspace:*
         version: link:../../packages/storybook
+      '@visual-check/storybook-addon':
+        specifier: workspace:*
+        version: link:../../packages/storybook-addon
       '@visual-check/typescript-config':
         specifier: workspace:*
         version: link:../../packages/typescript-config

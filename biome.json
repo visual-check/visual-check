@@ -55,7 +55,9 @@
       "includes": [
         "test-storybooks/*/visual-check.config.ts",
         "test-storybooks/storybook-10-react/.storybook/visual-check.ts",
-        "test-storybooks/storybook-10-react/e2e.ts"
+        "test-storybooks/storybook-10-react/e2e.ts",
+        "test-storybooks/storybook-10-react/e2e-support.ts",
+        "test-storybooks/storybook-10-react/addon-e2e.ts"
       ],
       "linter": {
         "rules": {

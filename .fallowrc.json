@@ -159,6 +159,8 @@
         "test-storybooks/storybook-10-react/stories/mocking-worker.ts",
         "test-storybooks/storybook-10-react/stories/remote-origin.ts",
         "test-storybooks/storybook-10-react/e2e.ts",
+        "test-storybooks/storybook-10-react/e2e-support.ts",
+        "test-storybooks/storybook-10-react/addon-e2e.ts",
         "test-storybooks/storybook-10-react/visual-check.config.ts",
         "test-storybooks/storybook-11-react/.storybook/main.ts",
         "test-storybooks/storybook-11-react/visual-check.config.ts",
