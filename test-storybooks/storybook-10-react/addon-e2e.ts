@@ -25,24 +25,29 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { get } from 'node:http'
-import { createServer } from 'node:net'
-import { basename, dirname, join } from 'node:path'
+import { createServer as createHttpServer, get, type Server } from 'node:http'
+import { type AddressInfo, createServer } from 'node:net'
+import { networkInterfaces } from 'node:os'
+import { basename, dirname, extname, join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { pathToFileURL } from 'node:url'
 import { isDeepStrictEqual } from 'node:util'
+import { crc32 } from 'node:zlib'
 import type { TestReportEntry } from '@visual-check/cli'
 import {
   type Case,
   cliBin,
   committedBaselines,
+  contentTypes,
   descendantsOf,
   diagnosticsDir,
   docker,
   executableOnPath,
+  fileOfUrlPath,
   image,
   isRunning,
   localEnvironment,
@@ -157,11 +162,28 @@ const heldStory = 'held--forever'
 const heldPath = join(storiesDir, 'held.stories.tsx')
 
 /**
- * How long things may take, in milliseconds: Storybook to start or stop, `update` to write the baselines, a check, the
- * manager or Storybook to show something, a call in the page, results to turn stale, and processes and containers to go.
+ * A story its case adds, whose clock ticks every 50 ms, so it changes after its capture.
+ */
+const tickingStory = 'ticking--default'
+
+/**
+ * The stories file of `tickingStory`.
+ */
+const tickingPath = join(storiesDir, 'ticking.stories.tsx')
+
+/**
+ * The folder the project's static build goes in.
+ */
+const staticDir = join(projectDir, 'storybook-static')
+
+/**
+ * How long things may take, in milliseconds: Storybook to start, stop or build, `update` to write the baselines, a
+ * check, the manager or Storybook to show something, a call in the page, results to turn stale, and processes and
+ * containers to go.
  */
 const timeouts = {
   start: 180_000,
+  build: 300_000,
   stop: 30_000,
   update: 300_000,
   check: 180_000,
@@ -337,6 +359,64 @@ interface StoppedOutcome {
 }
 
 /**
+ * A snapshot of an update, as the addon's state holds it.
+ */
+interface UpdatedSnapshot {
+  /**
+   * The snapshot's key.
+   */
+  id: string
+  /**
+   * What the update did with the baseline.
+   */
+  status: 'written' | 'kept' | 'broken'
+  /**
+   * Why it was written, why its story is broken, or `null` for a kept baseline.
+   */
+  reason: string | null
+  /**
+   * One line for people.
+   */
+  message: string
+  /**
+   * The baseline's path, relative to the config's folder.
+   */
+  baseline: string
+  /**
+   * Whether it's a flaky snapshot.
+   */
+  flaky: boolean
+}
+
+/**
+ * A warning by host of an update.
+ */
+interface HostWarning {
+  /**
+   * What it says.
+   */
+  message: string
+}
+
+/**
+ * What an update that finished came to.
+ */
+interface UpdatedOutcome {
+  /**
+   * That it finished.
+   */
+  result: 'updated'
+  /**
+   * The story's snapshots.
+   */
+  snapshots: UpdatedSnapshot[]
+  /**
+   * The warnings by host.
+   */
+  warnings: HostWarning[]
+}
+
+/**
  * A story's latest result, as the addon's state holds it.
  */
 interface StoryResult {
@@ -347,7 +427,7 @@ interface StoryResult {
   /**
    * What it came to.
    */
-  outcome: CheckedOutcome | StoppedOutcome
+  outcome: CheckedOutcome | UpdatedOutcome | StoppedOutcome
 }
 
 /**
@@ -630,11 +710,11 @@ function changeBaselines(): void {
 }
 
 /**
- * Starts Storybook in the project, with this `PATH`, and waits until it answers.
+ * Starts Storybook in the project, with this `PATH` and what the environment adds, and waits until it answers.
  *
  * @throws {Error} When it ends first, or doesn't answer in time.
  */
-async function startStorybook(path = process.env.PATH): Promise<void> {
+async function startStorybook(path = process.env.PATH, extraEnvironment: NodeJS.ProcessEnv = {}): Promise<void> {
   const output = openSync(join(outputDir, 'storybook.log'), 'a')
   const args = ['dev', '-p', String(port), '--exact-port', '--ci', '--no-open']
   const child = spawn(process.execPath, [storybookBin, ...args], {
@@ -645,6 +725,7 @@ async function startStorybook(path = process.env.PATH): Promise<void> {
       CACHE_DIR: join(projectDir, '.cache'),
       // Storybook doesn't start when it finds no package manager, and the PATH may have none.
       npm_config_user_agent: 'pnpm',
+      ...extraEnvironment,
     },
     stdio: ['ignore', output, output],
   })
@@ -787,7 +868,17 @@ async function panelSays(): Promise<string> {
     return 'the manager is not open'
   }
 
-  const texts = await textsOf(['run', 'empty', 'stale', 'error', 'disabled', 'row']).catch((error) => [String(error)])
+  const texts = await textsOf([
+    'run',
+    'empty',
+    'stale',
+    'error',
+    'disabled',
+    'row',
+    'update-row',
+    'warning',
+    'static-command',
+  ]).catch((error) => [String(error)])
 
   return `the panel says: ${texts.join(', ')}`
 }
@@ -850,6 +941,13 @@ async function click(selector: string): Promise<void> {
  */
 async function clickCheck(): Promise<void> {
   await click(`${partOf('check')}[aria-disabled="false"]`)
+}
+
+/**
+ * Clicks the panel's Update button once it can be used.
+ */
+async function clickUpdate(): Promise<void> {
+  await click(`${partOf('update')}[aria-disabled="false"]`)
 }
 
 /**
@@ -916,6 +1014,10 @@ async function passedProblems(result: StoryResult): Promise<string[]> {
 
   if (outcome.result === 'stopped') {
     return [`the check stopped: ${outcome.message}`]
+  }
+
+  if (outcome.result === 'updated') {
+    return ['the run was an update, not a check']
   }
 
   const failed = outcome.snapshots.filter(({ status }) => status !== 'passed')
@@ -1719,6 +1821,320 @@ async function checkNoDocker(): Promise<string[]> {
 }
 
 /**
+ * Gives a PNG with a `tEXt` chunk before its `IEND`, so its bytes differ and its pixels don't.
+ *
+ * @throws {Error} When the PNG doesn't end with its `IEND` chunk.
+ */
+function withTextChunk(png: Buffer): Buffer {
+  const end = png.length - 12
+
+  if (png.toString('latin1', end + 4, end + 8) !== 'IEND') {
+    throw new Error("the PNG doesn't end with its IEND chunk")
+  }
+
+  const typeAndData = Buffer.from('tEXtComment\0visual-check e2e', 'latin1')
+  const length = Buffer.alloc(4)
+  const checksum = Buffer.alloc(4)
+
+  length.writeUInt32BE(typeAndData.length - 4)
+  checksum.writeUInt32BE(crc32(typeAndData))
+
+  return Buffer.concat([png.subarray(0, end), length, typeAndData, checksum, png.subarray(end)])
+}
+
+/**
+ * Gives the baselines' modification times, by file name.
+ */
+function mtimesOf(names: string[]): Map<string, number> {
+  return new Map(names.map((name) => [name, statSync(join(baselinesDir, name)).mtimeMs]))
+}
+
+/**
+ * Gives the baselines' bytes, by file name, without these.
+ */
+function baselinesWithout(names: string[]): Map<string, Buffer> {
+  const baselines = readBaselines()
+
+  for (const name of names) {
+    baselines.delete(name)
+  }
+
+  return baselines
+}
+
+/**
+ * Gives the problem unless the panel's update rows say these, in order.
+ */
+async function updateRowsProblems(rows: string[]): Promise<string[]> {
+  return await shownProblems(`the update rows say ${rows.join(', ')}`, async () =>
+    isDeepStrictEqual(await textsOf(['update-row']), rows),
+  )
+}
+
+/**
+ * Gives the problem unless a check of `modesStory` passes, with exactly its three snapshots.
+ */
+async function threePassesProblems(): Promise<string[]> {
+  const result = await checkStory(modesStory)
+  const { outcome } = result
+  const count = outcome.result === 'checked' ? outcome.snapshots.length : 0
+
+  return [
+    ...(await passedProblems(result)),
+    ...problemUnless(count === 3, `the check after the update took ${count} snapshots, expected 3`),
+  ]
+}
+
+/**
+ * An update of a story with a baseline within tolerance, one that differs and a missing one writes the three, a check
+ * then passes, and a second update leaves every file as it was.
+ */
+async function checkUpdate(): Promise<string[]> {
+  const names = [`${modesStory}.png`, `${modesStory}.dark.png`, `${modesStory}.mobile.png`]
+  const [defaultName = ''] = names
+  const defaultBytes = readFileSync(join(baselinesDir, defaultName))
+
+  writeFileSync(join(baselinesDir, defaultName), withTextChunk(defaultBytes))
+
+  const others = baselinesWithout(names)
+
+  await openStory(modesStory)
+
+  const { outcome } = await checkStory(modesStory, clickUpdate)
+  const problems = [
+    ...problemUnless(outcome.result === 'updated', `the update came to ${JSON.stringify(outcome)}`),
+    ...(await updateRowsProblems(['Default Written', 'dark Written', 'mobile Written'])),
+    ...problemUnless(
+      isDeepStrictEqual(
+        await textsOf(['path']),
+        names.map((name) => `.visual-check/baselines/${name}`),
+      ),
+      `the paths are ${(await textsOf(['path'])).join(', ')}`,
+    ),
+    ...(await statusProblems(modesStory, 'Test status: Success')),
+    ...problemUnless(!(await shows(partOf('stale'))), 'the update is stale'),
+    ...writtenBytesProblems(names, defaultBytes),
+    ...problemUnless(isDeepStrictEqual(baselinesWithout(names), others), 'the update wrote another baseline'),
+    ...(await threePassesProblems()),
+  ]
+  const baselines = readBaselines()
+  const mtimes = mtimesOf([...baselines.keys()])
+
+  await checkStory(modesStory, clickUpdate)
+
+  return [
+    ...problems,
+    ...(await updateRowsProblems(['Default Untouched', 'dark Untouched', 'mobile Untouched'])),
+    ...problemUnless(isDeepStrictEqual(readBaselines(), baselines), 'the second update changed a baseline'),
+    ...problemUnless(
+      isDeepStrictEqual(mtimesOf([...baselines.keys()]), mtimes),
+      "the second update changed a baseline's modification time",
+    ),
+  ]
+}
+
+/**
+ * Gives the problem unless the baselines an update wrote are as expected: outside `--host` the committed ones byte for
+ * byte, with `--host` the default capture's bytes before its `tEXt` chunk.
+ */
+function writtenBytesProblems(names: string[], defaultBytes: Buffer): string[] {
+  const expected = onHost
+    ? names.slice(0, 1).map((name): [string, Buffer] => [name, defaultBytes])
+    : names.map((name): [string, Buffer] => [name, readFileSync(join(committedBaselines, name))])
+
+  return expected.flatMap(([name, bytes]) =>
+    problemUnless(readFileSync(join(baselinesDir, name)).equals(bytes), `the update wrote ${name} with other bytes`),
+  )
+}
+
+/**
+ * An update of a story whose clock ticks says it's broken, since it changed after its capture, and writes nothing.
+ */
+async function checkUnstable(): Promise<string[]> {
+  let problems: string[]
+
+  try {
+    writeFileSync(
+      tickingPath,
+      [
+        "import { useEffect, useState } from 'react'",
+        '',
+        'const Clock = () => {',
+        '  const [now, setNow] = useState(Date.now())',
+        '',
+        '  useEffect(() => {',
+        '    const timer = setInterval(() => setNow(Date.now()), 50)',
+        '',
+        '    return () => clearInterval(timer)',
+        '  }, [])',
+        '',
+        '  return <p style={{ fontSize: 48 }}>{now}</p>',
+        '}',
+        '',
+        "export default { title: 'Ticking', component: Clock }",
+        '',
+        'export const Default = {}',
+        '',
+      ].join('\n'),
+    )
+    await until('Storybook lists the ticking story', () => answers(tickingStory))
+    await openStory(tickingStory)
+
+    const { outcome } = await checkStory(tickingStory, clickUpdate)
+    const message = 'The story changed in the second after its capture'
+
+    problems = [
+      ...problemUnless(outcome.result === 'updated', `the update came to ${JSON.stringify(outcome)}`),
+      ...(await updateRowsProblems(['Default Broken story'])),
+      ...problemUnless(
+        (await textsOf(['reason'])).includes('Reason: changed-after-capture'),
+        `the reason is ${(await textsOf(['reason'])).join(', ')}`,
+      ),
+      ...problemUnless(
+        (await textsOf(['message'])).some((text) => text.includes(message)),
+        `the message doesn't say "${message}": ${(await textsOf(['message'])).join(', ')}`,
+      ),
+      ...(await statusProblems(tickingStory, 'Test status: Error')),
+      ...problemUnless(
+        !filesIn(baselinesDir).some((name) => name.startsWith(tickingStory)),
+        'the update wrote a baseline of the ticking story',
+      ),
+    ]
+  } finally {
+    rmSync(tickingPath, { force: true })
+  }
+
+  return [
+    ...problems,
+    ...(await shownProblems(
+      'Storybook lists the ticking story no more',
+      async () => !(await answers(tickingStory)) && (await answers()),
+    )),
+  ]
+}
+
+/**
+ * With `CI` set for Storybook, an update stops with the CLI's refusal, and writes nothing.
+ */
+async function checkUpdateUnderCi(): Promise<string[]> {
+  const refusal = 'visual-check update only runs locally, and the CI environment variable is set.'
+  const baselines = readBaselines()
+
+  try {
+    await startStorybook(process.env.PATH, { CI: 'true' })
+    await openStory(cardStory)
+
+    const { outcome } = await checkStory(cardStory, clickUpdate)
+
+    return [
+      ...problemUnless(
+        outcome.result === 'stopped' && outcome.message.includes(refusal),
+        `the update doesn't stop with the refusal: ${JSON.stringify(outcome)}`,
+      ),
+      ...(await shownProblems(`the panel says "${refusal}"`, async () => (await errorText()).includes(refusal))),
+      ...problemUnless(isDeepStrictEqual(readBaselines(), baselines), 'the refused update changed a baseline'),
+    ]
+  } finally {
+    await endStorybook('SIGKILL')
+  }
+}
+
+/**
+ * Builds the project's Storybook into `staticDir`.
+ *
+ * @throws {Error} When the build fails.
+ */
+function buildStorybook(): void {
+  const run = spawnSync(process.execPath, [storybookBin, 'build', '-o', staticDir, '--quiet'], {
+    cwd: projectDir,
+    env: { ...localEnvironment(), CACHE_DIR: join(projectDir, '.cache') },
+    encoding: 'utf8',
+    timeout: timeouts.build,
+    killSignal: 'SIGKILL',
+  })
+
+  if (run.status !== 0) {
+    throw new Error(`storybook build exited ${run.status ?? run.signal}: ${run.stderr.trim() || run.stdout.trim()}`)
+  }
+}
+
+/**
+ * Serves `staticDir` on every address, at a free port, with `/` as `index.html`, and 404 for anything else that isn't
+ * one of its files.
+ */
+async function serveStaticBuild(): Promise<Server> {
+  const server = createHttpServer((request, response) => {
+    const filePath = fileOfUrlPath(staticDir, new URL(request.url ?? '/', 'http://localhost').pathname)
+
+    if (filePath === undefined) {
+      response.writeHead(404).end()
+
+      return
+    }
+
+    response
+      .writeHead(200, { 'content-type': contentTypes[extname(filePath)] ?? 'application/octet-stream' })
+      .end(readFileSync(filePath))
+  })
+
+  await new Promise<void>((resolve) => server.listen(0, '0.0.0.0', resolve))
+
+  return server
+}
+
+/**
+ * Gives the machine's first IPv4 address that isn't a loopback one, or `undefined` when it has none.
+ */
+function networkAddress(): string | undefined {
+  return Object.values(networkInterfaces())
+    .flat()
+    .find((info) => info !== undefined && info.family === 'IPv4' && !info.internal)?.address
+}
+
+/**
+ * A static build served on 127.0.0.1 shows the commands of the story, with copy buttons, and on the machine's network
+ * address shows no Visual check tab.
+ */
+async function checkStatic(): Promise<string[]> {
+  const tab = '[role="tab"][id$="visual-check/panel"]'
+
+  buildStorybook()
+
+  const server = await serveStaticBuild()
+
+  try {
+    const staticPort = (server.address() as AddressInfo).port
+    const loopback = `http://127.0.0.1:${staticPort}`
+    const commands = ['test', 'update'].map(
+      (command) => `visual-check ${command} --storybook web --filter '^${cardStory}$' --url ${loopback}`,
+    )
+
+    await managerPage().goto(`${loopback}/?path=/story/${cardStory}`, timeouts.show)
+    await click(tab)
+
+    const problems = [
+      ...(await shownProblems(`the panel shows ${commands.join(' and ')}`, async () =>
+        isDeepStrictEqual(await textsOf(['static-command']), commands),
+      )),
+      ...problemUnless((await textsOf(['copy'])).length === 2, 'the panel shows no two copy buttons'),
+    ]
+    const address = networkAddress()
+
+    if (address === undefined) {
+      return [...problems, 'the machine has no IPv4 address but loopback ones, so the static build is not opened there']
+    }
+
+    await managerPage().goto(`http://${address}:${staticPort}/?path=/story/${cardStory}`, timeouts.show)
+    await until(`the sidebar shows ${cardStory}`, () => shows(sidebarItemOf(cardStory)))
+
+    return [...problems, ...problemUnless(!(await shows(tab)), `the Visual check tab shows on ${address}`)]
+  } finally {
+    server.closeAllConnections()
+    await new Promise((resolve) => server.close(resolve))
+  }
+}
+
+/**
  * The cases, in order. Each one opens the story it needs, and those after the first need the Storybook it starts.
  */
 function addonCases(): Case[] {
@@ -1748,6 +2164,14 @@ function addonCases(): Case[] {
       name: "config: one for another Storybook or none shows the CLI's message and the hint, a good one again needs no restart, another url makes a notice",
       run: checkConfig,
     },
+    {
+      name: 'update: Update rewrites within tolerance and missing and differing baselines, Check then passes, and a second Update leaves every file as it was',
+      run: checkUpdate,
+    },
+    {
+      name: "unstable: Update of a story that changes after its capture says it's broken, with the reason, and writes nothing",
+      run: checkUnstable,
+    },
     ...(onHost
       ? []
       : [
@@ -1760,8 +2184,16 @@ function addonCases(): Case[] {
       name: `${signal}: Storybook's end takes the addon's process, the browser and its container along`,
       run: () => checkKilled(signal),
     })),
+    {
+      name: "CI: with CI set for Storybook, Update shows the CLI's refusal and writes nothing",
+      run: checkUpdateUnderCi,
+    },
     { name: 'no probe: neither the start nor the panel runs docker, the first check does', run: checkNoProbe },
     { name: "no docker: the check shows the CLI's message", run: checkNoDocker },
+    {
+      name: "static: a static build on 127.0.0.1 shows the story's test and update commands with copy buttons, and on the machine's network address no Visual check tab",
+      run: checkStatic,
+    },
     ...(onHost ? [] : [{ name: 'the end: no container is left', run: containersGoneProblems }]),
   ]
 }

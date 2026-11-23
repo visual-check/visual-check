@@ -3,7 +3,7 @@
 import { spawnSync } from 'node:child_process'
 import { accessSync, constants, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { delimiter, join, sep } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 
 /**
@@ -52,6 +52,20 @@ export const noDockerTexts = [
   "visual-check runs the browser in Docker, and there's no docker command on PATH.",
   "Start or install Docker, or set platform: 'host' in the config.",
 ]
+
+/**
+ * The content type of each file extension the static build holds.
+ */
+export const contentTypes: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.woff2': 'font/woff2',
+}
 
 /**
  * The browser image every run uses, until the browser package names a published one.
@@ -124,6 +138,28 @@ export function thisMachinesChromeForTestingPlatform(): string {
  */
 export function isFile(path: string): boolean {
   return existsSync(path) && statSync(path).isFile()
+}
+
+/**
+ * Decodes a URL path, or gives the empty path, which names no file, when it can't be decoded.
+ */
+function decodedPath(pathname: string): string {
+  try {
+    return decodeURIComponent(pathname)
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * Gives the path of the file in a folder that a URL path names, a path ending in `/` naming its `index.html`, or
+ * `undefined` when it names no file there or can't be decoded.
+ */
+export function fileOfUrlPath(folder: string, pathname: string): string | undefined {
+  const decoded = decodedPath(pathname)
+  const filePath = join(folder, decoded.endsWith('/') ? `${decoded}index.html` : decoded)
+
+  return filePath.startsWith(`${folder}${sep}`) && isFile(filePath) ? filePath : undefined
 }
 
 /**

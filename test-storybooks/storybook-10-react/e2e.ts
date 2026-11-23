@@ -65,10 +65,12 @@ import {
   type Case,
   cliBin,
   committedBaselines,
+  contentTypes,
   descendantsOf,
   diagnosticsDir,
   docker,
   executableOnPath,
+  fileOfUrlPath,
   image,
   isFile,
   isRunning,
@@ -794,20 +796,6 @@ const outcomeDetails: [Outcome, RegExp][] = [
 const failingOutcomes: Outcome[] = ['differs', 'broken', 'missing']
 
 /**
- * The content type of each file extension the static build holds.
- */
-const contentTypes: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.woff2': 'font/woff2',
-}
-
-/**
  * How the static server changes what it serves. A story page is an `iframe.html` with an `id`, the page of the story
  * the browser captures. The page visual-check reads every story's options on, `iframe.html?viewMode=story`, has none.
  */
@@ -1293,15 +1281,6 @@ function readStorybookPackage(): StorybookPackage {
 }
 
 /**
- * Gives the path of the file in the static build that a URL path names, or `undefined` when it names no file there.
- */
-function staticFileOf(pathname: string): string | undefined {
-  const filePath = join(staticDir, pathname.endsWith('/') ? `${pathname}index.html` : pathname)
-
-  return filePath.startsWith(`${staticDir}${sep}`) && isFile(filePath) ? filePath : undefined
-}
-
-/**
  * Whether nothing is at this path, or an empty folder is.
  */
 function isMissingOrEmpty(path: string): boolean {
@@ -1325,7 +1304,7 @@ function serveFile(
   options: ServeOptions,
   markup: string | undefined,
 ): void {
-  const filePath = staticFileOf(pathname)
+  const filePath = fileOfUrlPath(staticDir, pathname)
 
   if (filePath === undefined) {
     response.writeHead(404).end()
