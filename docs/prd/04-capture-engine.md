@@ -25,7 +25,7 @@ v1 captures in Chromium only, through visual-check's own raw CDP driver. Nothing
   - collecting console messages and errors;
   - finding remote content.
 - Page hazards (below) are handled the same way in every driver.
-- From Playwright, visual-check copies data only: the launch arguments and the font table, each with a link to the Playwright file and version. They're reviewed on every Chromium bump.
+- From Playwright, visual-check copies data only: the launch arguments, with a link to the Playwright file and version. They're reviewed on every Chromium bump.
 
 ## Transport and launch
 
@@ -47,7 +47,7 @@ v1 captures in Chromium only, through visual-check's own raw CDP driver. Nothing
 
 Once per page:
 
-- **Font table** through `Page.setFontFamilies`. On Linux: standard and serif are Times New Roman, sans-serif is Arial, fixed is Monospace, cursive is Comic Sans MS, fantasy is Impact. On `host`, macOS and Windows each use their own list from the same source.
+- **No font table.** Every capture reaches beyond the viewport, which resets the page's web preferences and drops a table set through `Page.setFontFamilies`, and Chromium takes the table once per page. A page would be measured with the table's fonts and painted with the system's, so the generic families keep the system's fonts.
 - **User agent** ends in `StorybookTestRunner`, which puts Storybook on its test path.
 - **Emulation:** `timezone`, `locale` and `colorScheme` from the config, focus emulation, and `prefers-reduced-motion: no-preference`.
 - **A script at document start** that does these things:

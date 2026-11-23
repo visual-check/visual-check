@@ -2,7 +2,6 @@ import {
   BrowserExitedError,
   BrowserLaunchError,
   type BrowserProcess,
-  type BrowserSystem,
   type Driver,
   describeExit,
   type Page,
@@ -74,10 +73,6 @@ export interface CdpDriverOptions {
    * exited.
    */
   profileDir: string
-  /**
-   * The OS the browser runs on, which picks the font table.
-   */
-  system: BrowserSystem
   /**
    * How long the browser has to answer each of its launch calls, the version call and the target discovery call, in ms.
    * 30 000 by default.
@@ -347,16 +342,10 @@ class CdpDriver implements Driver {
   private readonly session: BrowserSession
 
   /**
-   * The OS the browser runs on.
-   */
-  private readonly system: BrowserSystem
-
-  /**
    * Wraps a session whose browser has answered its version call and has target discovery on.
    */
-  constructor(session: BrowserSession, browserVersion: BrowserVersion, system: BrowserSystem) {
+  constructor(session: BrowserSession, browserVersion: BrowserVersion) {
     this.session = session
-    this.system = system
     this.version = browserVersion.version
     this.userAgent = browserVersion.userAgent
     this.exited = session.exited
@@ -371,7 +360,7 @@ class CdpDriver implements Driver {
       return Promise.reject(new Error("The browser is closing, so it can't open a page."))
     }
 
-    return openCdpPage(this.session.connection, this.userAgent, this.system, setup)
+    return openCdpPage(this.session.connection, this.userAgent, setup)
   }
 
   /**
@@ -398,5 +387,5 @@ export async function launchCdpDriver(options: CdpDriverOptions): Promise<Driver
 
   await session.discoverPageTargets(launchTimeoutMs)
 
-  return new CdpDriver(session, browserVersion, options.system)
+  return new CdpDriver(session, browserVersion)
 }

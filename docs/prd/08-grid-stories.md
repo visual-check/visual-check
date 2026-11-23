@@ -46,7 +46,7 @@ These rules are pixels in the baseline of every story that renders a grid. They 
   - 4 px between a caption and its row's cells;
   - 16 px between rows, and between the header row and the first row;
   - nothing around the grid.
-- **Cells** sit at the top-left of their column. A column is as wide as its widest cell, or exactly `cellWidth`.
+- **Cells** sit at the top-left of their column. With `cellWidth`, each cell is exactly that wide. A column is as wide as its widest cell, or exactly `cellWidth`.
 - The grid has no background, border or padding, so the page's background shows through and modes change it.
 - The grid never wraps.
 
@@ -88,13 +88,14 @@ Other notes:
 
 ## What capture checks
 
-Capture finds a grid by its `data-visual-check-grid` attribute.
+Capture finds every grid by its `data-visual-check-grid` attribute in the top document, after the end state.
 
-- **Too wide:** a story whose grid is wider than the viewport is a broken story (`grid-too-wide`). The rule holds whatever the capture area is, `element` included. Its details carry the grid's width and the viewport's.
+- **Too wide:** a story whose grid is wider than the viewport is a broken story (`grid-too-wide`). A grid's width is its border box's, rounded up to whole CSS pixels, against the snapshot's viewport width. The rule holds whatever the capture area is, `element` included. Its details carry the grid's width and the viewport's.
   - The message names three fixes: give the story its own `viewport` width, list `modes` without the narrow ones, or set a smaller `cellWidth`.
   - A mode's viewport wins over the story's. So in a phone mode, the fix is to leave that mode out.
   - visual-check never widens the viewport by itself.
-- **Too tall:** over 32,767 device pixels, the story is a broken story (`too-tall`) with its own message: "split the grid into several stories". At scale 2 that's about 16,383 CSS pixels.
+  - The story gets an image of its page, like `element-missing`.
+- **Too tall:** a grid whose own box, at the viewport's scale, is over 32,767 device pixels on a side is a broken story (`too-tall`), whatever the capture area is. The message ends "Split the grid into several stories." Nothing is captured. At scale 2 that's about 16,383 CSS pixels. A grid too wide is reported as too wide, never as too tall.
 - There's no cap on the number of cells.
 
 ## Tests in this repo
@@ -108,6 +109,15 @@ Capture finds a grid by its `data-visual-check-grid` attribute.
 - [Cartesian stories helper][50], [Combined snapshots and network paths in v1][47], [Storybook 9 floor and Storybook 11][48].
 - [ADR 0002](../adr/0002-capture-on-storybook-test-path.md), [ADR 0009](../adr/0009-grid-stories-draw-everything-in-the-story.md).
 - Decided while writing this PRD: the header row's style and gap, when a prop varies, the `caption` signature, `forceStates`, the class names, and the width rule with `element`.
+- Decided while building the grid (#89):
+  - the width rule uses the grid's own width, not its right edge;
+  - a grid too tall breaks the story by the grid's own size, whatever the capture area;
+  - a prop listed with no values throws, so the story is a broken story (`error`); a value list given as `undefined` counts as not listed;
+  - every prop the component requires comes from `args` or `props`;
+  - with `cellWidth`, each cell is exactly that wide; without it, each cell keeps its own width at its column's left;
+  - React 18 runs in the React port's unit tests, and this repo's test Storybooks run React 19;
+  - the React port's types need TypeScript 5.4 or later;
+  - the root entry also exports the framework-free module: `gridLayoutOf`, `gridAttribute` and their types.
 
 [47]: https://github.com/visual-check/visual-check/issues/47
 [48]: https://github.com/visual-check/visual-check/issues/48

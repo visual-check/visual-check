@@ -24,7 +24,13 @@ import {
   prepareCaptureExpression,
   readAssetsReadiness,
 } from './page-script.js'
-import { type CapturePrep, type PageRemoteContent, readCapturePrep, type StoryMask } from './prepare-capture.js'
+import {
+  type CapturePrep,
+  type PageGrid,
+  type PageRemoteContent,
+  readCapturePrep,
+  type StoryMask,
+} from './prepare-capture.js'
 
 /**
  * How much longer than a wait in the page the driver waits for its answer, in ms. The wait in the page gives up first
@@ -120,8 +126,9 @@ export interface StoryToCapture {
   findRemoteContent?: boolean
   /**
    * Whether a story that breaks while its page still shows something comes with an image of that page: for the
-   * reasons `error`, `play-threw`, `timeout`, `fonts-not-loaded`, `wait-threw` and `element-missing`, the full page,
-   * captured at once, before the page is closed. Without it, a broken story comes without one.
+   * reasons `error`, `play-threw`, `timeout`, `fonts-not-loaded`, `wait-threw`, `element-missing` and
+   * `grid-too-wide`, the full page, captured at once, before the page is closed. Without it, a broken story comes
+   * without one.
    */
   imageWhenBroken?: boolean
   /**
@@ -181,8 +188,9 @@ export interface RemoteContentBox {
  * - `wait-threw`: the story's `wait` hook threw or rejected.
  * - `navigated-away`: the story's page went to another document.
  * - `crashed`: the page crashed, usually from running out of memory.
- * - `too-tall`: the capture is over 32,767 device pixels on a side.
+ * - `too-tall`: the capture, or a grid on the story's page, is over 32,767 device pixels on a side.
  * - `element-missing`: the story's `element` selector matched nothing, or an element whose box is of zero size.
+ * - `grid-too-wide`: a grid on the story's page is wider than the viewport.
  * - `browser-exited`: the browser exited while the story was in flight. The run's browser gives it; a capture session
  *   rejects with a `BrowserExitedError` instead.
  * - `changed-after-capture`: the story's page, captured again a second after its first capture on one load, had
@@ -203,6 +211,7 @@ export type BrokenReason =
   | 'crashed'
   | 'too-tall'
   | 'element-missing'
+  | 'grid-too-wide'
   | 'browser-exited'
   | 'changed-after-capture'
   | 'unstable'
@@ -212,8 +221,8 @@ export type BrokenReason =
  * story it can't capture, and the run gives one for a story in flight when its browser exits and for each story of a
  * stories file that didn't load. `update` gives one for a story that doesn't render the same way twice. Some reasons
  * keep details besides: the stories file's load error or the time it had, `play`'s stack, the readyTimeout that ran
- * out, the font faces still loading, where a story that navigated away went, and the size of a capture too tall to
- * take.
+ * out, the font faces still loading, where a story that navigated away went, the size of a capture too tall to take,
+ * and the width of a grid wider than the viewport.
  *
  * @public
  */
@@ -224,7 +233,7 @@ export type BrokenStory =
        */
       reason: Exclude<
         BrokenReason,
-        'load-failed' | 'play-threw' | 'timeout' | 'fonts-not-loaded' | 'navigated-away' | 'too-tall'
+        'load-failed' | 'play-threw' | 'timeout' | 'fonts-not-loaded' | 'navigated-away' | 'too-tall' | 'grid-too-wide'
       >
       /**
        * One line for people saying why.
@@ -319,25 +328,49 @@ export type BrokenStory =
     }
   | {
       /**
-       * Why the story can't be captured: the capture is over 32,767 device pixels on a side.
+       * Why the story can't be captured: the capture, or a grid on the story's page, is over 32,767 device pixels on a
+       * side.
        */
       reason: 'too-tall'
       /**
-       * One line for people saying why, with the capture's size.
+       * One line for people saying why, with the capture's size or the grid's.
        */
       message: string
       /**
-       * The capture's size, in device pixels.
+       * The capture's size, or the grid's, in device pixels.
        */
       size: {
         /**
-         * The capture's width, in device pixels.
+         * The capture's width, or the grid's, in device pixels.
          */
         width: number
         /**
-         * The capture's height, in device pixels.
+         * The capture's height, or the grid's, in device pixels.
          */
         height: number
+      }
+    }
+  | {
+      /**
+       * Why the story can't be captured: a grid on the story's page is wider than the viewport.
+       */
+      reason: 'grid-too-wide'
+      /**
+       * One line for people saying why, with the grid's width and the viewport's.
+       */
+      message: string
+      /**
+       * The widest grid's width and the viewport's, in CSS pixels.
+       */
+      grid: {
+        /**
+         * The widest grid's width, in CSS pixels, rounded up.
+         */
+        width: number
+        /**
+         * The viewport's width, in CSS pixels.
+         */
+        viewportWidth: number
       }
     }
 
@@ -821,6 +854,41 @@ export function remoteHostsOf(remote: readonly PageRemoteContent[] | undefined, 
 }
 
 /**
+ * Says why a story whose page shows a grid can't be captured, or gives nothing when the grid fits. A grid wider than the
+ * viewport, rounded up, is too wide, whatever the capture area: a cell past the viewport's edge would be cut or wrap. A
+ * grid whose own box, at the viewport's scale and rounded up, is over 32,767 device pixels on a side is too tall. Too
+ * wide wins over too tall. `viewport` is the snapshot's: its mode's when it has one.
+ */
+export function gridProblemOf(grid: PageGrid | undefined, viewport: PageViewport): BrokenStory | undefined {
+  if (grid === undefined) {
+    return undefined
+  }
+
+  const width = Math.ceil(grid.width)
+
+  if (width > viewport.width) {
+    return {
+      reason: 'grid-too-wide',
+      message: `The grid is ${width} px wide, wider than the ${viewport.width} px viewport. Give the story its own viewport width, list modes without the narrow ones, or set a smaller cellWidth.`,
+      grid: { width, viewportWidth: viewport.width },
+    }
+  }
+
+  const deviceWidth = Math.ceil(grid.width * viewport.deviceScaleFactor)
+  const deviceHeight = Math.ceil(grid.height * viewport.deviceScaleFactor)
+
+  if (deviceWidth <= maxCaptureSide && deviceHeight <= maxCaptureSide) {
+    return undefined
+  }
+
+  return {
+    reason: 'too-tall',
+    message: `The grid is ${deviceWidth} × ${deviceHeight} device pixels, over ${maxCaptureSide.toLocaleString('en-US')} on a side. Split the grid into several stories.`,
+    size: { width: deviceWidth, height: deviceHeight },
+  }
+}
+
+/**
  * What the page prepared a capture with.
  */
 interface PreparedCapture {
@@ -833,6 +901,10 @@ interface PreparedCapture {
    * remote content is unknown.
    */
   remote: PageRemoteContent[] | undefined
+  /**
+   * The grids the page shows: the widest grid's width and the tallest grid's height. Without it, the page shows none.
+   */
+  grid: PageGrid | undefined
 }
 
 /**
@@ -884,11 +956,12 @@ interface CapturedSnapshot {
  * those checks and the masks share readyTimeout, each getting only what's left of it. When the story asks for it with
  * `findRemoteContent`, the snapshot comes with the remote content it shows, unless the search didn't answer in time.
  * When the settings ask to list hosts, it also gives the hosts the page sent requests to, read once the capture is
- * done, and the hosts of the remote content the story shows, from the same search as the host masks. Gives the area
- * the snapshot was captured from beside it, and leaves the story's `captureAgainIf` to the caller. A story that can't
- * be captured comes back as a broken story. Either way it comes with the console messages and errors the page sent,
- * read once the capture is done or the story broke, while the page is still open. Rejects only with a
- * `BrowserExitedError`.
+ * done, and the hosts of the remote content the story shows, from the same search as the host masks. A story whose page
+ * shows a grid wider than the viewport, or too tall to capture, is broken before anything is captured, as
+ * `gridProblemOf` says. Gives the area the snapshot was captured from beside it, and leaves the story's
+ * `captureAgainIf` to the caller. A story that can't be captured comes back as a broken story. Either way it comes with
+ * the console messages and errors the page sent, read once the capture is done or the story broke, while the page is
+ * still open. Rejects only with a `BrowserExitedError`.
  */
 async function captureOnPage(
   page: Page,
@@ -988,7 +1061,7 @@ async function captureOnPage(
       return { broken: describeCapturePrep(prep, element, settings.readyTimeoutMs) }
     }
 
-    return { area: prep.box ?? 'full-page', remote: request.findRemote ? prep.remote : undefined }
+    return { area: prep.box ?? 'full-page', remote: request.findRemote ? prep.remote : undefined, grid: prep.grid }
   }
 
   try {
@@ -1015,6 +1088,12 @@ async function captureOnPage(
       return brokenBy(prepared.broken)
     }
 
+    const gridBroken = gridProblemOf(prepared.grid, story.viewport)
+
+    if (gridBroken !== undefined) {
+      return brokenBy(gridBroken)
+    }
+
     step = 'capture'
 
     const snapshot = await page.capture(prepared.area)
@@ -1039,8 +1118,8 @@ async function captureOnPage(
 
 /**
  * Why a story can be broken while its page still shows something, so an image of the page says what went wrong. A
- * crash, a capture too tall, a page that went to another document and a story that had no page leave nothing to
- * capture.
+ * crash, a capture or a grid too tall, a page that went to another document and a story that had no page leave
+ * nothing to capture.
  */
 const imagedReasons: readonly BrokenReason[] = [
   'error',
@@ -1049,6 +1128,7 @@ const imagedReasons: readonly BrokenReason[] = [
   'fonts-not-loaded',
   'wait-threw',
   'element-missing',
+  'grid-too-wide',
 ]
 
 /**
@@ -1173,10 +1253,13 @@ export function pageSetupOf(settings: CaptureSettings): PageSetup {
  * other outcome of a retry, a snapshot or another broken reason, is the story's outcome, and no other reason is
  * retried.
  *
+ * A story whose page shows a grid wider than the viewport, or too tall to capture, is broken with `grid-too-wide` or
+ * `too-tall` before anything is captured.
+ *
  * A story that asks for it with `imageWhenBroken` and breaks while its page still shows something, for the reasons
- * `error`, `play-threw`, `timeout`, `fonts-not-loaded`, `wait-threw` and `element-missing`, comes with an image of the
- * full page, captured before the page is closed, unless that capture fails or takes longer than the settings'
- * `brokenImageTimeLimitMs`. A browser exit during it rejects the capture with a `BrowserExitedError`.
+ * `error`, `play-threw`, `timeout`, `fonts-not-loaded`, `wait-threw`, `element-missing` and `grid-too-wide`, comes
+ * with an image of the full page, captured before the page is closed, unless that capture fails or takes longer than
+ * the settings' `brokenImageTimeLimitMs`. A browser exit during it rejects the capture with a `BrowserExitedError`.
  *
  * When a story has `captureAgainIf`, each attempt that captured a snapshot calls it with the snapshot, the page left as
  * it is, and captures the same area again at once when it resolves true. A second capture that fails makes the story

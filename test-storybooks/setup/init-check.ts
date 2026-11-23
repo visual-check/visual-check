@@ -66,6 +66,7 @@ import {
   packageManagers,
   projectFilesOf,
 } from './package-managers.ts'
+import { printResult } from './print-result.ts'
 
 /**
  * A started command, with its standard output and standard error piped.
@@ -1888,19 +1889,6 @@ async function problemsOf(step: Step): Promise<string[]> {
   } catch (error) {
     return [messageOf(error)]
   }
-}
-
-/**
- * Prints one line for a step, marked passed or failed, with how long it took, then one indented line for each of its
- * problems.
- */
-function printResult(name: string, seconds: number, problems: readonly string[]): void {
-  console.log(
-    [
-      `${problems.length === 0 ? '✓' : '✗'} ${name} (${seconds.toFixed(1)} s)`,
-      ...problems.map((problem) => `    ${problem}`),
-    ].join('\n'),
-  )
 }
 
 /**

@@ -58,6 +58,7 @@
       "includes": [
         "test-storybooks/*/visual-check.config.ts",
         "test-storybooks/storybook-10-react/.storybook/visual-check.ts",
+        "test-storybooks/storybook-10-react/stories/grid.stories.tsx",
         "test-storybooks/storybook-10-react/e2e.ts",
         "test-storybooks/storybook-10-react/e2e-support.ts",
         "test-storybooks/storybook-10-react/addon-e2e.ts"
@@ -203,6 +204,52 @@
                     ],
                     "message": "The addon never uses UniversalStore, which Storybook 11 makes internal."
                   }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/storybook/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "pixelmatch": "Only packages/cli/src/visual-diff/ compares images, through pixelmatch.",
+                  "sharp": "Only packages/cli/src/visual-diff/ decodes and encodes images, through sharp.",
+                  "yauzl": "Only packages/cli/src/browser-download/ unzips, through yauzl.",
+                  "react": "Only packages/storybook/src/react-port/ draws the grid with React.",
+                  "react-dom": "Only packages/storybook/src/react-port/ draws the grid with React."
+                },
+                "patterns": [
+                  {
+                    "group": ["react/**", "react-dom/**"],
+                    "message": "Only packages/storybook/src/react-port/ draws the grid with React."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/storybook/src/react-port/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "pixelmatch": "Only packages/cli/src/visual-diff/ compares images, through pixelmatch.",
+                  "sharp": "Only packages/cli/src/visual-diff/ decodes and encodes images, through sharp.",
+                  "yauzl": "Only packages/cli/src/browser-download/ unzips, through yauzl."
                 }
               }
             }

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "init-check": "node init-check.ts",
+    "no-framework-check": "node no-framework-check.ts",
     "test:type": "tsc --noEmit",
     "test:unit": "vitest run"
   },

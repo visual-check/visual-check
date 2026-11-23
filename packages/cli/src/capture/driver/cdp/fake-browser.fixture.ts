@@ -247,7 +247,6 @@ const defaultHandlers: Record<string, CommandHandler> = {
   'Network.enable': answerEmpty,
   'Page.handleJavaScriptDialog': answerEmpty,
   'Inspector.enable': answerEmpty,
-  'Page.setFontFamilies': answerEmpty,
   'Emulation.setUserAgentOverride': answerEmpty,
   'Emulation.setTimezoneOverride': answerEmpty,
   'Emulation.setLocaleOverride': answerEmpty,

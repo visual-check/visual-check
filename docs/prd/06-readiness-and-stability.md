@@ -121,7 +121,7 @@ A broken story counts toward exit 1, and the run goes on. Errors and timeouts ar
 | `wait-threw`            | The `wait` hook threw                                                                                                               |
 | `navigated-away`        | The story left its document, after 2 retries. The details carry the URL, and the message says to await the new page before clicking |
 | `element-missing`       | The `element` selector matched nothing, or a box of zero size                                                                       |
-| `too-tall`              | The capture is over 32,767 device pixels on a side                                                                                  |
+| `too-tall`              | The capture, or a grid, is over 32,767 device pixels on a side                                                                      |
 | `grid-too-wide`         | A grid is wider than the viewport ([Grid stories](08-grid-stories.md))                                                              |
 | `crashed`               | The page crashed. The message points to memory and the worker count                                                                 |
 | `browser-exited`        | The browser exited while the story was in flight                                                                                    |

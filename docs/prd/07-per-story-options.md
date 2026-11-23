@@ -86,7 +86,7 @@ Every story's merged options are checked before any capture. Each of these exits
   - It's matched in the top document only, not in shadow roots or frames. The first match is captured.
   - No match, or a box of zero size, makes a broken story (`element-missing`).
   - An invalid CSS selector makes a broken story (`error`). The page learns it only at capture, so it isn't an exit 2.
-- A capture over 32,767 device pixels on either side makes a broken story (`too-tall`). The message says to set `element` or a smaller viewport, or to capture a smaller element when `element` is already set.
+- A capture over 32,767 device pixels on either side makes a broken story (`too-tall`). The message says to set `element` or a smaller viewport, or to capture a smaller element when `element` is already set. For a grid too tall, the message says to split the grid into several stories ([Grid stories](08-grid-stories.md)).
 
 ## Leaving stories out
 

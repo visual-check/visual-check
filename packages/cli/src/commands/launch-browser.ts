@@ -5,7 +5,7 @@ import type { ChromeForTestingPlatform } from '../browser/chrome-for-testing-pla
 import { type InstallHeadlessShellOptions, installHeadlessShell } from '../browser-download/install-headless-shell.js'
 import { startBrowserProcess } from '../browser-process/start-browser-process.js'
 import { type CdpDriverOptions, launchCdpDriver } from '../capture/driver/cdp/cdp-driver.js'
-import { BrowserLaunchError, type BrowserSystem, type Driver } from '../capture/driver/driver.js'
+import { BrowserLaunchError, type Driver } from '../capture/driver/driver.js'
 import {
   type ContainerNetwork,
   type ContainerPlatform,
@@ -20,17 +20,6 @@ import type { ContainerRoute } from './browser-route.js'
  * the profile with it.
  */
 const containerProfileDir = '/tmp/visual-check-profile'
-
-/**
- * The OS each Chrome for Testing platform's headless shell runs on, which picks the font table its pages use.
- */
-const systemOfPlatform: Record<ChromeForTestingPlatform, BrowserSystem> = {
-  linux64: 'linux',
-  'linux-arm64': 'linux',
-  'mac-x64': 'macos',
-  'mac-arm64': 'macos',
-  win64: 'windows',
-}
 
 /**
  * What launching the browser for a run needs.
@@ -150,10 +139,6 @@ interface ChildBrowser {
    * Whether Chromium's sandbox is on.
    */
   sandbox: boolean
-  /**
-   * The OS the browser runs on, which picks the font table.
-   */
-  system: BrowserSystem
 }
 
 /**
@@ -170,7 +155,6 @@ async function launchChildBrowser(
     start: startBrowserProcess({ executable: child.executable, profileDir }),
     sandbox: child.sandbox,
     profileDir,
-    system: child.system,
   })
 }
 
@@ -193,7 +177,6 @@ async function launchCdpInContainer(
     }),
     sandbox: false,
     profileDir: containerProfileDir,
-    system: 'linux',
     ...(proxyServer === undefined ? {} : { proxyServer }),
   })
 }
@@ -246,7 +229,7 @@ export function createLaunchBrowser(seams: LauncherSeams = {}): LaunchBrowser {
 
     installed ??= await install({ version, platform, sha256, packageVersion, environment, progress })
 
-    const child = { executable: installed, system: systemOfPlatform[platform] }
+    const child = { executable: installed }
 
     try {
       const driver = await launchChildBrowser(launchDriver, { ...child, sandbox: sandbox ?? true })
@@ -273,7 +256,6 @@ export function createLaunchBrowser(seams: LauncherSeams = {}): LaunchBrowser {
         return await launchChildBrowser(launchDriver, {
           executable: launch.executable,
           sandbox: false,
-          system: 'linux',
         })
       case 'container':
         return await launchBrowserInContainer(launchDriver, launch)

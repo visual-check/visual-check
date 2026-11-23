@@ -8,7 +8,7 @@ This repo's CI checks the code, runs the built CLI against the repo's own small 
 
 | Job                  | Runner               | Checks                                                                                                                                                                                                                                                                                                                                                                 |
 | -------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Code                 | Linux, Node 24       | Biome, typecheck, Fallow, unit tests, and the Agent Skills validator (`skills-ref` 0.1.1, `agentskills validate`) on the agent skill's `SKILL.md`                                                                                                                                                                                                                      |
+| Code                 | Linux, Node 24       | Biome, typecheck, Fallow, unit tests, the Agent Skills validator (`skills-ref` 0.1.1, `agentskills validate`) on the agent skill's `SKILL.md`, and `@visual-check/storybook` installed alone with npm and pnpm, with no React, Vue or Angular                                                                                                                          |
 | Node 22              | Linux, Node 22       | Unit tests and one end-to-end run, because 22 is the minimum                                                                                                                                                                                                                                                                                                           |
 | Own Storybooks       | Linux                | The built CLI against this repo's test Storybooks, and on 10 the addon's end-to-end check (below)                                                                                                                                                                                                                                                                      |
 | Setup                | Linux                | `init` under each package manager, and on a monorepo (below)                                                                                                                                                                                                                                                                                                           |
@@ -79,7 +79,7 @@ These rest on source reading, or on measurements made with Playwright before the
 - installing `@visual-check/storybook` with no React, Vue or Angular present;
 - the Angular port on Angular 18 to 20;
 - Storybook 11's own animation pause followed by visual-check's end state;
-- the launch arguments and font table on the first browser build, against Playwright on the 300 real stories.
+- the launch arguments on the first browser build, against Playwright on the 300 real stories.
 
 ## Existing setup
 
