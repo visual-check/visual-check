@@ -55,7 +55,9 @@
       "includes": [
         "test-storybooks/*/visual-check.config.ts",
         "test-storybooks/storybook-10-react/.storybook/visual-check.ts",
-        "test-storybooks/storybook-10-react/e2e.ts"
+        "test-storybooks/storybook-10-react/e2e.ts",
+        "test-storybooks/storybook-10-react/e2e-support.ts",
+        "test-storybooks/storybook-10-react/addon-e2e.ts"
       ],
       "linter": {
         "rules": {
@@ -157,6 +159,48 @@
                     "message": "Only packages/cli/src/terminal-ui/ draws the terminal UI, through Ink and React."
                   }
                 ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/storybook-addon/**"],
+      "javascript": { "jsxRuntime": "reactClassic" },
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "pixelmatch": "Only packages/cli/src/visual-diff/ compares images, through pixelmatch.",
+                  "sharp": "Only packages/cli/src/visual-diff/ decodes and encodes images, through sharp.",
+                  "yauzl": "Only packages/cli/src/browser-download/ unzips, through yauzl.",
+                  "storybook/manager-api": {
+                    "importNames": [
+                      "experimental_UniversalStore",
+                      "experimental_useUniversalStore",
+                      "experimental_MockUniversalStore",
+                      "internal_universalStatusStore",
+                      "internal_universalTestProviderStore",
+                      "internal_universalChecklistStore"
+                    ],
+                    "message": "The addon never uses UniversalStore, which Storybook 11 makes internal."
+                  },
+                  "storybook/internal/core-server": {
+                    "importNames": [
+                      "experimental_UniversalStore",
+                      "experimental_useUniversalStore",
+                      "experimental_MockUniversalStore",
+                      "internal_universalStatusStore",
+                      "internal_universalTestProviderStore",
+                      "internal_universalChecklistStore"
+                    ],
+                    "message": "The addon never uses UniversalStore, which Storybook 11 makes internal."
+                  }
+                }
               }
             }
           }

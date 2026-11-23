@@ -1,6 +1,7 @@
-import { baselinePathOf, baselineStemOf, readBaseline } from '../baselines/baseline-files.js'
+import { baselinePathOf, readBaseline } from '../baselines/baseline-files.js'
 import type { BrokenStory, RemoteContentBox, StoryCapture } from '../capture/capture-session.js'
-import { writeReportImages } from '../report/report-folder.js'
+import type { ReportImages } from '../report/report-document.js'
+import type { ReportImageBytes } from '../report/report-folder.js'
 import type { ImageRegion, VisualDiff, VisualDiffResult } from '../visual-diff/visual-diff.js'
 import type { SnapshotToCapture } from './plan-snapshots.js'
 import {
@@ -14,8 +15,8 @@ import {
 } from './snapshot-result.js'
 
 /**
- * What `test` needs besides the run: the visual diff it compares snapshots with, the report folder it writes the
- * images of each differing snapshot to, and how many more times it captures a snapshot that differs.
+ * What `test` needs besides the run: the visual diff it compares snapshots with, how many more times it captures a
+ * snapshot that differs, whether it captures one with no baseline, and what writes a snapshot's images.
  */
 export interface TestTools {
   /**
@@ -23,13 +24,19 @@ export interface TestTools {
    */
   visualDiff: VisualDiff
   /**
-   * The report folder.
-   */
-  reportFolder: string
-  /**
    * How many more times a snapshot that differs is captured before it fails: the config's `retries`.
    */
   retries: number
+  /**
+   * Whether a snapshot with no baseline is captured, so its image can be shown.
+   */
+  captureMissing: boolean
+  /**
+   * Writes a snapshot's images and gives their paths, as the report lists them.
+   *
+   * @throws {ReportError} When an image can't be written.
+   */
+  writeImages: (item: SnapshotToCapture, images: Partial<ReportImageBytes>) => Promise<ReportImages>
 }
 
 /**
@@ -37,6 +44,11 @@ export interface TestTools {
  * when asked for, the remote content it shows.
  */
 type CapturedStory = Extract<StoryCapture, { snapshot: Uint8Array }>
+
+/**
+ * A capture that came back as a broken story.
+ */
+type BrokenCapture = Extract<StoryCapture, { broken: BrokenStory }>
 
 /**
  * A snapshot's baseline: its bytes and the path they were read from.
@@ -73,7 +85,7 @@ interface ComparedCapture {
 /**
  * One capture of a snapshot compared with its baseline, or the broken story it came back as.
  */
-type Attempt = ComparedCapture | Extract<StoryCapture, { broken: BrokenStory }>
+type Attempt = ComparedCapture | BrokenCapture
 
 /**
  * How a snapshot is captured on one attempt.
@@ -199,36 +211,87 @@ function remoteHostsOf(retry: Attempt | undefined): string[] | undefined {
 }
 
 /**
- * Tests one snapshot: a missing baseline is reported without a capture, and a snapshot passes when it differs from
- * its baseline by no more than the story's tolerance. One that differs beyond it, or in size, leaves its baseline,
- * snapshot and visual diff in the report folder at once, named after its baseline's stem, then is captured again, up
- * to `retries` more times, each capture a fresh one that also brings back the remote content it shows. The first retry
- * that passes makes the snapshot pass, flaky. A retry that comes back broken stops the retries. When no retry passes,
- * the snapshot differs with its first capture's message, and the report keeps that capture's images. When both the
- * first capture and the last retry differ by pixels, and every differing pixel of the last retry lies inside its remote
- * content, give or take the device scale factor rounded up, the result names those hosts, for a hint. A broken
- * first capture isn't retried. The first capture asks for an image of the story's page should it break; retries don't,
- * since a broken retry keeps the first capture's images. A broken first capture that came with an image of its page
- * leaves it in the report folder as its snapshot. It asks for a capture only once it has read the baseline. A pass's
- * time is the passing capture's alone: it leaves out the browser's launch and the comparison. The result counts the
- * captures it asked for and carries what the report lists: the first capture's console messages and, for a snapshot
- * that differs or passed only on a retry, its comparison and images, and the hosts a hint names.
+ * Gives the result of a snapshot whose first capture came back broken. An image of its page that came with it is
+ * written as its snapshot.
+ *
+ * @throws {ReportError} When the image can't be written.
+ */
+async function brokenFirstResultOf(
+  item: SnapshotToCapture,
+  first: BrokenCapture,
+  writeImages: TestTools['writeImages'],
+): Promise<SnapshotResult> {
+  const brokenResult = brokenResultOf(first.broken, { attempts: 1, console: first.console })
+
+  if (first.image === undefined) {
+    return brokenResult
+  }
+
+  return { ...brokenResult, images: await writeImages(item, { snapshot: first.image }) }
+}
+
+/**
+ * Tests a snapshot with no baseline: reports it without a capture or, with `captureMissing`, captures it once and
+ * writes its snapshot. A capture that comes back broken makes it broken, like any broken first capture.
+ *
+ * @throws {ReportError} When the image can't be written.
+ */
+async function testMissing(
+  item: SnapshotToCapture,
+  captureStory: CaptureStory,
+  { captureMissing, writeImages }: TestTools,
+): Promise<SnapshotResult> {
+  if (!captureMissing) {
+    return missingResultOf()
+  }
+
+  const capture = await captureStory({ ...storyToCaptureOf(item), imageWhenBroken: true })
+
+  if ('broken' in capture) {
+    return await brokenFirstResultOf(item, capture, writeImages)
+  }
+
+  return {
+    ...missingResultOf(),
+    attempts: 1,
+    completingMs: capture.completingMs,
+    console: capture.console,
+    images: await writeImages(item, { snapshot: capture.snapshot }),
+  }
+}
+
+/**
+ * Tests one snapshot: a missing baseline is reported without a capture, or with one when `captureMissing` says so,
+ * never retried, and a snapshot passes when it differs from its baseline by no more than the story's tolerance. One
+ * that differs beyond it, or in size, has its baseline, snapshot and visual diff written at once, then is captured
+ * again, up to `retries` more times, each capture a fresh one that also brings back the remote content it shows. The
+ * first retry that passes makes the snapshot pass, flaky. A retry that comes back broken stops the retries. When no
+ * retry passes, the snapshot differs with its first capture's message, and the report keeps that capture's images. When
+ * both the first capture and the last retry differ by pixels, and every differing pixel of the last retry lies inside
+ * its remote content, give or take the device scale factor rounded up, the result names those hosts, for a hint. A
+ * broken first capture isn't retried. The first capture asks for an image of the story's page should it break; retries
+ * don't, since a broken retry keeps the first capture's images. A broken first capture that came with an image of its
+ * page has it written as its snapshot. It asks for a capture only once it has read the baseline. A pass's time is the
+ * passing capture's alone: it leaves out the browser's launch and the comparison. The result counts the captures it
+ * asked for and carries what the report lists: the first capture's console messages and, for a snapshot that differs or
+ * passed only on a retry, its comparison and images, and the hosts a hint names.
  *
  * @throws {BaselineError} When the baseline can't be read or decoded.
- * @throws {ReportError} When an image can't be written to the report folder.
+ * @throws {ReportError} When an image can't be written.
  * @throws {SnapshotDecodeError} When the snapshot can't be decoded, which the browser's PNG files rule out.
  * @throws {VisualDiffError} When sharp can't be loaded, or a visual diff thread stops mid-comparison.
  */
 export async function testSnapshot(
   item: SnapshotToCapture,
   captureStory: CaptureStory,
-  { visualDiff, reportFolder, retries }: TestTools,
+  tools: TestTools,
 ): Promise<SnapshotResult> {
+  const { visualDiff, retries, writeImages } = tools
   const path = baselinePathOf(item.storybook.baselines, item.key)
   const bytes = await readBaseline(path)
 
   if (bytes === undefined) {
-    return missingResultOf()
+    return await testMissing(item, captureStory, tools)
   }
 
   let attempts = 0
@@ -237,20 +300,10 @@ export async function testSnapshot(
 
     return attemptOf(item, captureStory, visualDiff, { bytes, path }, options)
   }
-  const stem = baselineStemOf(item.key)
   const first = await attempt({ findRemoteContent: false, imageWhenBroken: true })
 
   if ('broken' in first) {
-    const brokenResult = brokenResultOf(first.broken, { attempts, console: first.console })
-
-    if (first.image === undefined) {
-      return brokenResult
-    }
-
-    return {
-      ...brokenResult,
-      images: await writeReportImages(reportFolder, item.storybook.name, stem, { snapshot: first.image }),
-    }
+    return await brokenFirstResultOf(item, first, writeImages)
   }
 
   const { capture, elapsedMs, result } = first
@@ -265,7 +318,7 @@ export async function testSnapshot(
     }
   }
 
-  const images = await writeReportImages(reportFolder, item.storybook.name, stem, {
+  const images = await writeImages(item, {
     baseline: bytes,
     snapshot: capture.snapshot,
     diff: result.diff,

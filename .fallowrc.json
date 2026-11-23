@@ -34,6 +34,7 @@
       { "name": "cli/capture", "patterns": ["packages/cli/src/capture/**"] },
       { "name": "cli/container", "patterns": ["packages/cli/src/container/**"] },
       { "name": "cli/browser-process", "patterns": ["packages/cli/src/browser-process/**"] },
+      { "name": "cli/addon-child", "patterns": ["packages/cli/src/addon-child/**"] },
       { "name": "cli/affected-stories", "patterns": ["packages/cli/src/affected-stories/**"] },
       { "name": "cli/agent-skill", "patterns": ["packages/cli/src/agent-skill/**"] },
       { "name": "cli/baselines", "patterns": ["packages/cli/src/baselines/**"] },
@@ -52,6 +53,12 @@
       { "name": "cli/terminal-ui", "patterns": ["packages/cli/src/terminal-ui/**"] },
       { "name": "cli/visual-diff", "patterns": ["packages/cli/src/visual-diff/**"] },
       { "name": "storybook/per-story-options", "patterns": ["packages/storybook/src/per-story-options/**"] },
+      { "name": "storybook-addon/channel-events", "patterns": ["packages/storybook-addon/src/channel-events/**"] },
+      { "name": "storybook-addon/check-relay", "patterns": ["packages/storybook-addon/src/check-relay/**"] },
+      { "name": "storybook-addon/engine-process", "patterns": ["packages/storybook-addon/src/engine-process/**"] },
+      { "name": "storybook-addon/manager-state", "patterns": ["packages/storybook-addon/src/manager-state/**"] },
+      { "name": "storybook-addon/panel", "patterns": ["packages/storybook-addon/src/panel/**"] },
+      { "name": "storybook-addon/sidebar", "patterns": ["packages/storybook-addon/src/sidebar/**"] },
       { "name": "repo-checks/workspace", "patterns": ["packages/repo-checks/src/workspace/**"] },
       { "name": "repo-checks/lockstep", "patterns": ["packages/repo-checks/src/lockstep/**"] },
       { "name": "repo-checks/chromium-checksums", "patterns": ["packages/repo-checks/src/chromium-checksums/**"] },
@@ -64,6 +71,7 @@
       { "from": "cli/capture", "allow": ["cli/capture/driver", "cli/storybook"] },
       { "from": "cli/container", "allow": ["cli/capture/driver"] },
       { "from": "cli/browser-process", "allow": ["cli/capture/driver"] },
+      { "from": "cli/addon-child", "allow": ["cli/commands", "cli/config", "cli/report"] },
       { "from": "cli/affected-stories", "allow": ["cli/baselines"] },
       { "from": "cli/agent-skill", "allow": ["cli/system-error"] },
       { "from": "cli/baselines", "allow": ["cli/system-error"] },
@@ -109,6 +117,21 @@
       { "from": "cli/terminal-ui", "allow": ["cli/init", "cli/reporter"] },
       { "from": "cli/visual-diff", "allow": ["cli/config"] },
       { "from": "storybook/per-story-options", "allow": [] },
+      { "from": "storybook-addon/channel-events", "allow": ["cli/addon-child"] },
+      {
+        "from": "storybook-addon/check-relay",
+        "allow": ["cli/addon-child", "storybook-addon/channel-events", "storybook-addon/engine-process"]
+      },
+      { "from": "storybook-addon/engine-process", "allow": ["cli/addon-child"] },
+      { "from": "storybook-addon/manager-state", "allow": ["storybook-addon/channel-events"] },
+      {
+        "from": "storybook-addon/panel",
+        "allow": ["cli/addon-child", "storybook-addon/channel-events", "storybook-addon/manager-state"]
+      },
+      {
+        "from": "storybook-addon/sidebar",
+        "allow": ["storybook-addon/channel-events", "storybook-addon/manager-state"]
+      },
       { "from": "repo-checks/workspace", "allow": [] },
       { "from": "repo-checks/lockstep", "allow": ["repo-checks/workspace"] },
       { "from": "repo-checks/chromium-checksums", "allow": ["repo-checks/workspace"] },
@@ -118,6 +141,7 @@
     "coverage": {
       "requireAllFiles": true,
       "allowUnmatched": [
+        "packages/cli/src/addon-child.ts",
         "packages/cli/src/bin.ts",
         "packages/cli/src/index.ts",
         "packages/storybook/src/index.ts",
@@ -135,6 +159,8 @@
         "test-storybooks/storybook-10-react/stories/mocking-worker.ts",
         "test-storybooks/storybook-10-react/stories/remote-origin.ts",
         "test-storybooks/storybook-10-react/e2e.ts",
+        "test-storybooks/storybook-10-react/e2e-support.ts",
+        "test-storybooks/storybook-10-react/addon-e2e.ts",
         "test-storybooks/storybook-10-react/visual-check.config.ts",
         "test-storybooks/storybook-11-react/.storybook/main.ts",
         "test-storybooks/storybook-11-react/visual-check.config.ts",

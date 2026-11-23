@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import type { BrowserPackage } from '../browser/read-browser-package.js'
 import {
   BrowserExitedError,
   BrowserLaunchError,
@@ -40,7 +41,7 @@ export const browserPackage = (() => {
     chromium: string
     image: { tag: string; digest: string }
     headlessShell: string
-    sha256: Record<string, string>
+    sha256: BrowserPackage['sha256']
   }
 
   return { packageVersion, ...json, imageReference: `${json.image.tag}@${json.image.digest}` }

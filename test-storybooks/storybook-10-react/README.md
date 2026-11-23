@@ -268,6 +268,33 @@ TEST_STORYBOOK_IMAGE=visual-check-chromium:arm64 pnpm turbo run e2e --filter @vi
 
 CI's "arm64 image" job does this on a Linux arm64 runner.
 
+## Running the addon's end-to-end check
+
+This Storybook lists visual-check's addon in its `.storybook/main.ts`, which the two others don't. The addon has no preview entry, so it changes no snapshot.
+
+`addon-e2e.ts` is the addon's end-to-end check. It starts `storybook dev` on port 6158 on a throwaway project, `.addon-e2e/`, which has the addon and copies of three stories files and their committed baselines, opens the real manager in the headless shell, through the CLI's own driver, and checks:
+
+- Before the first check, the panel has nothing to show, and the addon has started no process.
+- A check of a story with a passing, a changed and a missing baseline gives three rows, writes their images and no baseline, and the next check uses the same browser.
+- The viewer's slider moves where the snapshot is cut, the visual diff shows alone, an image's URL answers its own page and path only, an image whose file is gone says so, and images of different sizes show at one scale.
+- A changed stories file marks the result stale and takes its status icon, and nothing runs. So does a changed component that a stories file imports, which leaves Storybook's index as it was.
+- The item of a story's menu checks it and its status icon shows, "Run tests" runs nothing, and a reload of the manager keeps the results.
+- A check cancelled while its config loads, or while it captures, leaves the story's result as it was.
+- A config for another Storybook, or none, shows the CLI's message and the hint, and a good one again needs no restart. A `url` at another port makes a notice.
+- With the browser's container killed between two checks, the next one passes in another. With `--host` this isn't run.
+- Once `SIGKILL` or `SIGTERM` has ended Storybook, the addon's process, the browser and its container are gone.
+- Neither Storybook's start nor the panel runs docker. With no docker, the check shows the CLI's message.
+- At the end no container is left. With `--host` this isn't run.
+
+The manager's mobile layout, the Webpack builder and Storybook 10.0 aren't run.
+
+```sh
+TEST_STORYBOOK_IMAGE=visual-check-chromium:amd64 pnpm turbo run e2e:addon --filter @visual-check/test-storybook-10-react
+pnpm turbo run e2e:addon --filter @visual-check/test-storybook-10-react -- --host
+```
+
+With `--host` the checks run with `platform: 'host'`, against baselines that `update` writes first. Both run the manager on the machine itself, in the headless shell that the CLI downloads into its cache. When a case fails, Storybook's output and a screenshot of the manager are in `e2e-output/addon/`. CI's "Own Storybooks" job runs the first, and "macOS without Docker" the second.
+
 ## Rewriting the baselines
 
 Baselines must come from the default `linux/amd64` platform, the one CI renders on. Build the CLI, `@visual-check/storybook`, which the stories import, and the Storybook:

@@ -6,12 +6,25 @@ import { BrowserDownloadError } from '../browser-download/browser-download-error
 import type { InstallHeadlessShellOptions } from '../browser-download/install-headless-shell.js'
 import type { CdpDriverOptions } from '../capture/driver/cdp/cdp-driver.js'
 import { BrowserLaunchError, type Driver } from '../capture/driver/driver.js'
+import { type FakeDocker, installFakeDocker } from '../container/fake-docker.fixture.js'
 import { type BrowserLaunch, createLaunchBrowser } from './launch-browser.js'
 
 /**
  * The launch of the headless shell on the host.
  */
 type HostLaunch = Extract<BrowserLaunch, { in: 'host' }>
+
+/**
+ * The launch of the headless shell in visual-check's container.
+ */
+const containerLaunch: Extract<BrowserLaunch, { in: 'container' }> = {
+  in: 'container',
+  image: 'ghcr.io/visual-check/chromium@sha256:abc',
+  platform: 'linux/amd64',
+  route: 'host',
+  executable: '/opt/chromium/chrome-headless-shell',
+  progress: () => undefined,
+}
 
 /**
  * The executable the fake install gives.
@@ -252,5 +265,63 @@ describe("createLaunchBrowser inside visual-check's image", () => {
     expect(launches).toEqual([
       { sandbox: false, system: 'linux', profileDir: expect.stringContaining(tmpdir()), start: expect.any(Function) },
     ])
+  })
+})
+
+describe("createLaunchBrowser in visual-check's container", () => {
+  let fake: FakeDocker | undefined
+
+  afterEach(() => {
+    fake?.remove()
+    fake = undefined
+  })
+
+  it('stops the pull and launches nothing when the signal aborts during the pull', async () => {
+    const docker = installFakeDocker({ imagePresent: false, pullHangs: true })
+
+    fake = docker
+
+    const controller = new AbortController()
+    const reason = new Error('The check was cancelled.')
+    const { launchBrowser, launches } = fakeLauncher([driver])
+    const launch = launchBrowser({
+      ...containerLaunch,
+      progress: () => controller.abort(reason),
+      signal: controller.signal,
+    })
+
+    await expect(launch).rejects.toBe(reason)
+    await expect.poll(() => docker.pullIsRunning()).toBe(false)
+    expect(launches).toEqual([])
+  })
+
+  it('launches nothing when the signal aborts as the inspect ends that finds the image', async () => {
+    const docker = installFakeDocker({ holdInspect: true })
+
+    fake = docker
+
+    const controller = new AbortController()
+    const reason = new Error('The check was cancelled.')
+    const { launchBrowser, launches } = fakeLauncher([driver])
+    const launch = launchBrowser({ ...containerLaunch, signal: controller.signal })
+
+    // The process is gone, so the abort can't kill it, but its output hasn't ended.
+    await expect.poll(() => docker.inspectIsRunning()).toBe(false)
+    controller.abort(reason)
+    docker.releaseInspect()
+    await expect(launch).rejects.toBe(reason)
+    expect(docker.calls()).toHaveLength(1)
+    expect(launches).toEqual([])
+  })
+
+  it('launches nothing when the signal has aborted before the launch', async () => {
+    fake = installFakeDocker()
+
+    const reason = new Error('The check was cancelled.')
+    const { launchBrowser, launches } = fakeLauncher([driver])
+
+    await expect(launchBrowser({ ...containerLaunch, signal: AbortSignal.abort(reason) })).rejects.toBe(reason)
+    expect(fake.calls()).toEqual([])
+    expect(launches).toEqual([])
   })
 })

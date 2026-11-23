@@ -2,8 +2,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
-import type { BrokenStory, StoryCapture } from '../capture/capture-session.js'
+import { baselineStemOf } from '../baselines/baseline-files.js'
+import type { BrokenStory, StoryCapture, StoryToCapture } from '../capture/capture-session.js'
 import type { ConsoleMessage } from '../capture/driver/driver.js'
+import { writeReportImages } from '../report/report-folder.js'
 import { greyPng, whitePixels } from '../visual-diff/images.fixture.js'
 import { createVisualDiff } from '../visual-diff/visual-diff.js'
 import type { SnapshotToCapture } from './plan-snapshots.js'
@@ -115,7 +117,13 @@ function setupOf(baseline: Uint8Array | undefined, retries: number): TestSetup {
       globals: {},
     },
     reportFolder,
-    tools: { visualDiff, reportFolder, retries },
+    tools: {
+      visualDiff,
+      writeImages: (item, images) =>
+        writeReportImages(reportFolder, item.storybook.name, baselineStemOf(item.key), images),
+      retries,
+      captureMissing: false,
+    },
   }
 }
 
@@ -151,10 +159,49 @@ function reportImageAt(reportFolder: string, path: string): Uint8Array {
 }
 
 describe('testSnapshot', () => {
-  it('takes no capture of a missing baseline', async () => {
+  it('takes no capture of a missing baseline unless asked to', async () => {
     const { item, tools } = setupOf(undefined, 2)
 
     expect(await testSnapshot(item, captureStoryOf([]), tools)).toMatchObject({ status: 'missing', attempts: 0 })
+  })
+
+  it('captures a missing baseline once when asked to, with its snapshot as its only image', async () => {
+    const { item, reportFolder, tools } = setupOf(undefined, 2)
+    const asked: StoryToCapture[] = []
+    const captureStory: CaptureStory = async (story) => {
+      asked.push(story)
+
+      return { ...captureOf(white, firstConsole), completingMs: 7 }
+    }
+    const result = await testSnapshot(item, captureStory, { ...tools, captureMissing: true })
+
+    expect(result).toStrictEqual({
+      status: 'missing',
+      detail: 'missing: no baseline yet; run visual-check update to write it',
+      attempts: 1,
+      completingMs: 7,
+      console: firstConsole,
+      images: { baseline: null, snapshot: 'images/web/a.snapshot.png', diff: null },
+    })
+    expect(asked).toMatchObject([{ id: 'a', imageWhenBroken: true }])
+    expect(reportImageAt(reportFolder, 'images/web/a.snapshot.png')).toEqual(white)
+    expect(existsSync(join(item.storybook.baselines, 'a.png'))).toBe(false)
+  })
+
+  it('gives a missing baseline whose capture is broken as broken, with the image of its page', async () => {
+    const { item, reportFolder, tools } = setupOf(undefined, 2)
+    const captures: StoryCapture[] = [{ broken: brokenStory, console: firstConsole, image: brokenImage }]
+    const result = await testSnapshot(item, captureStoryOf(captures), { ...tools, captureMissing: true })
+
+    expect(result).toStrictEqual({
+      status: 'broken',
+      detail: `broken: ${brokenStory.message}`,
+      attempts: 1,
+      broken: brokenStory,
+      console: firstConsole,
+      images: { baseline: null, snapshot: 'images/web/a.snapshot.png', diff: null },
+    })
+    expect(reportImageAt(reportFolder, 'images/web/a.snapshot.png')).toEqual(brokenImage)
   })
 
   it('passes in one capture, with its console messages and nothing more to list', async () => {

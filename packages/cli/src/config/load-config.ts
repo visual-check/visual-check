@@ -1,7 +1,7 @@
-import { readFileSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
-import { createJiti, type JitiOptions } from 'jiti'
 import { ConfigError } from './config-error.js'
+import type { Config } from './define-config.js'
+import { evaluateDefault } from './evaluate-config.js'
 import { findConfig, hasConfigExtension, isFile } from './find-config.js'
 import { type ResolvedConfig, resolveConfig } from './resolve-config.js'
 import { validateConfig } from './validate-config.js'
@@ -36,38 +36,19 @@ export interface LoadConfigOptions {
 }
 
 /**
- * How jiti reads the config file, following the spec: always through jiti, never Node's own type stripping, and
- * tsconfig `paths` aren't resolved. Each option is set here, so its `JITI_*` environment variable can't change it.
- */
-const jitiOptions: JitiOptions = {
-  // Never hand a file to Node's own loader first, nor a package by name.
-  tryNative: false,
-  nativeModules: [],
-  // Read every file afresh on every load, so a config edited in a long-lived process loads as it is now.
-  moduleCache: false,
-  fsCache: false,
-  // Keep each module as it is: a config with no default export has no `default`, and the config's own imports behave
-  // closer to real ESM.
-  interopDefault: false,
-  // tsconfig `paths` aren't supported, and neither is any other alias.
-  tsconfigPaths: false,
-  alias: {},
-}
-
-/**
  * A path as messages show it: relative to `cwd`, or `the current folder` when it is `cwd`.
  */
-function displayPathOf(path: string, cwd: string): string {
+export function displayPathOf(path: string, cwd: string): string {
   return relative(cwd, path) || 'the current folder'
 }
 
 /**
- * Returns the absolute path of the nearest config the search finds from `cwd`.
+ * Returns the absolute path of the nearest config the search finds from `startDirectory`, an absolute folder.
  *
  * @throws {ConfigError} When the search finds none. The message points to `visual-check init`.
  */
-function searchConfig(cwd: string): string {
-  const path = findConfig(cwd)
+export function searchConfig(startDirectory: string): string {
+  const path = findConfig(startDirectory)
 
   if (path === undefined) {
     throw new ConfigError(
@@ -103,39 +84,44 @@ function checkGivenPath(givenPath: string, cwd: string): string {
 }
 
 /**
- * Runs the config file through jiti and returns its default export, or `undefined` when it has none. The default
- * export is awaited here, so a promise that rejects fails the load like any other error.
+ * Gives the error for a config that couldn't be loaded because of `error`, its `cause`. The message shows the config's
+ * path as `displayPath`.
  */
-async function evaluateDefault(path: string): Promise<unknown> {
-  // `jiti.import` would hand an `.mjs` config, or a `.js` one in a `"type": "module"` package, to Node's own
-  // `import()`, which keeps the first version of a file for the life of the process. `forceTranspile` runs the config
-  // file through jiti instead. The files it imports that Node treats as ESM (`.mjs`, and `.js` in a `"type": "module"`
-  // package) still load through Node's own loader: the cost of jiti's async mode, which top-level await needs.
-  const namespace: unknown = await createJiti(path, jitiOptions).evalModule(readFileSync(path, 'utf8'), {
-    filename: path,
-    async: true,
-    forceTranspile: true,
-  })
+export function loadErrorOf(error: unknown, path: string, displayPath: string): ConfigError {
+  const message = error instanceof Error ? error.message : String(error)
 
-  return typeof namespace === 'object' && namespace !== null && 'default' in namespace
-    ? await namespace.default
-    : undefined
+  return new ConfigError(`Couldn't load ${displayPath}: ${message.replaceAll(path, displayPath)}`, { cause: error })
 }
 
 /**
- * Returns the config file's default export, or `undefined` when it has none.
+ * Loads the config file at `path`, an absolute path, and validates it.
  *
- * @throws {ConfigError} When the file can't be read or run: a syntax error, a failing import, a throw at its top level
- * or a default export that rejects. The message shows the config's path as `displayPath`, and the original error is
- * the `cause`.
+ * @throws {ConfigError} When the file can't be read or run (a syntax error, a failing import, a throw at its top level
+ * or a default export that rejects), with the original error as the `cause`, and when the config is invalid. The
+ * message shows the config's path relative to `cwd`.
  */
-async function importDefault(path: string, displayPath: string): Promise<unknown> {
-  try {
-    return await evaluateDefault(path)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
+export async function readConfig(path: string, cwd: string): Promise<Config> {
+  const displayPath = displayPathOf(path, cwd)
+  const value = await evaluateDefault(path).catch((error: unknown) => {
+    throw loadErrorOf(error, path, displayPath)
+  })
 
-    throw new ConfigError(`Couldn't load ${displayPath}: ${message.replaceAll(path, displayPath)}`, { cause: error })
+  return validateConfig(value, displayPath)
+}
+
+/**
+ * Runs `load`, which uses the config at `path`, and names that path as the `configPath` of a `ConfigError` it fails
+ * with.
+ */
+export async function namingConfig<T>(path: string, load: () => Promise<T>): Promise<T> {
+  try {
+    return await load()
+  } catch (error) {
+    if (error instanceof ConfigError) {
+      throw new ConfigError(error.message, { cause: error.cause, configPath: path })
+    }
+
+    throw error
   }
 }
 
@@ -152,17 +138,6 @@ async function importDefault(path: string, displayPath: string): Promise<unknown
  */
 export async function loadConfig(options: LoadConfigOptions): Promise<ResolvedConfig> {
   const path = options.path === undefined ? searchConfig(options.cwd) : checkGivenPath(options.path, options.cwd)
-  const displayPath = displayPathOf(path, options.cwd)
 
-  try {
-    const config = validateConfig(await importDefault(path, displayPath), displayPath)
-
-    return resolveConfig(config, { ...options, path })
-  } catch (error) {
-    if (error instanceof ConfigError) {
-      throw new ConfigError(error.message, { cause: error.cause, configPath: path })
-    }
-
-    throw error
-  }
+  return await namingConfig(path, async () => resolveConfig(await readConfig(path, options.cwd), { ...options, path }))
 }

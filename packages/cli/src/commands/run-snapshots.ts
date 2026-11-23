@@ -1,17 +1,17 @@
 import { dirname } from 'node:path'
-import { baselinePathOf } from '../baselines/baseline-files.js'
+import { baselinePathOf, baselineStemOf } from '../baselines/baseline-files.js'
 import type { BrowserPackage } from '../browser/read-browser-package.js'
-import { brokenImageTimeLimitMs, type CaptureSettings } from '../capture/capture-session.js'
 import { runWorkerPool } from '../capture/worker-pool.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
 import type { ReportWarning } from '../report/report-document.js'
-import { ReportError, reportFolderOf } from '../report/report-folder.js'
+import { ReportError, reportFolderOf, writeReportImages } from '../report/report-folder.js'
 import type { RunEvent } from '../reporter/run-event.js'
 import type { Shard } from '../sharding/shard.js'
 import type { Story } from '../storybook/read-stories.js'
 import { testPathWarningOf } from '../storybook/test-path.js'
 import { createVisualDiff } from '../visual-diff/visual-diff.js'
 import type { BrowserPlace } from './browser-route.js'
+import { captureSettingsOf } from './capture-settings.js'
 import { hasOrphans, type StorybookBaselines } from './consistency-check.js'
 import type { LaunchBrowser } from './launch-browser.js'
 import { networkWarningsOf, warningsTextOf } from './network-warning.js'
@@ -260,23 +260,6 @@ function headerOf(run: SnapshotRun, share: RunShare | undefined, count: number):
   const workers = `${run.workers} ${run.workers === 1 ? 'worker' : 'workers'}`
 
   return `visual-check ${run.version} · ${run.command}${shardHeaderPartOf(share)} · ${snapshots} · ${workers}`
-}
-
-/**
- * Builds the session's settings from the config. Only `update` lists the hosts a story reaches.
- */
-function captureSettingsOf(run: SnapshotRun): CaptureSettings {
-  const { config } = run
-
-  return {
-    readyTimeoutMs: config.readyTimeout,
-    timezone: config.timezone,
-    locale: config.locale,
-    colorScheme: config.colorScheme,
-    maskColor: config.maskColor,
-    listHosts: run.command === 'update',
-    brokenImageTimeLimitMs,
-  }
 }
 
 /**
@@ -559,14 +542,22 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
     browserPackage: run.browserPackage,
     configImage: run.config.image,
     place: run.place,
-    settings: captureSettingsOf(run),
+    settings: captureSettingsOf(run.config, run.command === 'update'),
     environment: run.environment,
     progress: run.progress,
   })
   const visualDiff = createVisualDiff()
+  const reportFolder = reportFolderOf(run.config.path)
   const tools: SnapshotTools =
     run.command === 'test'
-      ? { command: 'test', visualDiff, reportFolder: reportFolderOf(run.config.path), retries: run.config.retries }
+      ? {
+          command: 'test',
+          visualDiff,
+          retries: run.config.retries,
+          captureMissing: false,
+          writeImages: (item, images) =>
+            writeReportImages(reportFolder, item.storybook.name, baselineStemOf(item.key), images),
+        }
       : { command: 'update', visualDiff, recaptureDelayMs: run.recaptureDelayMs }
   let snapshots: PlannedSnapshots | undefined
   let baselines: StorybookBaselines[] = []

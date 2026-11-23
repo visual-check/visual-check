@@ -42,23 +42,10 @@
 // own changes must reach no story, which it checks first. With the image, the killed CLI case runs too. On the host,
 // the cases share the cache as the host cases do, but it needn't start empty.
 import { type ChildProcessByStdio, spawn, spawnSync } from 'node:child_process'
-import {
-  accessSync,
-  constants,
-  cpSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createServer, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { tmpdir } from 'node:os'
-import { basename, delimiter, dirname, extname, join, relative, resolve as resolvePath, sep } from 'node:path'
+import { basename, dirname, extname, join, relative, resolve as resolvePath, sep } from 'node:path'
 import type { Readable } from 'node:stream'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { isDeepStrictEqual } from 'node:util'
@@ -74,6 +61,29 @@ import type {
   UpdateReportCounts,
   UpdateReportEntry,
 } from '@visual-check/cli'
+import {
+  type Case,
+  cliBin,
+  committedBaselines,
+  descendantsOf,
+  diagnosticsDir,
+  docker,
+  executableOnPath,
+  image,
+  isFile,
+  isRunning,
+  localEnvironment,
+  newContainers,
+  noDockerTexts,
+  packageDir,
+  problemUnless,
+  readBrowserPackage,
+  runCases,
+  thisMachinesChromeForTestingPlatform,
+  visualCheckContainers,
+  waitUntil,
+  withTemporaryFolder,
+} from './e2e-support.ts'
 
 /**
  * What became of one snapshot, as the CLI's line for it says: a `test` outcome, or an `update` one.
@@ -91,30 +101,9 @@ type Outcomes = Record<string, Outcome>
 type CliProcess = ChildProcessByStdio<null, Readable, Readable>
 
 /**
- * The folder the check starts in, the test Storybook's package folder, which the CLI runs in.
- */
-const packageDir = process.cwd()
-
-/**
  * The static Storybook build that `pnpm build-storybook` writes.
  */
 const staticDir = join(packageDir, 'storybook-static')
-
-/**
- * The built CLI, through this package's workspace link to it.
- */
-const cliBin = join(packageDir, 'node_modules', '@visual-check', 'cli', 'dist', 'bin.js')
-
-/**
- * The committed baselines.
- */
-const committedBaselines = join(packageDir, '.visual-check', 'baselines')
-
-/**
- * Where the update-then-test case copies the baselines it wrote when they differ from the committed ones, and each
- * stability case the card story's baseline when it isn't the committed one, for CI to keep.
- */
-const diagnosticsDir = join(packageDir, 'e2e-output')
 
 /**
  * Whether the check runs inside visual-check's browser image, as the `--inside-image` argument says.
@@ -182,24 +171,6 @@ const skillScriptTimeout = 420_000
 const markerPath = '/etc/visual-check/chromium.json'
 
 /**
- * The browser package, through this package's workspace link to it, which names the Chromium version the CLI
- * downloads for the host.
- */
-const browserPackagePath = join(packageDir, 'node_modules', '@visual-check', 'chromium', 'chromium.json')
-
-/**
- * Chrome for Testing's name for the platform of each machine visual-check downloads a headless shell for, by Node's
- * OS and architecture.
- */
-const chromeForTestingPlatforms: Record<string, string> = {
-  'linux/x64': 'linux64',
-  'linux/arm64': 'linux-arm64',
-  'darwin/x64': 'mac-x64',
-  'darwin/arm64': 'mac-arm64',
-  'win32/x64': 'win64',
-}
-
-/**
  * The story the host cases capture, the only one their server's `index.json` lists. One shows the download and its
  * reuse.
  */
@@ -224,19 +195,6 @@ const affectedChangeLine = '// visual-check e2e: a change for the affected stori
  * (`packages/cli/src/commands/run-selection.ts`), which the e2e can't import.
  */
 const affectedAllHint = 'Run with --all to cover every story.'
-
-/**
- * What the CLI says when there's no docker command: the problem, then the fix that names `platform: 'host'`.
- */
-const noDockerTexts = [
-  "visual-check runs the browser in Docker, and there's no docker command on PATH.",
-  "Start or install Docker, or set platform: 'host' in the config.",
-]
-
-/**
- * The browser image every run uses, until the browser package names a published one.
- */
-const image = process.env.TEST_STORYBOOK_IMAGE
 
 /**
  * Reads the package name from the `package.json` in the folder the check starts in.
@@ -267,16 +225,6 @@ function turboHint(packageName: string): string {
  * How long one CLI run may take before it is killed, in milliseconds.
  */
 const cliTimeoutMilliseconds = 300_000
-
-/**
- * The names visual-check gives its containers, as a `docker ps` name filter.
- */
-const containerNamePattern = '^visual-check-[0-9a-f]{12}$'
-
-/**
- * How long one docker command may take before it is killed, in milliseconds.
- */
-const dockerTimeoutMilliseconds = 30_000
 
 /**
  * The story the deliberate change alters, and the stylesheet that alters it through its `card` class.
@@ -1135,16 +1083,6 @@ interface ImageMarker {
 }
 
 /**
- * The part of the browser package that the cold cache case uses.
- */
-interface BrowserPackage {
-  /**
-   * The Chromium version, such as `157.0.8103.78`.
-   */
-  chromium: string
-}
-
-/**
  * The part of the installed `storybook` package that the test-path case uses.
  */
 interface StorybookPackage {
@@ -1215,20 +1153,6 @@ interface BrokenEntry {
    * Whether the entry holds what `holds` says.
    */
   has?: (entry: TestReportEntry) => boolean
-}
-
-/**
- * One end-to-end case: what it checks, and the check, which gives every problem it finds.
- */
-interface Case {
-  /**
-   * What the case checks.
-   */
-  name: string
-  /**
-   * Runs the case, resolving with its problems, none when it passes.
-   */
-  run: () => Promise<string[]>
 }
 
 /**
@@ -1314,7 +1238,7 @@ function findModeProblems(): string[] {
  * for a run without it.
  */
 function findHostProblems(): string[] {
-  return withoutDocker && isDockerOnPath()
+  return withoutDocker && executableOnPath('docker') !== undefined
     ? ['docker is on the PATH: --no-docker checks the error for a run without it, so run it where there is none.']
     : []
 }
@@ -1335,7 +1259,7 @@ function findBrowserImageProblems(): string[] {
 function findInsideImageProblems(): string[] {
   return [
     ...markerProblems(),
-    ...(isDockerOnPath()
+    ...(executableOnPath('docker') !== undefined
       ? ['docker is on the PATH: this mode proves the CLI needs none, so run it where there is none.']
       : []),
   ]
@@ -1355,34 +1279,10 @@ function markerProblems(): string[] {
 }
 
 /**
- * Whether an executable file named `docker` is in one of the `PATH` folders.
- */
-function isDockerOnPath(): boolean {
-  return (process.env.PATH ?? '').split(delimiter).some((folder) => {
-    const path = join(folder, 'docker')
-
-    try {
-      accessSync(path, constants.X_OK)
-
-      return isFile(path)
-    } catch {
-      return false
-    }
-  })
-}
-
-/**
  * Reads the image's marker.
  */
 function readMarker(): ImageMarker {
   return JSON.parse(readFileSync(markerPath, 'utf8')) as ImageMarker
-}
-
-/**
- * Reads the browser package.
- */
-function readBrowserPackage(): BrowserPackage {
-  return JSON.parse(readFileSync(browserPackagePath, 'utf8')) as BrowserPackage
 }
 
 /**
@@ -1393,35 +1293,12 @@ function readStorybookPackage(): StorybookPackage {
 }
 
 /**
- * Gives Chrome for Testing's name for this machine's platform, such as `mac-arm64`.
- *
- * @throws {Error} When visual-check downloads no headless shell for the machine.
- */
-function thisMachinesChromeForTestingPlatform(): string {
-  const machine = `${process.platform}/${process.arch}`
-  const platform = chromeForTestingPlatforms[machine]
-
-  if (platform === undefined) {
-    throw new Error(`visual-check downloads no headless shell for ${machine}, so --host can't run here`)
-  }
-
-  return platform
-}
-
-/**
  * Gives the path of the file in the static build that a URL path names, or `undefined` when it names no file there.
  */
 function staticFileOf(pathname: string): string | undefined {
   const filePath = join(staticDir, pathname.endsWith('/') ? `${pathname}index.html` : pathname)
 
   return filePath.startsWith(`${staticDir}${sep}`) && isFile(filePath) ? filePath : undefined
-}
-
-/**
- * Whether a file is at this path.
- */
-function isFile(path: string): boolean {
-  return existsSync(path) && statSync(path).isFile()
 }
 
 /**
@@ -1598,19 +1475,6 @@ async function withStorybookServer<T>(options: ServeOptions, use: (server: Story
     return await use(server)
   } finally {
     await server.stop()
-  }
-}
-
-/**
- * Makes a temporary folder, hands it to `use`, and removes it however `use` ends.
- */
-async function withTemporaryFolder<T>(use: (folder: string) => Promise<T>): Promise<T> {
-  const folder = mkdtempSync(join(tmpdir(), 'visual-check-e2e-'))
-
-  try {
-    return await use(folder)
-  } finally {
-    rmSync(folder, { recursive: true, force: true })
   }
 }
 
@@ -1845,20 +1709,6 @@ function baselineProblems(written: string, keys: string[]): string[] {
 }
 
 /**
- * The environment without `CI`, which `update` refuses to run under, and under which `test` stops before it captures
- * when its consistency check finds anything, and without `GITHUB_STEP_SUMMARY`, so no run writes the step summary of
- * the CI job running these tests. It's what every run of the CLI gets unless a case gives its own.
- */
-function localEnvironment(): NodeJS.ProcessEnv {
-  const environment = { ...process.env }
-
-  delete environment.CI
-  delete environment.GITHUB_STEP_SUMMARY
-
-  return environment
-}
-
-/**
  * What a written config sets besides the Storybook, its baselines, the image and 2 workers.
  */
 interface ConfigOptions {
@@ -1901,39 +1751,6 @@ function writeConfig(folder: string, url: string, baselines: string, options: Co
 }
 
 /**
- * Runs a docker command and gives its standard output. It is killed when it runs past its time limit.
- *
- * @throws {Error} When the command fails or runs past its time limit.
- */
-function docker(args: string[]): string {
-  const result = spawnSync('docker', args, { encoding: 'utf8', timeout: dockerTimeoutMilliseconds })
-
-  if (result.status !== 0) {
-    throw new Error(`docker ${args[0]} failed: ${String(result.error ?? result.stderr.trim())}`)
-  }
-
-  return result.stdout
-}
-
-/**
- * Lists the IDs of visual-check's containers: running ones, or all of them, stopped ones included.
- */
-function visualCheckContainers(which: 'running' | 'all'): string[] {
-  const all = which === 'all' ? ['-a'] : []
-
-  return docker(['ps', ...all, '--filter', `name=${containerNamePattern}`, '-q'])
-    .split('\n')
-    .filter((line) => line !== '')
-}
-
-/**
- * Lists the IDs of visual-check's containers that weren't there before.
- */
-function newContainers(which: 'running' | 'all', before: ReadonlySet<string>): string[] {
-  return visualCheckContainers(which).filter((id) => !before.has(id))
-}
-
-/**
  * Kills every running visual-check container that wasn't there before, other runs' included, so the browser in it
  * exits, and gives their IDs.
  *
@@ -1949,23 +1766,6 @@ function killNewContainers(before: ReadonlySet<string>): string[] {
   docker(['kill', ...ids])
 
   return ids
-}
-
-/**
- * Checks the condition every 200 ms until it holds or the time is up. Resolves with whether it held.
- */
-async function waitUntil(condition: () => boolean, timeoutMilliseconds: number): Promise<boolean> {
-  const deadline = Date.now() + timeoutMilliseconds
-
-  while (!condition()) {
-    if (Date.now() >= deadline) {
-      return false
-    }
-
-    await sleep(200)
-  }
-
-  return true
 }
 
 /**
@@ -2126,13 +1926,6 @@ function brokenImagesProblems(entry: TestReportEntry, { storyId, pageImage }: Br
       `${storyId} lists a baseline or diff image: ${baseline}, ${diff}`,
     ),
   ]
-}
-
-/**
- * Gives the problem unless the condition holds, or none when it does.
- */
-function problemUnless(condition: boolean, problem: string): string[] {
-  return condition ? [] : [problem]
 }
 
 /**
@@ -4675,74 +4468,6 @@ async function cleanTreeProblems(config: string, environment: NodeJS.ProcessEnv)
 }
 
 /**
- * Lists every running process as `ps` prints it, a `<pid> <parent pid>` line each, outside Windows.
- */
-function processLines(): string[] {
-  const listed = spawnSync('ps', ['-A', '-o', 'pid=,ppid='], { encoding: 'utf8' })
-
-  if (listed.error !== undefined || listed.status !== 0) {
-    throw new Error(`Couldn't list the running processes with ps: ${listed.error ?? `it exited with ${listed.status}`}`)
-  }
-
-  return listed.stdout.trim().split('\n')
-}
-
-/**
- * Lists each running process's children, by its parent's process ID, from `ps`, outside Windows.
- */
-function childrenByParent(): Map<number, number[]> {
-  const children = new Map<number, number[]>()
-
-  for (const [child = 0, parent = 0] of processLines().map((line) => line.trim().split(/\s+/).map(Number))) {
-    children.set(parent, [...(children.get(parent) ?? []), child])
-  }
-
-  return children
-}
-
-/**
- * Lists the processes that descend from the process `pid`, outside Windows.
- */
-function descendantsOf(pid: number): number[] {
-  const children = childrenByParent()
-  // On macOS the process 0 is its own parent, so the walk never visits it, nor any process twice.
-  const seen = new Set([0, pid])
-  const tree = [pid].filter((id) => id !== 0)
-
-  for (let index = 0; index < tree.length; index += 1) {
-    tree.push(...takeUnseen(children.get(tree[index] ?? 0) ?? [], seen))
-  }
-
-  return tree.slice(1)
-}
-
-/**
- * Takes from `pids` the process IDs not in `seen` yet, and adds them to it.
- */
-function takeUnseen(pids: number[], seen: Set<number>): number[] {
-  const unseen = pids.filter((pid) => !seen.has(pid))
-
-  for (const pid of unseen) {
-    seen.add(pid)
-  }
-
-  return unseen
-}
-
-/**
- * Whether the process `pid` still runs: signal 0 reaches it, or reaches it but may not signal it.
- */
-function isRunning(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-
-    return true
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM'
-  }
-}
-
-/**
  * Waits for each of these processes to end. Gives the problem with the ones that still run once the time is up.
  */
 async function processesGoneProblems(pids: number[]): Promise<string[]> {
@@ -4881,42 +4606,6 @@ function readExpectedOutcomes(): Outcomes {
  */
 function withoutLoadFails(expected: Outcomes): Outcomes {
   return Object.fromEntries(Object.entries(expected).filter(([key]) => !loadFailsFilter.test(key)))
-}
-
-/**
- * Runs every case, prints its result, and resolves with whether all of them passed.
- */
-async function runCases(cases: Case[]): Promise<boolean> {
-  let passed = true
-
-  for (const testCase of cases) {
-    const problems = await problemsOf(testCase)
-
-    printResult(testCase.name, problems)
-    passed = passed && problems.length === 0
-  }
-
-  return passed
-}
-
-/**
- * Prints one line for a case, marked passed or failed, then one indented line for each of its problems.
- */
-function printResult(name: string, problems: string[]): void {
-  console.log(
-    [`${problems.length === 0 ? '✓' : '✗'} ${name}`, ...problems.map((problem) => `    ${problem}`)].join('\n'),
-  )
-}
-
-/**
- * Runs a case and gives its problems. A case that throws has the error's message as its one problem.
- */
-async function problemsOf(testCase: Case): Promise<string[]> {
-  try {
-    return await testCase.run()
-  } catch (error) {
-    return [error instanceof Error ? error.message : String(error)]
-  }
 }
 
 const setupProblems = findSetupProblems()

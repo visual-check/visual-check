@@ -1,8 +1,9 @@
 // Tries this checkout's packages in another project, the way a user would, before they're on npm. It builds and packs
-// the packages of the checkout it's in (a worktree included, with its uncommitted changes), serves them from a
-// registry on 127.0.0.1 and runs `init` through `pnpm dlx` in the project, with the registry named for the
-// `@visual-check` scope through the environment, so no `.npmrc` changes. Then it adds the browser image to the config,
-// until the browser package names a published one.
+// the packages of the checkout it's in (a worktree included, with its uncommitted changes), each but the browser's at a
+// version of this try's own, such as `0.1.0-local.20261123153045`, so no package manager takes them for an earlier
+// try's build. It serves them from a registry on 127.0.0.1 and runs `init` through `pnpm dlx` in the project, with the
+// registry named for the `@visual-check` scope through the environment, so no `.npmrc` changes. Then it adds the
+// browser image to the config, until the browser package names a published one.
 //
 // The project must be in a git repo with nothing uncommitted. `--restore` brings it back: it resets the repo to the
 // commit it was on, removes every file the try added, `.visual-check/` folders included, and installs again.
@@ -10,11 +11,28 @@
 //   pnpm try-local <project> [--yes] [--image <image>]
 //   pnpm try-local --restore <project>
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, relative, resolve, sep } from 'node:path'
+import { basename, join, relative, resolve, sep } from 'node:path'
 import { parseArgs } from 'node:util'
-import { configWithImage, type PackedManifest, packedPackages, startRegistry, type Tarball } from './local-packages.ts'
+import {
+  configWithImage,
+  localVersionOf,
+  manifestWithVersions,
+  type PackedManifest,
+  packedPackages,
+  startRegistry,
+  type Tarball,
+} from './local-packages.ts'
 
 /**
  * What the try records in the project's git folder, for `--restore`.
@@ -30,6 +48,11 @@ interface TryRecord {
  * The repo's root: the checkout this script is in, which may be a worktree.
  */
 const repoRoot = join(import.meta.dirname, '..', '..')
+
+/**
+ * The packed package that keeps its version: the CLI only takes a plain release of a major its peer range names.
+ */
+const browserPackage = '@visual-check/chromium'
 
 /**
  * The file in the project's git folder that holds the record.
@@ -134,6 +157,48 @@ function packPackages(destination: string): Tarball[] {
 }
 
 /**
+ * Rewrites the tarball's `package.json` to the manifest, through a folder of its own in `folder`, and saves it as
+ * `<name>-<version>.tgz` there. Gives the new tarball.
+ */
+function rewriteTarball({ path }: Tarball, manifest: PackedManifest, folder: string): Tarball {
+  const unpacked = mkdtempSync(join(folder, 'unpacked-'))
+  const rewrittenPath = join(folder, `${manifest.name.replace('@', '').replace('/', '-')}-${manifest.version}.tgz`)
+  // Keeps macOS's tar from adding `._` files of extended attributes.
+  const environment = { ...process.env, COPYFILE_DISABLE: '1' }
+
+  run('tar', ['-xzf', path, '-C', unpacked], folder)
+  writeFileSync(join(unpacked, 'package', 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`)
+
+  const result = spawnSync('tar', ['-czf', rewrittenPath, '-C', unpacked, 'package'], { env: environment })
+
+  if (result.status !== 0) {
+    fail(`Couldn't repack ${basename(path)}: ${result.stderr?.toString().trim()}`)
+  }
+
+  rmSync(unpacked, { recursive: true, force: true })
+
+  return { manifest, path: rewrittenPath }
+}
+
+/**
+ * Gives every packed package but the browser's a version of this try's own, in `folder`, and points each dependency
+ * between them at it, so no package manager can take them for an earlier try's build of the same version. The
+ * checkout's `package.json` files don't change.
+ */
+function withLocalVersions(tarballs: readonly Tarball[], folder: string): Tarball[] {
+  const now = new Date()
+  const versions = new Map(
+    tarballs
+      .filter(({ manifest }) => manifest.name !== browserPackage)
+      .map(({ manifest }) => [manifest.name, localVersionOf(manifest.version, now)]),
+  )
+
+  mkdirSync(folder, { recursive: true })
+
+  return tarballs.map((tarball) => rewriteTarball(tarball, manifestWithVersions(tarball.manifest, versions), folder))
+}
+
+/**
  * Runs `init` through `pnpm dlx` in the project, at the packed CLI's version, with the registry named for the
  * `@visual-check` scope and a package cache of its own in `folder`. Gives its exit code. A Ctrl-C reaches `init` too,
  * so the script waits for it to end.
@@ -233,7 +298,8 @@ function checkCanTry(project: string, top: string, recordPath: string): void {
 }
 
 /**
- * Packs the packages into `folder`, serves them, records the project's commit and runs `init`. Gives its exit code.
+ * Packs the packages into `folder`, each but the browser's at a version of this try's own, serves them, records the
+ * project's commit and runs `init`. Gives its exit code.
  */
 async function initFromTarballs(
   project: string,
@@ -242,7 +308,7 @@ async function initFromTarballs(
   folder: string,
   yes: boolean,
 ): Promise<number> {
-  const tarballs = packPackages(join(folder, 'tarballs'))
+  const tarballs = withLocalVersions(packPackages(join(folder, 'packed')), join(folder, 'tarballs'))
   const cli = tarballs.find(({ manifest }) => manifest.name === '@visual-check/cli') ?? fail('No CLI was packed.')
   const record: TryRecord = { head: gitOutput(top, ['rev-parse', 'HEAD']) ?? fail(`${top} has no commit.`) }
   const registry = await startRegistry(tarballs)

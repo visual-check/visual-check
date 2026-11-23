@@ -44,9 +44,9 @@ export interface SnapshotResult {
    */
   detail: string
   /**
-   * How many captures visual-check asked for: 0 for a missing baseline and a stories file that didn't load, 1 and the
-   * retries made for `test`, and the loads made for `update`. The capture session's own retries of a story that
-   * navigates away aren't counted.
+   * How many captures visual-check asked for: 0 for a stories file that didn't load, 0 for a missing baseline, or 1
+   * when a check captures it, 1 and the retries made for `test`, and the loads made for `update`. The capture session's
+   * own retries of a story that navigates away aren't counted.
    */
   attempts: number
   /**
@@ -84,8 +84,9 @@ export interface SnapshotResult {
    */
   console?: ConsoleMessage[]
   /**
-   * The images `test` wrote to the report folder, relative to it: the first capture's baseline, snapshot and visual
-   * diff of a snapshot that differs or passed only on a retry, or a broken story's image of its page as the snapshot.
+   * The images `test` wrote to the report folder, or a check to its own, relative to that folder: the first capture's
+   * baseline, snapshot and visual diff of a snapshot that differs or passed only on a retry, a broken story's image of
+   * its page as the snapshot, or the snapshot of a missing baseline a check captured.
    */
   images?: ReportImages
   /**

@@ -1,4 +1,5 @@
 {
   "extends": "@visual-check/typescript-config/base.json",
-  "include": ["src"]
+  "compilerOptions": { "lib": ["es2023", "dom"], "types": ["node"], "jsx": "react" },
+  "include": ["src", "test"]
 }

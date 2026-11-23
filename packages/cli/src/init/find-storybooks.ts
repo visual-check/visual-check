@@ -3,7 +3,7 @@ import { basename, join, posix, relative, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { isFile } from '../config/find-config.js'
 import type { Segment } from './segment.js'
-import { configDirOf, defaultConfigDir, type StorybookCall } from './storybook-scripts.js'
+import { callConfigDir, defaultConfigDir, type StorybookCall } from './storybook-scripts.js'
 
 /**
  * Lists the files of a project: the paths, relative to the root and `/` separated, that git tracks or would track.
@@ -141,7 +141,7 @@ export function storybookConfigDirsOf(
 ): string[] {
   const found = new Set(files.filter((file) => mainFilePath.test(file)).map((file) => posix.dirname(file)))
 
-  for (const configDir of new Set(calls.map((call) => configDirOf(call)))) {
+  for (const configDir of new Set(calls.map((call) => callConfigDir(call)))) {
     if (isInsideRoot(configDir) && hasMainFile(configDir)) {
       found.add(configDir)
     }

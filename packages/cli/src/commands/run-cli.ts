@@ -1,26 +1,18 @@
 import { readFileSync } from 'node:fs'
-import { availableParallelism, totalmem } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import type { ReadStoriesMatchers, TracedChanges } from '../affected-stories/affected-stories.js'
 import { type FindReachedFiles, findReachedFilesWithFallow } from '../affected-stories/fallow-graph.js'
 import { InvalidBaseError } from '../affected-stories/git-changes.js'
 import { refreshSkill, skillRefreshLinesOf } from '../agent-skill/refresh-skill.js'
 import { checkBrowserPackage } from '../browser/browser-package.js'
-import { runImageOf } from '../browser/browser-version.js'
-import { chromeForTestingPlatformOf } from '../browser/chrome-for-testing-platform.js'
-import { imageMarkerPath } from '../browser/image-marker.js'
 import type { BrowserPackage } from '../browser/read-browser-package.js'
-import { autoWorkerCount, type BrowserHost } from '../capture/worker-pool.js'
 import { ConfigError } from '../config/config-error.js'
 import { locateConfig } from '../config/find-config.js'
 import { isCi } from '../config/is-ci.js'
 import { type LoadConfigOptions, loadConfig } from '../config/load-config.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
-import type { ContainerPlatform } from '../container/browser-container.js'
-import { ContainerError } from '../container/container-error.js'
-import { type DockerHost, type ProbeDocker, probeDocker } from '../container/docker-probe.js'
+import { probeDocker } from '../container/docker-probe.js'
 import { isInsideContainer } from '../container/inside-container.js'
-import { knownContainerIdOf } from '../container/own-container.js'
 import { type ListFiles, listProjectFiles } from '../init/find-storybooks.js'
 import { defaultsPrompter } from '../init/prompter.js'
 import { createRunCommand, type RunCommand } from '../init/run-command.js'
@@ -36,12 +28,10 @@ import type { RunReporter } from '../reporter/run-event.js'
 import { appendStepSummary, StepSummaryError } from '../step-summary/step-summary.js'
 import type { Story } from '../storybook/read-stories.js'
 import { readStoriesMatchers } from '../storybook/stories-matchers.js'
-import { type BrowserPlace, browserPlaceOf } from './browser-route.js'
 import { checkStorybooks } from './check-storybooks.js'
-import { dockerProblemOf } from './docker-problem.js'
 import { createLaunchBrowser, type LaunchBrowser } from './launch-browser.js'
 import { parseCommandLine, type RunOptions, UsageError } from './parse-command-line.js'
-import { readImageFit } from './read-image-fit.js'
+import { type BrowserPlacement, type PlaceBrowserOptions, placeBrowser, workerCountOf } from './place-browser.js'
 import { type RunOutput, reportLineOf, runOutputOf } from './run-output.js'
 import { type TestReportFacts, testReportFor, updateReportFor } from './run-report.js'
 import {
@@ -117,29 +107,7 @@ interface RunResult extends CliResult {
  *
  * @public
  */
-export interface RunCliOptions {
-  /**
-   * Where the marker of visual-check's image is read from. `/etc/visual-check/chromium.json` by default. A test gives
-   * another.
-   */
-  imageMarkerPath?: string
-  /**
-   * The CPUs and memory of the machine the CLI runs on, which `workers: 'auto'` reads when the browser runs inside
-   * visual-check's image or on the host. By default `os.availableParallelism()` and `os.totalmem()`. A test gives its
-   * own.
-   */
-  machine?: BrowserHost
-  /**
-   * The OS the CLI runs on, which decides between host networking and the proxy, whether `update` warns about baseline
-   * paths too long for Windows, with `arch` picks the headless shell `platform: 'host'` downloads, and whether `init`'s
-   * Docker warning adds the WSL sentence. `process.platform` by default. A test gives its own.
-   */
-  os?: NodeJS.Platform
-  /**
-   * The CPU architecture of the machine the CLI runs on, which with `os` picks the headless shell `platform: 'host'`
-   * downloads. `process.arch` by default. A test gives its own.
-   */
-  arch?: NodeJS.Architecture
+export interface RunCliOptions extends PlaceBrowserOptions {
   /**
    * Whether visual-check runs inside a container. By default it looks for the file Docker and Podman leave in a
    * container's root, and for `KUBERNETES_SERVICE_HOST`, which Kubernetes sets in every pod. A test gives its answer.
@@ -195,18 +163,6 @@ export interface RunCliOptions {
    * at launch. Each way it connects over CDP. A test gives a fake.
    */
   launchBrowser?: LaunchBrowser
-  /**
-   * Asks Docker what its engine has, before a run whose browser runs in visual-check's container reaches a Storybook.
-   * It also tells whether the engine is Docker Desktop's, which decides the browser's route to a Storybook. Inside
-   * visual-check's image and on the host no Docker is used, so it isn't asked. `init` asks it once, to warn when Docker
-   * can't run the browser. By default it runs `docker info`. A test gives a fake.
-   */
-  probeDocker?: ProbeDocker
-  /**
-   * Finds the ID of the container the CLI runs in, when the Docker daemon knows it. By default it reads
-   * `/proc/self/mountinfo` and asks `docker inspect`. A test gives a fake.
-   */
-  findKnownContainer?: () => Promise<string | undefined>
   /**
    * Lists the files of a project, where `init` looks for Storybooks. By default it runs `git ls-files`. A test gives a
    * fake.
@@ -569,7 +525,7 @@ async function configuredOutcomeOf(
   }
 
   const insideContainer = insideContainerOf(context.cliOptions, context.environment)
-  const placement = await placeAndProbe(config, browserPackage, insideContainer, context.cliOptions)
+  const placement = await placeBrowser(config, browserPackage, insideContainer, context.cliOptions)
 
   if ('problem' in placement) {
     return stoppedBy(placement.problem, inRun)
@@ -660,7 +616,7 @@ interface CheckedRun {
   /**
    * Where the browser runs, and the CPUs and memory there.
    */
-  placement: { place: BrowserPlace; host: BrowserHost }
+  placement: BrowserPlacement
   /**
    * Each Storybook the run requires, in config order, with its version and stories.
    */
@@ -738,7 +694,7 @@ async function selectedOutcomeOf(
       consistencyOnly: options.consistency,
       shard: options.shard,
       config,
-      workers: workersOf(options, config, checked.placement.host),
+      workers: workerCountOf(options.workers ?? config.workers, checked.placement.host),
       place: checked.placement.place,
       browserPackage: checked.browserPackage,
       selections: selection.selections,
@@ -924,105 +880,11 @@ function runDefaultsOf(
 }
 
 /**
- * Gives how many workers the run captures with: `--workers`, else the config's number, and for `'auto'` what the CPUs
- * and memory where the browser runs allow.
- */
-function workersOf(options: RunOptions, config: ResolvedConfig, host: BrowserHost): number {
-  const requested = options.workers ?? config.workers
-
-  return requested === 'auto' ? autoWorkerCount(host) : requested
-}
-
-/**
  * Whether the run is inside a container: the option when a test gives it, else what the environment and the root's
  * marker files say.
  */
 function insideContainerOf(cliOptions: RunCliOptions, environment: Record<string, string | undefined>): boolean {
   return cliOptions.insideContainer ?? isInsideContainer(environment)
-}
-
-/**
- * Decides where the run's browser runs and reads the CPUs and memory there: inside visual-check's image and on the
- * host the machine's own, with no Docker used, and in visual-check's container Docker's engine's, which the Docker
- * probe reads. In a container, the route to a Storybook comes from the container the CLI runs in, whether the engine
- * is Docker Desktop's, and the OS. Gives the place with them, or what to print when the browser has no place to run or
- * Docker can't run it.
- *
- * @throws {Error} Any error the probe throws besides a `ContainerError`.
- */
-async function placeAndProbe(
-  config: ResolvedConfig,
-  browserPackage: BrowserPackage,
-  insideContainer: boolean,
-  cliOptions: RunCliOptions,
-): Promise<{ place: BrowserPlace; host: BrowserHost } | { problem: string }> {
-  const imageFit = readImageFit(config.platform, browserPackage, cliOptions.imageMarkerPath ?? imageMarkerPath)
-
-  if ('problem' in imageFit) {
-    return { problem: `${imageFit.problem}\n` }
-  }
-
-  if (imageFit.insideImage) {
-    return { place: browserPlaceOf({ insideImage: true }), host: cliOptions.machine ?? machineOf() }
-  }
-
-  if (imageFit.platform === 'host') {
-    return hostPlaceOf(cliOptions)
-  }
-
-  let docker: DockerHost
-
-  try {
-    docker = await (cliOptions.probeDocker ?? probeDocker)()
-  } catch (error) {
-    if (error instanceof ContainerError) {
-      return { problem: dockerProblemOf(error, { insideContainer, image: runImageOf(browserPackage, config.image) }) }
-    }
-
-    throw error
-  }
-
-  return { place: await containerPlaceOf(imageFit.platform, docker, cliOptions), host: docker }
-}
-
-/**
- * Places the browser on the host, as the headless shell Chrome for Testing builds for the machine's OS and CPU
- * architecture, with the machine's CPUs and memory. No Docker is used. Gives the problem that exits 2 when Chrome for
- * Testing has no build for the machine.
- */
-function hostPlaceOf(cliOptions: RunCliOptions): { place: BrowserPlace; host: BrowserHost } | { problem: string } {
-  const download = chromeForTestingPlatformOf(cliOptions.os ?? process.platform, cliOptions.arch ?? process.arch)
-
-  if ('problem' in download) {
-    return { problem: `${download.problem}\n` }
-  }
-
-  return { place: { in: 'host', platform: download.platform }, host: cliOptions.machine ?? machineOf() }
-}
-
-/**
- * Gives the place of a browser in visual-check's container on this platform, with the route the five rules give it
- * from the container the CLI runs in, whether Docker's engine is Docker Desktop's, and the OS.
- */
-async function containerPlaceOf(
-  platform: ContainerPlatform,
-  docker: DockerHost,
-  cliOptions: RunCliOptions,
-): Promise<BrowserPlace> {
-  return browserPlaceOf({
-    insideImage: false,
-    platform,
-    containerId: await (cliOptions.findKnownContainer ?? knownContainerIdOf)(),
-    dockerDesktop: docker.desktop,
-    os: cliOptions.os ?? process.platform,
-  })
-}
-
-/**
- * Reads the CPUs and memory of the machine the CLI runs on.
- */
-function machineOf(): BrowserHost {
-  return { cpus: availableParallelism(), memoryBytes: totalmem() }
 }
 
 /**
