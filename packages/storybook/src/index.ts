@@ -3,6 +3,7 @@ import type { ForcedState } from './forced-state/forced-states.js'
 import {
   type GridCaption,
   type GridCell,
+  type GridHeader,
   type GridInput,
   type GridLayout,
   type GridRow,
@@ -31,6 +32,7 @@ export type {
   GlobalValue,
   GridCaption,
   GridCell,
+  GridHeader,
   GridInput,
   GridLayout,
   GridRow,

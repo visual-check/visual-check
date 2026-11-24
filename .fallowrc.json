@@ -131,7 +131,7 @@
       { "from": "cli/visual-diff", "allow": ["cli/config"] },
       { "from": "storybook/per-story-options", "allow": [] },
       { "from": "storybook/forced-state", "allow": [] },
-      { "from": "storybook/grid-story", "allow": [] },
+      { "from": "storybook/grid-story", "allow": ["storybook/forced-state"] },
       { "from": "storybook/react-port", "allow": ["storybook/grid-story"] },
       { "from": "storybook-addon/channel-events", "allow": ["cli/addon-child"] },
       {
