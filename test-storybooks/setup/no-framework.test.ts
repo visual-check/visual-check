@@ -12,6 +12,7 @@ describe('importProblemsOf', () => {
   const root: PackageEntry = { specifier: '@visual-check/storybook' }
   const react: PackageEntry = { specifier: '@visual-check/storybook/react', framework: 'react' }
   const vue: PackageEntry = { specifier: '@visual-check/storybook/vue', framework: 'vue' }
+  const angular: PackageEntry = { specifier: '@visual-check/storybook/angular', framework: '@angular/common' }
 
   it('finds no problem when the root entry imports', () => {
     expect(importProblemsOf(root, { status: 0, stderr: '' })).toEqual([])
@@ -76,6 +77,21 @@ describe('importProblemsOf', () => {
       `@visual-check/storybook/vue failed for another reason than a missing vue: ${stderr}`,
     ])
   })
+
+  it('finds no problem when the Angular entry fails because @angular/common is missing', () => {
+    const stderr =
+      "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@angular/common' imported from /tmp/project/node_modules/x.js"
+
+    expect(importProblemsOf(angular, { status: 1, stderr })).toEqual([])
+  })
+
+  it('takes a missing rxjs for another reason than a missing @angular/common', () => {
+    const stderr = "Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'rxjs' imported from /tmp/x.js"
+
+    expect(importProblemsOf(angular, { status: 1, stderr })).toEqual([
+      `@visual-check/storybook/angular failed for another reason than a missing @angular/common: ${stderr}`,
+    ])
+  })
 })
 
 describe('frameworkProblemsOf', () => {
@@ -119,6 +135,7 @@ describe('frameworkProblemsOf', () => {
       'react-dom/package.json',
       'vue/package.json',
       '@angular/core/package.json',
+      '@angular/common/package.json',
     ])
   })
 })

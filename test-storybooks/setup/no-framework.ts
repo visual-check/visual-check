@@ -20,7 +20,7 @@ export interface PackageEntry {
 /**
  * The frameworks none of which may resolve from the installed package.
  */
-const frameworks = ['react', 'react-dom', 'vue', '@angular/core']
+const frameworks = ['react', 'react-dom', 'vue', '@angular/core', '@angular/common']
 
 /**
  * The entries the check imports, each in a process of its own.
@@ -29,7 +29,8 @@ export const packageEntries: PackageEntry[] = [
   { specifier: '@visual-check/storybook' },
   { specifier: '@visual-check/storybook/react', framework: 'react' },
   { specifier: '@visual-check/storybook/vue', framework: 'vue' },
-  // The Angular port adds its entry here.
+  // Node reports the port's first import, so the Angular entry fails on `@angular/common` before `@angular/core`.
+  { specifier: '@visual-check/storybook/angular', framework: '@angular/common' },
 ]
 
 /**
