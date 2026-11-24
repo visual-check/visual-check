@@ -4,6 +4,8 @@ One of this repo's own test Storybooks ([PRD 18](../../docs/prd/18-repo-ci.md#th
 
 It has no pseudo-states addon and no preview annotations: the React test Storybooks' shared preview changes no grid snapshot.
 
+The [Storybook 9.1](../storybook-9-vue/README.md) and [Storybook 11](../storybook-11-vue/README.md) Vue test Storybooks have no stories of their own: they read this package's stories and `.storybook/test-storybook-config.ts`, and run `storybook-10-html`'s `e2e.ts` from their own folders.
+
 ## The grid stories
 
 `stories/grid.stories.ts` holds the `Grid` stories, with the React grid stories' IDs and DOM, written with render functions only. Their chips' looks, CSS and `play` checks come from `storybook-10-react/stories/grid-parts.ts`, so the grid is literally the same.
@@ -18,7 +20,7 @@ Each committed baseline is a copy of `storybook-10-react`'s same-named baseline.
 
 ## The config
 
-`.storybook/test-storybook-config.ts` turns docgen off: the stories hold no `.vue` file, and docgen would load `vue-component-meta`, which needs TypeScript's JS API, which TypeScript 7 doesn't have. It dedupes `vue` as well as `storybook`, so Storybook's renderer, the port in `@visual-check/storybook`'s build and the stories share one Vue, resolved from this package: with two copies, `provide` wouldn't reach the cells.
+`.storybook/test-storybook-config.ts` turns docgen off: the stories hold no `.vue` file, so docgen has nothing to read, and on Storybook 10 and 11 it would load `vue-component-meta` through the workspace's TypeScript 7, which has no JS API for it. Storybook 9.1's `@storybook/vue3-vite` brings its own TypeScript 5. It dedupes `vue` as well as `storybook`, so Storybook's renderer, the port in `@visual-check/storybook`'s build and the stories share one Vue, resolved from this package: with two copies, `provide` wouldn't reach the cells.
 
 ## The end-to-end check
 
@@ -36,8 +38,10 @@ Turbo builds the CLI, `@visual-check/storybook` and the Storybook first.
 
 ## Rewriting the baselines
 
-Never write them here with `update`: they must be the React port's images. When a grid baseline of `storybook-10-react` changes, copy it here:
+Never write them here with `update`: they must be the React port's images. When a grid baseline of `storybook-10-react` changes, copy it here, and into `storybook-9-vue` and `storybook-11-vue`:
 
 ```sh
+cp test-storybooks/storybook-10-react/.visual-check/baselines/grid--{every-combination,forced-states,late-styles}.png test-storybooks/storybook-9-vue/.visual-check/baselines/
 cp test-storybooks/storybook-10-react/.visual-check/baselines/grid--{every-combination,forced-states,late-styles}.png test-storybooks/storybook-10-vue/.visual-check/baselines/
+cp test-storybooks/storybook-10-react/.visual-check/baselines/grid--{every-combination,forced-states,late-styles}.png test-storybooks/storybook-11-vue/.visual-check/baselines/
 ```

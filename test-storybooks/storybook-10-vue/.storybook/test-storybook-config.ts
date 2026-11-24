@@ -10,8 +10,8 @@ import { dedupedViteConfig } from '../../storybook-10-html/.storybook/deduped-vi
  *
  * Storybook loads a framework given by its package name from where Storybook itself is installed, which in this
  * workspace finds whichever version pnpm hoisted, so the config gives the folder of the framework that `mainUrl`
- * resolves. Docgen is off: the stories hold no `.vue` file, and docgen would load `vue-component-meta`, which needs
- * TypeScript's JS API, which TypeScript 7 doesn't have.
+ * resolves. Docgen is off: the stories hold no `.vue` file, so docgen has nothing to read, and on Storybook 10 and 11
+ * it would load `vue-component-meta` through the workspace's TypeScript 7, which has no JS API for it.
  *
  * Storybook turns the stories' `storybook/test` imports into a global of its preview runtime, which Vite resolves from
  * the project root, the test Storybook's package folder. `resolve.dedupe` resolves `storybook` from there too, so the

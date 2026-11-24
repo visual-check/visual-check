@@ -1,0 +1,40 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build-storybook": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        ".storybook/**",
+        "package.json",
+        "tsconfig.json",
+        "$TURBO_ROOT$/test-storybooks/storybook-10-vue/.storybook/test-storybook-config.ts",
+        "$TURBO_ROOT$/test-storybooks/storybook-10-html/.storybook/deduped-vite-config.ts",
+        "$TURBO_ROOT$/test-storybooks/storybook-10-vue/stories/**",
+        "$TURBO_ROOT$/test-storybooks/storybook-10-vue/tsconfig.json",
+        "$TURBO_ROOT$/test-storybooks/storybook-10-react/stories/grid-parts.ts"
+      ],
+      "outputs": ["storybook-static/**"]
+    },
+    "e2e": {
+      "cache": false,
+      "dependsOn": ["^build", "build-storybook"],
+      "passThroughEnv": [
+        "TEST_STORYBOOK_IMAGE",
+        "VISUAL_CHECK_CACHE_DIR",
+        "VISUAL_CHECK_CHROMIUM_MIRROR",
+        "HTTPS_PROXY",
+        "https_proxy",
+        "NO_PROXY",
+        "no_proxy"
+      ]
+    },
+    "test:type": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/test-storybooks/storybook-10-vue/.storybook/test-storybook-config.ts",
+        "$TURBO_ROOT$/test-storybooks/storybook-10-html/.storybook/deduped-vite-config.ts"
+      ]
+    }
+  }
+}

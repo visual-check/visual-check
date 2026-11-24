@@ -94,7 +94,9 @@ jobs:
           - storybook-9-html
           - storybook-10-html
           - storybook-11-html
+          - storybook-9-vue
           - storybook-10-vue
+          - storybook-11-vue
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
