@@ -2,8 +2,9 @@
 // `addon-e2e.ts`.
 import { spawnSync } from 'node:child_process'
 import { accessSync, constants, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import type { ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
-import { delimiter, join, sep } from 'node:path'
+import { delimiter, extname, join, sep } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 
 /**
@@ -160,6 +161,29 @@ export function fileOfUrlPath(folder: string, pathname: string): string | undefi
   const filePath = join(folder, decoded.endsWith('/') ? `${decoded}index.html` : decoded)
 
   return filePath.startsWith(`${folder}${sep}`) && isFile(filePath) ? filePath : undefined
+}
+
+/**
+ * Answers a request for a URL path with the file in a folder that it names, its body changed by `change`, or 404 when
+ * it names no file there.
+ */
+export function answerWithStaticFile(
+  folder: string,
+  pathname: string,
+  response: ServerResponse,
+  change: (body: Buffer) => Buffer | string = (body) => body,
+): void {
+  const filePath = fileOfUrlPath(folder, pathname)
+
+  if (filePath === undefined) {
+    response.writeHead(404).end()
+
+    return
+  }
+
+  response
+    .writeHead(200, { 'content-type': contentTypes[extname(filePath)] ?? 'application/octet-stream' })
+    .end(change(readFileSync(filePath)))
 }
 
 /**

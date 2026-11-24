@@ -3,7 +3,10 @@
   "supportEntry": [
     "test-storybooks/storybook-9-react/visual-check.config.ts",
     "test-storybooks/storybook-10-react/visual-check.config.ts",
-    "test-storybooks/storybook-11-react/visual-check.config.ts"
+    "test-storybooks/storybook-11-react/visual-check.config.ts",
+    "test-storybooks/storybook-9-html/visual-check.config.ts",
+    "test-storybooks/storybook-10-html/visual-check.config.ts",
+    "test-storybooks/storybook-11-html/visual-check.config.ts"
   ],
   "ignorePatterns": ["test-storybooks/storybook-10-react/static/**", "test-storybooks/setup/fixtures/**"],
   "workspaces": {
@@ -15,6 +18,8 @@
       "test-storybooks/storybook-11-react": {
         "ignoreDependencies": ["@visual-check/storybook", "storybook-addon-pseudo-states"]
       },
+      "test-storybooks/storybook-9-html": { "ignoreDependencies": ["@visual-check/storybook"] },
+      "test-storybooks/storybook-11-html": { "ignoreDependencies": ["@visual-check/storybook"] },
       "test-storybooks/setup": {
         "ignoreDependencies": [
           "@visual-check/chromium",
@@ -70,6 +75,7 @@
       { "name": "storybook/forced-state", "patterns": ["packages/storybook/src/forced-state/**"] },
       { "name": "storybook/grid-story", "patterns": ["packages/storybook/src/grid-story/**"] },
       { "name": "storybook/react-port", "patterns": ["packages/storybook/src/react-port/**"] },
+      { "name": "storybook/dom-port", "patterns": ["packages/storybook/src/dom-port/**"] },
       { "name": "storybook-addon/channel-events", "patterns": ["packages/storybook-addon/src/channel-events/**"] },
       { "name": "storybook-addon/check-relay", "patterns": ["packages/storybook-addon/src/check-relay/**"] },
       { "name": "storybook-addon/engine-process", "patterns": ["packages/storybook-addon/src/engine-process/**"] },
@@ -138,6 +144,7 @@
       { "from": "storybook/forced-state", "allow": [] },
       { "from": "storybook/grid-story", "allow": ["storybook/forced-state"] },
       { "from": "storybook/react-port", "allow": ["storybook/forced-state", "storybook/grid-story"] },
+      { "from": "storybook/dom-port", "allow": ["storybook/forced-state", "storybook/grid-story"] },
       { "from": "storybook-addon/channel-events", "allow": ["cli/addon-child"] },
       {
         "from": "storybook-addon/check-relay",
@@ -185,6 +192,7 @@
         "test-storybooks/storybook-10-react/.storybook/shared-preview.ts",
         "test-storybooks/storybook-10-react/.storybook/visual-check.ts",
         "test-storybooks/storybook-10-react/stories/*.stories.tsx",
+        "test-storybooks/storybook-10-react/stories/grid-parts.ts",
         "test-storybooks/storybook-10-react/stories/mocking-worker.ts",
         "test-storybooks/storybook-10-react/stories/remote-origin.ts",
         "test-storybooks/storybook-10-react/e2e.ts",
@@ -193,6 +201,14 @@
         "test-storybooks/storybook-10-react/visual-check.config.ts",
         "test-storybooks/storybook-11-react/.storybook/main.ts",
         "test-storybooks/storybook-11-react/visual-check.config.ts",
+        "test-storybooks/storybook-9-html/.storybook/main.ts",
+        "test-storybooks/storybook-9-html/visual-check.config.ts",
+        "test-storybooks/storybook-10-html/.storybook/main.ts",
+        "test-storybooks/storybook-10-html/.storybook/test-storybook-config.ts",
+        "test-storybooks/storybook-10-html/stories/*.stories.ts",
+        "test-storybooks/storybook-10-html/*.ts",
+        "test-storybooks/storybook-11-html/.storybook/main.ts",
+        "test-storybooks/storybook-11-html/visual-check.config.ts",
         "test-storybooks/setup/*.ts",
         "packages/cli/skill/scripts/run.mjs",
         "packages/*/test/**/*.test.ts",

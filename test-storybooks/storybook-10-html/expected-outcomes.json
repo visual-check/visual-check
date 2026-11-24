@@ -1,0 +1,5 @@
+{
+  "grid--every-combination": "passed",
+  "grid--forced-states": "passed",
+  "grid--late-styles": "passed"
+}

@@ -1,3 +1,4 @@
+import { type CombinationsInput, combinations } from './dom-port/combinations.js'
 import { forceStates } from './forced-state/force-states.js'
 import type { ForcedState } from './forced-state/forced-states.js'
 import {
@@ -28,6 +29,7 @@ import {
 } from './per-story-options/define-visual-check.js'
 
 export type {
+  CombinationsInput,
   ForcedState,
   GlobalValue,
   GridCaption,
@@ -49,4 +51,4 @@ export type {
   WaitHook,
   WrittenMask,
 }
-export { defineVisualCheck, forceStates, gridAttribute, gridLayoutOf }
+export { combinations, defineVisualCheck, forceStates, gridAttribute, gridLayoutOf }

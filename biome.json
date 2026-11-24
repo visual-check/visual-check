@@ -62,7 +62,9 @@
         "test-storybooks/storybook-10-react/stories/forced-states.stories.tsx",
         "test-storybooks/storybook-10-react/e2e.ts",
         "test-storybooks/storybook-10-react/e2e-support.ts",
-        "test-storybooks/storybook-10-react/addon-e2e.ts"
+        "test-storybooks/storybook-10-react/addon-e2e.ts",
+        "test-storybooks/storybook-10-html/stories/grid.stories.ts",
+        "test-storybooks/storybook-10-html/*.ts"
       ],
       "linter": {
         "rules": {

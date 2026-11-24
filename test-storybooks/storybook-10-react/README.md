@@ -174,7 +174,7 @@ Viewed on `localhost`, the remote origin is the page's own, so none of them is l
 
 ## The grid stories
 
-`stories/grid.stories.tsx` renders a `Chip`, a rounded label, through `<Combinations>` from `@visual-check/storybook/react`. An accent chip takes its colour from a React context whose default is red; the meta's decorator provides green around every story, so a red chip in a snapshot means the context didn't reach the grid's cells.
+`stories/grid.stories.tsx` renders a `Chip`, a rounded label, through `<Combinations>` from `@visual-check/storybook/react`. An accent chip takes its colour from a React context whose default is red; the meta's decorator provides green around every story, so a red chip in a snapshot means the context didn't reach the grid's cells. The stories' chips, styles and `play` checks live in `stories/grid-parts.ts`, with no framework, which other ports' grid stories read.
 
 - `EveryCombination` lists two tones, two sizes and two titles, one of them `undefined`, and passes `label` in `args`: 8 captioned rows, such as `tone: accent, size: lg, title: undefined`, 16 px apart, every accent chip green. The long title's captions wrap at the column's width rather than widening it.
 - `ForcedStates` forces `hover` and `focus-visible` on a chip styled by a `<style>`: a header row, `default`, `:hover` and `:focus-visible`, above 2 captioned rows of 3 columns. The default tone's hover cell is blue, with the blue text a theme class outside the grid gives it; the quiet tone's stays grey, since its own rule, declared after the hover rule at the same specificity, still wins; both focus-visible cells have a purple outline. `play` checks the headers and each cell's computed style.
@@ -184,6 +184,8 @@ Viewed on `localhost`, the remote origin is the page's own, so none of them is l
 - `TooWide` sets a `cellWidth` of 1400, wider than the 1280 px viewport, and `element` to the grid itself. It's broken, `grid-too-wide`, whatever the capture area, and its line says the grid is wider than the viewport.
 
 `TooWide`'s committed baseline is the story with `cellWidth={1200}`: a 1200 px wide grid of 2 rows. Every grid baseline is byte-identical on 9.1, 10 and 11. A broken forced state makes its story `play-threw` or `wait-threw`, rather than passing with a wrong baseline.
+
+The plain-DOM test Storybooks, [`storybook-9-html`](../storybook-9-html/README.md), [`storybook-10-html`](../storybook-10-html/README.md) and [`storybook-11-html`](../storybook-11-html/README.md), draw `EveryCombination`, `ForcedStates` and `LateStyles` with `combinations()` from `@visual-check/storybook`, and their end-to-end check needs their baselines here byte for byte. When one of them changes, copy it into each one's `.visual-check/baselines/`.
 
 ## The forced states stories
 
