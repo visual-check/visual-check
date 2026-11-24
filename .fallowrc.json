@@ -70,6 +70,7 @@
       { "name": "storybook/forced-state", "patterns": ["packages/storybook/src/forced-state/**"] },
       { "name": "storybook/grid-story", "patterns": ["packages/storybook/src/grid-story/**"] },
       { "name": "storybook/react-port", "patterns": ["packages/storybook/src/react-port/**"] },
+      { "name": "storybook/dom-port", "patterns": ["packages/storybook/src/dom-port/**"] },
       { "name": "storybook-addon/channel-events", "patterns": ["packages/storybook-addon/src/channel-events/**"] },
       { "name": "storybook-addon/check-relay", "patterns": ["packages/storybook-addon/src/check-relay/**"] },
       { "name": "storybook-addon/engine-process", "patterns": ["packages/storybook-addon/src/engine-process/**"] },
@@ -138,6 +139,7 @@
       { "from": "storybook/forced-state", "allow": [] },
       { "from": "storybook/grid-story", "allow": ["storybook/forced-state"] },
       { "from": "storybook/react-port", "allow": ["storybook/forced-state", "storybook/grid-story"] },
+      { "from": "storybook/dom-port", "allow": ["storybook/forced-state", "storybook/grid-story"] },
       { "from": "storybook-addon/channel-events", "allow": ["cli/addon-child"] },
       {
         "from": "storybook-addon/check-relay",

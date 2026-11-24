@@ -90,10 +90,11 @@ packages/cli/src/
 
 ```
 packages/storybook/src/
-  index.ts              entry: defineVisualCheck and the framework-free grid module
+  index.ts              entry: defineVisualCheck, forceStates, the framework-free grid module and the plain-DOM port
   react.ts              entry: the React port, @visual-check/storybook/react
   per-story-options/    defineVisualCheck: a story's visualCheck parameter and its types
   forced-state/         forceStates: twin selectors for forced states in every stylesheet and shadow root
   grid-story/           the framework-free grid: rows, captions and every element's inline styles
   react-port/           adapter: React: <Combinations>
+  dom-port/             adapter: plain DOM: combinations()
 ```
