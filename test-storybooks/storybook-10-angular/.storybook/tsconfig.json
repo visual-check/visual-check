@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "es2022",
+    "moduleResolution": "bundler",
+    "lib": ["es2023", "dom"],
+    "strict": true,
+    "skipLibCheck": true,
+    "experimentalDecorators": true,
+    "useDefineForClassFields": false,
+    "paths": { "@angular/core": ["../node_modules/@angular/core"] }
+  },
+  "include": ["../stories/*.ts", "../../storybook-10-react/stories/grid-parts.ts"]
+}

@@ -4,10 +4,10 @@
 // `storybook-10-react`'s; and `update` into an empty folder writes `storybook-10-react`'s baselines.
 //
 // It works in the folder it starts in, so each other port's test Storybook runs this same file from its own folder, as
-// `node ../storybook-10-html/e2e.ts` from `storybook-9-html` or `storybook-10-vue`. Run it with
-// `pnpm turbo run e2e --filter <package name>`, which builds the CLI and the Storybook first, with TEST_STORYBOOK_IMAGE
-// naming the browser image. It prints one line per case, then each of its problems, and exits 1 when any case fails.
-// Every run of the CLI is without `CI` in its environment.
+// `node ../storybook-10-html/e2e.ts` from `storybook-9-html`, `storybook-10-vue` or `storybook-10-angular`. Run it
+// with `pnpm turbo run e2e --filter <package name>`, which builds the CLI and the Storybook first, with
+// TEST_STORYBOOK_IMAGE naming the browser image. It prints one line per case, then each of its problems, and exits 1
+// when any case fails. Every run of the CLI is without `CI` in its environment.
 import { spawn } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'

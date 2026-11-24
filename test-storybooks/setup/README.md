@@ -77,7 +77,7 @@ CI's Setup job runs every package manager with each fixture, and its macOS job r
 
 `no-framework-check.ts` checks that a missing framework never breaks the install of `@visual-check/storybook` ([PRD 01](../../docs/prd/01-packages.md#visual-checkstorybook)): only importing that framework's entry fails. It packs the package and installs it alone, with npm and with pnpm, each in a new project whose only dependency it is. In each project:
 
-- no framework (`react`, `react-dom`, `vue`, `@angular/core`) resolves from the installed package;
+- no framework (`react`, `react-dom`, `vue`, `@angular/core`, `@angular/common`) resolves from the installed package;
 - the root entry, `@visual-check/storybook`, imports;
 - each framework's entry, such as `@visual-check/storybook/react`, fails with `ERR_MODULE_NOT_FOUND` for its framework, and for nothing else, so a missing export doesn't pass.
 

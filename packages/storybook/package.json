@@ -19,6 +19,10 @@
     "./vue": {
       "types": "./dist/vue.d.ts",
       "default": "./dist/vue.js"
+    },
+    "./angular": {
+      "types": "./dist/angular.d.ts",
+      "default": "./dist/angular.js"
     }
   },
   "scripts": {
@@ -27,12 +31,16 @@
     "test:unit": "vitest run"
   },
   "peerDependencies": {
+    "@angular/common": ">=18.0.0",
     "@angular/core": ">=18.0.0",
     "react": "^18.0.0 || ^19.0.0",
     "storybook": "^9.1.0 || ^10.0.0 || ^11.0.0-0",
     "vue": "^3.0.0"
   },
   "peerDependenciesMeta": {
+    "@angular/common": {
+      "optional": true
+    },
     "@angular/core": {
       "optional": true
     },
@@ -47,6 +55,12 @@
     }
   },
   "devDependencies": {
+    "@angular/animations": "18.2.14",
+    "@angular/common": "18.2.14",
+    "@angular/compiler": "18.2.14",
+    "@angular/core": "18.2.14",
+    "@angular/platform-browser": "18.2.14",
+    "@angular/platform-server": "18.2.14",
     "@bramus/specificity": "2.4.4",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
@@ -56,6 +70,7 @@
     "storybook": "10.6.7",
     "typescript": "7.0.2",
     "vitest": "5.1.0",
-    "vue": "3.5.45"
+    "vue": "3.5.45",
+    "zone.js": "0.14.10"
   }
 }

@@ -1,12 +1,11 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite'
 import { Combinations } from '@visual-check/storybook/vue'
-import { expect } from 'storybook/test'
 import { defineComponent, h, type InjectionKey, inject, type PropType, provide } from 'vue'
 import {
   accentColor,
   type ChipProps,
   chipStyleOf,
-  colors,
+  everyCombinationPlay,
   forcedStatesPlay,
   type LateChipProps,
   lateBaseRule,
@@ -18,7 +17,6 @@ import {
   type StateChipProps,
   stateChipClassOf,
   stateChipStyles,
-  stylesOf,
 } from '../../storybook-10-react/stories/grid-parts.ts'
 
 /**
@@ -88,19 +86,7 @@ export const EveryCombination: Story = {
         args: { label: 'Save changes' },
       }),
   }),
-  play: async ({ canvas }) => {
-    // An accent chip's text is white, a neutral one's ink.
-    const accentChips = canvas
-      .getAllByText('Save changes')
-      .filter((chip) => getComputedStyle(chip).color === colors.white)
-
-    await expect(stylesOf(accentChips, ['background-color'])).toEqual([
-      [colors.accent],
-      [colors.accent],
-      [colors.accent],
-      [colors.accent],
-    ])
-  },
+  play: everyCombinationPlay,
 }
 
 /**

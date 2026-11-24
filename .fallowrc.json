@@ -9,7 +9,10 @@
     "test-storybooks/storybook-11-html/visual-check.config.ts",
     "test-storybooks/storybook-9-vue/visual-check.config.ts",
     "test-storybooks/storybook-10-vue/visual-check.config.ts",
-    "test-storybooks/storybook-11-vue/visual-check.config.ts"
+    "test-storybooks/storybook-11-vue/visual-check.config.ts",
+    "test-storybooks/storybook-9-angular/visual-check.config.ts",
+    "test-storybooks/storybook-10-angular/visual-check.config.ts",
+    "test-storybooks/storybook-11-angular/visual-check.config.ts"
   ],
   "ignorePatterns": ["test-storybooks/storybook-10-react/static/**", "test-storybooks/setup/fixtures/**"],
   "workspaces": {
@@ -25,6 +28,8 @@
       "test-storybooks/storybook-11-html": { "ignoreDependencies": ["@visual-check/storybook"] },
       "test-storybooks/storybook-9-vue": { "ignoreDependencies": ["@visual-check/storybook", "vue"] },
       "test-storybooks/storybook-11-vue": { "ignoreDependencies": ["@visual-check/storybook", "vue"] },
+      "test-storybooks/storybook-9-angular": { "ignoreDependencies": ["@visual-check/storybook"] },
+      "test-storybooks/storybook-11-angular": { "ignoreDependencies": ["@visual-check/storybook"] },
       "test-storybooks/setup": {
         "ignoreDependencies": [
           "@visual-check/chromium",
@@ -49,6 +54,10 @@
         "packages/storybook/src/forced-state/style-sheet.fixture.ts"
       ],
       "rules": { "unused-class-members": "off" }
+    },
+    {
+      "files": ["test-storybooks/storybook-10-angular/stories/grid.stories.ts"],
+      "rules": { "unrendered-components": "off" }
     }
   ],
   "boundaries": {
@@ -82,6 +91,7 @@
       { "name": "storybook/react-port", "patterns": ["packages/storybook/src/react-port/**"] },
       { "name": "storybook/dom-port", "patterns": ["packages/storybook/src/dom-port/**"] },
       { "name": "storybook/vue-port", "patterns": ["packages/storybook/src/vue-port/**"] },
+      { "name": "storybook/angular-port", "patterns": ["packages/storybook/src/angular-port/**"] },
       { "name": "storybook-addon/channel-events", "patterns": ["packages/storybook-addon/src/channel-events/**"] },
       { "name": "storybook-addon/check-relay", "patterns": ["packages/storybook-addon/src/check-relay/**"] },
       { "name": "storybook-addon/engine-process", "patterns": ["packages/storybook-addon/src/engine-process/**"] },
@@ -152,6 +162,7 @@
       { "from": "storybook/react-port", "allow": ["storybook/forced-state", "storybook/grid-story"] },
       { "from": "storybook/dom-port", "allow": ["storybook/forced-state", "storybook/grid-story"] },
       { "from": "storybook/vue-port", "allow": ["storybook/forced-state", "storybook/grid-story"] },
+      { "from": "storybook/angular-port", "allow": ["storybook/forced-state", "storybook/grid-story"] },
       { "from": "storybook-addon/channel-events", "allow": ["cli/addon-child"] },
       {
         "from": "storybook-addon/check-relay",
@@ -189,6 +200,7 @@
         "packages/storybook/src/index.ts",
         "packages/storybook/src/react.ts",
         "packages/storybook/src/vue.ts",
+        "packages/storybook/src/angular.ts",
         "packages/storybook-addon/src/manager.ts",
         "packages/storybook-addon/src/preset.ts",
         "packages/repo-checks/src/check-chromium-checksums.ts",
@@ -227,6 +239,16 @@
         "test-storybooks/storybook-10-vue/visual-check.config.ts",
         "test-storybooks/storybook-11-vue/.storybook/main.ts",
         "test-storybooks/storybook-11-vue/visual-check.config.ts",
+        "test-storybooks/storybook-9-angular/.storybook/main.ts",
+        "test-storybooks/storybook-9-angular/visual-check.config.ts",
+        "test-storybooks/storybook-10-angular/.storybook/main.ts",
+        "test-storybooks/storybook-10-angular/.storybook/test-storybook-config.ts",
+        "test-storybooks/storybook-10-angular/.storybook/own-modules-first.ts",
+        "test-storybooks/storybook-10-angular/.storybook/own-modules-first.test.ts",
+        "test-storybooks/storybook-10-angular/stories/*.stories.ts",
+        "test-storybooks/storybook-10-angular/visual-check.config.ts",
+        "test-storybooks/storybook-11-angular/.storybook/main.ts",
+        "test-storybooks/storybook-11-angular/visual-check.config.ts",
         "test-storybooks/setup/*.ts",
         "packages/cli/skill/scripts/run.mjs",
         "packages/*/test/**/*.test.ts",

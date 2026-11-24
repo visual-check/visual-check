@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@angular/core": ["../node_modules/@angular/core"],
+      "@storybook/angular": ["../node_modules/@storybook/angular/dist/index.d.ts"],
+      "storybook/test": ["../node_modules/storybook/dist/test/index.d.ts"]
+    }
+  }
+}

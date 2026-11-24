@@ -289,6 +289,26 @@ export interface GridPlayContext {
 }
 
 /**
+ * The `play` of `EveryCombination` in the ports whose chips inject their accent: checks every accent chip's computed
+ * background is the accent, so an accent that missed the grid's cells fails even before the image is compared.
+ *
+ * @public
+ */
+export async function everyCombinationPlay({ canvas }: GridPlayContext): Promise<void> {
+  // An accent chip's text is white, a neutral one's ink.
+  const accentChips = canvas
+    .getAllByText('Save changes')
+    .filter((chip) => getComputedStyle(chip).color === colors.white)
+
+  await expect(stylesOf(accentChips, ['background-color'])).toEqual([
+    [colors.accent],
+    [colors.accent],
+    [colors.accent],
+    [colors.accent],
+  ])
+}
+
+/**
  * The `play` of `ForcedStates`: checks the headers and each cell's computed style.
  *
  * @public
