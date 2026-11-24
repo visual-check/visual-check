@@ -2,13 +2,19 @@
 # apps run on (docs/prd/17-test-apps.md › A run). It uploads one artifact, visual-check-packages: each package's tarball
 # as `pnpm pack` names it, and the amd64 browser image as chromium-image.tar.gz, which `docker load` reads.
 #
-# It always packs visual-check/visual-check: the commit under test when this repository calls it, else its default
-# branch, as actions/checkout picks for another repository. Until #95 publishes the browser image and the browser
-# package, the test apps install the packed browser package and load this image.
+# It always packs visual-check/visual-check: the commit `ref` names when the caller passes one, as the release workflow
+# does with the commit release-please tagged. Else the commit under test when this repository calls it, else its
+# default branch, as actions/checkout picks for another repository. Until #95 publishes the browser image and the
+# browser package, the test apps install the packed browser package and load this image.
 name: Pack
 
 on:
   workflow_call:
+    inputs:
+      ref:
+        description: The commit to pack. Empty packs the commit actions/checkout picks.
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -22,6 +28,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: visual-check/visual-check
+          ref: ${{ inputs.ref }}
           persist-credentials: false
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -40,6 +47,8 @@ jobs:
             (cd "packages/$package" && pnpm pack --pack-destination "$RUNNER_TEMP/packages")
           done
           ls -l "$RUNNER_TEMP/packages"
+          # The release workflow's Publish to npm job prints the same lines for the files it publishes.
+          (cd "$RUNNER_TEMP/packages" && sha256sum -- *.tgz)
       - name: Create a docker-container builder
         run: docker buildx create --driver docker-container --use
       - name: Build the browser image

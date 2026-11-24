@@ -1,0 +1,203 @@
+# Releases the lockstep group, @visual-check/cli, @visual-check/storybook and @visual-check/storybook-addon, at one
+# version (docs/prd/19-release.md › Releasing the lockstep group).
+#
+# On every push to main, release-please opens or updates the group's release PR from the conventional commits since
+# the last release. On the push that merges it, release-please tags the release and drafts its GitHub releases. This
+# workflow then packs the tagged commit once, runs the test apps on those files, publishes those same files to npm only
+# when every test-apps job passed, and only then publishes the GitHub releases.
+#
+# Run by hand, or on a pull request that changes this workflow or the pack workflow, it's a dry run of the checked-out
+# commit: no release-please, `npm publish --dry-run` on the packed files, and no GitHub releases.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .github/workflows/pack.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A push's run waits for the one before it. Each event has its own group, so a dry run never takes the place of a
+# waiting push. A pull request's newer commit cancels its older run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # release-please, set up by release-please-config.json and .release-please-manifest.json. It reads the repository
+  # through the API, so it needs no checkout. It opens its PR with this workflow's token, so no workflow runs on that
+  # PR.
+  release-please:
+    name: Release PR
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      # The group's components release together, so the CLI's outputs stand for the group's.
+      released: ${{ steps.release.outputs['packages/cli--release_created'] }}
+      sha: ${{ steps.release.outputs['packages/cli--sha'] }}
+      version: ${{ steps.release.outputs['packages/cli--version'] }}
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
+
+  # What this run packs and publishes. On a push, only a release of the lockstep group, at the commit release-please
+  # tagged, which may be older than this push. Otherwise the checked-out commit, as a dry run. No workflow ran on the
+  # release PR, so the lockstep check runs here, on the commit to publish.
+  plan:
+    name: Plan
+    needs: release-please
+    # Also when release-please was skipped, as on a dry run.
+    if: ${{ !cancelled() && !failure() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      publish: ${{ steps.plan.outputs.publish }}
+      dry-run: ${{ steps.plan.outputs.dry-run }}
+      ref: ${{ steps.plan.outputs.ref }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Plan
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          RELEASED: ${{ needs.release-please.outputs.released }}
+          RELEASE_SHA: ${{ needs.release-please.outputs.sha }}
+        run: |
+          if [[ $EVENT != push ]]; then
+            echo "::notice::A dry run: nothing is published."
+            { echo publish=true; echo dry-run=true; echo ref=; } >> "$GITHUB_OUTPUT"
+          elif [[ $RELEASED == true ]]; then
+            { echo publish=true; echo dry-run=false; echo "ref=$RELEASE_SHA"; } >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::release-please released nothing of the lockstep group, so nothing is published."
+            echo publish=false >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.plan.outputs.publish == 'true'
+        with:
+          ref: ${{ steps.plan.outputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.plan.outputs.publish == 'true'
+        with:
+          node-version: 24
+      - name: Lockstep check
+        if: steps.plan.outputs.publish == 'true'
+        run: node packages/repo-checks/src/check-lockstep.ts
+      - name: Version
+        id: version
+        if: steps.plan.outputs.publish == 'true'
+        env:
+          RELEASED_VERSION: ${{ needs.release-please.outputs.version }}
+        run: |
+          version=$(jq -er .version packages/cli/package.json)
+          if [[ -n $RELEASED_VERSION && $version != "$RELEASED_VERSION" ]]; then
+            echo "::error::release-please released $RELEASED_VERSION, but packages/cli/package.json has $version."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  # The packages and the browser image, packed once from the commit the plan names, as CI packs them.
+  pack:
+    name: Pack
+    needs: plan
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.publish == 'true' }}
+    uses: ./.github/workflows/pack.yml
+    with:
+      ref: ${{ needs.plan.outputs.ref }}
+
+  # The test apps on those files, through test-apps' reusable workflow from its main, as CI runs them.
+  test-apps:
+    name: Test apps
+    needs: pack
+    if: ${{ !cancelled() && needs.pack.result == 'success' }}
+    uses: visual-check/test-apps/.github/workflows/test-apps.yml@main
+    with:
+      artifact: visual-check-packages
+
+  # The same files on npm, only when every test-apps job passed, through npm's trusted publishing: npm trades this job's
+  # OIDC token for a publish token, so no token is stored. npm 11.5.1 or later does that; Node 24 ships 11.19.
+  publish:
+    name: Publish to npm
+    needs: [plan, test-apps]
+    if: ${{ !cancelled() && needs.test-apps.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: visual-check-packages
+          path: ${{ runner.temp }}/packages
+      - name: Publish
+        env:
+          DRY_RUN: ${{ needs.plan.outputs.dry-run }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          npm --version
+          cd "$RUNNER_TEMP/packages"
+          # The lockstep group, as packages/repo-checks/src/lockstep/lockstep.ts lists it, in an order that puts each
+          # package's peers on npm before it: the addon peer-depends on its own version of the CLI.
+          for name in cli storybook storybook-addon; do
+            tarball="visual-check-$name-$VERSION.tgz"
+            if [[ ! -f $tarball ]]; then
+              echo "::error::The packed files hold no $tarball."
+              exit 1
+            fi
+            # The same line as the Pack job's, which shows npm gets the files the test apps ran on.
+            sha256sum -- "$tarball"
+            if [[ $DRY_RUN == true ]]; then
+              # Without the OIDC request variables, npm asks for no publish token. --force lets a dry run go on for a
+              # version that's on npm already, as a dry run of a released commit is.
+              env -u ACTIONS_ID_TOKEN_REQUEST_URL -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+                npm publish "./$tarball" --access public --provenance --dry-run --force
+            elif [[ $(npm view "@visual-check/$name@$VERSION" version 2> /dev/null) == "$VERSION" ]]; then
+              # An earlier attempt of this run published it, so re-running the run's failed jobs is safe.
+              echo "::notice::@visual-check/$name@$VERSION is on npm already."
+            else
+              npm publish "./$tarball" --access public --provenance
+            fi
+          done
+
+  # The draft GitHub releases release-please made, published now that npm has the packages. The CLI's is the
+  # repository's latest.
+  github-releases:
+    name: GitHub releases
+    needs: [plan, publish]
+    if: ${{ !cancelled() && needs.publish.result == 'success' && needs.plan.outputs.dry-run == 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the GitHub releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          for name in storybook-addon storybook cli; do
+            latest=false
+            if [[ $name == cli ]]; then
+              latest=true
+            fi
+            gh release edit "$name-v$VERSION" --repo "$GITHUB_REPOSITORY" --draft=false --latest="$latest"
+          done
