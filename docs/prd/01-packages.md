@@ -57,7 +57,7 @@ The three packages of the lockstep group always share one version and release to
 - It holds only code that runs in Storybook's preview, and it's safe in a browser.
 - The root entry exports:
   - `defineVisualCheck` and its types ([Per-story options](07-per-story-options.md));
-  - the framework-free grid module, the plain-DOM `combinations()` and the forced-states utility ([Grid stories](08-grid-stories.md)).
+  - the framework-free grid module, the plain-DOM `combinations()`, and `forceStates` with its `ForcedState` type, the forced-states utility ([Grid stories](08-grid-stories.md)).
 - Subpaths export one port each:
   - `/react`: `Combinations`, for React 18 and 19;
   - `/vue`: `Combinations`, for Vue 3;
@@ -66,7 +66,7 @@ The three packages of the lockstep group always share one version and release to
 - A missing framework never breaks the install. Only importing that framework's entry fails.
 - It has no dependency on the CLI. If a newer helper writes a key an older CLI doesn't know, the CLI exits 2 and names the key.
 - A project imports it from `<configDir>/visual-check.ts` and from stories files that render the grid.
-- It carries the MIT notice of Storybook's pseudo-states addon, which the forced-states utility is adapted from.
+- It carries the MIT notice of Storybook's pseudo-states addon, which the forced-states utility is adapted from, in `THIRD-PARTY-NOTICES.md`.
 
 ## `@visual-check/storybook-addon`
 

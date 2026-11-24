@@ -1,6 +1,9 @@
+import { forceStates } from './forced-state/force-states.js'
+import type { ForcedState } from './forced-state/forced-states.js'
 import {
   type GridCaption,
   type GridCell,
+  type GridHeader,
   type GridInput,
   type GridLayout,
   type GridRow,
@@ -25,9 +28,11 @@ import {
 } from './per-story-options/define-visual-check.js'
 
 export type {
+  ForcedState,
   GlobalValue,
   GridCaption,
   GridCell,
+  GridHeader,
   GridInput,
   GridLayout,
   GridRow,
@@ -44,4 +49,4 @@ export type {
   WaitHook,
   WrittenMask,
 }
-export { defineVisualCheck, gridAttribute, gridLayoutOf }
+export { defineVisualCheck, forceStates, gridAttribute, gridLayoutOf }

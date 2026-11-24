@@ -17,7 +17,7 @@ A story that lays out combinations of one component's props, and maybe forced st
 _Avoid_: Combined snapshot, contact sheet, cartesian story, matrix, variants
 
 **Forced state**:
-An interaction state, such as hover or keyboard focus, that a cell of a grid story shows without a pointer or a keyboard.
+An interaction state, such as hover or keyboard focus, that an element shows without a pointer or a keyboard, in a grid story's state cell or under a forced-state class.
 _Avoid_: Pseudo state, simulated hover
 
 **Baseline**:

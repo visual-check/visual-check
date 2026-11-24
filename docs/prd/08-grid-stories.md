@@ -79,7 +79,11 @@ What isn't forced:
 
 - the browser's own default styles, such as its default focus ring;
 - rules with the state inside `:not()`;
-- cross-origin stylesheets without CORS, which log a warning.
+- cross-origin stylesheets without CORS, which log a warning;
+- in a shadow root, a selector whose states are all nested in `:is()`, `:where()` or `:has()`, and one that starts with `:host-context()`;
+- closed shadow roots attached before the first grid with states or `forceStates` call;
+- a sheet pushed onto `adoptedStyleSheets`, rather than assigned, with no change to the DOM after it;
+- rules inside `@media (hover: hover)` in a mode that emulates touch, since the media query doesn't match.
 
 Other notes:
 
@@ -118,6 +122,19 @@ Capture finds every grid by its `data-visual-check-grid` attribute in the top do
   - React 18 runs in the React port's unit tests, and this repo's test Storybooks run React 19;
   - the React port's types need TypeScript 5.4 or later;
   - the root entry also exports the framework-free module: `gridLayoutOf`, `gridAttribute` and their types.
+- Decided while building forced states (#90):
+  - twins rewrite in place as `:is(.visual-check-<state> *)`, so `.btn:hover` gets `.btn:is(.visual-check-hover *)`, at the same specificity; a state after a pseudo-element moves in front of it;
+  - in shadow roots, twins put the condition on the host, as `:host(:where(.visual-check-<state>)) …` or `:host(.visual-check-<state>)`, and every shadow host inside a state cell gets that state's class;
+  - these aren't forced through the host: a shadow-root selector whose states are all nested in `:is()`, `:where()` or `:has()`, and one that starts with `:host-context()`;
+  - a selector with several listed states gets one twin with all of them forced;
+  - the listed states are the union of every grid and `forceStates` call on the page;
+  - twins stay after the grid unmounts, and are inert;
+  - hooks are installed on the first request and kept, inert. Closed shadow roots attached before then aren't reached. A sheet pushed onto `adoptedStyleSheets`, rather than assigned, is reached only on the next change to the DOM;
+  - `forceStates` returns the function that stops it, and does nothing without a DOM;
+  - a header never widens a column;
+  - an unknown or repeated state throws;
+  - the React port forces states in `useInsertionEffect`;
+  - the rewrite edits `selectorText` in place, so other rewriters' rule objects and indexes survive.
 
 [47]: https://github.com/visual-check/visual-check/issues/47
 [48]: https://github.com/visual-check/visual-check/issues/48

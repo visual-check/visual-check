@@ -22,11 +22,18 @@ import type { StorybookConfig } from '@storybook/react-vite'
  * preview-level `parameters.visualCheck`. It isn't named `preview.ts`, so Storybook loads it only through
  * `previewAnnotations`.
  *
+ * Every test Storybook renders beside Storybook's pseudo-states addon, `storybook-addon-pseudo-states`, resolved from
+ * the test Storybook's own package as the framework is, so the forced-state stories check that visual-check's rewrite
+ * and the addon's each keep the other's rules on every Storybook version.
+ *
  * @public
  */
 export function testStorybookConfig(mainUrl: string): StorybookConfig {
+  const require = createRequire(mainUrl)
+
   return {
-    framework: dirname(createRequire(mainUrl).resolve('@storybook/react-vite/package.json')),
+    framework: dirname(require.resolve('@storybook/react-vite/package.json')),
+    addons: [dirname(require.resolve('storybook-addon-pseudo-states/package.json'))],
     stories: [{ directory: fileURLToPath(new URL('../stories', import.meta.url)), files: '*.stories.tsx' }],
     staticDirs: [fileURLToPath(new URL('../static', import.meta.url))],
     previewAnnotations: (entries = []) => [...entries, fileURLToPath(new URL('./shared-preview.ts', import.meta.url))],

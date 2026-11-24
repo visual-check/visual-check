@@ -1,3 +1,5 @@
+import { checkedStatesOf, type ForcedState, forcedStateClassOf } from '../forced-state/forced-states.js'
+
 /**
  * The attribute the grid's element carries, empty, which capture finds a grid by.
  *
@@ -36,6 +38,12 @@ export interface GridInput<Props> {
    */
   cellWidth?: number | undefined
   /**
+   * The states to force, one column each after the default state's, in the order given: `hover`, `active`,
+   * `focus-visible`, `focus-within` and `focus`. With states, a header row names each column. Each state may appear
+   * once.
+   */
+  states?: readonly ForcedState[] | undefined
+  /**
    * Replaces a caption's default text. It gets only the row's varying props, in declaration order, and isn't called
    * for a row with no varying prop.
    */
@@ -66,6 +74,22 @@ export interface GridCaption {
 }
 
 /**
+ * The header of one column, in the header row: a line that names the column's state.
+ *
+ * @public
+ */
+export interface GridHeader {
+  /**
+   * `default` for the first column, else `:` and the state, such as `:focus-visible`.
+   */
+  text: string
+  /**
+   * The header element's inline styles.
+   */
+  style: GridStyle
+}
+
+/**
  * A cell of a row: the element that holds one render of the component.
  *
  * @public
@@ -75,6 +99,11 @@ export interface GridCell {
    * The cell element's inline styles.
    */
   style: GridStyle
+  /**
+   * The class of the cell's forced state, such as `visual-check-hover`, which the cell element carries so what it holds
+   * shows that state; `null` for the default state's cell.
+   */
+  stateClass: string | null
 }
 
 /**
@@ -93,13 +122,13 @@ export interface GridRow<Props> {
    */
   caption: GridCaption | null
   /**
-   * One cell per column, in column order: only the default state's for now.
+   * One cell per column, in column order: the default state's, then each forced state's.
    */
   cells: GridCell[]
 }
 
 /**
- * Everything a port draws: the grid element's styles and its rows.
+ * Everything a port draws: the grid element's styles, its header row and its rows, and the states it forces.
  *
  * @public
  */
@@ -109,9 +138,18 @@ export interface GridLayout<Props> {
    */
   style: GridStyle
   /**
+   * The header row: one header per column, in column order, or none when the grid forces no state.
+   */
+  headers: GridHeader[]
+  /**
    * The rows, in combination order.
    */
   rows: GridRow<Props>[]
+  /**
+   * The states the grid forces, checked, in column order after the default state's: what a port passes to
+   * `forceStates` while the grid is shown.
+   */
+  states: ForcedState[]
 }
 
 /**
@@ -128,6 +166,24 @@ const rowGap = 16
  * The space between a caption and its row's cells, in CSS pixels.
  */
 const captionGap = 4
+
+/**
+ * The space between the header row and the first row, in CSS pixels.
+ */
+const headerGap = 16
+
+/**
+ * The styles captions and headers share: small grey monospace, their text never widening a column. Each use puts
+ * the `all: 'initial'` reset first.
+ */
+const labelStyle: GridStyle = {
+  contain: 'inline-size',
+  'font-family': 'monospace',
+  'font-size': '11px',
+  'line-height': '14px',
+  color: '#737373',
+  'overflow-wrap': 'anywhere',
+}
 
 /**
  * A combination of listed props: one value for each prop, by prop name.
@@ -212,13 +268,31 @@ function captionStyleOf(rowIndex: number): GridStyle {
     display: 'block',
     'grid-column': '1 / -1',
     margin: `${top} 0 ${captionGap}px`,
-    contain: 'inline-size',
-    'font-family': 'monospace',
-    'font-size': '11px',
-    'line-height': '14px',
-    color: '#737373',
-    'overflow-wrap': 'anywhere',
+    ...labelStyle,
   }
+}
+
+/**
+ * The header row: none without states, else `default` then `:<state>` for each state, in one grid row above the
+ * first caption.
+ */
+function headersOf(states: ForcedState[]): GridHeader[] {
+  if (states.length === 0) {
+    return []
+  }
+
+  const style: GridStyle = { all: 'initial', display: 'block', margin: `0 0 ${headerGap}px`, ...labelStyle }
+
+  return ['default', ...states.map((state) => `:${state}`)].map((text) => ({ text, style }))
+}
+
+/**
+ * A row's cells: the default state's, then each state's with its class, all styled alike.
+ */
+function cellsOf(states: ForcedState[], cellWidth: number | undefined): GridCell[] {
+  const style = cellStyleOf(cellWidth)
+
+  return [null, ...states.map(forcedStateClassOf)].map((stateClass) => ({ style, stateClass }))
 }
 
 /**
@@ -235,13 +309,15 @@ function cellStyleOf(cellWidth: number | undefined): GridStyle {
 }
 
 /**
- * Works out a grid: its rows (every combination of the listed props), each caption's text and every element's inline
- * styles. Each port only turns the layout into elements.
+ * Works out a grid: its columns (the default state's, then one per forced state), its header row, its rows (every
+ * combination of the listed props), each caption's text and every element's inline styles. Each port only turns the
+ * layout into elements, and forces the layout's states while it's shown.
  *
- * @throws When a prop lists no values.
+ * @throws When a prop lists no values, or `states` lists an unknown state or one twice.
  * @public
  */
 export function gridLayoutOf<Props extends object>(input: GridInput<Props>): GridLayout<Props> {
+  const states = checkedStatesOf(input.states ?? [], 'the grid')
   const entries = Object.entries(input.props).filter(
     (entry): entry is [string, readonly unknown[]] => entry[1] !== undefined,
   )
@@ -257,9 +333,14 @@ export function gridLayoutOf<Props extends object>(input: GridInput<Props>): Gri
       props: { ...input.args, ...combination } as Props,
       caption:
         varyingNames.length === 0 ? null : { text: captionTextOf(varying, caption), style: captionStyleOf(rowIndex) },
-      cells: [{ style: cellStyleOf(input.cellWidth) }],
+      cells: cellsOf(states, input.cellWidth),
     }
   })
 
-  return { style: gridStyleOf(1, input.cellWidth), rows }
+  return {
+    style: gridStyleOf(1 + states.length, input.cellWidth),
+    headers: headersOf(states),
+    rows,
+    states,
+  }
 }

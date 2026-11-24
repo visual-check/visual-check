@@ -264,8 +264,8 @@ describe('gridLayoutOf', () => {
       const layout = gridLayoutOf({ props: { size: ['sm', 'lg'] } })
 
       expect(layout.rows.map((row) => row.cells)).toStrictEqual([
-        [{ style: { 'justify-self': 'start', 'align-self': 'start' } }],
-        [{ style: { 'justify-self': 'start', 'align-self': 'start' } }],
+        [{ style: { 'justify-self': 'start', 'align-self': 'start' }, stateClass: null }],
+        [{ style: { 'justify-self': 'start', 'align-self': 'start' }, stateClass: null }],
       ])
     })
 
@@ -273,8 +273,107 @@ describe('gridLayoutOf', () => {
       const layout = gridLayoutOf({ props: { size: ['sm'] }, cellWidth: 200 })
 
       expect(layout.rows.map((row) => row.cells)).toStrictEqual([
-        [{ style: { 'justify-self': 'start', 'align-self': 'start', width: '200px' } }],
+        [{ style: { 'justify-self': 'start', 'align-self': 'start', width: '200px' }, stateClass: null }],
       ])
+    })
+  })
+
+  describe('states', () => {
+    /**
+     * Every header's style, in its key order.
+     */
+    const headerStyle = {
+      all: 'initial',
+      display: 'block',
+      margin: '0 0 16px',
+      contain: 'inline-size',
+      'font-family': 'monospace',
+      'font-size': '11px',
+      'line-height': '14px',
+      color: '#737373',
+      'overflow-wrap': 'anywhere',
+    }
+
+    it.each([
+      ['without states', undefined],
+      ['with no states', []],
+    ])('draws no header row and one column %s', (_, states) => {
+      const layout = gridLayoutOf({ props: { size: ['sm', 'lg'] }, states })
+
+      expect(layout.headers).toStrictEqual([])
+      expect(layout.states).toStrictEqual([])
+      expect(layout.style).toStrictEqual(gridLayoutOf({ props: { size: ['sm', 'lg'] } }).style)
+      expect(layout.style['grid-template-columns']).toBe('max-content')
+    })
+
+    it('adds a column per state after the default one, with a header row naming each column', () => {
+      const layout = gridLayoutOf({ props: { size: ['sm', 'lg'] }, states: ['hover', 'focus-visible'] })
+
+      expect(layout.style['grid-template-columns']).toBe('max-content max-content max-content')
+      expect(layout.headers).toStrictEqual([
+        { text: 'default', style: headerStyle },
+        { text: ':hover', style: headerStyle },
+        { text: ':focus-visible', style: headerStyle },
+      ])
+      expect(layout.headers.map((header) => Object.keys(header.style))).toStrictEqual(
+        Array.from(layout.headers, () => Object.keys(headerStyle)),
+      )
+      expect(layout.rows.map((row) => row.cells.map((cell) => cell.stateClass))).toStrictEqual([
+        [null, 'visual-check-hover', 'visual-check-focus-visible'],
+        [null, 'visual-check-hover', 'visual-check-focus-visible'],
+      ])
+      expect(layout.states).toStrictEqual(['hover', 'focus-visible'])
+    })
+
+    it('makes every state column and cell exactly cellWidth wide', () => {
+      const layout = gridLayoutOf({ props: { size: ['sm'] }, cellWidth: 120, states: ['hover', 'focus'] })
+
+      expect(layout.style['grid-template-columns']).toBe('120px 120px 120px')
+      expect(layout.rows[0]?.cells.map((cell) => cell.style)).toStrictEqual(
+        Array.from({ length: 3 }, () => ({ 'justify-self': 'start', 'align-self': 'start', width: '120px' })),
+      )
+    })
+
+    it('orders the columns as the states are given', () => {
+      const layout = gridLayoutOf({ props: { size: ['sm'] }, states: ['focus', 'hover'] })
+
+      expect(layout.headers.map((header) => header.text)).toStrictEqual(['default', ':focus', ':hover'])
+      expect(layout.states).toStrictEqual(['focus', 'hover'])
+    })
+
+    it('gives each of the five states its class', () => {
+      const layout = gridLayoutOf({
+        props: { size: ['sm'] },
+        states: ['hover', 'active', 'focus-visible', 'focus-within', 'focus'],
+      })
+
+      expect(layout.rows[0]?.cells.map((cell) => cell.stateClass)).toStrictEqual([
+        null,
+        'visual-check-hover',
+        'visual-check-active',
+        'visual-check-focus-visible',
+        'visual-check-focus-within',
+        'visual-check-focus',
+      ])
+    })
+
+    it('keeps the first caption 4px above its cells and each header 16px above the first caption', () => {
+      const layout = gridLayoutOf({ props: { size: ['sm', 'lg'] }, states: ['hover'] })
+
+      expect(layout.rows[0]?.caption?.style.margin).toBe('0 0 4px')
+      expect(layout.headers.map((header) => header.style.margin)).toStrictEqual(['0 0 16px', '0 0 16px'])
+    })
+
+    it.each([
+      [
+        ['visited'],
+        'visual-check: the grid can\'t force "visited". The states it forces are hover, active, focus-visible, focus-within and focus.',
+      ],
+      [['hover', 'hover'], 'visual-check: the grid lists "hover" twice.'],
+    ])('throws for the states %j', (states, message) => {
+      const input = { props: { size: ['sm'] }, states }
+
+      expect(() => gridLayoutOf(input as unknown as GridInput<{ size: string }>)).toThrow(new Error(message))
     })
   })
 })

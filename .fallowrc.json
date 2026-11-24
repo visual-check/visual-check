@@ -8,8 +8,13 @@
   "ignorePatterns": ["test-storybooks/storybook-10-react/static/**", "test-storybooks/setup/fixtures/**"],
   "workspaces": {
     "settings": {
-      "test-storybooks/storybook-9-react": { "ignoreDependencies": ["@visual-check/storybook"] },
-      "test-storybooks/storybook-11-react": { "ignoreDependencies": ["@visual-check/storybook"] },
+      "test-storybooks/storybook-9-react": {
+        "ignoreDependencies": ["@visual-check/storybook", "storybook-addon-pseudo-states"]
+      },
+      "test-storybooks/storybook-10-react": { "ignoreDependencies": ["storybook-addon-pseudo-states"] },
+      "test-storybooks/storybook-11-react": {
+        "ignoreDependencies": ["@visual-check/storybook", "storybook-addon-pseudo-states"]
+      },
       "test-storybooks/setup": {
         "ignoreDependencies": [
           "@visual-check/chromium",
@@ -27,6 +32,15 @@
     "unused-dependencies": "warn",
     "boundary-violation": "error"
   },
+  "overrides": [
+    {
+      "files": [
+        "packages/storybook/src/forced-state/page.fixture.ts",
+        "packages/storybook/src/forced-state/style-sheet.fixture.ts"
+      ],
+      "rules": { "unused-class-members": "off" }
+    }
+  ],
   "boundaries": {
     "zones": [
       { "name": "cli/capture/driver/cdp", "patterns": ["packages/cli/src/capture/driver/cdp/**"] },
@@ -53,6 +67,7 @@
       { "name": "cli/terminal-ui", "patterns": ["packages/cli/src/terminal-ui/**"] },
       { "name": "cli/visual-diff", "patterns": ["packages/cli/src/visual-diff/**"] },
       { "name": "storybook/per-story-options", "patterns": ["packages/storybook/src/per-story-options/**"] },
+      { "name": "storybook/forced-state", "patterns": ["packages/storybook/src/forced-state/**"] },
       { "name": "storybook/grid-story", "patterns": ["packages/storybook/src/grid-story/**"] },
       { "name": "storybook/react-port", "patterns": ["packages/storybook/src/react-port/**"] },
       { "name": "storybook-addon/channel-events", "patterns": ["packages/storybook-addon/src/channel-events/**"] },
@@ -120,8 +135,9 @@
       { "from": "cli/terminal-ui", "allow": ["cli/init", "cli/reporter"] },
       { "from": "cli/visual-diff", "allow": ["cli/config"] },
       { "from": "storybook/per-story-options", "allow": [] },
-      { "from": "storybook/grid-story", "allow": [] },
-      { "from": "storybook/react-port", "allow": ["storybook/grid-story"] },
+      { "from": "storybook/forced-state", "allow": [] },
+      { "from": "storybook/grid-story", "allow": ["storybook/forced-state"] },
+      { "from": "storybook/react-port", "allow": ["storybook/forced-state", "storybook/grid-story"] },
       { "from": "storybook-addon/channel-events", "allow": ["cli/addon-child"] },
       {
         "from": "storybook-addon/check-relay",
