@@ -227,12 +227,17 @@
                   "sharp": "Only packages/cli/src/visual-diff/ decodes and encodes images, through sharp.",
                   "yauzl": "Only packages/cli/src/browser-download/ unzips, through yauzl.",
                   "react": "Only packages/storybook/src/react-port/ draws the grid with React.",
-                  "react-dom": "Only packages/storybook/src/react-port/ draws the grid with React."
+                  "react-dom": "Only packages/storybook/src/react-port/ draws the grid with React.",
+                  "vue": "Only packages/storybook/src/vue-port/ draws the grid with Vue."
                 },
                 "patterns": [
                   {
                     "group": ["react/**", "react-dom/**"],
                     "message": "Only packages/storybook/src/react-port/ draws the grid with React."
+                  },
+                  {
+                    "group": ["vue/**", "@vue/**"],
+                    "message": "Only packages/storybook/src/vue-port/ draws the grid with Vue."
                   }
                 ]
               }
@@ -252,8 +257,42 @@
                 "paths": {
                   "pixelmatch": "Only packages/cli/src/visual-diff/ compares images, through pixelmatch.",
                   "sharp": "Only packages/cli/src/visual-diff/ decodes and encodes images, through sharp.",
-                  "yauzl": "Only packages/cli/src/browser-download/ unzips, through yauzl."
-                }
+                  "yauzl": "Only packages/cli/src/browser-download/ unzips, through yauzl.",
+                  "vue": "Only packages/storybook/src/vue-port/ draws the grid with Vue."
+                },
+                "patterns": [
+                  {
+                    "group": ["vue/**", "@vue/**"],
+                    "message": "Only packages/storybook/src/vue-port/ draws the grid with Vue."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/storybook/src/vue-port/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "pixelmatch": "Only packages/cli/src/visual-diff/ compares images, through pixelmatch.",
+                  "sharp": "Only packages/cli/src/visual-diff/ decodes and encodes images, through sharp.",
+                  "yauzl": "Only packages/cli/src/browser-download/ unzips, through yauzl.",
+                  "react": "Only packages/storybook/src/react-port/ draws the grid with React.",
+                  "react-dom": "Only packages/storybook/src/react-port/ draws the grid with React."
+                },
+                "patterns": [
+                  {
+                    "group": ["react/**", "react-dom/**"],
+                    "message": "Only packages/storybook/src/react-port/ draws the grid with React."
+                  }
+                ]
               }
             }
           }
