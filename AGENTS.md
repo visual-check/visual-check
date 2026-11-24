@@ -16,6 +16,10 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/ag
 
 Adding, moving or exporting code in any package's `src/`: follow `docs/agents/source-layout.md`.
 
+### Commits
+
+Writing a commit message or a PR title: follow `docs/agents/commits.md`.
+
 ### Task execution
 
 Executing a ticket or plan: use the `subagent-driven-development` skill. Split the work into atomic commits, each one a single coherent change that passes checks on its own.
