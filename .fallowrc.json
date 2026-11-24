@@ -9,7 +9,8 @@
     "test-storybooks/storybook-11-html/visual-check.config.ts",
     "test-storybooks/storybook-9-vue/visual-check.config.ts",
     "test-storybooks/storybook-10-vue/visual-check.config.ts",
-    "test-storybooks/storybook-11-vue/visual-check.config.ts"
+    "test-storybooks/storybook-11-vue/visual-check.config.ts",
+    "test-storybooks/storybook-10-angular/visual-check.config.ts"
   ],
   "ignorePatterns": ["test-storybooks/storybook-10-react/static/**", "test-storybooks/setup/fixtures/**"],
   "workspaces": {
@@ -49,6 +50,10 @@
         "packages/storybook/src/forced-state/style-sheet.fixture.ts"
       ],
       "rules": { "unused-class-members": "off" }
+    },
+    {
+      "files": ["test-storybooks/storybook-10-angular/stories/grid.stories.ts"],
+      "rules": { "unrendered-components": "off" }
     }
   ],
   "boundaries": {
@@ -230,6 +235,12 @@
         "test-storybooks/storybook-10-vue/visual-check.config.ts",
         "test-storybooks/storybook-11-vue/.storybook/main.ts",
         "test-storybooks/storybook-11-vue/visual-check.config.ts",
+        "test-storybooks/storybook-10-angular/.storybook/main.ts",
+        "test-storybooks/storybook-10-angular/.storybook/test-storybook-config.ts",
+        "test-storybooks/storybook-10-angular/.storybook/own-modules-first.ts",
+        "test-storybooks/storybook-10-angular/.storybook/own-modules-first.test.ts",
+        "test-storybooks/storybook-10-angular/stories/*.stories.ts",
+        "test-storybooks/storybook-10-angular/visual-check.config.ts",
         "test-storybooks/setup/*.ts",
         "packages/cli/skill/scripts/run.mjs",
         "packages/*/test/**/*.test.ts",

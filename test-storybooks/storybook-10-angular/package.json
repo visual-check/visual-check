@@ -1,0 +1,37 @@
+{
+  "name": "@visual-check/test-storybook-10-angular",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build-storybook": "ng run test-storybook:build-storybook",
+    "e2e": "node ../storybook-10-html/e2e.ts",
+    "storybook": "ng run test-storybook:storybook",
+    "test:type": "tsc --noEmit && tsc --noEmit -p .storybook/tsconfig.json",
+    "test:unit": "vitest run"
+  },
+  "devDependencies": {
+    "@angular-devkit/architect": "0.2102.31",
+    "@angular-devkit/build-angular": "21.2.31",
+    "@angular-devkit/core": "21.2.31",
+    "@angular/animations": "21.2.26",
+    "@angular/cli": "21.2.31",
+    "@angular/common": "21.2.26",
+    "@angular/compiler": "21.2.26",
+    "@angular/compiler-cli": "21.2.26",
+    "@angular/core": "21.2.26",
+    "@angular/platform-browser": "21.2.26",
+    "@angular/platform-browser-dynamic": "21.2.26",
+    "@storybook/angular": "10.6.7",
+    "@types/node": "22.20.5",
+    "@visual-check/chromium": "workspace:*",
+    "@visual-check/cli": "workspace:*",
+    "@visual-check/storybook": "workspace:*",
+    "@visual-check/typescript-config": "workspace:*",
+    "rxjs": "7.8.2",
+    "storybook": "10.6.7",
+    "typescript": "5.9.3",
+    "vitest": "5.1.0",
+    "zone.js": "0.16.3"
+  }
+}

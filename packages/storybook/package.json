@@ -55,6 +55,7 @@
     }
   },
   "devDependencies": {
+    "@angular/animations": "18.2.14",
     "@angular/common": "18.2.14",
     "@angular/compiler": "18.2.14",
     "@angular/core": "18.2.14",
@@ -69,6 +70,7 @@
     "storybook": "10.6.7",
     "typescript": "7.0.2",
     "vitest": "5.1.0",
-    "vue": "3.5.45"
+    "vue": "3.5.45",
+    "zone.js": "0.14.10"
   }
 }

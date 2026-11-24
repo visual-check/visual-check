@@ -65,7 +65,8 @@
         "test-storybooks/storybook-10-react/addon-e2e.ts",
         "test-storybooks/storybook-10-html/stories/grid.stories.ts",
         "test-storybooks/storybook-10-html/*.ts",
-        "test-storybooks/storybook-10-vue/stories/grid.stories.ts"
+        "test-storybooks/storybook-10-vue/stories/grid.stories.ts",
+        "test-storybooks/storybook-10-angular/stories/grid.stories.ts"
       ],
       "linter": {
         "rules": {

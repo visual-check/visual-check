@@ -18,7 +18,7 @@ Each committed baseline is a copy of `storybook-10-react`'s same-named baseline.
 
 ## The end-to-end check
 
-`e2e.ts` works in the folder it starts in, so the 9.1 and 11 plain-DOM test Storybooks, and the [Vue test Storybooks](../storybook-10-vue/README.md) on 9.1, 10 and 11, run the same file from their own folders. The config it writes names the Storybook after its folder's renderer, `html` or `vue`. It serves the static build and runs the built CLI against it, in three cases:
+`e2e.ts` works in the folder it starts in, so the 9.1 and 11 plain-DOM test Storybooks, the [Vue test Storybooks](../storybook-10-vue/README.md) on 9.1, 10 and 11, and the [Angular test Storybook](../storybook-10-angular/README.md) on 10, run the same file from their own folders. The config it writes names the Storybook after its folder's renderer, `html`, `vue` or `angular`. It serves the static build and runs the built CLI against it, in three cases:
 
 1. `test --all` passes every grid story against the committed baselines.
 2. The committed baselines are `storybook-10-react`'s, byte for byte.
