@@ -8,7 +8,9 @@
         "$TURBO_ROOT$/packages/*/package.json",
         "$TURBO_ROOT$/packages/*/src/**",
         "$TURBO_ROOT$/packages/chromium/chromium.json",
-        "$TURBO_ROOT$/.fallowrc.json"
+        "$TURBO_ROOT$/.fallowrc.json",
+        "$TURBO_ROOT$/release-please-config.json",
+        "$TURBO_ROOT$/.release-please-manifest.json"
       ]
     }
   }
