@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { type GridLayout, gridLayoutOf, type PropValues } from '../grid-story/grid-layout.js'
 import { type CombinationsInput, combinations, gridElementOf } from './combinations.js'
-import { fakeGridPage } from './grid-page.fixture.js'
+import { type FakeGridPage, fakeGridPage } from './grid-page.fixture.js'
 
 /**
  * What the test button takes.
@@ -47,6 +47,27 @@ function drawn<Props extends object>({
  */
 function markupOf<Props extends object>(input: CombinationsInput<Props>): string {
   return fake.markupOf(drawn(input).grid)
+}
+
+/**
+ * A fresh fake page and the grid drawn in it with forced states, not yet in the page.
+ */
+function drawnWithStates(): { page: FakeGridPage; grid: HTMLElement } {
+  const page = fakeGridPage()
+  const layout = gridLayoutOf<ButtonProps>({
+    props: { size: ['sm', 'lg'] },
+    args: { label: 'Go', variant: 'solid' },
+    states: ['hover'],
+  })
+
+  return { page, grid: gridElementOf(page.page, layout, button) }
+}
+
+/**
+ * The page's body, to put the grid in.
+ */
+function bodyOf(page: FakeGridPage): HTMLElement {
+  return page.document.body as unknown as HTMLElement
 }
 
 describe('combinations', () => {
@@ -218,6 +239,115 @@ describe('combinations', () => {
     expect(() =>
       combinations({ render: button, props: { size: ['sm'] }, args: { label: 'Go', variant: 'solid' } }),
     ).toThrow("visual-check: combinations() needs a DOM. Call it in a story's render.")
+  })
+
+  it("forces the layout's states once, before render is first called", () => {
+    const page = fakeGridPage()
+    const render = vi.fn(button)
+    const layout = gridLayoutOf<ButtonProps>({
+      props: { size: ['sm', 'lg'] },
+      args: { label: 'Go', variant: 'solid' },
+      states: ['hover', 'focus-visible'],
+    })
+
+    gridElementOf(page.page, layout, render)
+
+    expect(page.forceStates.mock.calls).toStrictEqual([[['hover', 'focus-visible']]])
+    expect(page.forceStates.mock.invocationCallOrder[0]).toBeLessThan(render.mock.invocationCallOrder[0] ?? 0)
+  })
+
+  it('forces nothing and watches nothing without states', () => {
+    const page = fakeGridPage()
+
+    gridElementOf(page.page, gridLayoutOf<ButtonProps>({ props: { size: ['sm'] }, args: { label: 'Go' } }), button)
+
+    expect(page.forceStates).not.toHaveBeenCalled()
+    expect(page.observers).toHaveLength(0)
+  })
+
+  it("watches the document's children and subtree", () => {
+    const { page } = drawnWithStates()
+
+    expect(page.observers.map((observer) => observer.observed)).toStrictEqual([
+      [{ target: page.document, options: { childList: true, subtree: true } }],
+    ])
+  })
+
+  it('keeps forcing while the grid is in the page', () => {
+    const { page, grid } = drawnWithStates()
+
+    bodyOf(page).append(grid)
+    page.observers[0]?.trigger([{ removedNodes: [] }])
+
+    expect(page.stop).not.toHaveBeenCalled()
+    expect(page.observers[0]?.disconnected).toBe(false)
+  })
+
+  it('keeps forcing through changes elsewhere before the grid enters the page', () => {
+    const { page } = drawnWithStates()
+
+    page.observers[0]?.trigger([{ removedNodes: [page.element('span')] }])
+
+    expect(page.stop).not.toHaveBeenCalled()
+    expect(page.observers[0]?.disconnected).toBe(false)
+  })
+
+  it('stops forcing, once, when the grid leaves the page', () => {
+    const { page, grid } = drawnWithStates()
+    const observer = page.observers[0]
+
+    bodyOf(page).append(grid)
+    observer?.trigger([{ removedNodes: [] }])
+    page.remove(grid)
+    observer?.trigger([{ removedNodes: [grid] }])
+    observer?.trigger([{ removedNodes: [] }])
+
+    expect(page.stop).toHaveBeenCalledOnce()
+    expect(observer?.disconnected).toBe(true)
+  })
+
+  it('stops forcing when the grid has left the page, whatever the batch removed', () => {
+    const { page, grid } = drawnWithStates()
+    const wrapper = page.element('div')
+    const observer = page.observers[0]
+
+    bodyOf(page).append(wrapper)
+    wrapper.append(grid)
+    observer?.trigger([{ removedNodes: [] }])
+    page.remove(wrapper)
+    observer?.trigger([{ removedNodes: [] }])
+
+    expect(page.stop).toHaveBeenCalledOnce()
+    expect(observer?.disconnected).toBe(true)
+  })
+
+  it('stops forcing when the grid enters and leaves the page in one batch', () => {
+    const { page, grid } = drawnWithStates()
+    const wrapper = page.element('div')
+
+    wrapper.append(grid)
+    page.observers[0]?.trigger([{ removedNodes: [wrapper] }])
+
+    expect(page.stop).toHaveBeenCalledOnce()
+    expect(page.observers[0]?.disconnected).toBe(true)
+  })
+
+  it('stops forcing and rethrows when render throws', () => {
+    const page = fakeGridPage()
+    const failure = new Error('render failed')
+    const layout = gridLayoutOf<ButtonProps>({
+      props: { size: ['sm'] },
+      args: { label: 'Go', variant: 'solid' },
+      states: ['hover'],
+    })
+
+    expect(() =>
+      gridElementOf(page.page, layout, () => {
+        throw failure
+      }),
+    ).toThrow(failure)
+    expect(page.stop).toHaveBeenCalledOnce()
+    expect(page.observers).toHaveLength(0)
   })
 
   it("types the props' values from render's parameter", () => {

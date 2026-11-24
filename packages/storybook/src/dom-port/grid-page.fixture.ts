@@ -1,3 +1,5 @@
+import { type Mock, vi } from 'vitest'
+import type { ForcedState } from '../forced-state/forced-states.js'
 import type { GridPage } from './combinations.js'
 
 /**
@@ -42,10 +44,7 @@ class FakeNode {
    */
   append(...nodes: FakeNode[]): void {
     for (const node of nodes) {
-      if (node.parentNode !== null) {
-        node.parentNode.childNodes = node.parentNode.childNodes.filter((child) => child !== node)
-      }
-
+      detach(node)
       node.parentNode = this
       this.childNodes.push(node)
     }
@@ -62,6 +61,16 @@ class FakeNode {
     }
 
     return false
+  }
+}
+
+/**
+ * Takes the node out of its parent's children, if it has a parent.
+ */
+function detach(node: FakeNode): void {
+  if (node.parentNode !== null) {
+    node.parentNode.childNodes = node.parentNode.childNodes.filter((child) => child !== node)
+    node.parentNode = null
   }
 }
 
@@ -205,6 +214,24 @@ class FakeDocument extends FakeNode {
 }
 
 /**
+ * A fake `MutationObserver` the page made, as a test sees it.
+ */
+interface FakeMutationObserver {
+  /**
+   * Each `observe` call's target and options, in order.
+   */
+  readonly observed: { target: Node; options: unknown }[]
+  /**
+   * Whether `disconnect` was called.
+   */
+  readonly disconnected: boolean
+  /**
+   * Hands it the records, as a batch of mutations would, unless it was disconnected.
+   */
+  trigger(records: { removedNodes: Node[] }[]): void
+}
+
+/**
  * A fake page for the plain-DOM port and the helpers a test reads it with.
  */
 export interface FakeGridPage {
@@ -217,6 +244,18 @@ export interface FakeGridPage {
    */
   document: FakeDocument
   /**
+   * The page's `forceStates`, which gives `stop`.
+   */
+  forceStates: Mock<(states: readonly ForcedState[]) => () => void>
+  /**
+   * What each `forceStates` call gives, to end its request.
+   */
+  stop: Mock<() => void>
+  /**
+   * The observers created in the page.
+   */
+  observers: FakeMutationObserver[]
+  /**
    * A new element of the page with the attributes, set in order, then the text.
    */
   element(localName: string, text?: string, attributes?: Readonly<Record<string, string>>): HTMLElement
@@ -228,6 +267,10 @@ export interface FakeGridPage {
    * Each `style.setProperty` call on the element: its name and value, in order.
    */
   styleCallsOf(node: Node): [string, string][]
+  /**
+   * Detaches the node from its parent.
+   */
+  remove(node: Node): void
 }
 
 /**
@@ -235,10 +278,62 @@ export interface FakeGridPage {
  */
 export function fakeGridPage(): FakeGridPage {
   const document = new FakeDocument()
+  const stop = vi.fn<() => void>()
+  const forceStates = vi.fn<(states: readonly ForcedState[]) => () => void>(() => stop)
+  const observers: FakeMutationObserver[] = []
+
+  class PageMutationObserver implements FakeMutationObserver {
+    /**
+     * Each `observe` call's target and options, in order.
+     */
+    readonly observed: { target: Node; options: unknown }[] = []
+    /**
+     * Whether `disconnect` was called.
+     */
+    disconnected = false
+    /**
+     * What it hands records to.
+     */
+    readonly #callback: (records: { removedNodes: Node[] }[]) => void
+
+    /**
+     * An observer the page records, handing records to the callback.
+     */
+    constructor(callback: (records: { removedNodes: Node[] }[]) => void) {
+      this.#callback = callback
+      observers.push(this)
+    }
+
+    /**
+     * Records the target and options.
+     */
+    observe(target: Node, options: unknown): void {
+      this.observed.push({ target, options })
+    }
+
+    /**
+     * Marks it disconnected, so it hands on no more records.
+     */
+    disconnect(): void {
+      this.disconnected = true
+    }
+
+    /**
+     * Hands it the records unless it was disconnected.
+     */
+    trigger(records: { removedNodes: Node[] }[]): void {
+      if (!this.disconnected) {
+        this.#callback(records)
+      }
+    }
+  }
 
   return {
-    page: { document } as unknown as GridPage,
+    page: { document, MutationObserver: PageMutationObserver, forceStates } as unknown as GridPage,
     document,
+    forceStates,
+    stop,
+    observers,
     element: (localName, text, attributes = {}) => {
       const element = document.createElement(localName)
 
@@ -254,6 +349,9 @@ export function fakeGridPage(): FakeGridPage {
     },
     markupOf: (node) => markupOf(node as unknown as FakeNode).replaceAll('><', '>\n<'),
     styleCallsOf: (node) => (node as unknown as FakeElement).styleCalls,
+    remove: (node) => {
+      detach(node as unknown as FakeNode)
+    },
   }
 }
 
