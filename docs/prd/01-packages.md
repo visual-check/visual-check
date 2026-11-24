@@ -62,7 +62,7 @@ The three packages of the lockstep group always share one version and release to
   - `/react`: `Combinations`, for React 18 and 19;
   - `/vue`: `Combinations`, for Vue 3;
   - `/angular`: `combinations()`, for Angular 18 and later.
-- It has no run-time dependencies. `storybook`, `react`, `vue` and `@angular/core` are optional peers. `storybook` is there only for the `wait` hook's `StoryContext` type.
+- It has no run-time dependencies. `storybook`, `react`, `vue`, `@angular/core` and `@angular/common` are optional peers. `storybook` is there only for the `wait` hook's `StoryContext` type.
 - A missing framework never breaks the install. Only importing that framework's entry fails.
 - It has no dependency on the CLI. If a newer helper writes a key an older CLI doesn't know, the CLI exits 2 and names the key.
 - A project imports it from `<configDir>/visual-check.ts` and from stories files that render the grid.
