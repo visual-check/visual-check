@@ -101,11 +101,22 @@ importers:
         version: 5.1.0(@types/node@22.20.5)(vite@8.3.8(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0))
 
   packages/storybook:
-    dependencies:
-      '@angular/core':
-        specifier: '>=18.0.0'
-        version: 22.2.6(rxjs@7.8.2)
     devDependencies:
+      '@angular/common':
+        specifier: 18.2.14
+        version: 18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10))(rxjs@7.8.2)
+      '@angular/compiler':
+        specifier: 18.2.14
+        version: 18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10))
+      '@angular/core':
+        specifier: 18.2.14
+        version: 18.2.14(rxjs@7.8.2)(zone.js@0.14.10)
+      '@angular/platform-browser':
+        specifier: 18.2.14
+        version: 18.2.14(@angular/animations@18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10)))(@angular/common@18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10))(rxjs@7.8.2))(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10))
+      '@angular/platform-server':
+        specifier: 18.2.14
+        version: 18.2.14(@angular/animations@18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10)))(@angular/common@18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10))(rxjs@7.8.2))(@angular/compiler@18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10)))(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10))(@angular/platform-browser@18.2.14(@angular/animations@18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10)))(@angular/common@18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10))(rxjs@7.8.2))(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10)))
       '@bramus/specificity':
         specifier: 2.4.4
         version: 2.4.4
@@ -540,18 +551,55 @@ packages:
     resolution: {integrity: sha512-GZdcaU9RV2Gn9SAg1hcsSoQ4nIWZfutPqIvxayUYsOzfBPJioJ+aQIXnMJiGDz+35Gg2pskkPxioYnSblPELEw==}
     engines: {node: '>=18'}
 
-  '@angular/core@22.2.6':
-    resolution: {integrity: sha512-atESNSPsM0dBXU88aDtByBP4W/wb8USbhL16lsePyxBvAWtM1Xn7QBB489QTmHpY6VCXHnqMhXWcrZsDpoIBsw==}
-    engines: {node: ^22.22.3 || ^24.15.0 || >=26.0.0}
+  '@angular/animations@18.2.14':
+    resolution: {integrity: sha512-Kp/MWShoYYO+R3lrrZbZgszbbLGVXHB+39mdJZwnIuZMDkeL3JsIBlSOzyJRTnpS1vITc+9jgHvP/6uKbMrW1Q==}
+    engines: {node: ^18.19.1 || ^20.11.1 || >=22.0.0}
     peerDependencies:
-      '@angular/compiler': 22.2.6
+      '@angular/core': 18.2.14
+
+  '@angular/common@18.2.14':
+    resolution: {integrity: sha512-ZPRswzaVRiqcfZoowuAM22Hr2/z10ajWOUoFDoQ9tWqz/fH/773kJv2F9VvePIekgNPCzaizqv9gF6tGNqaAwg==}
+    engines: {node: ^18.19.1 || ^20.11.1 || >=22.0.0}
+    peerDependencies:
+      '@angular/core': 18.2.14
       rxjs: ^6.5.3 || ^7.4.0
-      zone.js: ~0.15.0 || ~0.16.0
+
+  '@angular/compiler@18.2.14':
+    resolution: {integrity: sha512-Mpq3v/mztQzGAQAAFV+wAI1hlXxZ0m8eDBgaN2kD3Ue+r4S6bLm1Vlryw0iyUnt05PcFIdxPT6xkcphq5pl6lw==}
+    engines: {node: ^18.19.1 || ^20.11.1 || >=22.0.0}
+    peerDependencies:
+      '@angular/core': 18.2.14
     peerDependenciesMeta:
-      '@angular/compiler':
+      '@angular/core':
         optional: true
-      zone.js:
+
+  '@angular/core@18.2.14':
+    resolution: {integrity: sha512-BIPrCs93ZZTY9ym7yfoTgAQ5rs706yoYeAdrgc8kh/bDbM9DawxKlgeKBx2FLt09Y0YQ1bFhKVp0cV4gDEaMxQ==}
+    engines: {node: ^18.19.1 || ^20.11.1 || >=22.0.0}
+    peerDependencies:
+      rxjs: ^6.5.3 || ^7.4.0
+      zone.js: ~0.14.10
+
+  '@angular/platform-browser@18.2.14':
+    resolution: {integrity: sha512-W+JTxI25su3RiZVZT3Yrw6KNUCmOIy7OZIZ+612skPgYK2f2qil7VclnW1oCwG896h50cMJU/lnAfxZxefQgyQ==}
+    engines: {node: ^18.19.1 || ^20.11.1 || >=22.0.0}
+    peerDependencies:
+      '@angular/animations': 18.2.14
+      '@angular/common': 18.2.14
+      '@angular/core': 18.2.14
+    peerDependenciesMeta:
+      '@angular/animations':
         optional: true
+
+  '@angular/platform-server@18.2.14':
+    resolution: {integrity: sha512-XUErL0mOPvua5EtlmSOFllSM+Ts1wHzNIv0WNV5FJxWI3Pe6Xxs29xneKDOImC9ErYWuQqK7sQ/hyIaHO5fhOw==}
+    engines: {node: ^18.19.1 || ^20.11.1 || >=22.0.0}
+    peerDependencies:
+      '@angular/animations': 18.2.14
+      '@angular/common': 18.2.14
+      '@angular/compiler': 18.2.14
+      '@angular/core': 18.2.14
+      '@angular/platform-browser': 18.2.14
 
   '@babel/code-frame@7.29.7':
     resolution: {integrity: sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw==}
@@ -3816,6 +3864,10 @@ packages:
     resolution: {integrity: sha512-h3Fbisa2nKGPxCpm89Hk33lBLsnaGBvctQopaBSOW/uIs6FTe1ATyAnKFJrzVs9vpGdsTe73WF3V4lIsk4Gacw==}
     engines: {node: '>=18'}
 
+  xhr2@0.2.1:
+    resolution: {integrity: sha512-sID0rrVCqkVNUn8t6xuv9+6FViXjUVXq8H5rWOH2rz9fDNQEd4g0EA2XlcEdJXRz5BMEn4O1pJFdT+z4YHhoWw==}
+    engines: {node: '>= 6'}
+
   yallist@3.1.1:
     resolution: {integrity: sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g==}
 
@@ -3830,6 +3882,9 @@ packages:
   yoga-layout@3.2.1:
     resolution: {integrity: sha512-0LPOt3AxKqMdFBZA3HBAt/t/8vIKq7VaQYbuA8WxCgung+p9TVyKRYdpvCb80HcdTN2NkbIKbhNwKUfm3tQywQ==}
 
+  zone.js@0.14.10:
+    resolution: {integrity: sha512-YGAhaO7J5ywOXW6InXNlLmfU194F8lVgu7bRntUF3TiG8Y3nBK0x1UJJuHUP/e8IyihkjCYqhCScpSwnlaSRkQ==}
+
 snapshots:
 
   '@adobe/css-tools@4.5.0': {}
@@ -3839,10 +3894,46 @@ snapshots:
       ansi-styles: 6.2.3
       is-fullwidth-code-point: 5.1.0
 
-  '@angular/core@22.2.6(rxjs@7.8.2)':
+  '@angular/animations@18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10))':
+    dependencies:
+      '@angular/core': 18.2.14(rxjs@7.8.2)(zone.js@0.14.10)
+      tslib: 2.9.1
+
+  '@angular/common@18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10))(rxjs@7.8.2)':
+    dependencies:
+      '@angular/core': 18.2.14(rxjs@7.8.2)(zone.js@0.14.10)
+      rxjs: 7.8.2
+      tslib: 2.9.1
+
+  '@angular/compiler@18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10))':
+    dependencies:
+      tslib: 2.9.1
+    optionalDependencies:
+      '@angular/core': 18.2.14(rxjs@7.8.2)(zone.js@0.14.10)
+
+  '@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10)':
     dependencies:
       rxjs: 7.8.2
       tslib: 2.9.1
+      zone.js: 0.14.10
+
+  '@angular/platform-browser@18.2.14(@angular/animations@18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10)))(@angular/common@18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10))(rxjs@7.8.2))(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10))':
+    dependencies:
+      '@angular/common': 18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10))(rxjs@7.8.2)
+      '@angular/core': 18.2.14(rxjs@7.8.2)(zone.js@0.14.10)
+      tslib: 2.9.1
+    optionalDependencies:
+      '@angular/animations': 18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10))
+
+  '@angular/platform-server@18.2.14(@angular/animations@18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10)))(@angular/common@18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10))(rxjs@7.8.2))(@angular/compiler@18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10)))(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10))(@angular/platform-browser@18.2.14(@angular/animations@18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10)))(@angular/common@18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10))(rxjs@7.8.2))(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10)))':
+    dependencies:
+      '@angular/animations': 18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10))
+      '@angular/common': 18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10))(rxjs@7.8.2)
+      '@angular/compiler': 18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10))
+      '@angular/core': 18.2.14(rxjs@7.8.2)(zone.js@0.14.10)
+      '@angular/platform-browser': 18.2.14(@angular/animations@18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10)))(@angular/common@18.2.14(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10))(rxjs@7.8.2))(@angular/core@18.2.14(rxjs@7.8.2)(zone.js@0.14.10))
+      tslib: 2.9.1
+      xhr2: 0.2.1
 
   '@babel/code-frame@7.29.7':
     dependencies:
@@ -6768,6 +6859,8 @@ snapshots:
     dependencies:
       is-wsl: 3.1.1
 
+  xhr2@0.2.1: {}
+
   yallist@3.1.1: {}
 
   yauzl@3.4.0:
@@ -6777,3 +6870,5 @@ snapshots:
   yocto-queue@1.2.2: {}
 
   yoga-layout@3.2.1: {}
+
+  zone.js@0.14.10: {}
