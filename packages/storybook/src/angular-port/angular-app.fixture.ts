@@ -1,4 +1,5 @@
 import {
+  type ApplicationConfig,
   Component,
   type EnvironmentProviders,
   Input,
@@ -7,7 +8,7 @@ import {
   type Type,
 } from '@angular/core'
 import { bootstrapApplication } from '@angular/platform-browser'
-import { provideServerRendering, renderApplication } from '@angular/platform-server'
+import { INITIAL_CONFIG, platformServer, provideServerRendering, renderApplication } from '@angular/platform-server'
 import type { CombinationsStory } from './combinations.js'
 
 /**
@@ -78,27 +79,56 @@ function storyRootOf(story: CombinationsStory, options: StoryRootOptions = {}): 
 }
 
 /**
+ * The app's config: server rendering without zone.js, and what the test's app provides.
+ */
+function appConfigOf(options: StoryRootOptions): ApplicationConfig {
+  return {
+    providers: [
+      provideServerRendering(),
+      provideExperimentalZonelessChangeDetection(),
+      ...(options.appProviders ?? []),
+    ],
+  }
+}
+
+/**
+ * A mounted story, kept until the test destroys it.
+ */
+export interface MountedStory {
+  /**
+   * Destroys the app, and so the story's view, then its platform.
+   */
+  destroy(): void
+}
+
+/**
+ * Mounts the story in a server platform's document, as `markupOf` does, and keeps it mounted until `destroy()`, so a
+ * test sees what happens while the grid exists and when Angular destroys it.
+ */
+export async function mountStory(story: CombinationsStory, options: StoryRootOptions = {}): Promise<MountedStory> {
+  const platformRef = platformServer([{ provide: INITIAL_CONFIG, useValue: { document: '<vc-root></vc-root>' } }])
+  const appRef = await bootstrapApplication(storyRootOf(story, options), appConfigOf(options), { platformRef })
+
+  await appRef.whenStable()
+
+  return {
+    destroy() {
+      appRef.destroy()
+      platformRef.destroy()
+    },
+  }
+}
+
+/**
  * The story's server-rendered markup inside `<vc-root>`, one tag per line. Only Angular's own spellings are rewritten
  * to React's, so the React port's snapshots apply verbatim: comments and the test components' host tags are dropped,
  * and a style's `: ` and `; ` lose their space and its trailing `;` is dropped.
  */
 export async function markupOf(story: CombinationsStory, options: StoryRootOptions = {}): Promise<string> {
   const root = storyRootOf(story, options)
-  const html = await renderApplication(
-    (context) =>
-      bootstrapApplication(
-        root,
-        {
-          providers: [
-            provideServerRendering(),
-            provideExperimentalZonelessChangeDetection(),
-            ...(options.appProviders ?? []),
-          ],
-        },
-        context,
-      ),
-    { document: '<vc-root></vc-root>' },
-  )
+  const html = await renderApplication((context) => bootstrapApplication(root, appConfigOf(options), context), {
+    document: '<vc-root></vc-root>',
+  })
   const inner = /<vc-root[^>]*>(.*)<\/vc-root>/s.exec(html)?.[1]
 
   if (inner === undefined) {

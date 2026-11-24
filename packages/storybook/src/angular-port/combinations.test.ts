@@ -14,10 +14,34 @@ import {
   output,
   VERSION,
 } from '@angular/core'
-import { describe, expect, expectTypeOf, it } from 'vitest'
+import { beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
+import type { ForcedState } from '../forced-state/forced-states.js'
 import { type GridStyle, gridLayoutOf, type PropValues } from '../grid-story/grid-layout.js'
-import { markupOf, withSignalInputs } from './angular-app.fixture.js'
+import { markupOf, mountStory, withSignalInputs } from './angular-app.fixture.js'
 import { type CombinationsInput, combinations } from './combinations.js'
+
+/**
+ * What forcing and the cells did, in order, shared with the mocked `forceStates`, and which platform the forcing
+ * directive is told it runs on.
+ */
+const { log, platform } = vi.hoisted(() => ({ log: [] as string[], platform: { server: false } }))
+
+vi.mock('../forced-state/force-states.js', () => ({
+  forceStates: (states: readonly ForcedState[]) => {
+    log.push(`force ${states.join(' ')}`)
+
+    return () => {
+      log.push(`stop ${states.join(' ')}`)
+    }
+  },
+}))
+
+// Angular 18's server platform throws when told it's a browser (`NG0210`), so the tests stand in for the platform
+// check instead. `NgComponentOutlet` stays the real one.
+vi.mock('@angular/common', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@angular/common')>()),
+  isPlatformServer: () => platform.server,
+}))
 
 /**
  * What the test button takes.
@@ -120,6 +144,35 @@ Input()(LegacyInputs.prototype, 'label')
 const Legacy = Component({ selector: 'vc-legacy', standalone: true, template: '<i>{{ label }}</i>' })(LegacyInputs)
 
 /**
+ * A cell that logs when it's created.
+ */
+const LoggedCell = Component({ selector: 'vc-logged', standalone: true, template: '<button>{{ size() }}</button>' })(
+  withSignalInputs(
+    class LoggedCell {
+      /**
+       * The cell's size.
+       */
+      size = input.required<string>()
+
+      /**
+       * Logs the cell's creation.
+       */
+      constructor() {
+        log.push('cell created')
+      }
+    },
+    { size: true },
+  ),
+)
+
+/**
+ * The log's lines that force or stop states.
+ */
+function forcingOf(lines: string[]): string[] {
+  return lines.filter((line) => /^(force|stop) /.test(line))
+}
+
+/**
  * Every `style` attribute's text in the markup, in document order.
  */
 function stylesOf(markup: string): string[] {
@@ -143,6 +196,11 @@ function textsOf(markup: string, tag: string): (string | undefined)[] {
 }
 
 describe('combinations', () => {
+  beforeEach(() => {
+    log.length = 0
+    platform.server = false
+  })
+
   it('runs on Angular 18, the oldest Angular the port supports', () => {
     expect(VERSION.major).toBe('18')
   })
@@ -185,7 +243,7 @@ describe('combinations', () => {
         texts: ['default', ':hover', 'size: sm', 'size: lg'],
       },
     })
-    expect(story.moduleMetadata).toStrictEqual({ imports: [NgComponentOutlet] })
+    expect(story.moduleMetadata).toStrictEqual({ imports: [NgComponentOutlet, expect.any(Function)] })
   })
 
   it('draws the grid, a caption above each row and a cell for each combination', async () => {
@@ -395,6 +453,65 @@ describe('combinations', () => {
     expect(() => combinations({ component: Plain, props: { label: ['a'] } })).toThrow(
       'visual-check: Plain is not an Angular component.',
     )
+  })
+
+  it("forces the layout's states once, before any cell is created, and keeps forcing while mounted", async () => {
+    const mounted = await mountStory(
+      combinations({ component: LoggedCell, props: { size: ['sm', 'lg'] }, states: ['hover', 'focus-visible'] }),
+    )
+    const whileMounted = [...log]
+
+    mounted.destroy()
+
+    expect(whileMounted).toStrictEqual(['force hover focus-visible', ...Array<string>(6).fill('cell created')])
+  })
+
+  it('stops once when Angular destroys the grid', async () => {
+    const mounted = await mountStory(
+      combinations({ component: LoggedCell, props: { size: ['sm'] }, states: ['hover', 'focus-visible'] }),
+    )
+
+    mounted.destroy()
+
+    expect(forcingOf(log)).toStrictEqual(['force hover focus-visible', 'stop hover focus-visible'])
+    expect(log.at(-1)).toBe('stop hover focus-visible')
+  })
+
+  it('forces nothing without states', async () => {
+    const story = combinations({ component: LoggedCell, props: { size: ['sm'] } })
+    const mounted = await mountStory(story)
+
+    mounted.destroy()
+
+    expect(story.moduleMetadata.imports).toStrictEqual([NgComponentOutlet])
+    expect(log).toStrictEqual(['cell created'])
+  })
+
+  it('forces nothing on the server', async () => {
+    platform.server = true
+
+    const story = combinations({ component: LoggedCell, props: { size: ['sm'] }, states: ['hover'] })
+    const mounted = await mountStory(story)
+
+    mounted.destroy()
+
+    expect(story.moduleMetadata.imports).toStrictEqual([NgComponentOutlet, expect.any(Function)])
+    expect(log).toStrictEqual(['cell created', 'cell created'])
+  })
+
+  it('forces nothing when the layout throws', () => {
+    expect(() => combinations({ component: LoggedCell, props: { size: [] }, states: ['hover'] })).toThrow(
+      /^visual-check: /,
+    )
+    expect(log).toStrictEqual([])
+  })
+
+  it('makes a forcing directive per call, so each grid forces its own states', () => {
+    const first = combinations({ component: LoggedCell, props: { size: ['sm'] }, states: ['hover'] })
+    const second = combinations({ component: LoggedCell, props: { size: ['sm'] }, states: ['hover'] })
+
+    expect(first.moduleMetadata.imports[1]).toBeTypeOf('function')
+    expect(second.moduleMetadata.imports[1]).not.toBe(first.moduleMetadata.imports[1])
   })
 
   it("types the props from the component's inputs", () => {

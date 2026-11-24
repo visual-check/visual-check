@@ -1,5 +1,16 @@
-import { NgComponentOutlet } from '@angular/common'
-import { type InputSignalWithTransform, type OutputRef, reflectComponentType, type Type } from '@angular/core'
+import { isPlatformServer, NgComponentOutlet } from '@angular/common'
+import {
+  Directive,
+  type InputSignalWithTransform,
+  inject,
+  type OnDestroy,
+  type OutputRef,
+  PLATFORM_ID,
+  reflectComponentType,
+  type Type,
+} from '@angular/core'
+import { forceStates } from '../forced-state/force-states.js'
+import type { ForcedState } from '../forced-state/forced-states.js'
 import {
   type GridCaption,
   type GridHeader,
@@ -77,7 +88,8 @@ export interface CombinationsStory {
     }
   }
   /**
-   * What the template uses: `NgComponentOutlet`, which creates the cells.
+   * What the template uses: `NgComponentOutlet`, which creates the cells, and with states the directive that forces
+   * them.
    */
   moduleMetadata: {
     /**
@@ -137,6 +149,28 @@ function gridTemplateOf(layout: GridLayout<object>): GridTemplate {
 }
 
 /**
+ * A standalone directive, made for one grid, that matches the grid's own element and forces the states from when it's
+ * created, before any cell, until Angular destroys it. It forces nothing while rendering on the server.
+ */
+function forcingDirectiveOf(states: readonly ForcedState[]): Type<OnDestroy> {
+  return Directive({ selector: `div[${gridAttribute}]`, standalone: true })(
+    class ForcedStates implements OnDestroy {
+      /**
+       * Stops forcing the states, or nothing on the server.
+       */
+      readonly #stop = isPlatformServer(inject(PLATFORM_ID)) ? undefined : forceStates(states)
+
+      /**
+       * Stops forcing the states when Angular destroys the grid.
+       */
+      ngOnDestroy(): void {
+        this.#stop?.()
+      }
+    },
+  )
+}
+
+/**
  * Checks that the component is an Angular component that takes every prop the grid sets, by the input's public name.
  *
  * @throws When the component is not an Angular component, or a name in `props` or `args` is none of its inputs.
@@ -166,7 +200,9 @@ function checkInputs(component: Type<unknown>, input: GridInput<object>): void {
  * `template` in its own markup, spreading `props` and `moduleMetadata`. Nothing here depends on Storybook. It works
  * with Angular 18 and later, with Angular's JIT compiler loaded, as Storybook's Angular renderer has it.
  *
- * With `states`, a header row names the columns, and each state cell carries its state's class.
+ * With `states`, a header row names the columns, each state cell carries its state's class, and stylesheets are
+ * rewritten to force those states from when the grid's element is created, before any cell, until Angular destroys
+ * it, and never while rendering on the server.
  *
  * @throws When the component is not an Angular component, a name in `props` or `args` is none of its inputs, a prop
  * lists no values, or `states` lists an unknown state or one twice.
@@ -181,6 +217,9 @@ export function combinations<Component>({ component, ...input }: CombinationsInp
   return {
     template,
     props: { visualCheckGrid: { component, rows: layout.rows.map((row) => row.props), texts } },
-    moduleMetadata: { imports: [NgComponentOutlet] },
+    moduleMetadata: {
+      imports:
+        layout.states.length === 0 ? [NgComponentOutlet] : [NgComponentOutlet, forcingDirectiveOf(layout.states)],
+    },
   }
 }
