@@ -217,6 +217,7 @@ export const colors = {
   purple: 'rgb(124, 58, 237)',
   green: 'rgb(187, 247, 208)',
   yellow: 'rgb(253, 230, 138)',
+  accent: 'rgb(22, 163, 74)',
 } as const
 
 /**

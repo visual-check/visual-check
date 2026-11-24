@@ -6,7 +6,8 @@
     "test-storybooks/storybook-11-react/visual-check.config.ts",
     "test-storybooks/storybook-9-html/visual-check.config.ts",
     "test-storybooks/storybook-10-html/visual-check.config.ts",
-    "test-storybooks/storybook-11-html/visual-check.config.ts"
+    "test-storybooks/storybook-11-html/visual-check.config.ts",
+    "test-storybooks/storybook-10-vue/visual-check.config.ts"
   ],
   "ignorePatterns": ["test-storybooks/storybook-10-react/static/**", "test-storybooks/setup/fixtures/**"],
   "workspaces": {
@@ -207,11 +208,17 @@
         "test-storybooks/storybook-9-html/.storybook/main.ts",
         "test-storybooks/storybook-9-html/visual-check.config.ts",
         "test-storybooks/storybook-10-html/.storybook/main.ts",
+        "test-storybooks/storybook-10-html/.storybook/deduped-vite-config.ts",
+        "test-storybooks/storybook-10-html/.storybook/deduped-vite-config.test.ts",
         "test-storybooks/storybook-10-html/.storybook/test-storybook-config.ts",
         "test-storybooks/storybook-10-html/stories/*.stories.ts",
         "test-storybooks/storybook-10-html/*.ts",
         "test-storybooks/storybook-11-html/.storybook/main.ts",
         "test-storybooks/storybook-11-html/visual-check.config.ts",
+        "test-storybooks/storybook-10-vue/.storybook/main.ts",
+        "test-storybooks/storybook-10-vue/.storybook/test-storybook-config.ts",
+        "test-storybooks/storybook-10-vue/stories/*.stories.ts",
+        "test-storybooks/storybook-10-vue/visual-check.config.ts",
         "test-storybooks/setup/*.ts",
         "packages/cli/skill/scripts/run.mjs",
         "packages/*/test/**/*.test.ts",

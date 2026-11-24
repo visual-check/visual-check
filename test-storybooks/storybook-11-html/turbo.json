@@ -9,6 +9,7 @@
         "package.json",
         "tsconfig.json",
         "$TURBO_ROOT$/test-storybooks/storybook-10-html/.storybook/test-storybook-config.ts",
+        "$TURBO_ROOT$/test-storybooks/storybook-10-html/.storybook/deduped-vite-config.ts",
         "$TURBO_ROOT$/test-storybooks/storybook-10-html/stories/**",
         "$TURBO_ROOT$/test-storybooks/storybook-10-html/tsconfig.json",
         "$TURBO_ROOT$/test-storybooks/storybook-10-react/stories/grid-parts.ts"
@@ -31,7 +32,8 @@
     "test:type": {
       "inputs": [
         "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/test-storybooks/storybook-10-html/.storybook/test-storybook-config.ts"
+        "$TURBO_ROOT$/test-storybooks/storybook-10-html/.storybook/test-storybook-config.ts",
+        "$TURBO_ROOT$/test-storybooks/storybook-10-html/.storybook/deduped-vite-config.ts"
       ]
     }
   }
