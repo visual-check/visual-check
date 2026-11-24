@@ -185,6 +185,8 @@ Viewed on `localhost`, the remote origin is the page's own, so none of them is l
 
 `TooWide`'s committed baseline is the story with `cellWidth={1200}`: a 1200 px wide grid of 2 rows. Every grid baseline is byte-identical on 9.1, 10 and 11. A broken forced state makes its story `play-threw` or `wait-threw`, rather than passing with a wrong baseline.
 
+The [plain-DOM test Storybook](../storybook-10-html/README.md) draws `EveryCombination`, `ForcedStates` and `LateStyles` with `combinations()` from `@visual-check/storybook`, and its end-to-end check needs their baselines here byte for byte. When one of them changes, copy it into `storybook-10-html/.visual-check/baselines/`.
+
 ## The forced states stories
 
 `stories/forced-states.stories.tsx` forces states outside a grid, with `forceStates` from `@visual-check/storybook`.

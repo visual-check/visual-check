@@ -1,0 +1,11 @@
+{
+  "extends": "@visual-check/typescript-config/base.json",
+  "compilerOptions": {
+    "lib": ["es2023", "dom"],
+    "types": ["node"],
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true
+  },
+  "include": [".storybook", "stories", "*.ts"]
+}

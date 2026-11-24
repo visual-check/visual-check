@@ -62,15 +62,14 @@ import type {
   UpdateReportEntry,
 } from '@visual-check/cli'
 import {
+  answerWithStaticFile,
   type Case,
   cliBin,
   committedBaselines,
-  contentTypes,
   descendantsOf,
   diagnosticsDir,
   docker,
   executableOnPath,
-  fileOfUrlPath,
   image,
   isFile,
   isRunning,
@@ -1317,19 +1316,7 @@ function serveFile(
   options: ServeOptions,
   markup: string | undefined,
 ): void {
-  const filePath = fileOfUrlPath(staticDir, pathname)
-
-  if (filePath === undefined) {
-    response.writeHead(404).end()
-
-    return
-  }
-
-  const body = readFileSync(filePath)
-
-  response
-    .writeHead(200, { 'content-type': contentTypes[extname(filePath)] ?? 'application/octet-stream' })
-    .end(changedBodyOf(pathname, body, options, markup))
+  answerWithStaticFile(staticDir, pathname, response, (body) => changedBodyOf(pathname, body, options, markup))
 }
 
 /**

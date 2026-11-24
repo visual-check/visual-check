@@ -201,6 +201,39 @@ importers:
         specifier: 5.1.0
         version: 5.1.0(@types/node@22.20.5)(vite@8.3.8(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0))
 
+  test-storybooks/storybook-10-html:
+    devDependencies:
+      '@storybook/html-vite':
+        specifier: 10.6.7
+        version: 10.6.7(storybook@10.6.7(@types/react@19.3.0)(react@19.3.1))(vite@8.3.8(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0))
+      '@types/node':
+        specifier: 22.20.5
+        version: 22.20.5
+      '@visual-check/chromium':
+        specifier: workspace:*
+        version: link:../../packages/chromium
+      '@visual-check/cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
+      '@visual-check/storybook':
+        specifier: workspace:*
+        version: link:../../packages/storybook
+      '@visual-check/typescript-config':
+        specifier: workspace:*
+        version: link:../../packages/typescript-config
+      storybook:
+        specifier: 10.6.7
+        version: 10.6.7(@types/react@19.3.0)(react@19.3.1)
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vite:
+        specifier: 8.3.8
+        version: 8.3.8(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@22.20.5)(vite@8.3.8(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0))
+
   test-storybooks/storybook-10-react:
     devDependencies:
       '@storybook/react-vite':
@@ -1677,6 +1710,17 @@ packages:
 
   '@storybook/global@5.0.0':
     resolution: {integrity: sha512-FcOqPAXACP0I3oJ/ws6/rrPT9WGhu915Cg8D02a9YxLo0DE9zI+a9A5gRGvmQ09fiWPukqI8ZAEoQEdWUKMQdQ==}
+
+  '@storybook/html-vite@10.6.7':
+    resolution: {integrity: sha512-MBqAMr3htgvFA38ThzPLiE8KbtZZoVnWTdPDV/h3FACz8z0kDOUMGq1usieMbQixbxGeMoD4HERwRV/vkT8l2Q==}
+    peerDependencies:
+      storybook: ^10.6.7
+      vite: ^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0
+
+  '@storybook/html@10.6.7':
+    resolution: {integrity: sha512-WJ9JujBalze+XPJBkdGtsbpBg5S3lcW37reqfkV/Rhw7fnGBVbRLovNvW7gdl/QTNuQyI2bkDfKrpdK1wcqh6Q==}
+    peerDependencies:
+      storybook: ^10.6.7
 
   '@storybook/icons@2.2.0':
     resolution: {integrity: sha512-FpUB/xizIrV1ILhCIYFo+TtQNN9YEoLjfcnAW0JtOXL+BcM2aisSysI0B54JMWDnljriXySBHgN6ps4s9lb75A==}
@@ -4201,6 +4245,19 @@ snapshots:
       unplugin: 1.16.1
 
   '@storybook/global@5.0.0': {}
+
+  '@storybook/html-vite@10.6.7(storybook@10.6.7(@types/react@19.3.0)(react@19.3.1))(vite@8.3.8(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0))':
+    dependencies:
+      '@storybook/builder-vite': 10.6.7(storybook@10.6.7(@types/react@19.3.0)(react@19.3.1))(vite@8.3.8(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0))
+      '@storybook/html': 10.6.7(storybook@10.6.7(@types/react@19.3.0)(react@19.3.1))
+      storybook: 10.6.7(@types/react@19.3.0)(react@19.3.1)
+      vite: 8.3.8(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)
+
+  '@storybook/html@10.6.7(storybook@10.6.7(@types/react@19.3.0)(react@19.3.1))':
+    dependencies:
+      '@storybook/global': 5.0.0
+      storybook: 10.6.7(@types/react@19.3.0)(react@19.3.1)
+      ts-dedent: 2.3.0
 
   '@storybook/icons@2.2.0(react@18.3.1)':
     dependencies:
