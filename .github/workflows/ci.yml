@@ -87,7 +87,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        storybook: [storybook-9-react, storybook-10-react, storybook-11-react, storybook-10-html]
+        storybook:
+          - storybook-9-react
+          - storybook-10-react
+          - storybook-11-react
+          - storybook-9-html
+          - storybook-10-html
+          - storybook-11-html
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

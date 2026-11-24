@@ -4,6 +4,8 @@ One of this repo's own test Storybooks ([PRD 18](../../docs/prd/18-repo-ci.md#th
 
 It has no pseudo-states addon and no preview annotations: the React test Storybooks' shared preview changes no grid snapshot.
 
+The [Storybook 9.1](../storybook-9-html/README.md) and [Storybook 11](../storybook-11-html/README.md) plain-DOM test Storybooks have no stories of their own: they read this package's stories and `.storybook/test-storybook-config.ts`, and run its `e2e.ts` from their own folders.
+
 ## The grid stories
 
 `stories/grid.stories.ts` holds the `Grid` stories, with the React grid stories' IDs and DOM. Their chips' looks, CSS and `play` checks come from `storybook-10-react/stories/grid-parts.ts`, so the grid is literally the same.
@@ -16,7 +18,7 @@ Each committed baseline is a copy of `storybook-10-react`'s same-named baseline.
 
 ## The end-to-end check
 
-`e2e.ts` serves the static build and runs the built CLI against it, in three cases:
+`e2e.ts` works in the folder it starts in, so the 9.1 and 11 plain-DOM test Storybooks run the same file from their own folders. It serves the static build and runs the built CLI against it, in three cases:
 
 1. `test --all` passes every grid story against the committed baselines.
 2. The committed baselines are `storybook-10-react`'s, byte for byte.
@@ -36,8 +38,10 @@ Turbo builds the CLI, `@visual-check/storybook` and the Storybook first.
 
 ## Rewriting the baselines
 
-Never write them here with `update`: they must be the React port's images. When a grid baseline of `storybook-10-react` changes, copy it here:
+Never write them here with `update`: they must be the React port's images. When a grid baseline of `storybook-10-react` changes, copy it here, and into `storybook-9-html` and `storybook-11-html`:
 
 ```sh
+cp test-storybooks/storybook-10-react/.visual-check/baselines/grid--{every-combination,forced-states,late-styles}.png test-storybooks/storybook-9-html/.visual-check/baselines/
 cp test-storybooks/storybook-10-react/.visual-check/baselines/grid--{every-combination,forced-states,late-styles}.png test-storybooks/storybook-10-html/.visual-check/baselines/
+cp test-storybooks/storybook-10-react/.visual-check/baselines/grid--{every-combination,forced-states,late-styles}.png test-storybooks/storybook-11-html/.visual-check/baselines/
 ```
