@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>visual-check · Landing F headers</title>
+<!-- PROTOTYPE — throwaway. Test page for landing F's five top headers (f-headers.css, f-headers.js).
+     The bar's "Header" toggle switches bare / slug / command / reveal / corners. Below the header: a stub of landing A's
+     hero (paper, crop marks, slug, huge headline, install block, proof) and seven filler bands that alternate bg-page and
+     bg-surface, with the canonical data-slot names, so each header can be judged while scrolling. -->
+<link rel="icon" href="../shared/logo/favicon.svg">
+<link rel="stylesheet" href="../shared/tokens.css">
+<link rel="stylesheet" href="../shared/bundle.css">
+<link rel="stylesheet" href="../shared/proto-base.css">
+<link rel="stylesheet" href="f-headers.css">
+<style>
+  /* Stub styles, prefixed d-. Values copied from landing A (container 1200px, gutters 16/32px, section padding 72/96px,
+     hero headline clamp(36px, 6.2vw, 92px), crop marks 10/4px and 18/8px). */
+  :root { --d-gutter: 16px; --d-crop-len: 10px; --d-crop-gap: 4px; --d-sec-pad: 72px; }
+  @media (min-width: 768px) { :root { --d-gutter: 32px; --d-crop-len: 18px; --d-crop-gap: 8px; --d-sec-pad: var(--space-24); } }
+
+  .d-wrap {
+    position: relative;
+    max-width: calc(1200px + 2 * var(--d-gutter));
+    margin-inline: auto;
+    padding-inline: max(var(--d-gutter), env(safe-area-inset-left, 0px)) max(var(--d-gutter), env(safe-area-inset-right, 0px));
+  }
+  .d-sec { background: var(--bg-page); color: var(--text-primary); padding-block: var(--d-sec-pad); }
+  .d-sec--surface { background: var(--bg-surface); }
+  :where(.d-sec) p { margin: 0; }
+  .d-h2 { margin: 0; font: 700 32px/36px var(--font-display); letter-spacing: -0.015em; }
+  @media (min-width: 768px) { .d-h2 { font: var(--text-h1); letter-spacing: -0.015em; } }
+  .d-lead { font: var(--text-body-lg); max-width: 40em; }
+  .d-muted { color: var(--text-muted); }
+  .d-stack { display: grid; gap: var(--space-6); grid-template-columns: minmax(0, 1fr); }
+  .d-stack--wide { gap: var(--space-12); }
+
+  .d-crop { position: absolute; top: 0; bottom: 0; left: max(var(--d-gutter), env(safe-area-inset-left, 0px)); right: max(var(--d-gutter), env(safe-area-inset-right, 0px)); pointer-events: none; }
+  .d-crop span { position: absolute; width: 0; height: 0; }
+  .d-crop span::before, .d-crop span::after { content: ""; position: absolute; background: var(--text-muted); }
+  .d-crop span::before { top: 0; height: 1px; width: var(--d-crop-len); }
+  .d-crop span::after { left: 0; width: 1px; height: var(--d-crop-len); }
+  .d-crop span:nth-child(1) { top: 0; left: 0; }
+  .d-crop span:nth-child(1)::before { right: var(--d-crop-gap); }
+  .d-crop span:nth-child(1)::after { bottom: var(--d-crop-gap); }
+  .d-crop span:nth-child(2) { top: 0; right: 0; }
+  .d-crop span:nth-child(2)::before { left: var(--d-crop-gap); }
+  .d-crop span:nth-child(2)::after { bottom: var(--d-crop-gap); }
+  .d-crop span:nth-child(3) { bottom: 0; left: 0; }
+  .d-crop span:nth-child(3)::before { right: var(--d-crop-gap); }
+  .d-crop span:nth-child(3)::after { top: var(--d-crop-gap); }
+  .d-crop span:nth-child(4) { bottom: 0; right: 0; }
+  .d-crop span:nth-child(4)::before { left: var(--d-crop-gap); }
+  .d-crop span:nth-child(4)::after { top: var(--d-crop-gap); }
+
+  .d-slug { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin: 0 0 var(--space-8); color: var(--text-muted); font: var(--text-label); letter-spacing: .02em; }
+  .d-reg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1; }
+  .d-cbar { display: inline-flex; }
+  .d-cbar span { width: 12px; height: 12px; display: block; }
+  .d-cbar .c { background: var(--brand-cyan); }
+  .d-cbar .m { background: var(--brand-magenta); }
+  .d-cbar .k { background: var(--text-primary); }
+  .d-cbar .p { background: var(--bg-raised); box-shadow: inset 0 0 0 1px var(--border-strong); }
+  @media (max-width: 479px) { .d-slug__long, .d-slug__r { display: none; } }
+
+  .d-hero { padding-top: var(--space-8); }
+  @media (min-width: 768px) { .d-hero { padding-top: var(--space-12); } }
+  .d-hero__title { margin: 0 0 40px; max-width: 14.5em; font-size: clamp(36px, 6.2vw, 92px); line-height: .95; letter-spacing: -0.03em; }
+  .d-hero__grid { display: grid; gap: var(--space-12); grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 1024px) { .d-hero__grid { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); column-gap: 64px; align-items: start; } }
+  .d-install pre { font-size: 16px; line-height: 24px; padding: 18px var(--space-4); }
+  .d-small { font: var(--text-small); color: var(--text-muted); }
+  .d-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4) var(--space-6); }
+
+  .d-proof { margin: 0; display: grid; background: var(--bg-raised); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); overflow: hidden; }
+  .d-proof__head, .d-proof__foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); padding: var(--space-3) var(--space-4); font: var(--text-label); letter-spacing: .02em; color: var(--text-muted); }
+  .d-plate { display: inline-flex; align-items: center; gap: 6px; color: var(--text-primary); }
+  .d-plate i { width: 10px; height: 10px; display: block; }
+  .d-plate--c i { background: var(--brand-cyan); }
+  .d-plate--m i { background: var(--brand-magenta); }
+  .d-art { position: relative; aspect-ratio: 640 / 300; border-block: 1px solid var(--border-subtle); background: var(--bg-page); display: grid; place-items: center; }
+  .d-press { position: relative; width: 42%; aspect-ratio: 3 / 1; }
+  .d-press span { position: absolute; inset: 0; display: grid; place-items: center; border-radius: var(--radius-md); font: 600 clamp(16px, 2.4vw, 30px)/1 var(--font-sans); color: var(--on-action-accent); mix-blend-mode: multiply; }
+  [data-theme="dark"] .d-press span { mix-blend-mode: screen; }
+  .d-press .c { background: var(--brand-cyan); transform: translate(-6px, -4px); }
+  .d-press .m { background: var(--brand-magenta); transform: translate(6px, 4px) scaleX(1.06); }
+  .d-proof__cap { padding: var(--space-3) var(--space-4) var(--space-4); font: var(--text-small); color: var(--text-muted); }
+
+  .d-eyebrow { font: var(--text-label); letter-spacing: .02em; color: var(--text-muted); }
+  .d-cols { display: grid; gap: var(--space-6); grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 900px) { .d-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--space-12); } }
+  .d-fact { display: grid; gap: var(--space-1); padding-top: var(--space-4); border-top: 1px solid var(--border-subtle); }
+  .d-fact strong { font: var(--text-h3); }
+  .d-faq { display: grid; border-top: 1px solid var(--border-subtle); }
+  .d-faq details { border-bottom: 1px solid var(--border-subtle); padding-block: var(--space-4); }
+  .d-faq summary { cursor: pointer; font: var(--text-h3); border-radius: var(--radius-sm); }
+  .d-cta-code { max-width: 560px; }
+  .d-faq details p { margin-top: var(--space-3); color: var(--text-muted); max-width: 40em; }
+</style>
+<script>
+  window.VC_PAGE = {
+    set: 'landing',
+    key: 'F',
+    toggles: [{ id: 'header', label: 'Header', options: ['bare', 'slug', 'command', 'reveal', 'corners'] }]
+  };
+</script>
+<script src="../shared/proto-kit.js"></script>
+<script src="f-headers.js" defer></script>
+</head>
+<body id="top">
+<div id="f-header" data-f-headers></div>
+<main>
+
+  <section data-slot="hero" class="d-sec d-hero" aria-labelledby="d-hero-title">
+    <div class="d-wrap">
+      <span class="d-crop" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+      <div class="d-slug" aria-hidden="true">
+        <span>visual-check</span>
+        <svg class="d-reg" viewBox="0 0 22 22"><circle cx="11" cy="11" r="5.5"/><path d="M11 0v22M0 11h22"/></svg>
+        <span class="d-cbar"><span class="c"></span><span class="m"></span><span class="k"></span><span class="p"></span></span>
+      </div>
+      <h1 id="d-hero-title" class="display d-hero__title">Proof every story before it ships.</h1>
+      <div class="d-hero__grid">
+        <div class="d-stack">
+          <p class="d-lead">visual-check is an open-source CLI for Storybook. It snapshots every story, compares each with the baseline you approved, and shows which stories moved, by how many pixels, in a visual diff.</p>
+          <div class="vc-code vc-code--register d-install">
+            <div class="vc-code__bar"><span>Run in your repo</span></div>
+            <pre><span class="p">$ </span>npx @visual-check/cli init</pre>
+          </div>
+          <p class="d-small">It finds your Storybooks, asks a few questions and installs what it needs. MIT licence, no account.</p>
+          <div class="d-actions">
+            <a class="vc-btn vc-btn--secondary" href="../docs/3.html#getting-started">Read the guide <svg class="vc-icon vc-btn__arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></a>
+            <a class="vc-link" href="#d-demo-title">See a run</a>
+          </div>
+        </div>
+        <figure class="d-proof">
+          <div class="d-proof__head">
+            <span class="d-plate d-plate--c"><i aria-hidden="true"></i>Plate C · baseline</span>
+            <span class="d-plate d-plate--m"><i aria-hidden="true"></i>Plate M · snapshot</span>
+          </div>
+          <div class="d-art" aria-hidden="true"><div class="d-press"><span class="c">Publish</span><span class="m">Publish</span></div></div>
+          <div class="d-proof__foot"><span>components-button--default · 3×</span><span class="vc-badge vc-badge--changed"><span class="vc-badge__glyph" aria-hidden="true">≠</span>changed</span></div>
+          <figcaption class="d-proof__cap">Stub of landing A's proof. The button's padding changed: 312 pixels differ, 20 allowed.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section data-slot="problem" class="d-sec d-sec--surface" aria-labelledby="d-problem-title">
+    <div class="d-wrap d-stack d-stack--wide">
+      <span class="d-crop" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+      <p class="d-eyebrow">the problem</p>
+      <h2 id="d-problem-title" class="d-h2">A one-line change moves forty stories.</h2>
+      <div class="d-cols">
+        <p class="d-lead">A shared token or component sits under dozens of stories. Change one line and every story that uses it can shift. Code review shows the line. Nobody reads the pixels it moved.</p>
+        <p class="d-lead d-muted">Coding agents make it worse: more UI changes, larger diffs, and an agent can't see what it changed.</p>
+      </div>
+    </div>
+  </section>
+
+  <section data-slot="demo" class="d-sec" aria-labelledby="d-demo-title">
+    <div class="d-wrap d-stack d-stack--wide">
+      <span class="d-crop" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+      <p class="d-eyebrow">how it works</p>
+      <h2 id="d-demo-title" class="d-h2">Every story, compared with what you approved.</h2>
+      <div class="vc-code">
+        <div class="vc-code__bar"><span>pnpm visual:check</span><span>real output format</span></div>
+<pre><span class="c">visual-check 0.1.0 · test · 108 snapshots · 4 workers</span>
+<span class="k">✗</span> web  components-button--default  <span class="k">differs: 312 differ, 20 allowed</span>
+<span class="k">✗</span> web  components-modal--default  mobile  <span class="k">differs: 1904 differ, 80 allowed (20 at scale 2)</span>
+<span class="c">── 2 failures ──</span>
+web  components-button--default
+  differs: 312 differ, 20 allowed
+  diff: .visual-check/report/images/web/components-button--default.diff.png
+106 passed · <span class="k">2 differs</span> · 11.4s
+<span class="c">Report: .visual-check/report/report.json</span></pre>
+      </div>
+    </div>
+  </section>
+
+  <section data-slot="commands" class="d-sec d-sec--surface" aria-labelledby="d-commands-title">
+    <div class="d-wrap d-stack d-stack--wide">
+      <span class="d-crop" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+      <p class="d-eyebrow">commands</p>
+      <h2 id="d-commands-title" class="d-h2">One command to try it.</h2>
+      <div class="vc-code">
+        <div class="vc-code__bar"><span>Run in your repo</span></div>
+<pre><span class="p">$ </span>npx @visual-check/cli init
+<span class="s">✓✓ visual-check init</span>
+? Name of the Storybook in apps/web  › web
+? URL of web  › http://127.0.0.1:6006
+? Install the agent skill?  › ● Yes  ○ No
+<span class="s">✓ visual-check is set up</span>
+Next
+  1  pnpm storybook       <span class="c">Start Storybook, and keep it running</span>
+  2  pnpm visual:update   <span class="c">Write the first baselines</span>
+  3  pnpm visual:check    <span class="c">Check the stories against the baselines</span>
+  4  <span class="c">Commit the changes, baselines included</span></pre>
+      </div>
+    </div>
+  </section>
+
+  <section data-slot="features" class="d-sec" aria-labelledby="d-features-title">
+    <div class="d-wrap d-stack d-stack--wide">
+      <span class="d-crop" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+      <p class="d-eyebrow">features</p>
+      <h2 id="d-features-title" class="d-h2">Same pixels on every machine.</h2>
+      <div class="d-cols">
+        <p class="d-fact"><strong>A pinned browser</strong><span class="d-muted">The browser runs in visual-check's own image, pinned by digest. A baseline written on a Mac passes in Linux CI and on Windows.</span></p>
+        <p class="d-fact"><strong>Baselines in your repo</strong><span class="d-muted">PNG files beside each Storybook, reviewed in the pull request like code. No service, no account.</span></p>
+        <p class="d-fact"><strong>Affected stories only</strong><span class="d-muted">Only the stories a change can reach. Its own browser driver, and sharding with a consistency check.</span></p>
+        <p class="d-fact"><strong>Honest with real stories</strong><span class="d-muted">Animations at their end state, readiness for fonts and images, flaky snapshots retried and listed.</span></p>
+      </div>
+    </div>
+  </section>
+
+  <section data-slot="agent" class="d-sec d-sec--surface" aria-labelledby="d-agent-title">
+    <div class="d-wrap d-stack d-stack--wide">
+      <span class="d-crop" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+      <p class="d-eyebrow">agent</p>
+      <h2 id="d-agent-title" class="d-h2">Your agent can't see the UI. Now it can check it.</h2>
+      <div class="d-cols">
+        <p class="d-lead"><code class="vc-inline-code">init</code> writes an agent skill. Your agent runs visual-check after UI changes, before it says the work is done, and reports which stories moved, with the diff paths.</p>
+        <p class="d-lead d-muted">It never accepts its own changes: no <code class="vc-inline-code">update</code>, no raised tolerance, no disabled story without your OK.</p>
+      </div>
+    </div>
+  </section>
+
+  <section data-slot="faq" class="d-sec" aria-labelledby="d-faq-title">
+    <div class="d-wrap d-stack d-stack--wide">
+      <span class="d-crop" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+      <p class="d-eyebrow">questions</p>
+      <h2 id="d-faq-title" class="d-h2">Questions before you run it.</h2>
+      <div class="d-faq">
+        <details><summary>Do I need Docker?</summary><p>By default, yes: that's how the pixels match everywhere. Without Docker, <code class="vc-inline-code">platform: 'host'</code> uses a local browser, and baselines then only match on the same OS.</p></details>
+        <details><summary>I'm on Apple silicon.</summary><p>It runs <code class="vc-inline-code">linux/amd64</code> through Rosetta by default, or <code class="vc-inline-code">linux/arm64</code>, which the default tolerance absorbs.</p></details>
+        <details><summary>Where do baselines live?</summary><p><code class="vc-inline-code">.visual-check/baselines/</code> beside each Storybook, committed. Only a person running <code class="vc-inline-code">update</code> writes them.</p></details>
+        <details><summary>What does it cost?</summary><p>Nothing. MIT.</p></details>
+      </div>
+    </div>
+  </section>
+
+  <section data-slot="cta" class="d-sec d-sec--surface" aria-labelledby="d-cta-title">
+    <div class="d-wrap d-stack">
+      <span class="d-crop" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+      <p class="d-eyebrow">run it</p>
+      <h2 id="d-cta-title" class="d-h2">Run it on your Storybook today.</h2>
+      <div class="vc-code d-cta-code">
+        <div class="vc-code__bar"><span>Run in your repo</span></div>
+        <pre><span class="p">$ </span>npx @visual-check/cli init</pre>
+      </div>
+      <div class="d-actions"><a class="vc-btn vc-btn--primary" href="../docs/3.html#getting-started">Read the guide</a></div>
+    </div>
+  </section>
+
+</main>
+<div data-kit="footer"></div>
+</body>
+</html>

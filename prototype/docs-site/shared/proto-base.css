@@ -1,0 +1,157 @@
+/* PROTOTYPE — throwaway. Base for every prototype page, after tokens.css and bundle.css.
+   Page styles use design-system tokens. The kit's own chrome (.kit-bar) deliberately does not,
+   so it never reads as part of the design being judged. */
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font: var(--text-body);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+img, svg, video { max-width: 100%; }
+h1, h2, h3 { text-wrap: balance; }
+p { text-wrap: pretty; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.kit-hidden { display: none !important; }
+.kit-missing { font: var(--text-small); color: var(--text-muted); padding: var(--space-6); }
+
+/* Header extras: the mobile menu sheet and sticky placement */
+.kit-header { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 50; }
+.kit-header .vc-header__nav a { white-space: nowrap; } /* design-system gap: nav links wrap between 768 and ~860px */
+/* Design-system gap: with four nav links and the 200px search field the header needs ~1100px.
+   Collapse in two steps instead of at 768px only. */
+@container (max-width: 1120px) {
+  .kit-header.vc-header > .vc-header__inner .vc-search { display: none; }
+  .kit-header.vc-header > .vc-header__inner .vc-header__search-icon { display: inline-grid; }
+}
+@container (max-width: 940px) {
+  .kit-header.vc-header > .vc-header__inner .vc-header__nav,
+  .kit-header.vc-header > .vc-header__inner .vc-header__wide { display: none; }
+  .kit-header.vc-header > .vc-header__inner .vc-header__menu { display: inline-grid; }
+}
+.kit-menu-sheet {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-4) var(--space-6);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-page);
+}
+.kit-menu-sheet[hidden] { display: none; }
+.kit-menu-sheet a:not(.vc-btn) { font: 600 18px/28px var(--font-display); color: var(--text-primary); text-decoration: none; padding: var(--space-1) 0; }
+
+/* Footer */
+.kit-footer { border-top: 1px solid var(--border-subtle); background: var(--bg-page); }
+.kit-footer__inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--space-8) max(16px, env(safe-area-inset-right, 0px)) calc(var(--space-24) + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+}
+.kit-footer__text { margin: 0; flex: 1 1 280px; font: var(--text-small); color: var(--text-muted); }
+.kit-footer__nav { display: flex; gap: var(--space-4); }
+.kit-footer__nav a { font: var(--text-small); color: var(--text-muted); }
+.kit-footer__nav a:hover { color: var(--text-primary); }
+
+/* Scene controls (demo play / pause / replay / chapters). Style further per variant. */
+.kit-scene-controls { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); min-height: 32px; }
+.kit-scene-btn {
+  display: inline-flex; align-items: center; gap: var(--space-1);
+  min-height: 32px; padding: 0 10px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+  background: transparent; color: var(--text-primary);
+  font: var(--text-ui); font-size: 14px; cursor: pointer;
+  transition: background-color var(--duration-fade) var(--ease-out);
+}
+.kit-scene-btn:hover { background: var(--bg-surface); }
+.kit-scene-chapters { display: inline-flex; flex-wrap: wrap; gap: var(--space-1); }
+.kit-chapter {
+  min-height: 32px; padding: 0 10px;
+  border: 1px solid transparent; border-radius: var(--radius-md);
+  background: transparent; color: var(--text-muted);
+  font: var(--text-label); cursor: pointer;
+}
+.kit-chapter:hover { color: var(--text-primary); background: var(--bg-surface); }
+.kit-chapter[aria-current] { color: var(--text-primary); border-color: var(--border-strong); }
+.is-typing::after { content: "▌"; margin-left: 1px; animation: kit-caret 1s steps(1) infinite; color: var(--code-cyan); }
+@keyframes kit-caret { 50% { opacity: 0; } }
+
+/* Embed mode (inside the mixer): the page grows to its content. */
+html.kit-embed, html.kit-embed body { height: auto; min-height: 0; overflow: hidden; scroll-behavior: auto; }
+
+/* ---------- prototype bar: not part of the design ---------- */
+.kit-bar {
+  position: fixed;
+  left: 50%;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 2147483000;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-width: calc(100vw - 16px);
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 4px;
+  border-radius: 999px;
+  background: #111;
+  color: #f5f5f5;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .35), 0 0 0 1px rgba(255, 255, 255, .12);
+  font: 500 12px/16px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  white-space: nowrap;
+}
+.kit-bar::-webkit-scrollbar { display: none; }
+.kit-bar__btn, .kit-bar__select {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  flex: none;
+}
+.kit-bar__btn:hover, .kit-bar__select:hover { background: rgba(255, 255, 255, .12); }
+.kit-bar__btn:focus-visible, .kit-bar__select:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 0; }
+.kit-bar__arrow { font-size: 16px; padding: 0 9px; }
+.kit-bar__select { font-weight: 700; padding-right: 10px; }
+.kit-bar__select option { color: #111; }
+.kit-bar__sep { width: 1px; height: 18px; margin: 0 4px; background: rgba(255, 255, 255, .2); flex: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .is-typing::after { animation: none; }
+}
+
+/* ---------- legacy SiteHeader ----------
+   The design system's header before the reveal redesign: a 64px bar with nav, search and Get started.
+   Prototypes A–E (through the kit header) and docs 1–2 still use its markup, a vc-header__inner directly
+   inside vc-header, so these rules apply only to that shape. */
+.vc-header:has(> .vc-header__inner) { container-type: inline-size; background: var(--bg-page); border-bottom: 1px solid var(--border-subtle); }
+.vc-header > .vc-header__inner { height: 64px; max-width: none; margin: 0; padding: 0 var(--space-8); gap: var(--space-6); }
+.vc-header > .vc-header__inner .vc-header__nav { flex: 1; margin-left: 0; }
+.vc-header > .vc-header__inner .vc-header__nav a { padding: 6px 10px; min-height: 0; }
+.vc-header > .vc-header__inner .vc-header__nav a::after { bottom: 0; }
+.vc-header > .vc-header__inner .vc-header__actions .vc-btn { margin-left: 0; }
+.vc-header > .vc-header__inner .vc-header__menu,
+.vc-header > .vc-header__inner .vc-header__search-icon { display: none; }
+@container (max-width: 767px) {
+  .vc-header > .vc-header__inner { gap: var(--space-2); padding: 0 var(--space-4); }
+  .vc-header > .vc-header__inner .vc-header__nav,
+  .vc-header > .vc-header__inner .vc-search,
+  .vc-header > .vc-header__inner .vc-header__wide { display: none; }
+  .vc-header > .vc-header__inner .vc-header__menu,
+  .vc-header > .vc-header__inner .vc-header__search-icon { display: inline-grid; }
+}

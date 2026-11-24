@@ -1,0 +1,329 @@
+/* visual-check components. Reads the custom properties and @font-face rules from tokens.css.
+   Motion: hovers spring (ease-spring, duration-spring), presses snap (ease-snap, duration-snap).
+   .is-hover and .is-active force those states, e.g. for grid stories. */
+
+body {
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+}
+
+/* Theme-specific content, e.g. the light and dark logo. Works with data-theme and Fumadocs' .dark class. */
+[data-theme="dark"] .vc-only-light,
+.dark .vc-only-light { display: none; }
+.vc-only-dark { display: none; }
+[data-theme="dark"] .vc-only-dark,
+.dark .vc-only-dark { display: revert; }
+
+.vc-link {
+  color: var(--text-cyan);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.vc-link:hover { text-decoration-thickness: 2px; }
+
+:where(.vc-btn, .vc-link, .vc-icon-btn, .vc-search, .vc-header__logo, .vc-header__nav a, .vc-code__copy, .vc-callout a):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Fixed-size controls size their border box. */
+.vc-btn, .vc-icon-btn, .vc-search { box-sizing: border-box; }
+
+/* Icons: inline SVG, 1.5px stroke, currentColor. */
+.vc-icon { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.vc-icon--20 { width: 20px; height: 20px; }
+
+/* Button
+   Hover: the button stays put; its plates spring out with a small overshoot.
+   Press: the plates spring back into register. The button itself never moves. */
+.vc-btn {
+  --vc-plates: 0 0 0 0 transparent, 0 0 0 0 transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 40px;
+  padding: 10px var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  box-shadow: var(--vc-plates);
+  font: 600 15px/20px var(--font-sans);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    box-shadow var(--duration-spring) var(--ease-spring),
+    background-color var(--duration-fade) var(--ease-out),
+    border-color var(--duration-fade) var(--ease-out);
+}
+.vc-btn--sm { min-height: 32px; padding: 6px 12px; font-size: 14px; }
+.vc-btn--lg { min-height: 48px; padding: 12px 22px; font-size: 17px; line-height: 24px; }
+
+.vc-btn--primary { --vc-plates: 0 0 0 0 var(--brand-cyan), 0 0 0 0 var(--brand-magenta); background: var(--action-primary); color: var(--on-action-primary); }
+.vc-btn--primary:is(:hover, .is-hover) { background: var(--action-primary-hover); box-shadow: var(--shadow-register); }
+
+.vc-btn--accent { --vc-plates: 0 0 0 0 var(--brand-cyan), 0 0 0 0 transparent; background: var(--action-accent); color: var(--on-action-accent); }
+.vc-btn--accent:is(:hover, .is-hover) { background: var(--action-accent-hover); box-shadow: -3px -3px 0 0 var(--brand-cyan), 0 0 0 0 transparent; }
+
+.vc-btn--secondary { --vc-plates: 0 0 0 0 var(--text-primary), 0 0 0 0 transparent; background: transparent; color: var(--text-primary); border-color: var(--border-strong); }
+.vc-btn--secondary:is(:hover, .is-hover) { border-color: var(--text-primary); box-shadow: 3px 3px 0 0 var(--text-primary), 0 0 0 0 transparent; }
+
+.vc-btn--ghost { background: transparent; color: var(--text-primary); }
+.vc-btn--ghost:is(:hover, .is-hover) { background: var(--bg-surface); }
+
+/* Pressed: the plates spring back into register with the same spring. The button doesn't move or shrink.
+   After the weights, so it wins over their hover. */
+.vc-btn:is(:active, .is-active), .vc-btn--primary:is(:active, .is-active), .vc-btn--accent:is(:active, .is-active), .vc-btn--secondary:is(:active, .is-active) {
+  box-shadow: var(--vc-plates);
+}
+
+/* An arrow after the label nudges forward on hover. */
+.vc-btn__arrow { transition: transform var(--duration-spring) var(--ease-spring); }
+.vc-btn:is(:hover, .is-hover) .vc-btn__arrow { transform: translateX(3px); }
+
+.vc-btn[disabled], .vc-btn[aria-disabled="true"] { opacity: .45; pointer-events: none; }
+
+/* Icon button: a square ghost button for icon-only actions. Needs an aria-label. */
+.vc-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background-color var(--duration-fade) var(--ease-out), color var(--duration-fade) var(--ease-out);
+}
+.vc-icon-btn .vc-icon { transition: transform var(--duration-spring) var(--ease-spring); }
+.vc-icon-btn:is(:hover, .is-hover) { background: var(--bg-surface); color: var(--text-primary); }
+.vc-icon-btn:is(:hover, .is-hover) .vc-icon { transform: scale(1.15) rotate(-8deg); }
+.vc-icon-btn:is(:active, .is-active) .vc-icon { transform: scale(.88); transition-duration: var(--duration-snap); transition-timing-function: var(--ease-snap); }
+
+/* Status badge */
+.vc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px var(--space-2);
+  border-radius: var(--radius-pill);
+  font: 500 12px/16px var(--font-mono);
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+.vc-badge__glyph { font-weight: 700; width: 1ch; text-align: center; }
+.vc-badge__count { font-weight: 700; font-variant-numeric: tabular-nums; }
+.vc-badge--passed { color: var(--info-fg); background: var(--info-bg); }
+.vc-badge--changed { color: var(--change-fg); background: var(--change-bg); }
+.vc-badge--missing, .vc-badge--flaky { color: var(--caution-fg); background: var(--caution-bg); }
+.vc-badge--failed { color: var(--danger-fg); background: var(--danger-bg); }
+.vc-badge--orphan { color: var(--neutral-fg); background: var(--neutral-bg); }
+
+/* A run summary: a row of badges with counts. */
+.vc-badge-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+/* Code block */
+.vc-code {
+  background: var(--code-bg);
+  color: var(--code-fg);
+  border: 1px solid var(--code-bg);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+[data-theme="dark"] .vc-code, .dark .vc-code { border-color: var(--border-subtle); }
+.vc-code--register { box-shadow: var(--shadow-register); }
+.vc-code__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid rgba(244, 242, 255, 0.12);
+  font: 500 12px/16px var(--font-mono);
+  letter-spacing: .02em;
+  color: var(--code-muted);
+}
+.vc-code__copy {
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  color: var(--code-muted);
+  font: inherit;
+  cursor: pointer;
+}
+.vc-code__copy:hover { color: var(--code-fg); }
+.vc-code pre {
+  margin: 0;
+  padding: var(--space-4);
+  overflow-x: auto;
+  font: 400 14px/22px var(--font-mono);
+}
+.vc-code .p { color: var(--code-cyan); user-select: none; }
+.vc-code .c { color: var(--code-muted); }
+.vc-code .s { color: var(--code-cyan); }
+.vc-code .k { color: var(--code-magenta); }
+
+.vc-inline-code {
+  font: 400 .875em/1 var(--font-mono);
+  padding: 2px 5px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+/* Callout: a tinted box with the tone in a solid disc. */
+.vc-callout {
+  --tone-fg: var(--info-fg);
+  --tone-bg: var(--info-bg);
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  column-gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--tone-bg);
+  color: var(--text-primary);
+  font: 400 16px/26px var(--font-sans);
+}
+.vc-callout--warning { --tone-fg: var(--caution-fg); --tone-bg: var(--caution-bg); }
+.vc-callout--danger { --tone-fg: var(--danger-fg); --tone-bg: var(--danger-bg); }
+.vc-callout__glyph {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-top: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--tone-fg);
+  color: var(--tone-bg);
+  font: 700 13px/1 var(--font-mono);
+}
+.vc-callout__title { display: block; color: var(--tone-fg); font-weight: 700; }
+.vc-callout p { margin: 0; }
+.vc-callout a { color: inherit; text-decoration: underline; text-underline-offset: 3px; font-weight: 600; }
+
+/* Site header: the landing page's. While the hero is in view the page shows only the logo (vc-header__top,
+   which scrolls away with the page). Once the hero's install command has scrolled past, the 48px bar
+   (vc-header__bar) slides down from the top edge with the in-page links, GitHub, the theme toggle and Get started.
+   The consumer adds .is-shown to the bar while the command is above it; .is-shown also forces it on in previews.
+   The docs don't use it: Fumadocs' layout carries their navigation. */
+.vc-header__top {
+  display: flex;
+  align-items: center;
+  max-width: 1264px;
+  margin: 0 auto;
+  padding: var(--space-6) max(var(--space-8), env(safe-area-inset-right, 0px)) var(--space-6) max(var(--space-8), env(safe-area-inset-left, 0px));
+}
+.vc-header__logo { display: flex; align-items: center; flex: none; border-radius: var(--radius-sm); }
+.vc-header__logo img { height: 24px; width: auto; }
+.vc-header__bar {
+  container-type: inline-size;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  padding-top: env(safe-area-inset-top, 0px);
+  background: var(--bg-page);
+  border-bottom: 1px solid var(--border-subtle);
+  transform: translateY(-100%);
+  visibility: hidden;
+  transition: transform var(--duration-spring) var(--ease-out), visibility 0s linear var(--duration-spring);
+}
+.vc-header__bar.is-shown {
+  transform: none;
+  visibility: visible;
+  transition: transform var(--duration-spring) var(--ease-out), visibility 0s;
+}
+.vc-header__inner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  height: 48px;
+  max-width: 1264px;
+  margin: 0 auto;
+  padding: 0 max(var(--space-8), env(safe-area-inset-right, 0px)) 0 max(var(--space-8), env(safe-area-inset-left, 0px));
+}
+.vc-header__bar .vc-header__logo img { height: 20px; }
+.vc-header__nav { display: flex; gap: var(--space-1); min-width: 0; margin-left: calc(-1 * var(--space-2)); }
+.vc-header__nav a {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font: 600 16px/20px var(--font-display);
+  letter-spacing: -0.005em;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color var(--duration-fade) var(--ease-out);
+}
+.vc-header__nav a::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 6px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--text-muted);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--duration-spring) var(--ease-spring);
+}
+.vc-header__nav a:is(:hover, .is-hover) { color: var(--text-primary); }
+.vc-header__nav a:is(:hover, .is-hover)::after { transform: scaleX(1); }
+.vc-header__nav a[aria-current] { color: var(--text-primary); }
+.vc-header__nav a[aria-current]::after { transform: scaleX(1); background: var(--text-cyan); }
+.vc-header__actions { display: flex; align-items: center; gap: var(--space-1); margin-left: auto; }
+.vc-header__actions .vc-btn { margin-left: var(--space-2); }
+
+@container (max-width: 1023px) {
+  .vc-header__inner { gap: var(--space-4); }
+}
+@container (max-width: 719px) {
+  .vc-header__nav { display: none; }
+}
+@media (max-width: 767px) {
+  .vc-header__top { padding-left: max(var(--space-4), env(safe-area-inset-left, 0px)); padding-right: max(var(--space-4), env(safe-area-inset-right, 0px)); }
+  .vc-header__inner { padding-left: max(var(--space-4), env(safe-area-inset-left, 0px)); padding-right: max(var(--space-4), env(safe-area-inset-right, 0px)); }
+}
+
+/* Search trigger: looks like a field, opens the docs search (⌘K). The docs restyle Fumadocs' search toggle with it. */
+.vc-search {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 200px;
+  height: 36px;
+  padding: 0 6px 0 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  font: 400 14px/20px var(--font-sans);
+  cursor: pointer;
+}
+.vc-search { transition: border-color var(--duration-fade) var(--ease-out); }
+.vc-search:hover { border-color: var(--border-strong); }
+.vc-search__label { flex: 1; text-align: left; }
+.vc-kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font: 500 11px/16px var(--font-mono);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vc-btn, .vc-btn__arrow, .vc-icon-btn, .vc-icon-btn .vc-icon, .vc-header__nav a::after { transition: none; }
+  /* The header bar appears in place: no slide. */
+  .vc-header__bar, .vc-header__bar.is-shown { transform: none; transition: none; }
+  .vc-btn:is(:hover, .is-hover, :active, .is-active), .vc-btn__arrow, .vc-icon-btn .vc-icon { transform: none !important; }
+}

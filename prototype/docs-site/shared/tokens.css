@@ -1,0 +1,210 @@
+/* visual-check — generated from tokens.json */
+@font-face {
+  font-family: "Bricolage Grotesque";
+  src: url("fonts/BricolageGrotesque-Variable.woff2") format("woff2");
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible Next";
+  src: url("fonts/AtkinsonHyperlegibleNext-Variable.woff2") format("woff2");
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible Next";
+  src: url("fonts/AtkinsonHyperlegibleNext-Variable-Italic.woff2") format("woff2");
+  font-weight: 200 800;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible Mono";
+  src: url("fonts/AtkinsonHyperlegibleMono-Variable.woff2") format("woff2");
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+}
+:root, [data-theme="light"] {
+  --brand-cyan: #00b4d8; /* First plate of the logo: the baseline. Fills and marks only, never text on light grounds (2.4:1). On dark grounds it reads at 6.5:1 or more. */
+  --brand-magenta: #ff2d87; /* Second plate of the logo: the snapshot. Fills and marks; as text only on dark grounds. Fill of the accent button with `on-action-accent` text. */
+  --brand-ink: #15133c; /* Logo overlap and text colour on light. Fixed in both themes; use `text-primary` for themed text. */
+  --brand-paper: #f4f2ff; /* Logo overlap and text colour on dark. Fixed in both themes; use `bg-surface` for themed panels. */
+  --bg-page: #fbfaff; /* Page background for the landing page and docs. */
+  --bg-surface: #f4f2ff; /* Sidebar, inline code, table header, hover fill of secondary and ghost buttons. */
+  --bg-raised: #ffffff; /* Cards, menus and anything that sits above `bg-page`. */
+  --bg-inverse: #15133c; /* Solid ink blocks: the overprint overlap, inverse bands on the landing page. */
+  --text-primary: #15133c; /* Headings and body copy on `bg-page`, `bg-surface` and `bg-raised` (16:1 or more in both themes). */
+  --text-muted: #55527a; /* Secondary copy, captions, nav links at rest, on `bg-page`, `bg-surface` and `bg-raised` (6.6:1 or more). */
+  --text-inverse: #f4f2ff; /* Text on `bg-inverse`. */
+  --text-cyan: #00728a; /* Links and baseline-related accents on `bg-page`, `bg-surface` and `bg-raised` (5.0:1 or more). Text-safe stand-in for `brand-cyan`. */
+  --text-magenta: #c7005f; /* Snapshot-related accents and the eyebrow over hero headings, on `bg-page`, `bg-surface` and `bg-raised` (5.3:1 or more). Text-safe stand-in for `brand-magenta`. */
+  --border-subtle: #e2dff2; /* Dividers, card and table outlines, header bottom rule. Decorative only. */
+  --border-strong: #8783ae; /* Borders of controls (secondary button, inputs) on `bg-page`, `bg-surface` and `bg-raised` (3:1 or more). */
+  --focus: #00728a; /* Focus ring: 2px solid, 2px offset, on every interactive element (5:1 or more on page grounds, 3.1:1 on `code-bg`). */
+  --action-primary: #15133c; /* Fill of the primary button. Solid ink, like the overlap in the mark. */
+  --action-primary-hover: #2a2763; /* Primary button fill on hover. */
+  --on-action-primary: #f4f2ff; /* Label on `action-primary` and `action-primary-hover` (12:1 or more). */
+  --action-accent: #d9006c; /* Fill of the accent button, a deeper magenta than the plate so its white label passes (5.0:1). One per view at most. */
+  --action-accent-hover: #c7005f; /* Accent button fill on hover: it deepens while the cyan plate springs out. `on-action-accent` reads 5.8:1 on it. */
+  --on-action-accent: #ffffff; /* Label on `action-accent` (5.0:1) and `action-accent-hover` (5.8:1). White, like paper showing through the ink. */
+  --code-bg: #15133c; /* Terminal and code block background in both themes. */
+  --code-fg: #f4f2ff; /* Code text on `code-bg`. */
+  --code-muted: #a8a5cf; /* Comments and output lines on `code-bg` (7.1:1 or more). */
+  --code-cyan: #5fd6ee; /* Shell prompt and strings on `code-bg`. */
+  --code-magenta: #ff7ab3; /* Keywords and the changed-count in CLI output on `code-bg`. */
+  --info-fg: #00657b; /* Passed (matches its baseline), and Note callouts. Text on `info-bg` and `bg-page` (6:1 or more). */
+  --info-bg: #e3f6fa; /* Background of passed badges and Note callouts. */
+  --change-fg: #b0005a; /* Changed: the snapshot differs from its baseline. Text on `change-bg` and `bg-page` (6:1 or more). */
+  --change-bg: #ffe6f1; /* Background of changed badges and the diff highlight. */
+  --danger-fg: #a33a00; /* Failed, a story that breaks, errors. Text on `danger-bg` and `bg-page` (5.9:1 or more). Orange, not red, so it stays apart from `change-fg`. */
+  --danger-bg: #ffeee3; /* Background of failed badges and Danger callouts. */
+  --caution-fg: #7a5300; /* Missing baseline, flaky snapshot, Warning callouts. Text on `caution-bg` and `bg-page` (6.2:1 or more). */
+  --caution-bg: #fff4d6; /* Background of missing and flaky badges and Warning callouts. */
+  --neutral-fg: #4a4770; /* Orphan, skipped, and other states that need no action. Text on `neutral-bg` (7:1 or more). */
+  --neutral-bg: #eceaf7; /* Background of neutral badges. */
+  --shadow-register: -3px -3px 0 0 #00b4d8, 3px 3px 0 0 #ff2d87; /* The off-register plates of the mark. Springs out on the primary button's hover (with `ease-spring`), springs back on press; static on the hero code block. One element in view at a time. */
+  --shadow-raised: 0 1px 2px 0 rgba(21, 19, 60, 0.08), 0 8px 24px -8px rgba(21, 19, 60, 0.12); /* Menus and popovers. Cards use a `border-subtle` outline instead. */
+}
+[data-theme="dark"] {
+  --bg-page: #0d0b26;
+  --bg-surface: #15133c;
+  --bg-raised: #1e1b4d;
+  --bg-inverse: #f4f2ff;
+  --text-primary: #f4f2ff;
+  --text-muted: #a8a5cf;
+  --text-inverse: #15133c;
+  --text-cyan: #2ec5e6;
+  --text-magenta: #ff5fa2;
+  --border-subtle: #2a2760;
+  --border-strong: #6a65a3;
+  --focus: #2ec5e6;
+  --action-primary: #f4f2ff;
+  --action-primary-hover: #dcd8f5;
+  --on-action-primary: #15133c;
+  --code-bg: #1a1745;
+  --info-fg: #5fd6ee;
+  --info-bg: #0b2f3d;
+  --change-fg: #ff7ab3;
+  --change-bg: #3a1030;
+  --danger-fg: #ff9a5c;
+  --danger-bg: #3a1e10;
+  --caution-fg: #f2c14e;
+  --caution-bg: #33280a;
+  --neutral-fg: #c9c6e8;
+  --neutral-bg: #25224f;
+  --shadow-raised: 0 1px 2px 0 rgba(0, 0, 0, 0.5), 0 8px 24px -8px rgba(0, 0, 0, 0.6);
+}
+:root {
+  --space-1: 4px; /* Gap between a glyph and its label. */
+  --space-2: 8px; /* Gap between buttons; badge horizontal padding. */
+  --space-3: 12px; /* Callout padding (vertical); compact list gaps. */
+  --space-4: 16px; /* Button horizontal padding; callout padding (horizontal); paragraph spacing. */
+  --space-6: 24px; /* Card padding; page gutter on phones. */
+  --space-8: 32px; /* Space above h2 in docs; page gutter on desktop. */
+  --space-12: 48px; /* Space between landing blocks inside a section. */
+  --space-24: 96px; /* Vertical rhythm between landing page sections. */
+  --radius-sm: 3px; /* Inline code, small badges inside dense tables. */
+  --radius-md: 6px; /* Buttons, inputs, callouts. */
+  --radius-lg: 10px; /* Code blocks, cards, images of snapshots. */
+  --radius-pill: 999px; /* Status badges only. */
+  --ease-spring: linear(0, 0.3 7%, 0.75 16%, 1.05 25%, 1.22 33%, 1.25 38%, 1.18 47%, 1.04 58%, 0.96 68%, 0.98 80%, 1); /* Hover in: overshoots about 25%, dips back once and settles, so plates and lifts land with a small bounce. */
+  --ease-snap: cubic-bezier(0.2, 0, 0, 1); /* Icon-button press: fast in, no overshoot. */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1); /* Colour and border fades, and hover out. */
+  --duration-spring: 320ms; /* With `ease-spring`: hover in on buttons, icon buttons and nav underlines. */
+  --duration-snap: 90ms; /* With `ease-snap`: icon-button press. */
+  --duration-fade: 160ms; /* With `ease-out`: background and border colour changes. */
+  --font-display: "Bricolage Grotesque", system-ui, sans-serif;
+  --font-sans: "Atkinson Hyperlegible Next", system-ui, sans-serif;
+  --font-mono: "Atkinson Hyperlegible Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --text-display: 700 64px/60px var(--font-display); /* Landing page hero heading only. One per page. */
+  --text-h1: 700 44px/48px var(--font-display); /* Docs page title; landing section headings. */
+  --text-h2: 700 30px/36px var(--font-display); /* Docs section headings. */
+  --text-h3: 600 21px/28px var(--font-display); /* Docs sub-sections, card titles. */
+  --text-body-lg: 400 18px/30px var(--font-sans); /* Hero lead and landing paragraphs. */
+  --text-body: 400 16px/26px var(--font-sans); /* Docs body copy. Measure 64–72 characters. */
+  --text-body-strong: 600 16px/26px var(--font-sans); /* Emphasis inside body copy, table headers. */
+  --text-ui: 600 15px/20px var(--font-sans); /* Buttons, nav links, tabs. */
+  --text-small: 400 14px/20px var(--font-sans); /* Captions, footnotes, sidebar items. */
+  --text-code: 400 14px/22px var(--font-mono); /* Code blocks and terminal output. */
+  --text-label: 500 12px/16px var(--font-mono); /* Status badges, eyebrows over headings, code block titles. */
+}
+.display {
+  font-family: var(--font-display);
+  font-size: 64px;
+  line-height: 60px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.h1 {
+  font-family: var(--font-display);
+  font-size: 44px;
+  line-height: 48px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+.h2 {
+  font-family: var(--font-display);
+  font-size: 30px;
+  line-height: 36px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.h3 {
+  font-family: var(--font-display);
+  font-size: 21px;
+  line-height: 28px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.body-lg {
+  font-family: var(--font-sans);
+  font-size: 18px;
+  line-height: 30px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.body {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 26px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.body-strong {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 26px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.ui {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.small {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.code {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}

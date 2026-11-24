@@ -1,0 +1,1197 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>visual-check · Landing B</title>
+<!-- PROTOTYPE — throwaway. Landing variant B: "One terminal". CLI-first and quiet: the pitch is one real terminal
+     session. The hero plays `init`; the demo section follows one session in chapters (init, update, a one-line CSS
+     change, test, update after approval), with a small panel that shows the pixels the terminal can't.
+     Demo technique: the hero uses VCProto.scene. The demo section uses its own small timeline (below), because its
+     chapters advance with the prose as you scroll and each one stops at its own end, which VCProto.scene can't do
+     (it plays on to the end of the script). It follows the kit's motion setting the same way. -->
+<link rel="icon" href="../shared/logo/favicon.svg">
+<link rel="stylesheet" href="../shared/tokens.css">
+<link rel="stylesheet" href="../shared/bundle.css">
+<link rel="stylesheet" href="../shared/proto-base.css">
+<style>
+  /* Values the design system doesn't have yet (become tokens before the real build):
+     - container max width 1200px; page gutter 16px on phones, 32px from 768px
+     - hero headline in the terminal-first layout: 52px/54px (between h1 44px and display 64px)
+     - hero headline and section headings on phones: 36px/38px and 30px/34px (display and h1 are too wide at 375px)
+     - statement size: 28px/38px, for one sentence set large (between h3 21px and h2 30px)
+     - hero terminal text 15px/24px on desktop (between code 14px and body 16px), 12px/19px on phones
+     - demo terminal frame: 360px of output on desktop, 300px on phones; sticky offset 88px (header 64px + 24px)
+     - demo step scroll distance: 420px per chapter
+     - story frames: canvas 112px high at 2× on desktop, 84px at 1.25× on phones; story canvas white (#fff) in both themes
+     - a muted rule for the diff ghost in the story drawing: #dedce9 fill, #b9b6cc text (an image, so not themed)
+  */
+
+  .b-wrap { max-width: 1200px; margin: 0 auto; padding-inline: max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px)); }
+  @media (min-width: 768px) { .b-wrap { padding-inline: 32px; } }
+  .b-sec { background: var(--bg-page); color: var(--text-primary); padding-block: var(--space-24); }
+  .b-h2 { margin: 0; font: var(--text-h1); letter-spacing: -0.015em; max-width: 22ch; }
+  .b-h3 { margin: 0; font: var(--text-h3); }
+  .b-lead { margin: 0; font: var(--text-body-lg); max-width: 60ch; }
+  .b-p { margin: 0; font: var(--text-body-lg); }
+  .b-small { margin: 0; font: var(--text-small); color: var(--text-muted); }
+  .b-vh { position: absolute !important; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; padding: 0; }
+  .b-sec code:not(.b-raw) { font-family: var(--font-mono); }
+  .b-sec :where(p, dd, li, h3, [data-copy-alt]) > code { font-size: 0.88em; }
+  @media (max-width: 767px) {
+    .b-sec { padding-block: 72px; }
+    .b-h2 { font-size: 30px; line-height: 34px; }
+    .b-lead, .b-p { font: var(--text-body); }
+  }
+
+  /* ---------- terminal lines (shared by every terminal on the page) ---------- */
+  .b-tout { display: grid; padding: var(--space-4) 20px; font: 400 14px/22px var(--font-mono); color: var(--code-fg); }
+  .b-tout > .b-ghost, .b-tout > .b-live { grid-area: 1 / 1; min-width: 0; }
+  .b-ghost { visibility: hidden; }
+  .b-ln { min-height: 1lh; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .b-ln--gap { margin-top: 1lh; }
+  .vc-code .b-cy { color: var(--code-cyan); }
+  .vc-code .b-mg { color: var(--code-magenta); }
+  .vc-code .b-dim { color: var(--code-muted); }
+  .vc-code .b-del { color: var(--code-cyan); }
+  .vc-code .b-add { color: var(--code-magenta); }
+  .vc-code .b-err { color: #ff9a5c; } /* danger-fg (dark) as text on code-bg: pnpm's ELIFECYCLE line */
+  .vc-code__bar .b-bar-r { color: var(--code-muted); }
+
+  /* ---------- HERO ---------- */
+  .b-hero { padding-block: 32px var(--space-24); }
+  .b-hero__grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: 24px; row-gap: 32px; align-items: start; }
+  .b-hero__title { grid-area: title; margin: 0; max-width: 20ch; text-wrap: balance; }
+  .b-hero__lead { grid-area: lead; display: grid; gap: var(--space-6); align-content: start; }
+  .b-hero__term { grid-area: term; margin: 0; min-width: 0; }
+  .b-hero__proof { grid-area: proof; min-width: 0; }
+  .b-hero__sub { margin: 0; font: var(--text-body-lg); max-width: 46ch; }
+  .b-hero__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); }
+
+  /* terminal-first: the terminal leads, the proof sits beside it, the headline follows */
+  html[data-t-hero="terminal-first"] .b-hero__grid {
+    grid-template-areas:
+      "term term term term term term term term proof proof proof proof"
+      "title title title title title title title lead lead lead lead lead";
+  }
+  html[data-t-hero="terminal-first"] .b-hero__title { font-size: 52px; line-height: 54px; letter-spacing: -0.02em; align-self: start; }
+  html[data-t-hero="terminal-first"] .b-hero__proof { align-self: start; padding-top: 4px; }
+  /* headline-first: the headline spans, the copy and proof sit left of a smaller terminal */
+  html[data-t-hero="headline-first"] .b-hero__grid {
+    grid-template-areas:
+      "title title title title title title title title title title title title"
+      "lead lead lead lead lead term term term term term term term"
+      "proof proof proof proof proof term term term term term term term";
+    row-gap: 32px;
+  }
+  html[data-t-hero="headline-first"] .b-hero__title { max-width: 18ch; }
+  html[data-t-hero="headline-first"] .b-hero__proof { align-self: start; }
+
+  @media (max-width: 1023px) {
+    html[data-t-hero] .b-hero__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 32px; }
+    html[data-t-hero="terminal-first"] .b-hero__grid { grid-template-areas: "term term" "title title" "lead proof"; }
+    html[data-t-hero="headline-first"] .b-hero__grid { grid-template-areas: "title title" "lead proof" "term term"; }
+    html[data-t-hero] .b-hero__title { font-size: 52px; line-height: 54px; }
+    html[data-t-hero] .b-hero__proof { align-self: start; padding-bottom: 0; }
+  }
+  @media (max-width: 767px) {
+    .b-hero { padding-top: 24px; }
+    html[data-t-hero] .b-hero__grid { grid-template-columns: minmax(0, 1fr); row-gap: 24px; }
+    html[data-t-hero="terminal-first"] .b-hero__grid { grid-template-areas: "term" "title" "lead" "proof"; }
+    html[data-t-hero="headline-first"] .b-hero__grid { grid-template-areas: "title" "lead" "term" "proof"; }
+    html[data-t-hero] .b-hero__title { font-size: 36px; line-height: 38px; letter-spacing: -0.02em; }
+    .b-hero__sub { font: var(--text-body); }
+    .b-hero__cmd { order: -1; }
+  }
+
+  .b-hterm .b-tout { padding: 18px 24px; }
+  @media (max-width: 767px) { .b-hterm .b-tout { font-size: 12px; line-height: 18px; padding: 14px; } .b-hterm .b-nd { display: block; padding-left: 5ch; } }
+  .b-hterm__foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); margin-top: var(--space-4); }
+  .b-hterm__cap { margin: 0; font: var(--text-small); color: var(--text-muted); }
+  .b-hterm .kit-scene-controls { min-height: 32px; }
+
+  /* The copyable command */
+  .b-cmdbox { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: 6px 8px 6px var(--space-4); max-width: 30rem; }
+  .b-cmdbox code { font: 400 15px/24px var(--font-mono); white-space: nowrap; overflow-x: auto; }
+  .b-cmdbox .vc-code__copy { flex: none; min-height: 32px; padding: 4px 10px; color: var(--code-fg); }
+  .b-cmdbox .vc-code__copy:hover { background: rgba(244, 242, 255, 0.1); }
+
+  /* Proof: real count lines, each with where it came from */
+  .b-proof { margin: 0; display: grid; gap: var(--space-4); }
+  .b-proof__row { display: grid; gap: 2px; }
+  .b-proof dt { margin: 0; }
+  .b-proof dt code { font: 500 16px/24px var(--font-mono); padding: 2px 8px; background: var(--bg-surface); border-radius: var(--radius-sm); }
+  .b-proof dd { margin: 0; font: var(--text-small); color: var(--text-muted); }
+  .b-proof__src { margin: var(--space-4) 0 0; font: var(--text-small); color: var(--text-muted); }
+
+  /* ---------- PROBLEM ---------- */
+  .b-problem__grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: 24px; row-gap: var(--space-12); margin-top: var(--space-8); }
+  .b-problem__left { grid-column: 1 / span 5; display: grid; gap: var(--space-6); align-content: start; }
+  .b-problem__right { grid-column: 7 / span 6; }
+  .b-problem__diff .b-tout { font-size: 14px; line-height: 22px; }
+  .b-today { margin: var(--space-4) 0 0; display: grid; gap: var(--space-6); }
+  .b-today__item { display: grid; gap: var(--space-1); }
+  .b-today dt { font: 600 18px/26px var(--font-sans); }
+  .b-today dd { margin: 0; font: var(--text-body); color: var(--text-primary); max-width: 52ch; }
+  .b-statement { grid-column: 1 / -1; margin: 0; padding-top: var(--space-8); font: var(--text-h2); letter-spacing: -0.01em; max-width: 34ch; }
+  @media (max-width: 1023px) {
+    .b-problem__left, .b-problem__right { grid-column: 1 / -1; }
+  }
+  @media (max-width: 767px) {
+    .b-statement { font: var(--text-h3); }
+    .b-problem__diff .b-tout { font-size: 12px; line-height: 18px; }
+  }
+
+  /* ---------- DEMO ---------- */
+  .b-demo__head { display: grid; gap: var(--space-4); margin-bottom: var(--space-12); }
+  .b-demo__grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: 24px; align-items: start; }
+  .b-steps { grid-column: 1 / span 4; margin: 0; padding: 0; list-style: none; }
+  .b-stage { grid-column: 5 / span 8; position: sticky; top: 88px; display: grid; gap: var(--space-3); min-width: 0; }
+  .b-step { min-height: 420px; padding-top: 4px; color: var(--text-muted); transition: color var(--duration-fade) var(--ease-out); }
+  .b-step:last-child { min-height: 0; padding-bottom: 120px; }
+  .b-step.is-current { color: var(--text-primary); }
+  .b-step__k { display: block; margin-bottom: var(--space-2); font: var(--text-ui); color: inherit; }
+  .b-step .b-h3 { margin-bottom: var(--space-3); color: inherit; font: var(--text-h2); letter-spacing: -0.01em; }
+  .b-step p { margin: 0; font: var(--text-body-lg); color: inherit; }
+  .b-next { display: none; }
+
+  .b-stage__bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); }
+  .b-chaps { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+  .b-chap {
+    min-height: 34px; padding: 0 12px; border: 1px solid transparent; border-radius: var(--radius-md);
+    background: transparent; color: var(--text-muted); font: var(--text-ui); font-size: 14px; cursor: pointer;
+    transition: background-color var(--duration-fade) var(--ease-out), color var(--duration-fade) var(--ease-out);
+  }
+  .b-chap:hover { color: var(--text-primary); background: var(--bg-surface); }
+  .b-chap[aria-current="step"] { color: var(--text-primary); border-color: var(--border-strong); }
+  .b-play {
+    display: inline-flex; align-items: center; gap: var(--space-1); min-height: 34px; padding: 0 12px;
+    border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: transparent; color: var(--text-primary);
+    font: var(--text-ui); font-size: 14px; cursor: pointer; transition: background-color var(--duration-fade) var(--ease-out);
+  }
+  .b-play:hover { background: var(--bg-surface); }
+  html[data-motion="still"] .b-play { display: none; }
+
+  .b-dterm .b-tout { display: block; height: 360px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(244,242,255,.25) transparent; }
+  .b-dterm .b-tout:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  .b-ln.is-chapter-start { scroll-margin-top: 16px; }
+  .b-stage__note { margin: 0; font: var(--text-small); color: var(--text-muted); }
+  html[data-t-reporter="log"] .b-rep-live, html[data-t-reporter="live"] .b-rep-log { display: none; }
+
+  /* The diff panel: what the terminal can't show */
+  .b-diff { margin: 0; padding: var(--space-3) var(--space-4) var(--space-4); background: var(--bg-surface); border-radius: var(--radius-lg); container-type: inline-size; }
+  .b-diff__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); margin-bottom: var(--space-3); }
+  .b-diff__id { font: 500 14px/20px var(--font-mono); color: var(--text-primary); }
+  .b-diff__head .vc-badge { transition: background-color var(--duration-fade) var(--ease-out), color var(--duration-fade) var(--ease-out); }
+  .b-frames { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); }
+  .b-frame { margin: 0; min-width: 0; }
+  .b-frame--wipe { display: none; grid-column: span 2; }
+  html[data-t-panel="wipe"] .b-frame--base, html[data-t-panel="wipe"] .b-frame--snap { display: none; }
+  html[data-t-panel="wipe"] .b-frame--wipe { display: block; }
+  .b-canvas { position: relative; height: 112px; display: grid; place-items: center; overflow: hidden; background: #fff; border-radius: var(--radius-sm); }
+  .b-pic { display: grid; place-items: center; width: 100%; height: 100%; }
+  .b-zoom { zoom: 2; display: grid; place-items: center; }
+  .b-frame__cap { display: block; margin: var(--space-2) 0 0; font: var(--text-small); color: var(--text-muted); }
+  .b-none { padding: 0 8px; font: var(--text-small); color: #55527a; text-align: center; max-width: 16ch; }
+  .b-sbtn { display: inline-block; padding: 8px 16px; border-radius: 6px; background: #15133c; color: #f4f2ff; font: 600 14px/20px var(--font-sans); white-space: nowrap; }
+  .b-sbtn--new { padding: 10px 16px; }
+  .b-dstack { display: grid; place-items: center; }
+  .b-dstack > * { grid-area: 1 / 1; }
+  .b-dghost { background: #dedce9; color: #5f5c84; }
+  .b-dmag { background: #ff2d87; color: transparent; }
+  .b-wipe__layer { position: absolute; inset: 0; display: grid; place-items: center; background: #fff; }
+  .b-wipe__layer--snap { clip-path: inset(0 0 0 var(--pos, 50%)); }
+  .b-wipe__handle { position: absolute; top: 0; bottom: 0; left: var(--pos, 50%); width: 2px; margin-left: -1px; background: #15133c; }
+  .b-wipe__cap { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); }
+  .b-wipe__cap span { white-space: pre; }
+  .b-wipe__cap input { flex: 1 1 140px; accent-color: var(--text-primary); min-height: 24px; }
+  .b-diff__note { margin: var(--space-3) 0 0; font: var(--text-small); color: var(--text-muted); min-height: 40px; }
+  .b-diff__note code { font: 400 14px/20px var(--font-mono); color: var(--text-primary); overflow-wrap: anywhere; }
+  @container (max-width: 520px) {
+    .b-canvas { height: 84px; }
+    .b-zoom { zoom: 1.25; }
+  }
+
+  /* Tab layout: phones, tablets and the mixer. The chapters are picked, the prose shows one step. */
+  .b-demo.is-tabs .b-stage { position: static; }
+  .b-demo.is-tabs .b-step { display: none; min-height: 0; padding: 0; color: var(--text-primary); }
+  @media (max-width: 1023px) {
+    .b-demo.is-tabs .b-demo__grid { grid-template-columns: minmax(0, 1fr); row-gap: var(--space-6); }
+    .b-demo.is-tabs .b-stage { grid-column: 1; grid-row: 1; }
+    .b-demo.is-tabs .b-steps { grid-column: 1; grid-row: 2; max-width: 44rem; }
+  }
+  .b-demo.is-tabs .b-step.is-current { display: block; }
+  .b-demo.is-tabs .b-next { display: inline-flex; margin-top: var(--space-4); }
+  @media (max-width: 767px) {
+    .b-dterm .b-tout { height: 300px; font-size: 12px; line-height: 18px; padding: 12px 14px; }
+    .b-step .b-h3 { font: var(--text-h3); }
+  }
+
+  /* ---------- COMMANDS ---------- */
+  .b-commands__head { display: grid; gap: var(--space-4); margin-bottom: var(--space-12); }
+  .b-ctable { width: 100%; border-collapse: collapse; }
+  .b-ctable th { padding: 0 var(--space-6) var(--space-3) 0; text-align: left; font: var(--text-small); color: var(--text-muted); font-weight: 600; }
+  .b-ctable td { padding: var(--space-8) var(--space-6) var(--space-8) 0; vertical-align: top; border-top: 1px solid var(--border-subtle); }
+  .b-ctable th:last-child, .b-ctable td:last-child { padding-right: 0; }
+  .b-ctable__cmd { width: 18%; }
+  .b-ctable__cmd code { font: 500 30px/36px var(--font-mono); letter-spacing: -0.02em; }
+  .b-ctable__help { width: 27%; font: 600 21px/28px var(--font-display); }
+  .b-ctable__who { font: var(--text-body); }
+  .b-ctable__who p { margin: 0 0 var(--space-2); }
+  .b-ctable__script { width: 24%; white-space: nowrap; }
+  .b-ctable__script code { display: inline-block; font: 400 14px/22px var(--font-mono); padding: 4px 10px; border-radius: var(--radius-sm); background: var(--code-bg); color: var(--code-fg); }
+  .b-flags { margin-top: var(--space-8); display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2) var(--space-3); }
+  .b-flags__label { font: var(--text-body); font-weight: 600; margin-right: var(--space-2); }
+  .b-flags code { font: 400 14px/22px var(--font-mono); }
+  @media (max-width: 899px) {
+    .b-ctable thead { display: none; }
+    .b-ctable, .b-ctable tbody, .b-ctable tr, .b-ctable td { display: block; width: auto; }
+    .b-ctable tr { padding: var(--space-6) 0; border-top: 1px solid var(--border-subtle); }
+    .b-ctable td { border: 0; padding: 0 0 var(--space-3); }
+    .b-ctable__cmd code { font-size: 26px; line-height: 32px; }
+    .b-ctable__help { font-size: 19px; line-height: 26px; }
+    .b-ctable__script::before { content: "As a script  "; white-space: pre; font: var(--text-small); color: var(--text-muted); }
+  }
+
+  /* ---------- FEATURES ---------- */
+  .b-features__head { display: grid; gap: var(--space-4); margin-bottom: var(--space-12); }
+  .b-claims { margin: 0; padding: 0; list-style: none; display: grid; gap: 72px; }
+  .b-claim { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: 24px; row-gap: var(--space-4); }
+  .b-claim__text { grid-column: 1 / span 6; display: grid; gap: var(--space-3); align-content: start; }
+  .b-claim__text p { margin: 0; font: var(--text-body-lg); }
+  .b-claim__proof { grid-column: 8 / span 5; display: grid; gap: var(--space-2); align-content: start; }
+  .b-fig { margin: 0; font: 700 44px/48px var(--font-display); letter-spacing: -0.015em; }
+  .b-fig__vs { font: 600 21px/28px var(--font-display); color: var(--text-muted); }
+  .b-claim__proof .b-src { margin: 0; font: var(--text-small); color: var(--text-muted); }
+  .b-claim__proof .vc-code .b-tout { padding: 12px 14px; }
+  .b-countline { display: block; font: 500 18px/28px var(--font-mono); }
+  .b-surfaces { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--space-3); }
+  .b-surfaces li { display: grid; gap: 2px; }
+  .b-surfaces strong { font: var(--text-body-strong); }
+  .b-surfaces span { font: var(--text-small); color: var(--text-muted); }
+  @media (max-width: 1023px) {
+    .b-claim__text { grid-column: 1 / span 7; }
+    .b-claim__proof { grid-column: 9 / span 4; }
+  }
+  @media (max-width: 767px) {
+    .b-claim__text, .b-claim__proof { grid-column: 1 / -1; }
+    .b-fig { font-size: 34px; line-height: 38px; }
+  }
+
+  /* ---------- AGENT ---------- */
+  .b-agent__grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: 24px; row-gap: var(--space-12); align-items: start; }
+  .b-agent__text { grid-column: 1 / span 5; display: grid; gap: var(--space-6); }
+  .b-agent__chat { grid-column: 7 / span 6; margin: 0; }
+  .b-rule { margin: 0; padding: var(--space-4); border-radius: var(--radius-md); background: var(--info-bg); font: var(--text-body); }
+  .b-rule strong { display: block; color: var(--info-fg); }
+  .b-files { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--space-3); }
+  .b-files li { display: grid; gap: 2px; }
+  .b-files code { font: 400 14px/22px var(--font-mono); overflow-wrap: anywhere; }
+  .b-files span { font: var(--text-small); color: var(--text-muted); }
+  .b-chat { display: grid; gap: var(--space-4); padding: var(--space-6); border-radius: var(--radius-lg); background: var(--bg-surface); }
+  .b-msg { display: grid; gap: var(--space-2); }
+  .b-msg__who { font: var(--text-ui); font-size: 14px; color: var(--text-muted); }
+  .b-msg p { margin: 0; font: var(--text-body); }
+  .b-msg ul { margin: 0; padding-left: 20px; font: var(--text-body); display: grid; gap: var(--space-2); }
+  .b-msg code { font-size: 0.9em; overflow-wrap: anywhere; }
+  .b-msg--you p { font-weight: 600; }
+  .b-chat .vc-code .b-tout { padding: 12px 14px; }
+  .b-chat__cap { margin: var(--space-3) 0 0; font: var(--text-small); color: var(--text-muted); }
+  @media (max-width: 1023px) {
+    .b-agent__text, .b-agent__chat { grid-column: 1 / -1; }
+  }
+  @media (max-width: 767px) { .b-chat { padding: var(--space-4); } }
+
+  /* ---------- FAQ ---------- */
+  .b-faq__head { display: grid; gap: var(--space-4); margin-bottom: var(--space-12); }
+  .b-qa { margin: 0; columns: 2; column-gap: 72px; }
+  .b-qa__item { display: grid; gap: var(--space-2); break-inside: avoid; margin-bottom: var(--space-8); }
+  .b-qa dt { font: var(--text-h3); }
+  .b-qa dd { margin: 0; font: var(--text-body-lg); max-width: 62ch; }
+  .b-qa dd code { font-size: 0.9em; }
+  @media (max-width: 1023px) { .b-qa { columns: 1; } }
+  @media (max-width: 767px) { .b-qa dd { font: var(--text-body); } }
+
+  /* ---------- CTA ---------- */
+  .b-cta__inner { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: 24px; row-gap: var(--space-8); }
+  .b-cta__head { grid-column: 1 / span 7; display: grid; gap: var(--space-4); align-content: start; }
+  .b-cta__cmdrow { grid-column: 1 / -1; }
+  .b-needs { grid-column: 9 / span 4; margin: 0; display: grid; gap: var(--space-3); align-content: start; padding-top: 6px; }
+  .b-needs__item { display: grid; gap: 2px; }
+  .b-needs dt { font: var(--text-small); color: var(--text-muted); }
+  .b-needs dd { margin: 0; font: var(--text-body-strong); }
+  @media (max-width: 1023px) { .b-cta__head { grid-column: 1 / -1; } .b-needs { grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .b-cta__cmdrow { display: grid; gap: var(--space-4); }
+  .b-pm { display: inline-flex; flex-wrap: wrap; gap: var(--space-1); margin: 0; padding: 0; border: 0; }
+  .b-pm label { position: relative; }
+  .b-pm input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+  .b-pm span {
+    display: inline-flex; align-items: center; min-height: 34px; padding: 0 14px; border: 1px solid transparent; border-radius: var(--radius-md);
+    font: var(--text-ui); font-size: 14px; color: var(--text-muted); transition: background-color var(--duration-fade) var(--ease-out), color var(--duration-fade) var(--ease-out);
+  }
+  .b-pm label:hover span { background: var(--bg-surface); color: var(--text-primary); }
+  .b-pm input:checked + span { color: var(--text-primary); border-color: var(--border-strong); }
+  .b-pm input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .b-bigcmd { padding: var(--space-6) var(--space-8); }
+  .b-bigcmd code { display: block; font: 400 30px/36px var(--font-mono); letter-spacing: -0.01em; white-space: nowrap; overflow-x: auto; }
+  .b-cta__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3) var(--space-4); }
+  .b-cta__needs { margin: 0; font: var(--text-small); color: var(--text-muted); max-width: 64ch; }
+  @media (max-width: 767px) {
+    .b-bigcmd { padding: var(--space-4); }
+    .b-bigcmd code { font-size: 16px; line-height: 24px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .b-step, .b-chap, .b-play, .b-pm span, .b-diff__head .vc-badge { transition: none; }
+  }
+</style>
+<script>
+  window.VC_PAGE = {
+    set: 'landing',
+    key: 'B',
+    toggles: [
+      { id: 'hero', label: 'Hero', options: ['terminal-first', 'headline-first'] },
+      { id: 'reporter', label: 'Reporter', options: ['log', 'live'] },
+      { id: 'panel', label: 'Diff panel', options: ['images', 'wipe'] }
+    ]
+  };
+</script>
+<script src="../shared/proto-kit.js"></script>
+<script>
+  /* Shared by the copy buttons of the hero and the last call. Touches only the button it is given. */
+  function bCopy(btn, text) {
+    function done(ok) {
+      var label = btn.getAttribute('data-label') || btn.textContent;
+      btn.setAttribute('data-label', label);
+      btn.textContent = ok ? 'Copied' : 'Select and copy';
+      var live = btn.parentNode.querySelector('.b-copy-status');
+      if (live) live.textContent = ok ? 'Copied ' + text : '';
+      clearTimeout(btn._bt);
+      btn._bt = setTimeout(function () { btn.textContent = label; if (live) live.textContent = ''; }, 1800);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
+    else done(false);
+  }
+</script>
+</head>
+<body id="top">
+<div data-kit="header"></div>
+<main>
+
+  <!-- ================= HERO: init, played in a real-looking terminal ================= -->
+  <section class="b-sec b-hero" data-slot="hero" id="b-hero" aria-labelledby="b-hero-title">
+    <div class="b-wrap b-hero__grid">
+      <h1 id="b-hero-title" class="display b-hero__title" data-copy>
+        <span data-copy-alt>Three commands to see every UI change</span>
+        <span data-copy-alt>Same pixels on your laptop and in CI</span>
+        <span data-copy-alt># Nobody reads the pixels in review</span>
+      </h1>
+
+      <div class="b-hero__lead">
+        <p class="b-hero__sub" data-copy>
+          <span data-copy-alt><code>init</code> sets it up. <code>update</code> writes the baselines you approve. <code>test</code> names every Storybook story that moved, by how many pixels, with a visual diff. Open source, on your machine and in your CI.</span>
+          <span data-copy-alt>visual-check snapshots every Storybook story in a browser pinned inside its own Docker image. A baseline written on a Mac passes in Linux CI, and a real change shows up as a visual diff.</span>
+          <span data-copy-alt>visual-check does. It snapshots every Storybook story, compares each with the baseline you approved and tells you which ones moved, by how many pixels, with a visual diff.</span>
+        </p>
+        <div class="b-hero__cmd">
+          <div class="vc-code b-cmdbox" data-ui>
+            <code><span class="p">$ </span>npx @visual-check/cli init</code>
+            <button class="vc-code__copy" type="button" data-b-copy="npx @visual-check/cli init">Copy</button>
+            <span class="b-copy-status b-vh" aria-live="polite"></span>
+          </div>
+        </div>
+        <div class="b-hero__actions">
+          <a class="vc-btn vc-btn--secondary" href="../docs/1.html#getting-started">Read the docs</a>
+          <span class="b-small">MIT licence. No account.</span>
+        </div>
+      </div>
+
+      <figure class="b-hero__term b-hterm">
+        <div class="vc-code vc-code--register" data-ui>
+          <div class="vc-code__bar"><span>Terminal</span><span class="b-bar-r">init, replayed</span></div>
+          <div class="b-tout" id="b-hero-scene"><div class="b-ghost" aria-hidden="true"></div><div class="b-live"></div></div>
+        </div>
+        <figcaption class="b-hterm__foot">
+          <p class="b-hterm__cap">The real prompts and steps of <code>init</code>, replayed in your browser. Timings shortened.</p>
+          <div id="b-hero-controls"></div>
+        </figcaption>
+      </figure>
+
+      <div class="b-hero__proof">
+        <dl class="b-proof">
+          <div class="b-proof__row"><dt><code>108 passed · 10.8s</code></dt><dd>108 snapshots on a GitHub-hosted runner, 4 workers</dd></div>
+          <div class="b-proof__row"><dt><code>110 passed · 19.1s</code></dt><dd>Five Storybooks in one repo: React, vanilla, Vue, Solid and Svelte</dd></div>
+          <div class="b-proof__row"><dt><code>108 passed · 16.9s</code></dt><dd>Windows with Docker Desktop</dd></div>
+        </dl>
+        <p class="b-proof__src">Count lines from the public CI of visual-check's test apps. <a class="vc-link" href="https://github.com/visual-check/test-apps/actions" target="_blank" rel="noopener">See the runs</a></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= PROBLEM ================= -->
+  <section class="b-sec b-problem" data-slot="problem" aria-labelledby="b-problem-title">
+    <div class="b-wrap">
+      <h2 class="b-h2" id="b-problem-title">A one-line change can move forty stories</h2>
+      <div class="b-problem__grid">
+        <div class="b-problem__left">
+          <p class="b-lead">Review shows the line. It doesn't show the forty stories that use the token, and nobody opens forty stories to check. A coding agent makes more of these changes, faster, and it can't see any of them.</p>
+          <div class="vc-code b-problem__diff" data-ui>
+            <div class="vc-code__bar"><span>What the reviewer sees</span></div>
+            <div class="b-tout"><div class="b-live">
+              <div class="b-ln b-dim">src/tokens.css</div>
+              <div class="b-ln b-dim">@@ -12 +12 @@ :root {</div>
+              <div class="b-ln"><span class="b-del">-  --space-2: 8px;</span></div>
+              <div class="b-ln"><span class="b-add">+  --space-2: 10px;</span></div>
+              <div class="b-ln b-dim"> 1 file changed, 1 insertion(+), 1 deletion(-)</div>
+            </div></div>
+          </div>
+        </div>
+        <div class="b-problem__right">
+          <h3 class="b-h3">What teams use today</h3>
+          <dl class="b-today">
+            <div class="b-today__item"><dt>Screenshot tests in Playwright</dt><dd>Baselines pass on the machine that wrote them. On another OS, fonts and anti-aliasing render differently, so CI fails on pixels nobody changed.</dd></div>
+            <div class="b-today__item"><dt>A hosted service</dt><dd>It bills per snapshot, then again per browser and per mode, and keeps your images on its servers.</dd></div>
+            <div class="b-today__item"><dt>A harness of your own</dt><dd>It grows to 2,000 lines per project, and one person knows how it works.</dd></div>
+            <div class="b-today__item"><dt>The open-source tool many teams used</dt><dd>It's no longer maintained.</dd></div>
+          </dl>
+        </div>
+        <p class="b-statement">Code review shows what changed in the code. visual-check shows what changed on screen.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= DEMO: one session in chapters ================= -->
+  <section class="b-sec b-demo" data-slot="demo" id="b-demo" aria-labelledby="b-demo-title">
+    <div class="b-wrap">
+      <header class="b-demo__head">
+        <h2 class="b-h2" id="b-demo-title">One session, start to finish</h2>
+        <p class="b-lead">Set it up, write the baselines, change one line of CSS, see what it moved, then approve it. The terminal follows the text.</p>
+      </header>
+      <div class="b-demo__grid">
+        <ol class="b-steps">
+          <li class="b-step" data-i="0">
+            <h3 class="b-h3">Set it up once</h3>
+            <p><code>init</code> finds the Storybook in <code>apps/web</code>, asks three questions and installs what it needs. It writes its config, two npm scripts and the agent skill. It doesn't touch your stories or your preview file.</p>
+            <button class="vc-btn vc-btn--secondary vc-btn--sm b-next" type="button" data-i="1">Next: first baselines</button>
+          </li>
+          <li class="b-step" data-i="1">
+            <h3 class="b-h3">Approve what's there today</h3>
+            <p><code>update</code> snapshots all 108 stories and modes and writes each one as a PNG baseline beside the Storybook. You commit them with your code. Only a person runs <code>update</code>. With <code>CI</code> set, it exits 2.</p>
+            <button class="vc-btn vc-btn--secondary vc-btn--sm b-next" type="button" data-i="2">Next: one-line change</button>
+          </li>
+          <li class="b-step" data-i="2">
+            <h3 class="b-h3">Change one line</h3>
+            <p>The button gets 2px more padding. Review shows one line of CSS. It doesn't show that the modal on mobile moved too, because nobody opened it.</p>
+            <button class="vc-btn vc-btn--secondary vc-btn--sm b-next" type="button" data-i="3">Next: test</button>
+          </li>
+          <li class="b-step" data-i="3">
+            <h3 class="b-h3">See what moved</h3>
+            <p><code>test</code> snapshots every story in the same pinned browser and compares each with its baseline. Two differ. It names them, counts the pixels, writes a visual diff for each and exits 1, so the CI check fails.</p>
+            <button class="vc-btn vc-btn--secondary vc-btn--sm b-next" type="button" data-i="4">Next: approve</button>
+          </li>
+          <li class="b-step" data-i="4">
+            <h3 class="b-h3">Approve it, or fix it</h3>
+            <p>If the change is intended, a person runs <code>update</code>. The two new baselines land in the same commit as the CSS, so the reviewer sees the code and the pixels together.</p>
+          </li>
+        </ol>
+
+        <div class="b-stage">
+          <div class="b-stage__bar">
+            <div class="b-chaps" role="group" aria-label="Chapters of the session">
+              <button class="b-chap" type="button" data-i="0">Set up</button>
+              <button class="b-chap" type="button" data-i="1">First baselines</button>
+              <button class="b-chap" type="button" data-i="2">One-line change</button>
+              <button class="b-chap" type="button" data-i="3">Test</button>
+              <button class="b-chap" type="button" data-i="4">Approve</button>
+            </div>
+            <button class="b-play" type="button"></button>
+          </div>
+          <div class="vc-code b-dterm" data-ui>
+            <div class="vc-code__bar"><span>Terminal</span><span class="b-bar-r"><span class="b-rep-log">reporter: log</span><span class="b-rep-live">reporter: live</span></span></div>
+            <div class="b-tout" tabindex="0" role="region" aria-label="Terminal output of the session"></div>
+          </div>
+          <figure class="b-diff" data-ui aria-label="The story components-button--default, as images">
+            <figcaption class="b-diff__head"><code class="b-diff__id">components-button--default</code><span class="b-diff__badge"></span></figcaption>
+            <div class="b-frames">
+              <div class="b-frame b-frame--base"><div class="b-canvas" role="img" data-alt="base"><div class="b-pic" data-f="base" aria-hidden="true"></div></div><span class="b-frame__cap">Baseline</span></div>
+              <div class="b-frame b-frame--snap"><div class="b-canvas" role="img" data-alt="snap"><div class="b-pic" data-f="snap" aria-hidden="true"></div></div><span class="b-frame__cap">Snapshot</span></div>
+              <div class="b-frame b-frame--wipe">
+                <div class="b-canvas b-wipe" role="img" data-alt="wipe">
+                  <div class="b-wipe__layer b-pic" data-f="base" aria-hidden="true"></div>
+                  <div class="b-wipe__layer b-wipe__layer--snap b-pic" data-f="snap" aria-hidden="true"></div>
+                  <span class="b-wipe__handle" aria-hidden="true"></span>
+                </div>
+                <label class="b-frame__cap b-wipe__cap"><span>Left: baseline  Right: snapshot</span><input type="range" min="0" max="100" value="50" aria-label="Wipe between the baseline and the snapshot"></label>
+              </div>
+              <div class="b-frame b-frame--diff"><div class="b-canvas" role="img" data-alt="diff"><div class="b-pic" data-f="diff" aria-hidden="true"></div></div><span class="b-frame__cap">Visual diff</span></div>
+            </div>
+            <p class="b-diff__note"></p>
+          </figure>
+          <p class="b-stage__note">Output from visual-check's own test apps, shortened. <span class="b-rep-log">The <code>log</code> reporter prints one line per snapshot. It's the default in CI.</span><span class="b-rep-live">The <code>live</code> reporter prints only failures, above one progress line. It's the default in a terminal.</span></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= COMMANDS: the CLI's own --help, annotated ================= -->
+  <section class="b-sec b-commands" data-slot="commands" aria-labelledby="b-commands-title">
+    <div class="b-wrap">
+      <header class="b-commands__head">
+        <h2 class="b-h2" id="b-commands-title">Three commands do all of it</h2>
+        <p class="b-lead"><code>init</code> turns the other two into npm scripts, so day to day you type <code>pnpm visual:check</code>. Only one of them writes baselines, and it never runs in CI.</p>
+      </header>
+      <table class="b-ctable">
+        <thead><tr><th scope="col">Command</th><th scope="col">What <code>--help</code> says</th><th scope="col">Who runs it, and what happens</th><th scope="col">As a script</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="b-ctable__cmd"><code>init</code></td>
+            <td class="b-ctable__help">Set up visual-check in this project</td>
+            <td class="b-ctable__who"><p>You, once. It finds each Storybook and its port, asks a few questions, installs the packages, and writes the config, two scripts and the agent skill.</p><p class="b-small">It writes no CI workflow and never edits your preview file or the root <code>.gitignore</code>.</p></td>
+            <td class="b-ctable__script"><code>npx @visual-check/cli init</code></td>
+          </tr>
+          <tr>
+            <td class="b-ctable__cmd"><code>update</code></td>
+            <td class="b-ctable__help">Write missing and failing baselines and delete orphans (local only)</td>
+            <td class="b-ctable__who"><p>A person, after looking at the visual diffs. It prints every file it wrote, so the pull request shows the same list.</p><p class="b-small">With <code>CI</code> set it exits 2. No pipeline can approve its own changes.</p></td>
+            <td class="b-ctable__script"><code>pnpm visual:update</code></td>
+          </tr>
+          <tr>
+            <td class="b-ctable__cmd"><code>test</code></td>
+            <td class="b-ctable__help">Capture snapshots and compare them with baselines</td>
+            <td class="b-ctable__who"><p>Everyone. You on your laptop, CI through the GitHub Action, your agent through the skill.</p><p class="b-small">Exit 0 when every story matches its baseline, 1 when a story needs a look, 2 when the tool, the config or the environment fails.</p></td>
+            <td class="b-ctable__script"><code>pnpm visual:check</code></td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="b-flags">
+        <span class="b-flags__label">Flags you'll reach for</span>
+        <code class="vc-inline-code">--affected</code><code class="vc-inline-code">--filter &lt;regex&gt;</code><code class="vc-inline-code">--base &lt;ref&gt;</code><code class="vc-inline-code">--storybook &lt;name&gt;</code><code class="vc-inline-code">--shard 2/3</code><code class="vc-inline-code">--reporter live|log|json</code>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= FEATURES: claims, each with its number and where it came from ================= -->
+  <section class="b-sec b-features" data-slot="features" aria-labelledby="b-features-title">
+    <div class="b-wrap">
+      <header class="b-features__head">
+        <h2 class="b-h2" id="b-features-title">The details that keep a run honest</h2>
+        <p class="b-lead">Each claim comes with its number and where the number came from: visual-check's public CI, or the measurements in its design research.</p>
+      </header>
+      <ul class="b-claims">
+        <li class="b-claim">
+          <div class="b-claim__text">
+            <h3 class="b-h3">Same pixels on every machine</h3>
+            <p>The browser runs in visual-check's own image, pinned by digest, as <code>linux/amd64</code> by default. A baseline written on a Mac passes in Linux CI and on Windows. Pixels that differ between machines are what make other screenshot tests flaky.</p>
+          </div>
+          <div class="b-claim__proof">
+            <code class="b-countline">108 passed · 10.8s</code>
+            <p class="b-src">Linux, a GitHub-hosted runner, 4 workers</p>
+            <code class="b-countline">108 passed · 16.9s</code>
+            <p class="b-src">Windows with Docker Desktop</p>
+          </div>
+        </li>
+        <li class="b-claim">
+          <div class="b-claim__text">
+            <h3 class="b-h3">Only the stories a change can reach</h3>
+            <p><code>test --affected</code> follows the changed files to the stories they reach and snapshots those. <code>--shard 2/3</code> splits a big run across runners, and a consistency job checks that no baseline went missing.</p>
+          </div>
+          <div class="b-claim__proof">
+            <div class="vc-code" data-ui><div class="b-tout"><div class="b-live"><div class="b-ln b-dim">Storybook docs is left out, since no changed file reaches it.</div></div></div></div>
+            <code class="b-countline">110 passed · 19.1s</code>
+            <p class="b-src">Five Storybooks in one repo, one run</p>
+          </div>
+        </li>
+        <li class="b-claim">
+          <div class="b-claim__text">
+            <h3 class="b-h3">Fast because it's narrow</h3>
+            <p>It drives the browser itself, without Playwright. A story is ready in 80 ms instead of 170 ms through Storybook's test path, and a snapshot whose bytes match its baseline passes without decoding either image.</p>
+          </div>
+          <div class="b-claim__proof">
+            <p class="b-fig">3.30 <span class="b-fig__vs">captures/s, against 2.71</span></p>
+            <p class="b-src">Against Playwright's <code>run-server</code>: 2 workers on 2 vCPUs, 300 real stories, 18–24% faster</p>
+            <p class="b-fig">98–99%</p>
+            <p class="b-src">of unchanged snapshots pass on identical bytes</p>
+          </div>
+        </li>
+        <li class="b-claim">
+          <div class="b-claim__text">
+            <h3 class="b-h3">Honest with real stories</h3>
+            <p>Animations are captured at their end state. Each capture waits for fonts and images, and for your own <code>wait</code> hook. Masks cover a clock by selector or a CDN by host. A failing snapshot is retried once, and a flaky one is listed but never fails the run.</p>
+          </div>
+          <div class="b-claim__proof">
+            <div class="vc-code" data-ui><div class="b-tout"><div class="b-live"><div class="b-ln">! web  checkout--flow  broken: The story navigated away to /categories/burgers. Await the new page before clicking.</div></div></div></div>
+            <p class="b-src">A broken story says why, and what to change</p>
+          </div>
+        </li>
+        <li class="b-claim">
+          <div class="b-claim__text">
+            <h3 class="b-h3">Strict by default</h3>
+            <p>The default tolerance, <code>{ color: 0.01, pixels: 20 }</code>, still catches 89–100% of small deliberate changes in the measured set. Anti-aliased pixels count towards it, which is what finds a missing icon.</p>
+          </div>
+          <div class="b-claim__proof">
+            <p class="b-fig">259 of 260</p>
+            <p class="b-src">hidden icons caught when anti-aliased pixels count, against 118 when they're ignored</p>
+          </div>
+        </li>
+        <li class="b-claim">
+          <div class="b-claim__text">
+            <h3 class="b-h3">Nothing leaves your machine</h3>
+            <p>There's no service, no account and no per-snapshot bill. Baselines are PNG files in your repo, reviewed in the pull request like code. The report is a JSON file. MIT licence.</p>
+          </div>
+          <div class="b-claim__proof">
+            <code class="b-countline" style="font-size:14px;line-height:22px;overflow-wrap:anywhere">apps/web/.visual-check/baselines/components-button--default.png</code>
+            <p class="b-src">Where a baseline lives: beside its Storybook, committed</p>
+          </div>
+        </li>
+        <li class="b-claim">
+          <div class="b-claim__text">
+            <h3 class="b-h3">Review where you already work</h3>
+            <p>The same run reads the same everywhere, and the same baselines answer it.</p>
+          </div>
+          <div class="b-claim__proof">
+            <ul class="b-surfaces">
+              <li><strong>Terminal</strong><span>Every story that moved, with its pixel count and diff path</span></li>
+              <li><strong>Storybook addon</strong><span>Check and Update the open story, with a wipe slider. Storybook 10</span></li>
+              <li><strong>GitHub Action</strong><span><code>uses: visual-check/action@v1</code>, a step summary and the report as an artifact</span></li>
+              <li><strong>JSON report</strong><span><code>.visual-check/report/report.json</code>, for scripts and agents</span></li>
+            </ul>
+          </div>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ================= AGENT ================= -->
+  <section class="b-sec b-agent" data-slot="agent" aria-labelledby="b-agent-title">
+    <div class="b-wrap b-agent__grid">
+      <div class="b-agent__text">
+        <h2 class="b-h2" id="b-agent-title">Your agent can't see the UI</h2>
+        <p class="b-lead"><code>init</code> writes an agent skill: a Markdown file and a small Node script. Your agent runs it after UI changes, before it says the work is done, and tells you which stories moved, by how many pixels, with the paths of the visual diffs.</p>
+        <p class="b-rule"><strong>It never approves its own change.</strong>Without your OK it doesn't run <code>update</code>, raise the tolerance or disable a story to make a failure pass. A person writes the baselines.</p>
+        <ul class="b-files" aria-label="What init writes for the agent">
+          <li><code>.agents/skills/visual-check/SKILL.md</code><span>When to run it and how to report</span></li>
+          <li><code>.agents/skills/visual-check/scripts/run.mjs</code><span>Starts Storybook if it's down, runs <code>test</code>, stops what it started</span></li>
+          <li><code>.claude/skills/visual-check</code><span>A link to the same skill (a copy on Windows)</span></li>
+        </ul>
+      </div>
+      <figure class="b-agent__chat">
+        <div class="b-chat" data-ui>
+          <div class="b-msg b-msg--you"><span class="b-msg__who">You</span><p>Give the primary button a little more room.</p></div>
+          <div class="b-msg">
+            <span class="b-msg__who">Agent</span>
+            <p>Changed the padding in <code>src/button/button.css</code> from <code>8px 16px</code> to <code>10px 16px</code>. Checking the stories.</p>
+            <div class="vc-code"><div class="b-tout"><div class="b-live">
+              <div class="b-ln"><span class="p">$ </span>node .agents/skills/visual-check/scripts/run.mjs test</div>
+              <div class="b-ln b-dim">Reused Storybook web, which was already running at http://127.0.0.1:6006.</div>
+            </div></div></div>
+            <p>visual-check ran on 14 affected snapshots: 12 passed and 2 differ.</p>
+            <ul>
+              <li><code>components-button--default</code> (default capture): 312 pixels differ. Diff: <code>.visual-check/report/images/web/components-button--default.diff.png</code></li>
+              <li><code>components-modal--default</code> (mobile): 1904 pixels differ. Diff: <code>…/components-modal--default.mobile.diff.png</code></li>
+            </ul>
+            <p>Both come from my padding change. If they're intended, run <code>pnpm visual:update</code>. I won't run it without your OK. No missing baselines, orphans or flaky snapshots.</p>
+          </div>
+        </div>
+        <figcaption class="b-chat__cap">An example. The command and its output are the skill's real strings; the reply follows the shape the skill asks for.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ================= FAQ ================= -->
+  <section class="b-sec b-faq" data-slot="faq" aria-labelledby="b-faq-title">
+    <div class="b-wrap">
+      <header class="b-faq__head">
+        <h2 class="b-h2" id="b-faq-title">Before you run it</h2>
+        <p class="b-lead">The questions people ask before <code>init</code>. Anything else is in the <a class="vc-link" href="../docs/1.html">docs</a>.</p>
+      </header>
+      <dl class="b-qa">
+        <div class="b-qa__item"><dt>Do I need Docker?</dt><dd>By default, yes. The browser runs in visual-check's own image, which is how the pixels match on every machine. Without Docker, <code>platform: 'host'</code> uses a local browser, and baselines then only match on the same OS.</dd></div>
+        <div class="b-qa__item"><dt>Is it slow on my M-series Mac?</dt><dd>The default <code>linux/amd64</code> image runs emulated through Rosetta, so it's slower than native. <code>platform: 'linux/arm64'</code> is faster, and the default tolerance absorbs the small rendering difference.</dd></div>
+        <div class="b-qa__item"><dt>Will it be flaky?</dt><dd>Animations are captured at their end state and each capture waits for fonts and images. A failing snapshot is retried once. A flaky one is listed in the output and never fails the run.</dd></div>
+        <div class="b-qa__item"><dt>Where do baselines live, and who writes them?</dt><dd>In <code>.visual-check/baselines/</code> beside each Storybook, committed. Only a person running <code>update</code> writes them. CI never does: <code>update</code> with <code>CI</code> set exits 2.</dd></div>
+        <div class="b-qa__item"><dt>How is it different from a hosted visual-testing service?</dt><dd>It runs in your CI and on your machine. There's no per-snapshot pricing, no upload and no hosted review. You review in the pull request, the Storybook addon and the report.</dd></div>
+        <div class="b-qa__item"><dt>Which Storybooks and CIs does it support?</dt><dd>Storybook 9.1, 10 and 11. The addon needs Storybook 10. GitHub Actions has an Action and a reusable workflow, and the CLI runs anywhere Docker does. Node 22.17 or later, with npm, pnpm, Yarn or Bun.</dd></div>
+        <div class="b-qa__item"><dt>What does it change in my repo?</dt><dd>Its config (<code>visual-check.config.ts</code> and <code>.storybook/visual-check.ts</code>), two npm scripts, the agent skill and <code>.visual-check/</code> folders. It never edits your preview file or your stories.</dd></div>
+        <div class="b-qa__item"><dt>What does it cost?</dt><dd>Nothing. It's MIT-licensed and runs on the CI minutes you already have.</dd></div>
+        <div class="b-qa__item"><dt>Coming from Loki, Lost Pixel or the Storybook test-runner?</dt><dd>Run <code>init</code> beside it. The docs have a page for moving over.</dd></div>
+        <div class="b-qa__item"><dt>Can my agent approve its own changes?</dt><dd>No. The skill runs <code>test</code> and reports. It tells the agent never to run <code>update</code>, raise the tolerance or disable a story without your OK.</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <!-- ================= LAST CALL ================= -->
+  <section class="b-sec b-cta" data-slot="cta" aria-labelledby="b-cta-title">
+    <div class="b-wrap b-cta__inner">
+      <div class="b-cta__head">
+        <h2 class="b-h2" id="b-cta-title">Run it on the Storybook you have open</h2>
+        <p class="b-lead">It asks three questions, then writes its config, two scripts and the agent skill. To take it out again, delete those and the <code>.visual-check</code> folders.</p>
+      </div>
+      <dl class="b-needs" aria-label="What it needs">
+        <div class="b-needs__item"><dt>Node</dt><dd>22.17 or later</dd></div>
+        <div class="b-needs__item"><dt>Docker</dt><dd>For the pinned browser</dd></div>
+        <div class="b-needs__item"><dt>Storybook</dt><dd>9.1, 10 or 11</dd></div>
+        <div class="b-needs__item"><dt>Package manager</dt><dd>npm, pnpm, Yarn or Bun</dd></div>
+      </dl>
+      <div class="b-cta__cmdrow">
+        <fieldset class="b-pm">
+          <legend class="b-vh">Package manager</legend>
+          <label><input type="radio" name="b-pm" value="npx @visual-check/cli init" checked><span>npm</span></label>
+          <label><input type="radio" name="b-pm" value="pnpm dlx @visual-check/cli init"><span>pnpm</span></label>
+          <label><input type="radio" name="b-pm" value="yarn dlx @visual-check/cli init"><span>Yarn</span></label>
+          <label><input type="radio" name="b-pm" value="bunx @visual-check/cli init"><span>Bun</span></label>
+        </fieldset>
+        <div class="vc-code b-bigcmd" data-ui><code><span class="p">$ </span><span class="b-bigcmd__txt">npx @visual-check/cli init</span></code></div>
+        <div class="b-cta__actions">
+          <button class="vc-btn vc-btn--accent vc-btn--lg b-cta__copy" type="button">Copy the command</button>
+          <span class="b-copy-status b-vh" aria-live="polite"></span>
+          <a class="vc-btn vc-btn--ghost vc-btn--lg" href="../docs/1.html#getting-started">Read the getting started guide <svg class="vc-icon vc-btn__arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+<div data-kit="footer"></div>
+
+<script>
+/* ---------- HERO: init in a terminal (VCProto.scene) ---------- */
+(function () {
+  var root = document.getElementById('b-hero-scene');
+  if (!root) return;
+  var hero = document.getElementById('b-hero');
+  hero.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-b-copy]');
+    if (b) bCopy(b, b.getAttribute('data-b-copy'));
+  });
+
+  var OK = '<span class="s">✓</span> ';
+  function bar(n, total) {
+    var f = Math.round(n / total * 20);
+    return '<span class="b-cy">' + '━'.repeat(f) + '</span><span class="b-dim">' + '─'.repeat(20 - f) + '</span>';
+  }
+  var SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
+
+  async function script(t) {
+    var o = t.$('.b-live');
+    var cmd = t.add(o, '<div class="b-ln"><span class="p">$ </span><span class="b-cmd"></span></div>');
+    await t.type(cmd.querySelector('.b-cmd'), 'npx @visual-check/cli init', { cps: 22 });
+    await t.wait(650);
+    t.add(o, '<div class="b-ln"><span class="b-cy">✓</span><span class="b-mg">✓</span> <span class="b-dim">visual-check init</span></div>');
+    await t.wait(350);
+    var prog = t.add(o, '<div class="b-ln b-ln--gap"></div>');
+    var qs = [
+      ['Name of the Storybook in apps/web', 'What the config and the report call this Storybook.', '› web', 'web'],
+      ['URL of web', 'Where visual-check opens it, locally and in CI. Use 127.0.0.1, not localhost.', '› http://127.0.0.1:6006', 'http://127.0.0.1:6006'],
+      ['Install the agent skill?', 'Teaches a coding agent to run visual-check and report what changed.', '› <span class="s">●</span> Yes  <span class="b-dim">○ No</span>', 'Yes']
+    ];
+    var answered = null;
+    for (var i = 0; i < qs.length; i++) {
+      prog.innerHTML = bar(i, qs.length) + ' <span class="b-dim">Step ' + (i + 1) + ' of ' + qs.length + '</span>';
+      var q = t.add(o, '<div class="b-q"><div class="b-ln"><span class="k">?</span> ' + qs[i][0] + '</div><div class="b-ln b-dim">  ' + qs[i][1] + '</div><div class="b-ln">  ' + qs[i][2] + '</div></div>');
+      await t.wait(1100);
+      q.remove();
+      var line = '<div class="b-ln">' + OK + qs[i][0] + ' <span class="s">' + qs[i][3] + '</span></div>';
+      if (!answered) { prog.insertAdjacentHTML('beforebegin', line); answered = true; }
+      else prog.insertAdjacentHTML('beforebegin', line);
+      await t.wait(200);
+    }
+    // the setup steps
+    var steps = ['Write the files and scripts', "Install visual-check's packages", 'Check for unlisted dependencies'];
+    var times = ['0.0s', '3.0s', '0.2s'];
+    prog.innerHTML = bar(0, 3) + ' <span class="b-dim">0/3 · 0.0s</span>';
+    var list = t.add(o, '<div class="b-steplist">' + steps.map(function (s) { return '<div class="b-ln"><span class="b-dim">○</span> ' + s + '</div>'; }).join('') + '</div>');
+    var rows = list.children;
+    for (var k = 0; k < steps.length; k++) {
+      var row = rows[k];
+      if (!t.instant && k === 1) {
+        row.innerHTML = '<span class="b-cy">' + SPIN[0] + '</span> ' + steps[k] + ' <span class="b-dim">0.0s</span>';
+        var sub = document.createElement('div');
+        sub.innerHTML = '<div class="b-ln b-dim">  pnpm add --save-dev @visual-check/cli @visual-check/chromium@^157.0.0 @…</div><div class="b-ln b-dim">  │ Progress: resolved 1, reused 0, downloaded 0, added 0</div>';
+        row.after(sub);
+        for (var f = 0; f < 22; f++) {
+          await t.wait(80);
+          var secs = (f * 0.14).toFixed(1);
+          row.innerHTML = '<span class="b-cy">' + SPIN[f % SPIN.length] + '</span> ' + steps[k] + ' <span class="b-dim">' + secs + 's</span>';
+          prog.innerHTML = bar(1, 3) + ' <span class="b-dim">1/3 · ' + secs + 's</span>';
+          sub.lastChild.textContent = '  │ Progress: resolved ' + Math.min(214, 1 + f * 11) + ', reused ' + Math.min(198, f * 10) + ', downloaded ' + Math.min(16, f) + ', added ' + Math.min(16, f);
+        }
+        sub.remove();
+      } else {
+        await t.wait(380);
+      }
+      row.innerHTML = OK + steps[k] + ' <span class="b-dim">' + times[k] + '</span>';
+      prog.innerHTML = bar(k + 1, 3) + ' <span class="b-dim">' + (k + 1) + '/3 · ' + ['0.0s', '3.0s', '3.2s'][k] + '</span>';
+    }
+    await t.wait(400);
+    prog.remove();
+    list.classList.add('b-ln--gap');
+    t.add(o, '<div class="b-ln b-ln--gap">' + OK + 'visual-check is set up</div>');
+    await t.wait(300);
+    t.add(o, '<div class="b-ln b-ln--gap">Next</div>');
+    var next = [
+      ['pnpm storybook    ', 'Start Storybook, and keep it running'],
+      ['pnpm visual:update', 'Write the first baselines'],
+      ['pnpm visual:check ', 'Check the stories against the baselines'],
+      ['', 'Commit the changes, baselines included']
+    ];
+    for (var n = 0; n < next.length; n++) {
+      t.add(o, '<div class="b-ln">  <span class="b-dim">' + (n + 1) + '</span>  ' + (next[n][0] ? '<span class="s">' + next[n][0] + '</span>   <span class="b-nd">' + next[n][1] + '</span>' : next[n][1]) + '</div>');
+      await t.wait(140);
+    }
+  }
+
+  // Run the script once, instantly, into a detached copy: its end state holds the terminal's height while it plays.
+  var fake = document.createElement('div');
+  fake.innerHTML = '<div class="b-live"></div>';
+  var ft = {
+    instant: true,
+    $: function (s) { return fake.querySelector(s); },
+    $$: function (s) { return [].slice.call(fake.querySelectorAll(s)); },
+    wait: async function () {},
+    chapter: function () {},
+    type: async function (el, text) { el.textContent += text; },
+    add: function (p, html) { p.insertAdjacentHTML('beforeend', html); return p.lastElementChild; }
+  };
+  script(ft).then(function () {
+    root.querySelector('.b-ghost').innerHTML = fake.querySelector('.b-live').innerHTML;
+    VCProto.scene(root, script, { controls: '#b-hero-controls', label: 'visual-check init, replayed in a terminal' });
+  });
+})();
+</script>
+
+<script>
+/* ---------- DEMO: one session, in chapters that follow the prose ----------
+   Its own small timeline rather than VCProto.scene: each chapter stops at its own end, scroll and chapter buttons
+   pick the chapter, and one button plays the whole session. Same motion rules as the kit:
+   auto = plays when seen, click = end states until you press play or pick a chapter, still = end states only. */
+(function () {
+  var sec = document.getElementById('b-demo');
+  if (!sec) return;
+  var out = sec.querySelector('.b-dterm .b-tout');
+  var stage = sec.querySelector('.b-stage');
+  var fig = sec.querySelector('.b-diff');
+  var chaps = [].slice.call(sec.querySelectorAll('.b-chap'));
+  var steps = [].slice.call(sec.querySelectorAll('.b-step'));
+  var playBtn = sec.querySelector('.b-play');
+  var motion = VCProto.motion;
+  var CANCEL = {};
+  var runId = 0, paused = false, resumers = [], state = 'ended', current = 4, playedAll = false, mode = 'one', seen = false, autoPaused = false;
+
+  function rep() { return document.documentElement.getAttribute('data-t-reporter') === 'live' ? 'live' : 'log'; }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  /* ----- the pictures the terminal can't show ----- */
+  function z(html) { return '<div class="b-zoom">' + html + '</div>'; }
+  var OLD = z('<span class="b-sbtn">Button</span>');
+  var NEW = z('<span class="b-sbtn b-sbtn--new">Button</span>');
+  function none(text) { return '<span class="b-none">' + text + '</span>'; }
+  var GHOST = z('<span class="b-dstack"><span class="b-sbtn b-dghost">Button</span></span>');
+  var DIFF = z('<span class="b-dstack"><span class="b-sbtn b-sbtn--new b-dmag">Button</span><span class="b-sbtn b-dghost">Button</span></span>');
+  var ALT = {
+    old: 'The button, 36px high', neu: 'The button, 40px high', none: 'Empty',
+    ghost: 'The button faded out, with no pixel marked', diff: 'The button faded out, with a 2px magenta band along its top and bottom edges: the pixels that differ'
+  };
+  function badge(kind, glyph, label, count) {
+    return '<span class="vc-badge vc-badge--' + kind + '"><span class="vc-badge__glyph" aria-hidden="true">' + glyph + '</span>' + label + (count ? ' <span class="vc-badge__count">' + count + '</span>' : '') + '</span>';
+  }
+  var PANEL = {
+    init: { alt: ['none', 'none', 'none'], base: none('No baseline yet'), snap: none('Not taken'), diff: none('Nothing to compare'), badge: badge('missing', '▲', 'Missing baseline'),
+      note: 'There is no baseline yet. The first <code>update</code> writes it.' },
+    base: { alt: ['old', 'old', 'ghost'], base: OLD, snap: OLD, diff: GHOST, badge: badge('passed', '✓', 'Written'),
+      note: '<code>written .visual-check/baselines/components-button--default.png</code>' },
+    edit: { alt: ['old', 'none', 'none'], base: OLD, snap: none('Not taken since the change'), diff: none('Nothing to compare'), badge: badge('orphan', '○', 'Not checked'),
+      note: 'The CSS changed. Nothing has compared the story with its baseline since.' },
+    test: { alt: ['old', 'neu', 'diff'], base: OLD, snap: NEW, diff: DIFF, badge: badge('changed', '✗', 'Changed', '312 px'),
+      note: '<code>differs: 312 differ, 20 allowed</code><br><code>diff: .visual-check/report/images/web/components-button--default.diff.png</code>' },
+    approved: { alt: ['neu', 'neu', 'ghost'], base: NEW, snap: NEW, diff: GHOST, badge: badge('passed', '✓', 'Written'),
+      note: '<code>written .visual-check/baselines/components-button--default.png</code>, in the same commit as the CSS.' }
+  };
+  function panel(name) {
+    var p = PANEL[name];
+    fig.setAttribute('data-state', name);
+    [].forEach.call(fig.querySelectorAll('[data-f]'), function (el) { el.innerHTML = p[el.getAttribute('data-f')]; });
+    var a = { base: 'Baseline: ' + ALT[p.alt[0]], snap: 'Snapshot: ' + ALT[p.alt[1]], diff: 'Visual diff: ' + ALT[p.alt[2]] };
+    a.wipe = a.base + '. ' + a.snap;
+    [].forEach.call(fig.querySelectorAll('[data-alt]'), function (el) { el.setAttribute('aria-label', a[el.getAttribute('data-alt')]); });
+    fig.querySelector('.b-diff__badge').innerHTML = p.badge;
+    fig.querySelector('.b-diff__note').innerHTML = p.note;
+  }
+  var wipe = fig.querySelector('.b-wipe'), range = fig.querySelector('.b-wipe__cap input');
+  range.addEventListener('input', function () { wipe.style.setProperty('--pos', range.value + '%'); });
+
+  /* ----- terminal timeline ----- */
+  function follow() { out.scrollTop = out.scrollHeight; }
+  function api(id, animate) {
+    var t = { animate: animate };
+    function check() { if (id !== runId) throw CANCEL; }
+    t.wait = async function (ms) {
+      check();
+      if (!animate) return;
+      var left = ms;
+      while (left > 0) {
+        if (paused) { await new Promise(function (r) { resumers.push(r); }); check(); }
+        var s = Math.min(left, 40);
+        await sleep(s); check();
+        left -= s;
+      }
+    };
+    t.line = function (html, cls, before) {
+      check();
+      var d = document.createElement('div');
+      d.className = 'b-ln' + (cls ? ' ' + cls : '');
+      d.innerHTML = html || '';
+      if (before) out.insertBefore(d, before); else out.appendChild(d);
+      if (animate) follow();
+      return d;
+    };
+    t.lines = async function (arr, gap) {
+      for (var i = 0; i < arr.length; i++) { t.line(arr[i]); await t.wait(gap == null ? 110 : gap); }
+    };
+    t.cmd = async function (text) {
+      var el = t.line('<span class="p">$ </span><span class="b-cmd"></span>', 'is-chapter-start' + (out.children.length ? ' b-ln--gap' : ''));
+      var c = el.querySelector('.b-cmd');
+      if (!animate) { c.textContent = text; return el; }
+      c.classList.add('is-typing');
+      for (var i = 0; i < text.length; i++) { c.textContent += text[i]; await t.wait(38 * (0.6 + Math.random() * 0.8)); }
+      c.classList.remove('is-typing');
+      await t.wait(380);
+      return el;
+    };
+    // the live reporter's one progress line; failures print above it
+    t.progress = async function (total, secs, events) {
+      if (!animate) { events.forEach(function (e) { t.line(e[1]); if (e[2]) e[2](); }); return; }
+      var SP = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
+      var sp = t.line('');
+      var frames = 26, ev = 0;
+      for (var f = 0; f <= frames; f++) {
+        var n = Math.round(total * f / frames);
+        while (ev < events.length && events[ev][0] <= n) { t.line(events[ev][1], '', sp); if (events[ev][2]) events[ev][2](); ev++; }
+        sp.innerHTML = '<span class="b-cy">' + SP[f % SP.length] + '</span> ' + n + '/' + total + ' snapshots · 4 workers · ' + (secs * f / frames).toFixed(1) + 's';
+        follow();
+        await t.wait(95);
+      }
+      sp.remove();
+    };
+    return t;
+  }
+
+  var HEAD_UPDATE = 'visual-check 0.1.0 · update · 108 snapshots · 4 workers';
+  var HEAD_TEST = 'visual-check 0.1.0 · test · 108 snapshots · 4 workers';
+  var OKM = '<span class="s">✓</span> ';
+  var XM = '<span class="k">✗</span> ';
+  var BTN_X = XM + 'web  components-button--default  <span class="k">differs: 312 differ, 20 allowed</span>';
+  var MODAL_X = XM + 'web  components-modal--default  mobile  <span class="k">differs: 1904 differ, 80 allowed (20 at scale 2)</span>';
+  var MORE = '<span class="b-dim">…</span>';
+
+  var CH = [
+    async function (t) { // init
+      panel('init');
+      await t.cmd('npx @visual-check/cli init');
+      t.line('<span class="b-cy">✓</span><span class="b-mg">✓</span> <span class="b-dim">visual-check init</span>');
+      await t.wait(300);
+      await t.lines([
+        OKM + 'Name of the Storybook in apps/web <span class="s">web</span>',
+        OKM + 'URL of web <span class="s">http://127.0.0.1:6006</span>',
+        OKM + 'Install the agent skill? <span class="s">Yes</span>'
+      ], 320);
+      await t.lines([
+        OKM + 'Write the files and scripts <span class="b-dim">0.0s</span>',
+        OKM + "Install visual-check's packages <span class=\"b-dim\">3.0s</span>",
+        OKM + 'Check for unlisted dependencies <span class="b-dim">0.2s</span>'
+      ], 300);
+      t.line(OKM + 'visual-check is set up', 'b-ln--gap');
+      panel('init');
+    },
+    async function (t) { // update: the first baselines
+      await t.cmd('pnpm visual:update');
+      t.line('<span class="b-dim">&gt; visual-check update</span>');
+      await t.wait(250);
+      t.line(HEAD_UPDATE);
+      if (rep() === 'log') {
+        await t.lines([
+          OKM + 'web  components-alert--warning  <span class="b-dim">written: missing</span>',
+          OKM + 'web  components-button--default  <span class="b-dim">written: missing</span>',
+          OKM + 'web  components-button--danger  <span class="b-dim">written: missing</span>',
+          OKM + 'web  components-modal--default  <span class="b-dim">written: missing</span>',
+          OKM + 'web  components-modal--default  mobile  <span class="b-dim">written: missing</span>',
+          MORE
+        ], 150);
+      } else {
+        await t.progress(108, 64.6, []);
+      }
+      t.line('<span class="s">108 written</span>');
+      await t.lines([
+        '<span class="b-dim">written .visual-check/baselines/components-alert--warning.png</span>',
+        '<span class="b-dim">written .visual-check/baselines/components-button--default.png</span>',
+        MORE
+      ], 90);
+      panel('base');
+    },
+    async function (t) { // the one-line change
+      await t.cmd('git diff');
+      await t.lines([
+        '<span class="b-dim">diff --git a/src/button/button.css b/src/button/button.css</span>',
+        '<span class="b-dim">@@ -4 +4 @@ .button {</span>',
+        '<span class="b-del">-  padding: 8px 16px;</span>',
+        '<span class="b-add">+  padding: 10px 16px;</span>'
+      ], 140);
+      panel('edit');
+    },
+    async function (t) { // test
+      var log = rep() === 'log';
+      await t.cmd(log ? 'pnpm visual:check --reporter log' : 'pnpm visual:check');
+      t.line('<span class="b-dim">&gt; visual-check test' + (log ? ' --reporter log' : '') + '</span>');
+      await t.wait(250);
+      t.line(HEAD_TEST);
+      if (log) {
+        t.line(OKM + 'web  components-alert--warning  <span class="b-dim">821 ms</span>'); await t.wait(170);
+        t.line(BTN_X); panel('test'); await t.wait(170);
+        t.line(OKM + 'web  components-button--danger  <span class="b-dim">265 ms</span>'); await t.wait(170);
+        t.line(MODAL_X); await t.wait(170);
+        t.line(OKM + 'web  components-tabs--default  <span class="b-dim">268 ms</span>'); await t.wait(170);
+        t.line(MORE); await t.wait(300);
+      } else {
+        await t.progress(108, 11.4, [[23, BTN_X, function () { panel('test'); }], [61, MODAL_X]]);
+      }
+      t.line('── 2 failures ──');
+      await t.lines([
+        'web  components-button--default',
+        '  <span class="k">differs: 312 differ, 20 allowed</span>',
+        '  <span class="b-dim">diff: .visual-check/report/images/web/components-button--default.diff.png</span>',
+        'web  components-modal--default  mobile',
+        '  <span class="k">differs: 1904 differ, 80 allowed (20 at scale 2)</span>',
+        '  <span class="b-dim">diff: .visual-check/report/images/web/components-modal--default.mobile.diff.png</span>'
+      ], 90);
+      t.line('<span class="s">106 passed</span> · <span class="k">2 differs</span> · 11.4s');
+      t.line('<span class="b-dim">Report: .visual-check/report/report.json</span>');
+      await t.wait(250);
+      t.line('<span class="b-err"> ELIFECYCLE  Command failed with exit code 1.</span>');
+    },
+    async function (t) { // approve: update again
+      await t.cmd('pnpm visual:update');
+      t.line('<span class="b-dim">&gt; visual-check update</span>');
+      await t.wait(250);
+      t.line(HEAD_UPDATE);
+      if (rep() === 'log') {
+        await t.lines([
+          OKM + 'web  components-alert--warning  <span class="b-dim">kept</span>',
+          OKM + 'web  components-button--default  <span class="b-dim">written: differs: 312 differ, 20 allowed</span>',
+          OKM + 'web  components-modal--default  mobile  <span class="b-dim">written: differs: 1904 differ, 80 allowed (20 at scale 2)</span>',
+          MORE
+        ], 150);
+      } else {
+        await t.progress(108, 9.8, []);
+      }
+      t.line('<span class="s">2 written</span> · 106 kept');
+      await t.lines([
+        '<span class="b-dim">written .visual-check/baselines/components-button--default.png</span>',
+        '<span class="b-dim">written .visual-check/baselines/components-modal--default.mobile.png</span>'
+      ], 90);
+      panel('approved');
+      await t.wait(500);
+      await t.cmd('git commit -am "Give the button 2px more padding"');
+      await t.lines([
+        '<span class="b-dim">[button-padding 3f9c2e1] Give the button 2px more padding</span>',
+        '<span class="b-dim"> 3 files changed, 1 insertion(+), 1 deletion(-)</span>'
+      ], 90);
+    }
+  ];
+
+  function flush() { var r = resumers; resumers = []; r.forEach(function (f) { f(); }); }
+  function setCurrent(i) {
+    current = i;
+    chaps.forEach(function (b, j) { if (j === i) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current'); });
+    steps.forEach(function (s, j) { s.classList.toggle('is-current', j === i); });
+  }
+  var ICON_PLAY = VCProto.icon.play, ICON_PAUSE = VCProto.icon.pause, ICON_REPLAY = VCProto.icon.replay;
+  function setState(s) {
+    state = s;
+    out.setAttribute('aria-busy', s === 'playing' ? 'true' : 'false');
+    if (s === 'playing') playBtn.innerHTML = ICON_PAUSE + '<span>Pause</span>';
+    else if (s === 'paused') playBtn.innerHTML = ICON_PLAY + '<span>Resume</span>';
+    else playBtn.innerHTML = (playedAll ? ICON_REPLAY + '<span>Replay the session</span>' : ICON_PLAY + '<span>Play the session</span>');
+  }
+
+  async function show(k, animate, all) {
+    var id = ++runId;
+    paused = false; flush();
+    mode = all ? 'all' : 'one';
+    out.innerHTML = '';
+    setState(animate ? 'playing' : 'ended');
+    try {
+      var still = api(id, false);
+      for (var i = 0; i < k; i++) { setCurrent(i); await CH[i](still); }
+      var last = all ? CH.length - 1 : k;
+      for (var j = k; j <= last; j++) {
+        setCurrent(j);
+        var t = api(id, animate);
+        await CH[j](t);
+        if (j < last) await t.wait(1600);
+      }
+      if (id === runId) { mode = 'one'; setState('ended'); follow(); }
+    } catch (e) { if (e !== CANCEL) console.error(e); }
+  }
+  function pause() { if (state === 'playing') { paused = true; setState('paused'); } }
+  function resume() { if (state === 'paused') { paused = false; setState('playing'); flush(); } }
+
+  playBtn.addEventListener('click', function () {
+    autoPaused = false;
+    if (state === 'playing') pause();
+    else if (state === 'paused') resume();
+    else { playedAll = true; show(0, true, true); }
+  });
+  function pick(i) { autoPaused = false; seen = true; show(i, motion !== 'still'); }
+  chaps.forEach(function (b, i) { b.addEventListener('click', function () { pick(i); }); });
+  [].forEach.call(sec.querySelectorAll('.b-next'), function (b) {
+    b.addEventListener('click', function () {
+      var i = +b.getAttribute('data-i');
+      pick(i);
+      var s = steps[i] && steps[i].querySelector('.b-next');
+      if (s) s.focus({ preventScroll: true }); else if (steps[i]) { steps[i].setAttribute('tabindex', '-1'); steps[i].focus({ preventScroll: true }); }
+    });
+  });
+
+  /* Layout: scroll-driven chapters beside a sticky terminal on wide screens; picked chapters elsewhere and in the mixer. */
+  var wide = window.matchMedia('(min-width: 1024px)');
+  function tabs() { return VCProto.embed || !wide.matches; }
+  function applyLayout() { sec.classList.toggle('is-tabs', tabs()); }
+  applyLayout();
+  if (wide.addEventListener) wide.addEventListener('change', applyLayout);
+
+  steps.forEach(function (step, i) {
+    VCProto.onView(step, function (vis) {
+      if (!vis || tabs()) return;
+      if (mode === 'all' && state !== 'ended') return; // the visitor asked for the whole session: let it play
+      if (seen && i === current) return;
+      seen = true;
+      show(i, motion === 'auto');
+    }, { rootMargin: '-38% 0px -56% 0px', threshold: 0.01 });
+  });
+  VCProto.onView(stage, function (vis) {
+    if (vis && !seen && tabs() && motion === 'auto') { seen = true; show(0, true); return; }
+    if (!vis && state === 'playing') { pause(); autoPaused = true; }
+    else if (vis && state === 'paused' && autoPaused) { autoPaused = false; resume(); }
+  }, { threshold: 0.35 });
+
+  document.addEventListener('vc-proto:toggle', function (e) {
+    if (e.detail.id !== 'reporter') return;
+    if (current === 1 || current === 3 || current === 4) show(current, motion === 'auto');
+  });
+
+  // At rest: the whole session, ended.
+  show(CH.length - 1, false);
+})();
+</script>
+
+<script>
+/* ---------- LAST CALL: package manager and copy ---------- */
+(function () {
+  var sec = document.querySelector('.b-cta');
+  if (!sec) return;
+  var txt = sec.querySelector('.b-bigcmd__txt');
+  sec.addEventListener('change', function (e) { if (e.target.name === 'b-pm') txt.textContent = e.target.value; });
+  sec.querySelector('.b-cta__copy').addEventListener('click', function (e) { bCopy(e.currentTarget, txt.textContent); });
+})();
+</script>
+</body>
+</html>

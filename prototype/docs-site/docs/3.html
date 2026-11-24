@@ -1,0 +1,2801 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Getting started · visual-check docs</title>
+<!-- PROTOTYPE — throwaway. Docs variant 3: "Illustrated" (the Diff-first direction).
+     Fumadocs `layouts/spacious` (Base UI): the page sits in an inset panel beside the sidebar, page actions at the top
+     of the panel, the panel scrolls and the window doesn't, TOC in `block` style. The docs teach with custom MDX
+     components (TolerancePlayground, DiffViewer, CliOutput, EndState), and expose every AI route Fumadocs offers. -->
+<link rel="icon" href="../shared/logo/favicon.svg">
+<!-- Fumadocs llms integration: each page carries a Markdown alternate. The script keeps it on the current page. -->
+<link rel="alternate" type="text/markdown" id="md-alternate" href="https://visual-check.vercel.app/docs/getting-started.md">
+<link rel="stylesheet" href="../shared/tokens.css">
+<link rel="stylesheet" href="../shared/bundle.css">
+<link rel="stylesheet" href="../shared/proto-base.css">
+<style>
+  /* Values the design system doesn't have yet (become tokens before the real build):
+     - layout (Fumadocs Spacious): sidebar 268px · page max 760px (1200px as `full`) · TOC 304px · panel inset 8px
+     - bars: panel action bar and mobile header 56px · TOC popover bar 40px
+     - Ask AI panel 380px · drawer min(85%, 380px) · search dialog 640px wide, top at calc(50% - 250px)
+     - sticky figures: a 580px prose column beside a flexible figure column (other blocks keep the 640px measure)
+     - container breakpoints of the panel: TOC rail from 960px, sticky figures from 1040px;
+       viewport breakpoints: sidebar from 768px, docked Ask AI from 1280px
+     - tints: active sidebar item = text-cyan at 10% · dialog scrim = brand-ink at 48% · faded baseline in a visual diff
+     - z-index layers: bars 20, popovers 30, floating panel 40
+     - pixel strip: 92px row-label column, 2px grid line between image pixels at scale 2
+     - TOC block slide: 160ms (reuses duration-fade; the system has no "follow" duration)
+  */
+  :root {
+    --sp-sidebar: 268px;
+    --sp-page: 760px;
+    --sp-page-full: 1200px;
+    --sp-toc: 304px;
+    --sp-inset: 8px;
+    --sp-bar: 56px;
+    --sp-pop: 40px;
+    --sp-chat: 380px;
+    --sp-measure: 640px;
+    --sp-active: color-mix(in oklab, var(--text-cyan) 10%, transparent);
+    --sp-scrim: color-mix(in oklab, var(--brand-ink) 48%, transparent);
+    --sp-sticky-top: calc(var(--sp-bar) + var(--sp-pop) + var(--space-4));
+  }
+  html { scroll-behavior: auto; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+  .sp-skip { position: fixed; left: var(--space-2); top: calc(-1 * var(--space-24)); z-index: 60; }
+  .sp-skip:focus { top: var(--space-2); }
+
+  /* =========================================================== layout: Fumadocs Spacious
+     #nd-docs-layout grid · aside#nd-sidebar · inset panel (scrolls) · optional aiChat column */
+  .sp { min-height: 100dvh; background: var(--bg-surface); }
+  #nd-subnav { display: none; }
+  .sp-panel { position: relative; background: var(--bg-page); container: panel / inline-size; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+  @media (min-width: 768px) {
+    .sp { display: grid; grid-template-columns: var(--sp-sidebar) minmax(0, 1fr); height: 100dvh; }
+    .sp-panel {
+      height: calc(100dvh - 2 * var(--sp-inset));
+      margin: var(--sp-inset) var(--sp-inset) var(--sp-inset) 0;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      overflow-y: auto;
+      overscroll-behavior: contain;
+    }
+  }
+  @media (max-width: 767px) {
+    #nd-subnav {
+      position: sticky; top: 0; z-index: 20;
+      display: flex; align-items: center; gap: var(--space-1);
+      height: var(--sp-bar); padding: 0 var(--space-2) 0 var(--space-4);
+      background: var(--bg-page); border-bottom: 1px solid var(--border-subtle);
+    }
+    #nd-subnav .sb-logo img { height: 22px; }
+    #nd-subnav .grow { flex: 1; }
+  }
+
+  /* =========================================================== sidebar (aside#nd-sidebar) */
+  #nd-sidebar { display: flex; flex-direction: column; min-height: 0; font: var(--text-small); }
+  @media (max-width: 767px) { #nd-sidebar { display: none; } }
+  .sb-head { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4) var(--space-4) var(--space-2); }
+  .sb-brand { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-height: 36px; padding-left: var(--space-2); }
+  .sb-logo { display: inline-flex; border-radius: var(--radius-sm); }
+  .sb-logo img { height: 22px; width: auto; }
+  .sb-ver { font: var(--text-label); color: var(--text-muted); padding: 1px 6px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-page); }
+  .sb-search.vc-search { width: 100%; background: var(--bg-raised); }
+  .sb-nav { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-2) var(--space-4) var(--space-4); scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+  .sb-sep { margin: var(--space-6) 0 var(--space-1); padding: 0 var(--space-2); font: var(--text-label); letter-spacing: .02em; color: var(--text-muted); }
+  .sb-sep:first-child { margin-top: var(--space-1); }
+  .sb-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+  .sb-item {
+    display: flex; align-items: center; gap: var(--space-2);
+    padding: 6px var(--space-2); border-radius: var(--radius-md);
+    color: var(--text-muted); text-decoration: none;
+    transition: background-color var(--duration-fade) var(--ease-out), color var(--duration-fade) var(--ease-out);
+  }
+  .sb-item:hover { background: var(--bg-raised); color: var(--text-primary); }
+  .sb-item[aria-current="page"] { background: var(--sp-active); color: var(--text-cyan); font-weight: 600; }
+  .sb-item code { font: 500 .93em/1 var(--font-mono); }
+  .sb-fig { margin-left: auto; display: inline-flex; color: var(--text-muted); opacity: .8; }
+  .sb-item[aria-current="page"] .sb-fig { color: var(--text-cyan); opacity: 1; }
+  .sb-foot { padding: var(--space-2) var(--space-4) var(--space-4); }
+  .sb-foot__row { display: flex; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-page); }
+  .sb-foot__row .vc-icon-btn { width: 32px; height: 32px; }
+  .sb-foot__llms { margin-right: auto; padding: 0 var(--space-2); font: var(--text-label); color: var(--text-muted); text-decoration: none; border-radius: var(--radius-sm); line-height: 32px; }
+  .sb-foot__llms:hover { color: var(--text-primary); }
+
+  /* =========================================================== panel bar: page actions at the top of the inset panel */
+  .sp-bar {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; align-items: center; gap: var(--space-4);
+    height: var(--sp-bar); padding: 0 var(--space-4) 0 var(--space-6);
+    background: var(--bg-page);
+    border-bottom: 1px solid transparent;
+    transition: border-color var(--duration-fade) var(--ease-out);
+  }
+  .sp-panel.is-scrolled .sp-bar { border-bottom-color: var(--border-subtle); }
+  .sp-crumbs { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0; padding: 0; list-style: none; font: var(--text-small); color: var(--text-muted); }
+  .sp-crumbs li { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .sp-crumbs li + li::before { content: ""; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-top: 1.5px solid currentColor; transform: rotate(45deg); margin-right: 4px; opacity: .7; flex: none; }
+  .sp-crumbs [aria-current] { color: var(--text-primary); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sp-crumbs code { font: 500 .93em/1 var(--font-mono); }
+  .sp-actions { margin-left: auto; display: flex; align-items: center; gap: var(--space-2); }
+  .sp-actions .vc-btn { gap: 6px; }
+  .sp-actions .vc-btn[aria-pressed="true"] { background: var(--sp-active); color: var(--text-cyan); }
+  .sp-actions .vc-btn[aria-expanded="true"] { border-color: var(--text-primary); }
+  .sp-actions .vc-btn .vc-icon { width: 15px; height: 15px; }
+  .sp-actions__sep { width: 1px; height: 20px; background: var(--border-subtle); }
+  @container panel (max-width: 639px) {
+    .sp-bar { flex-wrap: wrap; height: auto; padding: var(--space-3) var(--space-4); row-gap: var(--space-2); }
+    .sp-actions { margin-left: 0; width: 100%; }
+    .sp-actions__ask { margin-left: auto; }
+  }
+  @media (max-width: 767px) {
+    .sp-bar { position: static; }
+  }
+
+  /* Open ▾ menu (Fumadocs ViewOptionsPopover): a popover anchored to its trigger. */
+  .menu {
+    position-anchor: --open-menu;
+    position-area: block-end span-inline-start;
+    position-try-fallbacks: flip-block, flip-inline;
+    inset: auto;
+    margin: 6px 0 0;
+    min-width: 248px;
+    padding: var(--space-1);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--bg-raised);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-raised);
+  }
+  .menu__item {
+    display: flex; align-items: center; gap: var(--space-3); width: 100%;
+    padding: 8px 10px; border: 0; border-radius: var(--radius-md);
+    background: none; color: var(--text-primary); font: var(--text-small); text-align: left; text-decoration: none; cursor: pointer;
+    transition: background-color var(--duration-fade) var(--ease-out);
+  }
+  .menu__item:hover, .menu__item:focus-visible { background: var(--bg-surface); }
+  .menu__item:focus-visible { outline-offset: -2px; }
+  .menu__item .vc-icon { color: var(--text-muted); }
+  .menu__ext { margin-left: auto; }
+  .menu__label { padding: 8px 10px 4px; font: var(--text-label); color: var(--text-muted); }
+  .menu hr { border: 0; border-top: 1px solid var(--border-subtle); margin: var(--space-1) 0; }
+
+  /* =========================================================== TOC popover ("On this page", below the rail breakpoint) */
+  .sp-tocpop { display: none; position: sticky; top: var(--sp-bar); z-index: 19; height: var(--sp-pop); background: var(--bg-page); border-bottom: 1px solid var(--border-subtle); }
+  .sp-tocpop__btn {
+    display: flex; align-items: center; gap: var(--space-2); width: 100%; height: 100%;
+    padding: 0 var(--space-6); border: 0; background: none; cursor: pointer; text-align: left;
+    font: var(--text-small); color: var(--text-muted);
+  }
+  .sp-tocpop__btn:focus-visible { outline-offset: -2px; }
+  .sp-tocpop__current { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font-weight: 600; }
+  .sp-tocpop__current code { font: 500 .93em/1 var(--font-mono); }
+  .sp-tocpop__chev { margin-left: auto; transition: transform var(--duration-fade) var(--ease-out); }
+  .sp-tocpop__btn[aria-expanded="true"] .sp-tocpop__chev { transform: rotate(180deg); }
+  .sp-tocpop__panel {
+    position: absolute; left: var(--space-4); right: var(--space-4); top: calc(100% + 4px);
+    max-height: min(60vh, 520px); overflow-y: auto;
+    padding: var(--space-4); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg);
+    background: var(--bg-raised); box-shadow: var(--shadow-raised);
+  }
+  .sp-tocpop__panel[hidden] { display: none; }
+  @media (max-width: 767px) { .sp-tocpop { top: var(--sp-bar); } }
+
+  /* =========================================================== page grid: article#nd-page beside #nd-toc */
+  .sp-grid { display: grid; grid-template-columns: minmax(0, var(--sp-page)) var(--sp-toc); justify-content: center; column-gap: var(--space-8); padding: 0 var(--space-6); }
+  #nd-page { min-width: 0; padding: var(--space-12) 0 var(--space-24); }
+  #nd-toc {
+    position: sticky; top: var(--sp-bar); align-self: start;
+    max-height: calc(100dvh - 2 * var(--sp-inset) - var(--sp-bar) - 2px); overflow-y: auto; scrollbar-width: none;
+    display: flex; flex-direction: column; gap: var(--space-6);
+    padding: var(--space-12) 0 var(--space-6);
+  }
+  .sp-agents--inline { display: none; }
+  @container panel (max-width: 959px) {
+    .sp-grid { grid-template-columns: minmax(0, var(--sp-page)); }
+    #nd-toc { display: none; }
+    .sp-tocpop { display: block; }
+    .sp-agents--inline { display: block; }
+  }
+  @container panel (max-width: 520px) {
+    .sp-grid { padding: 0 var(--space-4); }
+    .sp-tocpop__btn { padding: 0 var(--space-4); }
+    #nd-page { padding-top: var(--space-8); }
+  }
+
+  /* Figures toggle, sticky: on a wide panel the page goes `full`, the TOC moves to the popover,
+     and each figure sticks beside the prose that discusses it. */
+  @container panel (min-width: 1040px) {
+    html[data-t-figures="sticky"] .sp-grid { grid-template-columns: minmax(0, var(--sp-page-full)); }
+    html[data-t-figures="sticky"] #nd-toc { display: none; }
+    html[data-t-figures="sticky"] .sp-tocpop { display: block; }
+    html[data-t-figures="sticky"] .sp-agents--inline { display: block; }
+    html[data-t-figures="sticky"] .dp > :not(.fp),
+    html[data-t-figures="sticky"] .sp-agents--inline,
+    html[data-t-figures="sticky"] .pf { max-width: var(--sp-measure); }
+    html[data-t-figures="sticky"] .fp {
+      display: grid;
+      grid-template-columns: minmax(0, 580px) minmax(0, 1fr);
+      grid-template-rows: auto 1fr;
+      column-gap: var(--space-8);
+      align-items: start;
+    }
+    html[data-t-figures="sticky"] .fp > .fp__prose { grid-column: 1; }
+    html[data-t-figures="sticky"] .fp > .fp__prose + .fp__fig + .fp__prose { margin-top: var(--space-4); }
+    html[data-t-figures="sticky"] .fp > .fp__fig { grid-column: 2; grid-row: 1 / 3; align-self: stretch; margin-top: 0; }
+    html[data-t-figures="sticky"] .fp__fig > .fig { position: sticky; top: var(--sp-sticky-top); }
+    html[data-t-figures="sticky"] .fp__pin { display: inline-flex; }
+  }
+  .fp__pin { display: none; align-items: center; gap: 6px; font: var(--text-label); color: var(--text-cyan); }
+
+  /* =========================================================== TOC (block | clerk) */
+  .toc { position: relative; }
+  .toc__title { display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-3); font: var(--text-label); color: var(--text-muted); }
+  .toc__body { position: relative; isolation: isolate; }
+  .toc__list { list-style: none; margin: 0; padding: 0; }
+  .sp-tocpop__panel .toc__title { display: none; }
+  .toc__link {
+    display: flex; align-items: baseline; gap: 10px;
+    padding: 6px var(--space-2); border-radius: var(--radius-md);
+    font: var(--text-small); color: var(--text-muted); text-decoration: none;
+    transition: color var(--duration-fade) var(--ease-out);
+  }
+  .toc__link:hover { color: var(--text-primary); }
+  .toc__link code { font: 500 .93em/1 var(--font-mono); }
+  .toc__item.is-active > .toc__link { color: var(--text-primary); }
+  .toc__chip { flex: none; width: 2.4ch; font: var(--text-label); color: var(--text-muted); font-variant-numeric: tabular-nums; transition: color var(--duration-fade) var(--ease-out); }
+  .toc__item.is-active .toc__chip { color: var(--text-cyan); }
+  .toc__item[data-depth="3"] > .toc__link { padding-left: calc(var(--space-2) + 2.4ch + 10px); }
+  .toc__block {
+    position: absolute; z-index: -1; left: 0; right: 0; top: 0; height: 0;
+    border-radius: var(--radius-md); background: var(--bg-surface); opacity: 0;
+    transition: transform var(--duration-fade) var(--ease-out), height var(--duration-fade) var(--ease-out), opacity var(--duration-fade) var(--ease-out);
+  }
+  .toc__block.is-on { opacity: 1; }
+  .toc__track { display: none; position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+  .toc__track .base { fill: none; stroke: var(--border-strong); stroke-width: 1; }
+  .toc__track .hi { fill: none; stroke: var(--text-cyan); stroke-width: 2; stroke-linecap: round; }
+  .toc__track rect { transition: y var(--duration-fade) var(--ease-out), height var(--duration-fade) var(--ease-out); }
+  html[data-t-toc="clerk"] .toc__block,
+  html[data-t-toc="clerk"] .toc__chip { display: none; }
+  html[data-t-toc="clerk"] .toc__track { display: block; }
+  html[data-t-toc="clerk"] .toc__link { padding-left: 22px; border-radius: 0; }
+  html[data-t-toc="clerk"] .toc__item[data-depth="3"] > .toc__link { padding-left: 34px; }
+  html[data-t-toc="clerk"] .toc__item.is-active > .toc__link { color: var(--text-cyan); }
+
+  /* TOC footer slot (tableOfContent.footer): the AI routes */
+  .sp-agents { padding: var(--space-4); border-radius: var(--radius-lg); background: var(--bg-surface); font: var(--text-small); }
+  .sp-agents__title { display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-2); font: var(--text-label); color: var(--text-muted); }
+  .sp-agents p { margin: 0 0 var(--space-3); color: var(--text-muted); }
+  .sp-agents ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .sp-agents li { display: flex; gap: var(--space-2); align-items: baseline; }
+  .sp-agents a { color: var(--text-cyan); text-decoration: none; font: 500 13px/20px var(--font-mono); }
+  .sp-agents a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .sp-agents span { color: var(--text-muted); }
+  .sp-agents--inline { margin-top: var(--space-12); }
+  .sp-agents__md { padding: 0; border: 0; background: none; color: var(--text-cyan); font: 500 13px/20px var(--font-mono); cursor: pointer; border-radius: var(--radius-sm); }
+  .sp-agents__md:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .sp-agents p.sp-agents__skill { margin: var(--space-3) 0 0; }
+  .sp-agents .sp-agents__skill a { font: inherit; }
+
+  /* =========================================================== page content (DocsTitle · DocsDescription · DocsBody) */
+  .dp[hidden] { display: none; }
+  .dp > * { margin: 0; }
+  .dp > * + * { margin-top: var(--space-4); }
+  .dp__title { font: var(--text-h1); letter-spacing: -0.015em; }
+  .dp__title code { font: 700 .86em/1 var(--font-mono); letter-spacing: -0.02em; }
+  .dp > .dp__lede { margin-top: var(--space-4); font: var(--text-body-lg); color: var(--text-muted); max-width: var(--sp-measure); }
+  .dp > .dp__lede + * { margin-top: var(--space-8); }
+  .dp h2 { margin-top: var(--space-12); font: var(--text-h2); letter-spacing: -0.01em; scroll-margin-top: var(--sp-sticky-top); }
+  .dp h3 { margin-top: var(--space-8); font: var(--text-h3); scroll-margin-top: var(--sp-sticky-top); }
+  .dp h2 code, .dp h3 code { font-size: .86em; }
+  .dp :is(h2, h3) + * { margin-top: var(--space-3); }
+  /* Prose rules use :where() so a figure's own classes win over them. */
+  .dp :where(p, li) { font: var(--text-body); }
+  .dp :where(ul, ol) { padding-left: 1.3em; }
+  .dp :where(li + li) { margin-top: var(--space-1); }
+  .dp :where(li)::marker { color: var(--text-muted); }
+  .dp :where(strong) { font-weight: 600; }
+  .flow > * { margin: 0; }
+  .flow > * + * { margin-top: var(--space-4); }
+  .hd-anchor { margin-left: var(--space-2); color: var(--text-muted); text-decoration: none; font-weight: 400; opacity: 0; transition: opacity var(--duration-fade) var(--ease-out); border-radius: var(--radius-sm); }
+  :is(h2, h3):hover .hd-anchor, .hd-anchor:focus-visible { opacity: 1; }
+
+  /* Code blocks: vc-code with a title bar, tabs (npm tabs), copy button */
+  .dp .vc-code pre { tab-size: 2; }
+  .vc-code__title { display: inline-flex; align-items: center; gap: var(--space-2); }
+  .vc-code__copy { display: inline-flex; align-items: center; gap: 6px; }
+  .vc-code__copy .vc-icon { width: 14px; height: 14px; }
+  .vc-code__copy:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .cb-bar { padding-block: 0; min-height: 38px; }
+  .cb-tabs { display: flex; gap: var(--space-4); align-self: stretch; }
+  .cb-tab {
+    padding: 10px 0 8px; border: 0; border-bottom: 2px solid transparent; background: none;
+    color: var(--code-muted); font: inherit; cursor: pointer;
+    transition: color var(--duration-fade) var(--ease-out), border-color var(--duration-fade) var(--ease-out);
+  }
+  .cb-tab:hover { color: var(--code-fg); }
+  .cb-tab[aria-selected="true"] { color: var(--code-fg); border-bottom-color: var(--code-cyan); }
+  .cb-tab:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: var(--radius-sm); }
+  .vc-code .o-ok { color: var(--code-cyan); }
+  .vc-code .o-x { color: var(--code-magenta); }
+  .vc-code .o-b { font-weight: 700; }
+  .cli pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+  /* Tables */
+  .tbl { overflow-x: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); }
+  .tbl table { width: 100%; border-collapse: collapse; font: var(--text-small); }
+  .tbl th { text-align: left; vertical-align: bottom; font-weight: 600; background: var(--bg-surface); padding: 10px 12px; border-bottom: 1px solid var(--border-subtle); }
+  .tbl td { padding: 10px 12px; border-top: 1px solid var(--border-subtle); vertical-align: top; }
+  .tbl tr:first-child td { border-top: 0; }
+  .tbl code { font: 500 .93em/1 var(--font-mono); }
+  .tbl .num { text-align: right; font: 400 13px/20px var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .tbl th.num { font: 600 14px/20px var(--font-sans); white-space: normal; min-width: 64px; }
+  .tbl tr.is-default td { background: var(--bg-surface); font-weight: 600; }
+  .tbl .tag { display: block; margin-top: 2px; font: var(--text-label); color: var(--text-cyan); }
+  .tbl--measured th:first-child, .tbl--measured td:first-child { white-space: nowrap; }
+  .tbl--prompts td:first-child .vc-inline-code { padding: 0; border: 0; background: none; font: 500 13px/20px var(--font-mono); }
+  .tbl--prompts td:first-child { width: 46%; }
+  .cell-note { display: block; margin-top: 2px; font: var(--text-small); color: var(--text-muted); }
+  .tbl caption { caption-side: bottom; text-align: left; padding: 10px 12px; font: var(--text-small); color: var(--text-muted); border-top: 1px solid var(--border-subtle); }
+
+  /* Steps (Fumadocs Steps) */
+  .steps { counter-reset: step; margin-left: 15px; padding-left: 31px; border-left: 1px solid var(--border-subtle); }
+  .step { position: relative; counter-increment: step; }
+  .steps > .step + .step { margin-top: var(--space-12); }
+  .step > h3 { margin-top: 0; }
+  .step::before {
+    content: counter(step); position: absolute; left: -48px; top: -2px;
+    width: 32px; height: 32px; display: grid; place-items: center;
+    border-radius: var(--radius-pill); background: var(--bg-surface); border: 1px solid var(--border-subtle);
+    font: var(--text-label); color: var(--text-primary);
+  }
+
+  /* Files (Fumadocs Files) */
+  .files { padding: var(--space-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-raised); font: var(--text-small); }
+  .files ul { list-style: none; margin: 0; padding: 0; }
+  .files li + li { margin-top: 0; }
+  .files ul ul { margin-left: 15px; padding-left: var(--space-2); border-left: 1px solid var(--border-subtle); }
+  .files__row { display: flex; align-items: center; gap: var(--space-2); padding: 5px var(--space-2); border-radius: var(--radius-sm); }
+  .files__row code { font: 400 13px/20px var(--font-mono); }
+  .files__row .vc-icon { color: var(--text-muted); }
+  .files__note { margin-left: auto; padding-left: var(--space-3); font: var(--text-small); color: var(--text-muted); text-align: right; }
+  @container panel (max-width: 520px) { .files__note { display: none; } }
+
+  /* Cards (Fumadocs Cards) */
+  .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+  @container panel (max-width: 560px) { .cards { grid-template-columns: minmax(0, 1fr); } }
+  .card {
+    display: block; padding: var(--space-4); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg);
+    background: var(--bg-raised); color: var(--text-primary); text-decoration: none;
+    transition: border-color var(--duration-fade) var(--ease-out);
+  }
+  .card:hover { border-color: var(--border-strong); }
+  .card__title { display: flex; align-items: center; gap: 6px; font: var(--text-ui); }
+  .card__title code { font: 600 .93em/1 var(--font-mono); }
+  .card__title .vc-icon { transition: transform var(--duration-spring) var(--ease-spring); }
+  .card:hover .card__title .vc-icon { transform: translateX(3px); }
+  .card__desc { margin-top: var(--space-1); font: var(--text-small); color: var(--text-muted); }
+
+  /* Callouts sit in the flow like any block */
+  .dp .vc-callout p { font: inherit; }
+
+  /* Page footer: last updated, Edit on GitHub, prev/next */
+  .pf { margin-top: var(--space-12); display: grid; gap: var(--space-6); }
+  .pf__meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); padding-top: var(--space-6); border-top: 1px solid var(--border-subtle); font: var(--text-small); color: var(--text-muted); }
+  .pf__nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
+  .pf__card {
+    display: grid; gap: 2px; padding: var(--space-4); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg);
+    color: var(--text-primary); text-decoration: none;
+    transition: background-color var(--duration-fade) var(--ease-out), border-color var(--duration-fade) var(--ease-out);
+  }
+  .pf__card:hover { background: var(--bg-surface); }
+  .pf__card--next { text-align: right; grid-column: 2; }
+  .pf__label { display: inline-flex; align-items: center; gap: var(--space-1); font: var(--text-label); color: var(--text-muted); }
+  .pf__card--next .pf__label { justify-self: end; }
+  .pf__label .vc-icon { width: 14px; height: 14px; }
+  .pf__title { font: var(--text-ui); }
+  .pf__title code { font: 600 .93em/1 var(--font-mono); }
+  @container panel (max-width: 520px) { .pf__nav { grid-template-columns: minmax(0, 1fr); } .pf__card--next { grid-column: 1; } }
+
+  /* Stub page */
+  .stub { padding: var(--space-6); border: 1px dashed var(--border-strong); border-radius: var(--radius-lg); }
+  .stub__label { margin: 0; font: var(--text-label); color: var(--text-muted); }
+  .stub ul { margin: var(--space-3) 0 0; }
+
+  /* =========================================================== figures (custom MDX components) */
+  .fig { margin: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-raised); container: fig / inline-size; }
+  .fp__fig { margin-top: var(--space-6); }
+  .fp__fig + .fp__prose { margin-top: var(--space-6); }
+  .fig__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border-subtle); }
+  .fig__name { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
+  .fig__title { font: var(--text-ui); }
+  .fig__kind { font: var(--text-label); color: var(--text-muted); }
+  .fig__body { padding: var(--space-4); }
+  .fig__caption { padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border-subtle); font: var(--text-small); color: var(--text-muted); }
+  .fig__caption code { font: 500 .93em/1 var(--font-mono); }
+
+  /* Shared controls: range, segmented radio, switch */
+  .range { display: block; width: 100%; height: 24px; margin: var(--space-2) 0 0; background: transparent; appearance: none; -webkit-appearance: none; cursor: pointer; }
+  .range::-webkit-slider-runnable-track { height: 4px; border-radius: var(--radius-pill); background: var(--border-subtle); }
+  .range::-moz-range-track { height: 4px; border-radius: var(--radius-pill); background: var(--border-subtle); }
+  .range::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 18px; height: 18px; margin-top: -7px;
+    border-radius: var(--radius-pill); background: var(--bg-raised); border: 2px solid var(--text-primary);
+    transition: transform var(--duration-spring) var(--ease-spring);
+  }
+  .range::-moz-range-thumb { width: 14px; height: 14px; border-radius: var(--radius-pill); background: var(--bg-raised); border: 2px solid var(--text-primary); transition: transform var(--duration-spring) var(--ease-spring); }
+  .range:hover::-webkit-slider-thumb, .range:active::-webkit-slider-thumb { transform: scale(1.15); }
+  .range:hover::-moz-range-thumb { transform: scale(1.15); }
+  .range:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; border-radius: var(--radius-sm); }
+  .ticks { position: relative; height: 16px; margin: 2px 0 0; font: 500 11px/16px var(--font-mono); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .ticks span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; transition: color var(--duration-fade) var(--ease-out); }
+  .ticks span.is-on { color: var(--text-primary); font-weight: 700; }
+  .seg { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); }
+  .seg label {
+    position: relative; display: inline-flex; align-items: center; min-height: 28px; padding: 0 10px;
+    border-radius: var(--radius-sm); font: 600 14px/20px var(--font-sans); color: var(--text-muted); cursor: pointer;
+    transition: background-color var(--duration-fade) var(--ease-out), color var(--duration-fade) var(--ease-out);
+  }
+  .seg label:hover { color: var(--text-primary); }
+  .seg input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+  .seg label:has(input:checked) { background: var(--action-primary); color: var(--on-action-primary); }
+  .seg label:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .sw { display: inline-flex; align-items: center; gap: var(--space-2); font: var(--text-small); cursor: pointer; }
+  .sw input {
+    position: relative; flex: none; width: 34px; height: 20px; margin: 0; appearance: none; -webkit-appearance: none;
+    border-radius: var(--radius-pill); background: var(--border-strong); cursor: pointer;
+    transition: background-color var(--duration-fade) var(--ease-out);
+  }
+  .sw input::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+    border-radius: var(--radius-pill); background: var(--bg-raised);
+    transition: transform var(--duration-spring) var(--ease-spring);
+  }
+  .sw input:checked { background: var(--action-primary); }
+  .sw input:checked::after { transform: translateX(14px); background: var(--on-action-primary); }
+  .sw input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  /* <TolerancePlayground> */
+  .tp-strip { display: grid; grid-template-columns: 92px repeat(10, minmax(0, 1fr)); column-gap: 6px; row-gap: var(--space-2); align-items: center; }
+  .tp-corner { min-height: 1px; }
+  .tp-idx { font: 500 11px/16px var(--font-mono); color: var(--text-muted); text-align: center; }
+  .tp-lab { font: var(--text-label); color: var(--text-muted); }
+  /* One cell is one CSS pixel. At scale 2, a cross splits it into its 2 × 2 image pixels. */
+  .tp-cell {
+    position: relative; aspect-ratio: 1; max-height: 56px;
+    border-radius: var(--radius-sm); overflow: hidden; background: var(--px);
+    box-shadow: inset 0 0 0 1px var(--border-subtle);
+    outline: 2px solid transparent; outline-offset: -2px;
+    transition: background-color var(--duration-fade) var(--ease-out), outline-color var(--duration-fade) var(--ease-out);
+  }
+  .tp-cell::before, .tp-cell::after { content: ""; position: absolute; background: var(--bg-raised); opacity: 0; transition: opacity var(--duration-fade) var(--ease-out); }
+  .tp-cell::before { top: 0; bottom: 0; left: calc(50% - 1px); width: 2px; }
+  .tp-cell::after { left: 0; right: 0; top: calc(50% - 1px); height: 2px; }
+  .tp[data-scale="2"] .tp-cell::before, .tp[data-scale="2"] .tp-cell::after { opacity: 1; }
+  .tp-cell.is-diff { background: var(--brand-magenta); }
+  .tp-cell.is-within { outline-color: var(--brand-cyan); }
+  .tp-d { font: 500 11px/16px var(--font-mono); text-align: center; color: var(--text-muted); font-variant-numeric: tabular-nums; transition: color var(--duration-fade) var(--ease-out); }
+  .tp-d.is-count { color: var(--change-fg); font-weight: 700; }
+  .tp-d.is-within { color: var(--info-fg); }
+  .tp-legend { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-6); margin-top: var(--space-4); font: var(--text-small); color: var(--text-muted); }
+  .tp-legend span { display: inline-flex; align-items: center; gap: var(--space-2); }
+  .tp-legend i { width: 14px; height: 14px; border-radius: var(--radius-sm); }
+  .tp-legend .k-diff { background: var(--brand-magenta); }
+  .tp-legend .k-within { background: var(--brand-paper); box-shadow: inset 0 0 0 2px var(--brand-cyan); }
+  .tp-legend .k-same { background: var(--brand-paper); box-shadow: inset 0 0 0 1px var(--border-subtle); }
+  .tp-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4) var(--space-8); margin-top: var(--space-6); padding-top: var(--space-6); border-top: 1px solid var(--border-subtle); }
+  .ctl__top { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+  .ctl__label { font: var(--text-ui); }
+  .ctl__label code { font: 600 .93em/1 var(--font-mono); }
+  .ctl__value { font: 700 15px/20px var(--font-mono); font-variant-numeric: tabular-nums; }
+  .ctl__hint { margin: 2px 0 0; font: var(--text-small); color: var(--text-muted); }
+  .tp-opts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3) var(--space-6); margin-top: var(--space-6); }
+  .tp-opts__group { display: inline-flex; align-items: center; gap: var(--space-2); margin: 0; padding: 0; border: 0; }
+  .tp-opts__group legend { float: left; margin-right: var(--space-2); padding: 0; font: var(--text-small); color: var(--text-muted); }
+  .tp-out { display: grid; gap: var(--space-3); margin-top: var(--space-6); padding: var(--space-4); border-radius: var(--radius-md); background: var(--bg-surface); }
+  .tp-out__row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); }
+  .tp-count { margin: 0; font: var(--text-h3); font-variant-numeric: tabular-nums; }
+  .tp-count b { font-weight: 700; }
+  .tp-count .muted { color: var(--text-muted); font-weight: 400; }
+  .tp-rule { margin: 0; font: 400 13px/20px var(--font-mono); color: var(--text-muted); }
+  .tp-rule b { color: var(--text-primary); font-weight: 700; }
+  .tp-cli pre { padding: 10px 14px; font-size: 13px; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  @container fig (max-width: 480px) {
+    .tp-strip { grid-template-columns: repeat(10, minmax(0, 1fr)); column-gap: 4px; }
+    .tp-corner { display: none; }
+    .tp-lab { grid-column: 1 / -1; margin-top: var(--space-1); }
+    .tp-controls { grid-template-columns: minmax(0, 1fr); }
+    .tp-d { font-size: 9px; letter-spacing: -0.03em; }
+  }
+
+  /* <DiffViewer> */
+  .dv-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+  .dv-id { font: 500 13px/20px var(--font-mono); }
+  .dv-mode { font: var(--text-label); color: var(--text-muted); padding: 1px 6px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); }
+  .dv-msg { margin: 0 0 var(--space-4); font: 400 13px/20px var(--font-mono); color: var(--text-muted); }
+  .dv-stage { position: relative; margin: 3px; aspect-ratio: 9 / 5; border-radius: var(--radius-md); background: var(--brand-paper); box-shadow: var(--shadow-register); cursor: ew-resize; touch-action: pan-y; user-select: none; }
+  .dv-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; border-radius: inherit; }
+  .dv-snap { clip-path: inset(0 0 0 var(--wipe, 50%)); }
+  .dv-handle { position: absolute; top: 0; bottom: 0; left: var(--wipe, 50%); width: 2px; margin-left: -1px; background: var(--brand-ink); pointer-events: none; }
+  .dv-knob { position: absolute; top: 50%; left: 50%; width: 28px; height: 28px; transform: translate(-50%, -50%); display: grid; place-items: center; border-radius: var(--radius-pill); background: var(--brand-ink); color: var(--brand-paper); }
+  .dv-tag { position: absolute; top: var(--space-2); padding: 2px var(--space-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-raised); font: var(--text-label); }
+  .dv-tag--base { left: var(--space-2); color: var(--text-cyan); }
+  .dv-tag--snap { right: var(--space-2); color: var(--text-magenta); }
+  .dv-stage .dv-diff { display: none; }
+  .fig[data-view="diff"] :is(.dv-base, .dv-snap, .dv-handle, .dv-tag--snap, .dv-wipe) { display: none; }
+  .fig[data-view="diff"] .dv-stage .dv-diff { display: block; }
+  .fig[data-view="diff"] .dv-stage { cursor: default; }
+  .dv-tag--diff { display: none; left: var(--space-2); color: var(--text-magenta); }
+  .fig[data-view="diff"] .dv-tag--base { display: none; }
+  .fig[data-view="diff"] .dv-tag--diff { display: block; }
+  .dv-wipe { margin-top: var(--space-4); }
+  .dv-wipe__cap { display: flex; justify-content: space-between; margin-top: var(--space-1); font: var(--text-label); color: var(--text-muted); }
+  .dv-legend { display: none; margin: var(--space-4) 0 0; font: var(--text-small); color: var(--text-muted); }
+  .dv-legend i { display: inline-block; width: 12px; height: 12px; margin-right: 6px; border-radius: var(--radius-sm); background: var(--brand-magenta); vertical-align: -1px; }
+  .fig[data-view="diff"] .dv-legend { display: block; }
+
+  /* <EndState> (Animations) */
+  .es { display: grid; grid-template-columns: 120px repeat(3, minmax(0, 1fr)); gap: var(--space-3); align-items: center; }
+  .es-colhead { font: var(--text-label); color: var(--text-muted); }
+  .es-rowlab { font: var(--text-label); color: var(--text-muted); }
+  .es-rowlab b { display: block; color: var(--text-primary); font-weight: 500; }
+  .es-stage { position: relative; aspect-ratio: 16 / 10; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--brand-paper); }
+  .es-spin { width: 40px; height: 40px; transform: rotate(var(--r, 0deg)); }
+  .es-spin .t { fill: none; stroke: color-mix(in oklab, var(--brand-ink) 14%, var(--brand-paper)); stroke-width: 5; }
+  .es-spin .a { fill: none; stroke: var(--brand-ink); stroke-width: 5; stroke-linecap: round; }
+  .es-toast { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: var(--radius-md); background: var(--brand-ink); color: var(--brand-paper); font: 600 13px/18px var(--font-sans); white-space: nowrap; opacity: var(--o, 1); transform: translateY(var(--y, 0px)); }
+  .es-bar { width: 76%; display: grid; gap: 6px; font: 600 12px/16px var(--font-sans); color: var(--brand-ink); }
+  .es-bar__track { height: 8px; border-radius: var(--radius-pill); background: color-mix(in oklab, var(--brand-ink) 14%, var(--brand-paper)); overflow: hidden; }
+  .es-bar__fill { height: 100%; width: var(--w, 70%); border-radius: inherit; background: var(--brand-ink); }
+  .es-live .es-spin { --r: 130deg; }
+  .es-live .es-toast { --o: .4; --y: 10px; }
+  .es-live .es-bar__fill { --w: 28%; }
+  .es-when { position: relative; height: 2px; margin-top: var(--space-2); border-radius: var(--radius-pill); background: var(--border-subtle); }
+  .es-when i { position: absolute; top: 50%; width: 9px; height: 9px; border-radius: var(--radius-pill); background: var(--brand-magenta); transform: translate(-50%, -50%); }
+  .es-when--start i { left: 0; transform: translate(0, -50%); }
+  .es-when--end i { left: 100%; transform: translate(-100%, -50%); }
+  .es-note { margin: 6px 0 0; font: var(--text-label); color: var(--text-muted); }
+  .fig[data-playing] .es-live .es-spin { animation: es-spin 900ms linear infinite; }
+  .fig[data-playing] .es-live .es-toast { animation: es-toast 700ms var(--ease-out) both; }
+  .fig[data-playing] .es-live .es-bar__fill { animation: es-fill 1600ms var(--ease-out) both; }
+  @keyframes es-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  @keyframes es-toast { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes es-fill { from { width: 0; } to { width: 70%; } }
+  @container fig (max-width: 480px) {
+    .es { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .es-rowlab, .es-corner { grid-column: 1 / -1; }
+    .es-corner { display: none; }
+  }
+
+  /* =========================================================== Ask AI (aiChat panel) */
+  .sp-chat { display: none; flex-direction: column; min-height: 0; background: var(--bg-page); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); overflow: hidden; }
+  html[data-t-ai="docked"] .sp-chat { display: flex; }
+  @media (min-width: 1280px) {
+    html[data-t-ai="docked"] .sp { grid-template-columns: var(--sp-sidebar) minmax(0, 1fr) var(--sp-chat); }
+    .sp-chat { height: calc(100dvh - 2 * var(--sp-inset)); margin: var(--sp-inset) var(--sp-inset) var(--sp-inset) 0; }
+  }
+  @media (max-width: 1279px) {
+    .sp-chat { position: fixed; z-index: 40; right: var(--sp-inset); top: var(--sp-inset); bottom: var(--sp-inset); width: min(var(--sp-chat), calc(100% - 2 * var(--sp-inset))); box-shadow: var(--shadow-raised); }
+  }
+  .chat__head { display: flex; align-items: center; gap: var(--space-2); flex: none; height: var(--sp-bar); padding: 0 var(--space-2) 0 var(--space-4); border-bottom: 1px solid var(--border-subtle); }
+  .chat__title { margin: 0; font: var(--text-ui); }
+  .chat__sub { font: var(--text-label); color: var(--text-muted); }
+  .chat__head .vc-icon-btn { margin-left: auto; }
+  .chat__log { flex: 1; min-height: 0; overflow-y: auto; display: grid; align-content: start; gap: var(--space-6); padding: var(--space-4); scrollbar-width: thin; }
+  .msg { font: var(--text-small); }
+  .msg--user { justify-self: end; max-width: 88%; padding: 10px 14px; border-radius: var(--radius-lg); background: var(--bg-surface); }
+  .msg--ai > * { margin: 0; }
+  .msg--ai > * + * { margin-top: var(--space-3); }
+  .msg--ai p, .msg--ai li { font: var(--text-small); }
+  .msg--ai ul { padding-left: 1.2em; }
+  .msg--ai li + li { margin-top: var(--space-1); }
+  .msg--user p { margin: 0; }
+  .msg code { font: 500 .93em/1 var(--font-mono); }
+  .msg--ai code { font: 500 .93em/1 var(--font-mono); padding: 1px 4px; border-radius: var(--radius-sm); background: var(--bg-surface); border: 1px solid var(--border-subtle); }
+  .msg__who { display: flex; align-items: center; gap: var(--space-2); font: var(--text-label); color: var(--text-muted); }
+  .msg__sources { display: flex; flex-wrap: wrap; gap: 6px; }
+  .msg__src { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); font: var(--text-label); color: var(--text-cyan); text-decoration: none; transition: border-color var(--duration-fade) var(--ease-out); }
+  .msg__src:hover { border-color: var(--border-strong); }
+  .msg__src code { font: inherit; }
+  .chat__form { flex: none; padding: var(--space-3); border-top: 1px solid var(--border-subtle); }
+  .chat__box { display: flex; align-items: flex-end; gap: var(--space-2); padding: 6px 6px 6px 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--bg-raised); }
+  .chat__box:has(textarea:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .chat__box textarea { flex: 1; min-height: 40px; padding: 8px 0; border: 0; resize: none; background: transparent; color: var(--text-primary); font: var(--text-small); outline: none; }
+  .chat__box textarea::placeholder { color: var(--text-muted); }
+  .chat__note { margin: var(--space-2) 0 0; font: var(--text-small); color: var(--text-muted); }
+
+  /* =========================================================== dialogs: search (⌘K), drawer, Markdown view */
+  dialog:modal { overscroll-behavior: contain; }
+  dialog::backdrop { background: var(--sp-scrim); overflow: hidden; overscroll-behavior: contain; }
+  .sd {
+    width: min(640px, calc(100% - 2 * var(--space-2))); max-width: none;
+    max-height: min(560px, calc(100dvh - 2 * var(--space-4)));
+    margin: max(var(--space-4), calc(50dvh - 250px)) auto auto; padding: 0;
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-lg);
+    background: var(--bg-raised); color: var(--text-primary); box-shadow: var(--shadow-raised); overflow: hidden;
+  }
+  .sd[open] { display: flex; flex-direction: column; }
+  .sd__head { display: flex; align-items: center; gap: var(--space-3); flex: none; padding: 0 var(--space-3) 0 var(--space-4); border-bottom: 1px solid var(--border-subtle); color: var(--text-muted); }
+  .sd__head:has(input:focus-visible) { box-shadow: inset 0 -2px 0 var(--focus); }
+  .sd__input { flex: 1; min-width: 0; height: 52px; border: 0; background: transparent; color: var(--text-primary); font: 400 17px/24px var(--font-sans); outline: none; }
+  .sd__input::placeholder { color: var(--text-muted); }
+  .sd__list { flex: 1; min-height: 0; overflow-y: auto; margin: 0; padding: var(--space-2); list-style: none; }
+  .sd__group { padding: 10px 10px 4px; font: var(--text-label); color: var(--text-muted); }
+  .sd__opt { display: flex; align-items: center; gap: var(--space-3); padding: 8px 10px; border-radius: var(--radius-md); cursor: pointer; }
+  .sd__opt[aria-selected="true"] { background: var(--bg-surface); }
+  .sd__opt[aria-selected="true"] .sd__go { opacity: 1; }
+  .sd__opt .vc-icon { color: var(--text-muted); }
+  .sd__txt { display: grid; min-width: 0; }
+  .sd__t { font: var(--text-small); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sd__t code { font: 600 .93em/1 var(--font-mono); }
+  .sd__p { font: var(--text-small); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sd__opt mark { background: none; color: var(--text-cyan); }
+  .sd__go { margin-left: auto; opacity: 0; color: var(--text-muted); }
+  .sd__empty { padding: var(--space-8) var(--space-4); text-align: center; font: var(--text-small); color: var(--text-muted); }
+  .sd__foot { display: flex; flex-wrap: wrap; gap: var(--space-4); flex: none; padding: 10px var(--space-4); border-top: 1px solid var(--border-subtle); font: var(--text-label); color: var(--text-muted); }
+  .sd__foot span { display: inline-flex; align-items: center; gap: 6px; }
+  .drawer {
+    width: min(85%, 380px); max-width: none; height: 100dvh; max-height: none;
+    margin: 0 0 0 auto; padding: 0; border: 0; border-left: 1px solid var(--border-subtle);
+    background: var(--bg-surface); color: var(--text-primary);
+  }
+  .drawer[open] { display: flex; flex-direction: column; }
+  .drawer .sb-brand .vc-icon-btn { margin-left: auto; }
+  .mdv { width: min(760px, calc(100% - 2 * var(--space-2))); max-width: none; max-height: calc(100dvh - 2 * var(--space-6)); margin: auto; padding: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-raised); color: var(--text-primary); box-shadow: var(--shadow-raised); }
+  .mdv[open] { display: flex; flex-direction: column; }
+  .mdv__head { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4); border-bottom: 1px solid var(--border-subtle); }
+  .mdv__head h1 { margin: 0; font: var(--text-ui); }
+  .mdv__head code { font: var(--text-label); color: var(--text-muted); }
+  .mdv__head .vc-icon-btn { margin-left: auto; }
+  .mdv .vc-code { margin: var(--space-4); overflow: auto; min-height: 0; }
+  .mdv .vc-code pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 20px; }
+
+
+  @media (prefers-reduced-motion: reduce) {
+    .toc__block, .toc__track rect, .card__title .vc-icon, .range::-webkit-slider-thumb, .sw input::after, .tp-cell, .tp-cell::before, .tp-cell::after { transition: none; }
+    .fig[data-playing] .es-live :is(.es-spin, .es-toast, .es-bar__fill) { animation-duration: 1ms; animation-iteration-count: 1; }
+  }
+</style>
+<script>
+  window.VC_PAGE = {
+    set: 'docs',
+    key: '3',
+    toggles: [
+      { id: 'figures', label: 'Figures', options: ['inline', 'sticky'] },
+      { id: 'toc', label: 'TOC', options: ['clerk', 'block'] },
+      { id: 'ai', label: 'Ask AI', options: ['hidden', 'docked'] }
+    ]
+  };
+</script>
+<script src="../shared/proto-kit.js"></script>
+</head>
+<body>
+<!-- Icon sprite: the design system's hand-drawn style (16px grid, 1.5px stroke, currentColor). -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h.5"/></symbol>
+  <symbol id="i-check" viewBox="0 0 16 16"><path d="M3 8.5l3 3 7-7"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 16 16"><path d="M4.5 6.5 8 10l3.5-3.5"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 16 16"><path d="M2.5 4a1.5 1.5 0 0 1 1.5-1.5h8A1.5 1.5 0 0 1 13.5 4v5.5A1.5 1.5 0 0 1 12 11H7l-3 2.5V11a1.5 1.5 0 0 1-1.5-1.5z"/><path d="M5.5 6h5M5.5 8h3"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 16 16"><path d="M6.5 3.5h-3v9h9v-3M9 3h4v4M13 3 7.5 8.5"/></symbol>
+  <symbol id="i-md" viewBox="0 0 16 16"><rect x="1.5" y="3.5" width="13" height="9" rx="1.5"/><path d="M4 10V6l1.75 2L7.5 6v4M10.5 6v4M9 8.5l1.5 1.5 1.5-1.5"/></symbol>
+  <symbol id="i-github" viewBox="0 0 20 20"><path d="M7 15.5c-3 1-3-1.5-4.5-2M12.5 17.5v-2.6a2.3 2.3 0 0 0-.6-1.7c2.1-.2 4.3-1 4.3-4.7a3.6 3.6 0 0 0-1-2.5 3.4 3.4 0 0 0 0-2.5s-.8-.2-2.6 1a9 9 0 0 0-4.7 0C6.1 3.3 5.3 3.5 5.3 3.5a3.4 3.4 0 0 0 0 2.5 3.6 3.6 0 0 0-1 2.5c0 3.7 2.2 4.5 4.3 4.7a2.3 2.3 0 0 0-.6 1.7v2.6"/></symbol>
+  <symbol id="i-theme" viewBox="0 0 20 20"><circle cx="10" cy="10" r="6.5"/><path d="M10 3.5a6.5 6.5 0 0 0 0 13z" fill="currentColor"/></symbol>
+  <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 20 20"><path d="M3 6h14M3 10h14M3 14h14"/></symbol>
+  <symbol id="i-close" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></symbol>
+  <symbol id="i-file" viewBox="0 0 16 16"><path d="M4 1.5h5L12.5 5v9.5h-8.5z"/><path d="M9 1.5V5h3.5"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 16 16"><path d="M1.5 4a1 1 0 0 1 1-1h3.5l1.5 1.5h6a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="i-link" viewBox="0 0 16 16"><path d="M6.5 9.5l3-3M7 4.5l1-1a2.8 2.8 0 0 1 4 4l-1 1M9 11.5l-1 1a2.8 2.8 0 0 1-4-4l1-1"/></symbol>
+  <symbol id="i-hash" viewBox="0 0 16 16"><path d="M6 2.5 5 13.5M11 2.5l-1 11M2.5 6h11M2 10h11"/></symbol>
+  <symbol id="i-page" viewBox="0 0 16 16"><path d="M3.5 1.5h6l3 3v10h-9z"/><path d="M5.5 7h5M5.5 9.5h5M5.5 12h3"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 16 16"><path d="M3 8h10M9 4l4 4-4 4"/></symbol>
+  <symbol id="i-arrow-left" viewBox="0 0 16 16"><path d="M13 8H3M7 4 3 8l4 4"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 16 16"><path d="M10.5 2.5l3 3-8 8H2.5v-3z"/><path d="M9 4l3 3"/></symbol>
+  <symbol id="i-list" viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h11M5.5 12h8"/></symbol>
+  <symbol id="i-fig" viewBox="0 0 16 16"><rect x="1.5" y="1.5" width="9" height="9" rx="1"/><rect x="5.5" y="5.5" width="9" height="9" rx="1"/></symbol>
+  <symbol id="i-play" viewBox="0 0 16 16"><path d="M5 3.5v9l7-4.5z" fill="currentColor"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor"/></symbol>
+  <symbol id="i-send" viewBox="0 0 16 16"><path d="M8 13V3M4 7l4-4 4 4"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 16 16"><path d="M9.5 1.5l5 5-2 .5-3 3 .5 3-1 1-3-3-3.5 3.5M5 7l3-3 .5-2.5"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4.5 6.5 6.5 8.5l-2 2M8.5 10.5h3"/></symbol>
+  <symbol id="i-wipe" viewBox="0 0 16 16"><path d="M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5"/></symbol>
+</svg>
+
+<a class="vc-btn vc-btn--primary vc-btn--sm sp-skip" href="#nd-page">Skip to content</a>
+
+<!-- div#nd-docs-layout — Fumadocs `layouts/spacious` (DocsLayout props: nav, links, githubUrl, sidebar, aiChat). -->
+<div id="nd-docs-layout" class="sp">
+
+  <!-- header#nd-subnav — the layout's mobile header (< 768px): nav title, search toggle, theme, sidebar trigger. -->
+  <header id="nd-subnav">
+    <a class="sb-logo" href="../landing/a.html" aria-label="visual-check home">
+      <img class="vc-only-light" src="../shared/logo/logo-horizontal.svg" alt="visual-check">
+      <img class="vc-only-dark" src="../shared/logo/logo-horizontal-dark.svg" alt="visual-check">
+    </a>
+    <span class="grow"></span>
+    <button class="vc-icon-btn" type="button" data-search-open aria-label="Search the docs"><svg class="vc-icon vc-icon--20" viewBox="0 0 16 16"><use href="#i-search"/></svg></button>
+    <button class="vc-icon-btn" type="button" data-kit-theme-toggle aria-label="Toggle theme"><svg class="vc-icon vc-icon--20" viewBox="0 0 20 20"><use href="#i-theme"/></svg></button>
+    <button class="vc-icon-btn" type="button" data-drawer-open aria-label="Open the docs menu" aria-haspopup="dialog"><svg class="vc-icon vc-icon--20" viewBox="0 0 20 20"><use href="#i-menu"/></svg></button>
+  </header>
+
+  <!-- aside#nd-sidebar — the layout's sidebar: nav title, search trigger, page tree from meta.json (separators), footer. -->
+  <aside id="nd-sidebar" aria-label="Docs">
+    <div class="sb-head">
+      <div class="sb-brand">
+        <a class="sb-logo" href="../landing/a.html" aria-label="visual-check home">
+          <img class="vc-only-light" src="../shared/logo/logo-horizontal.svg" alt="visual-check">
+          <img class="vc-only-dark" src="../shared/logo/logo-horizontal-dark.svg" alt="visual-check">
+        </a>
+        <span class="sb-ver" title="Docs for the latest 0.x release">0.1</span>
+      </div>
+      <!-- Search trigger (slots.searchTrigger), restyled as the design system's vc-search. -->
+      <button class="vc-search sb-search" type="button" data-search-open aria-haspopup="dialog">
+        <svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-search"/></svg><span class="vc-search__label">Search docs</span><kbd class="vc-kbd" data-kbd-mod>⌘K</kbd>
+      </button>
+    </div>
+    <nav class="sb-nav" aria-label="Docs pages" data-nav></nav>
+    <!-- sidebar.footer: icon links | theme switch -->
+    <div class="sb-foot">
+      <div class="sb-foot__row">
+        <a class="sb-foot__llms" href="https://visual-check.vercel.app/llms.txt" target="_blank" rel="noopener">llms.txt</a>
+        <a class="vc-icon-btn" href="https://github.com/visual-check/visual-check" target="_blank" rel="noopener" aria-label="visual-check on GitHub"><svg class="vc-icon vc-icon--20" viewBox="0 0 20 20"><use href="#i-github"/></svg></a>
+        <button class="vc-icon-btn" type="button" data-kit-theme-toggle aria-label="Toggle theme"><svg class="vc-icon vc-icon--20" viewBox="0 0 20 20"><use href="#i-theme"/></svg></button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- The inset panel of the Spacious layout: it scrolls, the window doesn't. Holds page actions, the TOC popover and DocsPage. -->
+  <div class="sp-panel" id="sp-panel">
+
+    <!-- Page actions at the top of the panel: breadcrumb (includeSeparator) · MarkdownCopyButton · ViewOptionsPopover · aiChat trigger. -->
+    <div class="sp-bar">
+      <nav aria-label="Breadcrumb"><ol class="sp-crumbs" id="crumbs"></ol></nav>
+      <div class="sp-actions" role="group" aria-label="Page actions">
+        <button class="vc-btn vc-btn--secondary vc-btn--sm" type="button" id="copy-md">
+          <svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-copy"/></svg><span id="copy-md-label">Copy Markdown</span>
+        </button>
+        <button class="vc-btn vc-btn--secondary vc-btn--sm" type="button" id="open-btn" popovertarget="open-menu" aria-haspopup="menu" aria-expanded="false" style="anchor-name: --open-menu">
+          Open<svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-chev"/></svg>
+        </button>
+        <div class="menu" id="open-menu" popover role="menu" aria-labelledby="open-btn">
+          <div class="menu__label" role="presentation">Ask about this page</div>
+          <a class="menu__item" role="menuitem" data-open-ai="chatgpt" target="_blank" rel="noopener" href="#"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-chat"/></svg>Open in ChatGPT<svg class="vc-icon menu__ext" viewBox="0 0 16 16"><use href="#i-ext"/></svg></a>
+          <a class="menu__item" role="menuitem" data-open-ai="claude" target="_blank" rel="noopener" href="#"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-chat"/></svg>Open in Claude<svg class="vc-icon menu__ext" viewBox="0 0 16 16"><use href="#i-ext"/></svg></a>
+          <a class="menu__item" role="menuitem" data-open-ai="cursor" target="_blank" rel="noopener" href="#"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-chat"/></svg>Open in Cursor<svg class="vc-icon menu__ext" viewBox="0 0 16 16"><use href="#i-ext"/></svg></a>
+          <hr role="separator">
+          <button class="menu__item" role="menuitem" type="button" data-md-view><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-md"/></svg>View as Markdown</button>
+          <a class="menu__item" role="menuitem" data-github-src target="_blank" rel="noopener" href="#"><svg class="vc-icon" viewBox="0 0 20 20"><use href="#i-github"/></svg>Open in GitHub<svg class="vc-icon menu__ext" viewBox="0 0 16 16"><use href="#i-ext"/></svg></a>
+        </div>
+        <span class="sp-actions__sep" aria-hidden="true"></span>
+        <button class="vc-btn vc-btn--ghost vc-btn--sm sp-actions__ask" type="button" data-ai-toggle aria-pressed="false" aria-controls="sp-chat">
+          <svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-chat"/></svg>Ask AI
+        </button>
+      </div>
+    </div>
+
+    <!-- toc-popover — DocsPage `tableOfContentPopover`: below the rail breakpoint, and in sticky-figure mode. -->
+    <div class="sp-tocpop">
+      <button class="sp-tocpop__btn" type="button" aria-expanded="false" aria-controls="tocpop-panel" id="tocpop-btn">
+        <svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-list"/></svg><span>On this page</span>
+        <span class="sp-tocpop__current" id="tocpop-current"></span>
+        <svg class="vc-icon sp-tocpop__chev" viewBox="0 0 16 16"><use href="#i-chev"/></svg>
+      </button>
+      <div class="sp-tocpop__panel" id="tocpop-panel" hidden>
+        <nav class="toc" data-toc aria-label="On this page"></nav>
+      </div>
+    </div>
+
+    <div class="sp-grid">
+      <main class="sp-main">
+        <!-- article#nd-page — DocsPage: DocsTitle, DocsDescription, DocsBody (prose), footer. -->
+        <article id="nd-page" tabindex="-1">
+
+<!-- ======================================================================= Getting started -->
+<div class="dp" data-page="getting-started" hidden>
+  <h1 class="dp__title">Getting started</h1>
+  <p class="dp__lede">Set up visual-check, write the first baselines and check your stories against them.</p>
+
+  <!-- Callout (type="info") → vc-callout -->
+  <div class="vc-callout" role="note">
+    <span class="vc-callout__glyph" aria-hidden="true">i</span>
+    <div>
+      <strong class="vc-callout__title">Readiness never waits for the network</strong>
+      <p>visual-check captures a story once it has finished and its images and fonts have loaded. It doesn't wait for network requests. So when the first <code>test</code> fails, a story usually needs tuning: a <code>wait</code> hook for late content, a mask for content that changes, or a look at its animations. <a href="#gs-tuning">What to tune</a>.</p>
+    </div>
+  </div>
+
+  <h2 id="gs-requirements">What you need</h2>
+  <ul>
+    <li>Node 22.17 or later.</li>
+    <li>Storybook 9.1, 10 or 11. The Storybook addon needs Storybook 10.</li>
+    <li>Docker, running. The browser runs in a container, so every machine captures the same pixels.</li>
+    <li>npm, pnpm, Yarn 1, Yarn 4.17.1 or later, or Bun.</li>
+  </ul>
+
+  <h2 id="gs-set-up">Set up</h2>
+  <!-- Steps (fumadocs-ui/components/steps) -->
+  <div class="steps">
+    <section class="step flow">
+      <h3 id="gs-init">Run <code>init</code></h3>
+      <p>Run it anywhere in the repo: inside a package, it works at the workspace root and says so. It installs visual-check's packages itself, so there's no separate install step.</p>
+      <!-- ```npm npx @visual-check/cli init``` → remark-npm tabs (npm-to-yarn), groupId persisted -->
+      <div class="vc-code cb" data-pm-block>
+        <div class="vc-code__bar cb-bar">
+          <div class="cb-tabs" role="tablist" aria-label="Package manager"></div>
+          <button class="vc-code__copy" type="button" data-copy-btn><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-copy"/></svg><span>Copy</span></button>
+        </div>
+        <pre role="tabpanel"><code><span class="p">$ </span><span class="cmd" data-pm-cmd="dlx:@visual-check/cli init"></span></code></pre>
+      </div>
+      <p><code>init</code> finds every Storybook through its <code>.storybook/main.*</code> file, works out the command and port that start it, and checks Docker. Then it asks its questions. Arrows choose, and an answered question collapses to one line.</p>
+      <div class="tbl tbl--prompts">
+        <table>
+          <thead><tr><th scope="col">Question</th><th scope="col">Its hint in the terminal</th></tr></thead>
+          <tbody>
+            <tr><td><code>Package manager</code><span class="cell-note">Only when nothing names one</span></td><td>No lockfile or packageManager field names one.</td></tr>
+            <tr><td><code>Storybooks to set up</code><span class="cell-note">Only when there are several</span></td><td>The ones ticked go in the config.</td></tr>
+            <tr><td><code>Name of the Storybook in apps/web</code></td><td>What the config and the report call this Storybook.</td></tr>
+            <tr><td><code>URL of web</code></td><td>Where visual-check opens it, locally and in CI. Use 127.0.0.1, not localhost.</td></tr>
+            <tr><td><code>Command that starts web</code><span class="cell-note">Only when no script starts it</span></td><td>No script starts this Storybook. The next steps show this command.</td></tr>
+            <tr><td><code>Name of the script that runs visual-check test</code></td><td>Compares each story with its baseline. Default <code>visual:check</code>.</td></tr>
+            <tr><td><code>Name of the script that runs visual-check update</code></td><td>Writes the baselines. Default <code>visual:update</code>.</td></tr>
+            <tr><td><code>Install the agent skill?</code></td><td>Teaches a coding agent to run visual-check and report what changed. Default yes.</td></tr>
+            <tr><td><code>Add the Storybook addon to web?</code><span class="cell-note">Storybook 10 only</span></td><td>Check and update the open story from inside Storybook. Default yes.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>It never asks about the platform, tolerance or workers, and one URL serves both local runs and CI. <code>init --yes</code> takes every default.</p>
+      <div class="vc-callout vc-callout--warning" role="note">
+        <span class="vc-callout__glyph" aria-hidden="true">!</span>
+        <div>
+          <strong class="vc-callout__title">Yarn 4 on a release day</strong>
+          <p>Yarn 4 refuses a package published less than a day ago, so <code>yarn dlx @visual-check/cli init</code> can fail on the day of a release. Wait a day, or list <code>@visual-check/*</code> under <code>npmPreapprovedPackages</code> in <code>.yarnrc.yml</code>.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="step flow">
+      <h3 id="gs-files">Check what it wrote</h3>
+      <p>For a repo with one Storybook at its root, <code>init</code> writes these files:</p>
+      <!-- Files (fumadocs-ui/components/files) -->
+      <div class="files" data-md="```
+visual-check.config.ts
+package.json                      scripts visual:check and visual:update
+.visual-check/.gitignore
+.storybook/visual-check.ts
+.agents/skills/visual-check/      SKILL.md, scripts/run.mjs, setup.json
+.claude/skills/visual-check       a link to the agent skill
+```">
+        <ul>
+          <li><span class="files__row"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-file"/></svg><code>visual-check.config.ts</code><span class="files__note">Names each Storybook</span></span></li>
+          <li><span class="files__row"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-file"/></svg><code>package.json</code><span class="files__note">Adds <code>visual:check</code> and <code>visual:update</code></span></span></li>
+          <li><span class="files__row"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-folder"/></svg><code>.visual-check/</code></span>
+            <ul><li><span class="files__row"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-file"/></svg><code>.gitignore</code><span class="files__note">Keeps all but <code>baselines/</code> out of git</span></span></li></ul></li>
+          <li><span class="files__row"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-folder"/></svg><code>.storybook/</code></span>
+            <ul><li><span class="files__row"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-file"/></svg><code>visual-check.ts</code><span class="files__note">Options for every story</span></span></li></ul></li>
+          <li><span class="files__row"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-folder"/></svg><code>.agents/skills/visual-check/</code><span class="files__note">The agent skill</span></span>
+            <ul>
+              <li><span class="files__row"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-file"/></svg><code>SKILL.md</code></span></li>
+              <li><span class="files__row"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-file"/></svg><code>scripts/run.mjs</code></span></li>
+              <li><span class="files__row"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-file"/></svg><code>setup.json</code></span></li>
+            </ul></li>
+          <li><span class="files__row"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-link"/></svg><code>.claude/skills/visual-check</code><span class="files__note">A link to the skill</span></span></li>
+        </ul>
+      </div>
+      <p>It adds <code>@visual-check/cli</code> and <code>@visual-check/chromium</code>, the browser, at the workspace root, and <code>@visual-check/storybook</code> and the addon in the Storybook's package. It never edits <code>preview.*</code>, your other scripts or the root <code>.gitignore</code>, touches <code>main.*</code> only through <code>storybook add</code>, and writes no CI workflow.</p>
+      <div class="vc-code" data-lang="ts" data-title="visual-check.config.ts">
+        <div class="vc-code__bar"><span class="vc-code__title"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-file"/></svg>visual-check.config.ts</span><button class="vc-code__copy" type="button" data-copy-btn><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+<pre><code><span class="k">import</span> { defineConfig } <span class="k">from</span> <span class="s">'@visual-check/cli'</span>
+
+<span class="k">export default</span> defineConfig({
+  storybooks: {
+    web: { url: <span class="s">'http://127.0.0.1:6006'</span> },
+  },
+})</code></pre>
+      </div>
+      <p>The config names each Storybook and where it runs, and holds only what differs from the defaults. Options for stories live in Storybook parameters, written with the helper <code>init</code> puts next to your preview:</p>
+      <div class="vc-code" data-lang="ts" data-title=".storybook/visual-check.ts">
+        <div class="vc-code__bar"><span class="vc-code__title"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-file"/></svg>.storybook/visual-check.ts</span><button class="vc-code__copy" type="button" data-copy-btn><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+<pre><code><span class="k">import</span> { defineVisualCheck } <span class="k">from</span> <span class="s">'@visual-check/storybook'</span>
+
+<span class="c">// To set options for every story, spread visualCheck into the parameters in your preview file:</span>
+<span class="c">//   import { visualCheck } from './visual-check'</span>
+<span class="c">//   parameters: { ...visualCheck({}) },</span>
+<span class="k">export const</span> visualCheck = defineVisualCheck({
+  modes: {
+    <span class="c">// Each mode a story lists adds one snapshot besides its default capture. For example:</span>
+    <span class="c">// mobile: { viewport: { width: 375, height: 667, deviceScaleFactor: 2, touch: true } },</span>
+  },
+})</code></pre>
+      </div>
+      <p>It ends by printing the next steps:</p>
+      <!-- <CliOutput> custom MDX component -->
+      <div class="vc-code cli" data-cli data-md-lang="text">
+        <div class="vc-code__bar"><span class="vc-code__title"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-terminal"/></svg>Terminal</span></div>
+        <pre><code id="closing-message"></code></pre>
+      </div>
+    </section>
+
+    <section class="step flow">
+      <h3 id="gs-storybook">Start Storybook</h3>
+      <p>visual-check never starts or builds a Storybook. It connects to the one running at the URL in the config, so start yours in its own terminal and keep it running.</p>
+      <div class="vc-code cb" data-pm-block>
+        <div class="vc-code__bar cb-bar">
+          <div class="cb-tabs" role="tablist" aria-label="Package manager"></div>
+          <button class="vc-code__copy" type="button" data-copy-btn><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-copy"/></svg><span>Copy</span></button>
+        </div>
+        <pre role="tabpanel"><code><span class="p">$ </span><span class="cmd" data-pm-cmd="run:storybook"></span></code></pre>
+      </div>
+    </section>
+
+    <section class="step flow">
+      <h3 id="gs-update">Write the first baselines</h3>
+      <p><code>update</code> captures every story and writes a baseline for each one that has none. It writes a baseline only when two loads of the story agree, so a baseline is never a one-off frame.</p>
+      <div class="vc-code cli" data-cli data-md-lang="sh">
+        <div class="vc-code__bar"><span class="vc-code__title"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-terminal"/></svg>Terminal</span><button class="vc-code__copy" type="button" data-copy-btn><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+<pre><code><span class="p">$ </span><span class="cmd" data-pm-cmd="run:visual:update"></span>
+<span class="c">visual-check 0.1.0 · update · 108 snapshots · 4 workers</span>
+<span class="o-ok o-b">108 written</span>
+<span class="c">written .visual-check/baselines/components-alert--info.png
+written .visual-check/baselines/components-button--default.png
+…</span>
+<span class="k">s3.amazonaws.com: 2 stories (components-image--default, components-image--responsive) show remote content. A CDN can serve it differently on another machine, so CI may fail.</span></code></pre>
+      </div>
+      <p>The last line is a warning: two stories show images from a CDN, which can serve different bytes to another machine. <a href="#remote-content">Remote content</a> has the fixes.</p>
+      <p><code>update</code> runs on your machine only. With <code>CI</code> set it exits 2, and no CI job ever writes a baseline.</p>
+    </section>
+
+    <section class="step flow">
+      <h3 id="gs-test">Check the stories</h3>
+      <p><code>test</code> captures each story again and compares the snapshot with its baseline. Straight after <code>update</code>, every story passes:</p>
+      <div class="vc-code cli" data-cli data-md-lang="sh">
+        <div class="vc-code__bar"><span class="vc-code__title"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-terminal"/></svg>Terminal</span><button class="vc-code__copy" type="button" data-copy-btn><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+<pre><code><span class="p">$ </span><span class="cmd" data-pm-cmd="run:visual:check"></span>
+<span class="c">visual-check 0.1.0 · test · 108 snapshots · 4 workers</span>
+<span class="o-ok o-b">108 passed</span><span class="c"> · 10.8s</span>
+<span class="c">Report: .visual-check/report/report.json</span></code></pre>
+      </div>
+      <p>In a terminal, passing stories print nothing while the run goes. Only failures print a line, and the run ends with the counts. It exits 0 when every story passes.</p>
+    </section>
+
+    <section class="step flow">
+      <h3 id="gs-commit">Commit the baselines</h3>
+      <p>Baselines are PNG files in <code>.visual-check/baselines/</code>, next to the Storybook. Commit them with the rest of the setup, so CI and the rest of your team compare against the same images. The <code>.gitignore</code> that <code>init</code> wrote keeps the report out of git.</p>
+      <p>To run visual-check on every pull request, see <a href="#ci">CI</a>.</p>
+    </section>
+  </div>
+
+  <h2 id="gs-differs">When a snapshot differs</h2>
+  <div class="fp">
+    <div class="fp__prose flow">
+      <p>Change a component and run <code>test</code> again. Here a button's vertical padding grew by 2px, and two stories that render it now differ:</p>
+      <div class="vc-code cli" data-cli data-md-lang="sh">
+        <div class="vc-code__bar"><span class="vc-code__title"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-terminal"/></svg>Terminal</span><button class="vc-code__copy" type="button" data-copy-btn><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+<pre><code><span class="p">$ </span><span class="cmd" data-pm-cmd="run:visual:check"></span>
+<span class="c">visual-check 0.1.0 · test · 108 snapshots · 4 workers</span>
+<span class="o-x">✗</span> web  components-button--default  <span class="k">differs: 312 differ, 20 allowed</span>
+<span class="o-x">✗</span> web  components-modal--default  mobile  <span class="k">differs: <span data-dv-count>1904</span> differ, 80 allowed (20 at scale 2)</span>
+<span class="c">── 2 failures ──</span>
+web  components-button--default
+  <span class="k">differs: 312 differ, 20 allowed</span>
+  <span class="c">diff: .visual-check/report/images/web/components-button--default.diff.png</span>
+web  components-modal--default  mobile
+  <span class="k">differs: <span data-dv-count>1904</span> differ, 80 allowed (20 at scale 2)</span>
+  <span class="c">diff: .visual-check/report/images/web/components-modal--default.mobile.diff.png</span>
+<span class="o-ok">106 passed</span> · <span class="k o-b">2 differs</span><span class="c"> · 11.4s</span>
+<span class="c">Report: .visual-check/report/report.json</span></code></pre>
+      </div>
+    </div>
+    <div class="fp__fig">
+      <!-- <DiffViewer> custom MDX component: baseline | snapshot | visual diff, wipe slider, register frame. -->
+      <figure class="fig dv" id="dv" data-view="slider" aria-labelledby="dv-title" data-md="_Figure (DiffViewer): the baseline, snapshot and visual diff of components-modal--default in the mobile mode. The buttons are 4px taller in the snapshot; the visual diff shows magenta along their edges, their labels and everything below them._">
+        <div class="fig__head">
+          <div class="dv-meta">
+            <span class="dv-id" id="dv-title">components-modal--default</span>
+            <span class="dv-mode">mobile</span>
+            <span class="vc-badge vc-badge--changed"><span class="vc-badge__glyph" aria-hidden="true">✗</span>changed</span>
+          </div>
+          <div class="seg" role="radiogroup" aria-label="View">
+            <label><input type="radio" name="dv-view" value="slider" checked>Slider</label>
+            <label><input type="radio" name="dv-view" value="diff">Visual diff</label>
+          </div>
+        </div>
+        <div class="fig__body">
+          <p class="dv-msg">differs: <span data-dv-count>1904</span> differ, 80 allowed (20 at scale 2)</p>
+          <div class="dv-stage" id="dv-stage">
+            <canvas class="dv-base" width="720" height="400" role="img" aria-label="Baseline: a modal with Cancel and Discard buttons"></canvas>
+            <canvas class="dv-snap" width="720" height="400" role="img" aria-label="Snapshot: the same modal with buttons 4px taller"></canvas>
+            <canvas class="dv-diff" width="720" height="400" role="img" aria-label="Visual diff: magenta along the buttons, their labels and the modal's lower edge"></canvas>
+            <span class="dv-handle" aria-hidden="true"><span class="dv-knob"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-wipe"/></svg></span></span>
+            <span class="dv-tag dv-tag--base" aria-hidden="true">Baseline</span>
+            <span class="dv-tag dv-tag--snap" aria-hidden="true">Snapshot</span>
+            <span class="dv-tag dv-tag--diff" aria-hidden="true">Visual diff</span>
+          </div>
+          <div class="dv-wipe">
+            <input class="range" type="range" id="dv-wipe" min="0" max="100" value="50" aria-label="Wipe between the baseline and the snapshot">
+            <div class="dv-wipe__cap" aria-hidden="true"><span>Left: baseline</span><span>Right: snapshot</span></div>
+          </div>
+          <p class="dv-legend"><i></i>Pixels that differ, over a faded copy of the baseline.</p>
+        </div>
+        <figcaption class="fig__caption">The modal story in its <code>mobile</code> mode, captured at scale 2. This figure computes its visual diff in your browser, at <code>color: 0.01</code>.</figcaption>
+      </figure>
+    </div>
+    <div class="fp__prose flow">
+      <p>Each failure names its visual diff: one image, magenta where pixels differ, over a faded copy of the baseline. The Storybook addon shows the same images, with the same wipe, inside Storybook.</p>
+      <p><span data-dv-count>1904</span> pixels differ. The <code>mobile</code> mode captures at scale 2, where the default budget of 20 CSS pixels allows 80 image pixels, so the snapshot fails and <code>test</code> exits 1.</p>
+      <p>If the change is intended, run <code>update</code> and commit the new baselines with the code that changed them. If it isn't, fix the code. Don't raise the tolerance to make a real change pass: <a href="#color-and-pixels"><code>color</code> and <code>pixels</code></a> explains what it absorbs.</p>
+    </div>
+  </div>
+
+  <h2 id="gs-tuning">If the first test fails</h2>
+  <p>A story can pass in Storybook and still fail its first <code>test</code>. These are the usual causes, each with its fix:</p>
+  <ul>
+    <li><strong>Late content</strong>, such as data from an API or icons loaded by script: a <a href="#wait-hook"><code>wait</code> hook</a> that waits for it.</li>
+    <li><strong>Content that changes every run</strong>, such as a clock or a random avatar: a mask.</li>
+    <li><strong>Images from another origin</strong>: a CDN can serve different bytes to different machines. See <a href="#remote-content">Remote content</a>.</li>
+    <li><strong>Motion visual-check can't reach</strong>, such as a canvas or a Lottie file: a mask or a <code>wait</code> hook. See <a href="#animations">Animations</a>.</li>
+  </ul>
+  <p>Options go in the story's parameters, through the helper <code>init</code> wrote:</p>
+  <div class="vc-code" data-lang="tsx" data-title="Dashboard.stories.tsx">
+    <div class="vc-code__bar"><span class="vc-code__title"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-file"/></svg>Dashboard.stories.tsx</span><button class="vc-code__copy" type="button" data-copy-btn><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+<pre><code><span class="k">import</span> { visualCheck } <span class="k">from</span> <span class="s">'../.storybook/visual-check'</span>
+
+<span class="k">export const</span> Default: Story = {
+  parameters: {
+    ...visualCheck({
+      masks: { clock: { selector: <span class="s">'[data-clock]'</span> } },
+      wait: <span class="k">async</span> ({ canvas }) => {
+        <span class="k">await</span> canvas.findByText(<span class="s">'Revenue this month'</span>)
+      },
+    }),
+  },
+}</code></pre>
+  </div>
+  <p>A snapshot that fails and then passes on its retry is a flaky snapshot. It doesn't fail the run, and it's listed by name at the end, so you can fix it later.</p>
+
+  <h2 id="gs-next">Next steps</h2>
+  <!-- Cards (fumadocs-ui/components/card) -->
+  <div class="cards">
+    <a class="card" href="#modes"><span class="card__title">Modes<svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-arrow"/></svg></span><span class="card__desc">Capture a story in a dark theme or at a phone's size.</span></a>
+    <a class="card" href="#ci"><span class="card__title">CI<svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-arrow"/></svg></span><span class="card__desc">Run visual-check on every pull request with the GitHub Action.</span></a>
+    <a class="card" href="#color-and-pixels"><span class="card__title"><span><code>color</code> and <code>pixels</code></span><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-arrow"/></svg></span><span class="card__desc">What tolerance absorbs, and where the defaults come from.</span></a>
+    <a class="card" href="#agent-skill"><span class="card__title">Agent skill<svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-arrow"/></svg></span><span class="card__desc">Let a coding agent run visual-check and report what changed.</span></a>
+  </div>
+</div>
+
+<!-- ======================================================================= color and pixels -->
+<div class="dp" data-page="color-and-pixels" hidden>
+  <h1 class="dp__title"><code>color</code> and <code>pixels</code></h1>
+  <p class="dp__lede">A snapshot passes when it differs from its baseline by no more than the story's tolerance. Tolerance asks two questions: did this pixel change, and how many changed pixels are allowed?</p>
+
+  <h2 id="cp-two-keys">Two questions, two keys</h2>
+  <p><code>color</code> decides whether one pixel counts as differing. It's a number from 0 to 1: how far a pixel's colour may move and still count as unchanged. At the default, <code>0.01</code>, a grey shift of up to about 2 of 255 doesn't count.</p>
+  <p><code>pixels</code> decides how many differing pixels a snapshot may have and still pass. The default is <code>20</code>.</p>
+  <div class="vc-code" data-lang="ts" data-title="visual-check.config.ts">
+    <div class="vc-code__bar"><span class="vc-code__title"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-file"/></svg>visual-check.config.ts</span><button class="vc-code__copy" type="button" data-copy-btn><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+<pre><code><span class="k">export default</span> defineConfig({
+  storybooks: { web: { url: <span class="s">'http://127.0.0.1:6006'</span> } },
+  <span class="c">// The defaults, written out</span>
+  tolerance: { color: <span class="s">0.01</span>, pixels: <span class="s">20</span> },
+})</code></pre>
+  </div>
+
+  <h2 id="cp-worked-example">Ten pixels, worked through</h2>
+  <div class="fp">
+    <div class="fp__prose flow">
+      <p>The figure holds ten pixels from the edge of a button's label, as the baseline and the snapshot show them. Under each pair is how far its colour moved, on the same 0 to 1 scale as <code>color</code>. Pixels that count as differing light up magenta in the visual diff.</p>
+      <p>It starts at <code>color: 0.01</code> with a budget of 2. Pixels 2 and 7 moved by raster noise, 1 and 2 of 255, and don't count. The anti-aliased edges of the stroke moved further, so pixels 3 and 6 count. Pixels 9 and 10 are a deliberate change: a new stroke. Four pixels differ and two are allowed, so the snapshot fails.</p>
+    </div>
+    <div class="fp__fig">
+      <!-- <TolerancePlayground> custom MDX component -->
+      <figure class="fig tp" id="tp" data-scale="1" aria-labelledby="tp-title" data-md="_Figure (TolerancePlayground): ten pixels with colour differences 0, 0.004, 0.017, 0, 0, 0.034, 0.008, 0, 0.48 and 0.19. At `color: 0.01`, pixels 3, 6, 9 and 10 differ; with `pixels: 2` the snapshot fails with 4 differ, 2 allowed. Without the deliberate change in pixels 9 and 10, it passes with 2 differ, 2 allowed. At scale 2 every count is four times larger, and so is the budget._">
+        <div class="fig__head">
+          <div class="fig__name"><span class="fig__title" id="tp-title">Ten pixels</span><span class="fig__kind">Try the sliders</span></div>
+          <span class="fp__pin"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-pin"/></svg>Pinned while you read</span>
+        </div>
+        <div class="fig__body">
+          <div class="tp-strip" id="tp-strip"></div>
+          <div class="tp-legend" aria-hidden="true">
+            <span><i class="k-diff"></i>Counts as differing</span>
+            <span><i class="k-within"></i>Moved, within <code class="vc-inline-code">color</code></span>
+            <span><i class="k-same"></i>Unchanged</span>
+          </div>
+          <div class="tp-controls">
+            <div class="ctl">
+              <div class="ctl__top"><label class="ctl__label" for="tp-color"><code>color</code></label><output class="ctl__value" id="tp-color-out" for="tp-color">0.01</output></div>
+              <p class="ctl__hint" id="tp-color-hint">Did this pixel change?</p>
+              <input class="range" type="range" id="tp-color" min="0" max="8" step="1" value="2" aria-describedby="tp-color-hint">
+              <div class="ticks" id="tp-color-ticks" aria-hidden="true"></div>
+            </div>
+            <div class="ctl">
+              <div class="ctl__top"><label class="ctl__label" for="tp-pixels"><code>pixels</code></label><output class="ctl__value" id="tp-pixels-out" for="tp-pixels">2</output></div>
+              <p class="ctl__hint" id="tp-pixels-hint">How many changed pixels are allowed?</p>
+              <input class="range" type="range" id="tp-pixels" min="0" max="10" step="1" value="2" aria-describedby="tp-pixels-hint">
+              <div class="ticks" id="tp-pixels-ticks" aria-hidden="true"></div>
+            </div>
+          </div>
+          <div class="tp-opts">
+            <fieldset class="tp-opts__group">
+              <legend>Scale</legend>
+              <div class="seg">
+                <label><input type="radio" name="tp-scale" value="1" checked>1</label>
+                <label><input type="radio" name="tp-scale" value="2">2</label>
+              </div>
+            </fieldset>
+            <label class="sw"><input type="checkbox" role="switch" id="tp-change" checked>Deliberate change in pixels 9 and 10</label>
+          </div>
+          <div class="tp-out">
+            <div class="tp-out__row">
+              <p class="tp-count" id="tp-count"></p>
+              <span id="tp-badge"></span>
+            </div>
+            <p class="tp-rule" id="tp-rule"></p>
+            <div class="vc-code tp-cli"><pre><code id="tp-cli"></code></pre></div>
+            <p class="sr-only" aria-live="polite" id="tp-live"></p>
+          </div>
+        </div>
+        <figcaption class="fig__caption">The real visual diff draws only magenta. The cyan outline here marks pixels that moved but stayed within <code>color</code>.</figcaption>
+      </figure>
+    </div>
+    <div class="fp__prose flow">
+      <p>Try these:</p>
+      <ol>
+        <li><strong>Turn the deliberate change off.</strong> Only the anti-aliased edges are left: 2 differ, 2 allowed, and the snapshot passes. That's the budget's job: absorbing the few edge pixels that move between machines.</li>
+        <li><strong>Set <code>color</code> to 0.</strong> Noise counts too now. Four pixels differ on a snapshot with no deliberate change, so the budget would have to grow to 4 just to pass it.</li>
+        <li><strong>Turn the change on and set <code>color</code> to 0.05.</strong> The edges stop counting, the count drops to 2, and the snapshot passes with the change in it.</li>
+        <li><strong>Switch to scale 2.</strong> Every CSS pixel is now 2 × 2 image pixels, so four times as many pixels differ, and the budget grows by the same factor. The result doesn't change.</li>
+      </ol>
+      <p>A real snapshot has far more pixels: the default budget of 20 is against 921,600 at 1280 × 720. The strip scales that down to ten.</p>
+
+      <h2 id="cp-lower-color">Why a lower <code>color</code> isn't stricter</h2>
+      <p>Lowering <code>color</code> makes more pixels count, and most of the new ones are noise. The budget then has to grow to absorb it, and a bigger budget lets real changes through.</p>
+      <p>In the measurements behind the defaults, at <code>color: 0</code> the noise between arm64 and amd64 needs a budget of 18,859 pixels, and that budget misses 561 of 606 one-pixel shifts. <a href="#cp-measured">The table</a> has every row.</p>
+
+      <h2 id="cp-anti-aliasing">Anti-aliased pixels count</h2>
+      <p>Anti-aliased pixels, the soft edges of text, icons and shapes, count like any other pixel. There's no option to ignore them in v1, and <code>pixelmatch</code>'s filter that drops a lone differing pixel stays off.</p>
+      <p>A small icon is mostly edge. In the measurements behind the defaults, the default budget caught 118 of 260 hidden icons with anti-aliased pixels ignored, and 259 with every pixel counted.</p>
+
+      <h2 id="cp-css-pixels">CSS pixels and scale</h2>
+      <p>A count in <code>pixels</code> is in CSS pixels. At a device scale factor of s, a snapshot may have ⌊<code>pixels</code> × s²⌋ differing image pixels.</p>
+      <div class="tbl">
+        <table>
+          <thead><tr><th scope="col">Scale</th><th scope="col" class="num">Image pixels per CSS pixel</th><th scope="col" class="num"><code>pixels: 20</code> allows</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td class="num">1</td><td class="num">20</td></tr>
+            <tr><td>1.5</td><td class="num">2.25</td><td class="num">45</td></tr>
+            <tr><td>2</td><td class="num">4</td><td class="num">80</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The defaults were measured at scale 1, and phone modes are recommended at scale 2. There, the same change covers 3 to 4 times as many image pixels, and arm64's noise needed 69 pixels where it needed 19. An unscaled 20 would fail arm64 at scale 2; 80 absorbs it.</p>
+      <p>A failure shows image pixels against the scaled budget, and the scale when it isn't 1:</p>
+      <div class="vc-code cli" data-cli data-md-lang="text">
+        <div class="vc-code__bar"><span class="vc-code__title"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-terminal"/></svg>Terminal</span></div>
+    <pre><code><span class="o-x">✗</span> web  button--primary  mobile  <span class="k">differs: 84 differ, 80 allowed (20 at scale 2)</span></code></pre>
+      </div>
+    </div>
+  </div>
+
+  <h2 id="cp-measured">Where the defaults come from</h2>
+  <p>The defaults were measured on 606 stories of a public component library's Storybook, at 1280 × 720 and scale 1. For each <code>color</code>, the budget is the most pixels that platform noise produced between arm64 and amd64. Each deliberate change was made on arm64 and compared with an amd64 baseline. The table counts the changes caught, out of the stories where the change was visible.</p>
+  <div class="tbl tbl--measured">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col"><code>color</code></th>
+          <th scope="col" class="num">Budget that absorbs arm64</th>
+          <th scope="col" class="num">1 px shift (606)</th>
+          <th scope="col" class="num">One character (533)</th>
+          <th scope="col" class="num">Hidden icon (286)</th>
+          <th scope="col" class="num">Background ±4 (517)</th>
+          <th scope="col" class="num">±8 (517)</th>
+          <th scope="col" class="num">±16 (518)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><code>0</code></td><td class="num">18,859 px</td><td class="num">45</td><td class="num">1</td><td class="num">1</td><td class="num">50</td><td class="num">50</td><td class="num">50</td></tr>
+        <tr><td><code>0.005</code></td><td class="num">3,054 px</td><td class="num">305</td><td class="num">15</td><td class="num">1</td><td class="num">310</td><td class="num">312</td><td class="num">312</td></tr>
+        <tr class="is-default"><td><code>0.01</code><span class="tag">default</span></td><td class="num">19 px</td><td class="num">606</td><td class="num">527</td><td class="num">285</td><td class="num">462</td><td class="num">481</td><td class="num">505</td></tr>
+        <tr><td><code>0.02</code></td><td class="num">0</td><td class="num">606</td><td class="num">533</td><td class="num">286</td><td class="num">3</td><td class="num">453</td><td class="num">492</td></tr>
+        <tr><td><code>0.05</code></td><td class="num">0</td><td class="num">604</td><td class="num">533</td><td class="num">286</td><td class="num">1</td><td class="num">0</td><td class="num">444</td></tr>
+        <tr><td><code>0.1</code><span class="tag">pixelmatch's default</span></td><td class="num">0</td><td class="num">601</td><td class="num">533</td><td class="num">286</td><td class="num">0</td><td class="num">0</td><td class="num">0</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>At <code>0.01</code>, a budget of 20 lets every difference between arm64 and amd64 pass, and still catches 89–100% of the small deliberate changes. <code>pixelmatch</code>'s own default, <code>0.1</code>, catches no background change of up to 16 levels: it measures perceived colour, and a uniform shift that size is below it.</p>
+
+
+  <h2 id="cp-percent">Percent strings</h2>
+  <p><code>pixels</code> also takes a share of the image, as a string from <code>'0%'</code> to <code>'100%'</code>. A share is counted against the image's own pixels, so it isn't scaled, and it's rounded down to a whole pixel.</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th scope="col">Value</th><th scope="col">Means</th></tr></thead>
+      <tbody>
+        <tr><td>A whole number, 0 or more, such as <code>20</code></td><td>A count of differing CSS pixels</td></tr>
+        <tr><td>A string from <code>'0%'</code> to <code>'100%'</code>, such as <code>'0.1%'</code></td><td>A share of the image's own pixels</td></tr>
+        <tr><td>Anything else, such as <code>1.5</code>, <code>-1</code> or <code>'0.1'</code></td><td>Exit 2</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>On a 1280 × 720 snapshot, <code>'0.1%'</code> allows 921 differing pixels. On a full-page snapshot twice as tall, it allows twice as many. A level sets a count or a share, never both, and each level replaces the budget it inherits.</p>
+
+  <h2 id="cp-setting">Setting tolerance</h2>
+  <p>Set it in the config for every Storybook, in <code>preview</code> for one Storybook, in a meta for one stories file, or on a story. It deep-merges, so a level can set only <code>color</code> or only <code>pixels</code>.</p>
+  <div class="vc-code" data-lang="tsx" data-title="Chart.stories.tsx">
+    <div class="vc-code__bar"><span class="vc-code__title"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-file"/></svg>Chart.stories.tsx</span><button class="vc-code__copy" type="button" data-copy-btn><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+<pre><code><span class="k">import</span> { visualCheck } <span class="k">from</span> <span class="s">'../.storybook/visual-check'</span>
+
+<span class="k">export const</span> Default: Story = {
+  parameters: {
+    ...visualCheck({ tolerance: { pixels: <span class="s">'0.1%'</span> } }),
+  },
+}</code></pre>
+  </div>
+  <p>Retries and <code>update</code>'s stability checks use each story's own tolerance.</p>
+  <div class="vc-callout vc-callout--warning" role="note">
+    <span class="vc-callout__glyph" aria-hidden="true">!</span>
+    <div>
+      <strong class="vc-callout__title">A size change always fails</strong>
+      <p>A snapshot whose width or height differs from its baseline fails whatever <code>pixels</code> and the masks say. The report shows both sizes, such as <code>1280×2400 → 1280×2432</code>, and the visual diff marks the padding in cyan.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ======================================================================= Animations -->
+<div class="dp" data-page="animations" hidden>
+  <h1 class="dp__title">Animations</h1>
+  <p class="dp__lede">A snapshot shows how a story ends, not a moment in the middle. visual-check lets your animations run, then brings the page to its end state just before it captures.</p>
+
+  <h2 id="an-end-state">What a snapshot shows</h2>
+  <div class="fp">
+    <div class="fp__prose flow">
+      <p>Every snapshot shows the end state:</p>
+      <ul>
+        <li>finite animations and transitions, CSS or script, as if they had finished;</li>
+        <li>infinite animations on their first frame;</li>
+        <li>videos, animated GIFs and SVG animation on their first frame.</li>
+      </ul>
+    </div>
+    <div class="fp__fig">
+      <!-- <EndState> custom MDX component -->
+      <figure class="fig" id="es" aria-labelledby="es-title" data-md="_Figure (EndState): a spinner, a toast and a progress bar. In Storybook they run; in the snapshot the spinner is on its first frame, the toast is fully shown and the progress bar stands at 70%, where its transition ends._">
+        <div class="fig__head">
+          <div class="fig__name"><span class="fig__title" id="es-title">Three stories, as captured</span></div>
+          <button class="vc-btn vc-btn--secondary vc-btn--sm" type="button" id="es-play" aria-pressed="false">
+            <svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-play"/></svg><span>Play in Storybook</span>
+          </button>
+        </div>
+        <div class="fig__body">
+          <div class="es">
+            <span class="es-corner" aria-hidden="true"></span>
+            <span class="es-colhead">Spinner</span>
+            <span class="es-colhead">Toast</span>
+            <span class="es-colhead">Progress bar</span>
+
+            <span class="es-rowlab"><b>In Storybook</b>While it runs</span>
+            <div class="es-stage es-live" role="img" aria-label="Spinner, mid-turn">
+              <svg class="es-spin" viewBox="0 0 40 40" aria-hidden="true"><circle class="t" cx="20" cy="20" r="15"/><path class="a" d="M20 5a15 15 0 0 1 15 15"/></svg>
+            </div>
+            <div class="es-stage es-live" role="img" aria-label="Toast, fading in">
+              <span class="es-toast" aria-hidden="true"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-check"/></svg>Saved</span>
+            </div>
+            <div class="es-stage es-live" role="img" aria-label="Progress bar, partly filled">
+              <div class="es-bar" aria-hidden="true">Uploading<div class="es-bar__track"><div class="es-bar__fill"></div></div></div>
+            </div>
+
+            <span class="es-rowlab"><b>In the snapshot</b>End state</span>
+            <div>
+              <div class="es-stage" role="img" aria-label="Spinner on its first frame">
+                <svg class="es-spin" viewBox="0 0 40 40" aria-hidden="true"><circle class="t" cx="20" cy="20" r="15"/><path class="a" d="M20 5a15 15 0 0 1 15 15"/></svg>
+              </div>
+              <div class="es-when es-when--start" aria-hidden="true"><i></i></div>
+              <p class="es-note">Infinite: first frame</p>
+            </div>
+            <div>
+              <div class="es-stage" role="img" aria-label="Toast fully shown">
+                <span class="es-toast" aria-hidden="true"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-check"/></svg>Saved</span>
+              </div>
+              <div class="es-when es-when--end" aria-hidden="true"><i></i></div>
+              <p class="es-note">Finite: finished</p>
+            </div>
+            <div>
+              <div class="es-stage" role="img" aria-label="Progress bar at 70%, where its transition ends">
+                <div class="es-bar" aria-hidden="true">Uploading<div class="es-bar__track"><div class="es-bar__fill"></div></div></div>
+              </div>
+              <div class="es-when es-when--end" aria-hidden="true"><i></i></div>
+              <p class="es-note">Transition: finished</p>
+            </div>
+          </div>
+        </div>
+        <figcaption class="fig__caption">The magenta dot marks where on each animation's timeline the snapshot is taken.</figcaption>
+      </figure>
+    </div>
+    <div class="fp__prose flow">
+      <p>The figure shows three stories as they run in Storybook and as they're captured. The spinner's animation is infinite, so it's captured on its first frame. The toast fades in once, so it's captured fully in. The progress bar's transition ends at 70%, so it's captured there.</p>
+      <p>The end state is always on, and there's no option. A story with nothing running pays nothing for it.</p>
+
+      <h2 id="an-how">How the page gets there</h2>
+      <p>After the story has finished and any <code>wait</code> hook has run, visual-check:</p>
+      <ol>
+        <li>finishes every running finite animation: in the document, in every shadow root and in every same-origin frame;</li>
+        <li>lets a frame pass, so end events run your page's logic, such as removing a toast's entering class;</li>
+        <li>repeats both until two checks a frame apart find nothing finite running, for at most 20 rounds;</li>
+        <li>puts whatever still runs on its first keyframe: infinite animations, and any that can't finish;</li>
+        <li>freezes media: videos go back to their first frame, inline SVG animation pauses at 0, and an animated GIF in an <code>&lt;img&gt;</code> shows its first frame;</li>
+        <li>checks images and fonts again if anything changed, then captures.</li>
+      </ol>
+      <p>Animations your page paused itself, and scroll-driven ones, are left alone.</p>
+      <div class="vc-callout" role="note">
+        <span class="vc-callout__glyph" aria-hidden="true">i</span>
+        <div>
+          <strong class="vc-callout__title">It counts toward <code>readyTimeout</code></strong>
+          <p><code>readyTimeout</code>, 10 seconds by default, covers everything up to the capture, this step included. Running out makes a broken story, and its message names the step it was in.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <h2 id="an-play"><code>play</code> runs as in Storybook</h2>
+  <p>visual-check waits for Storybook's <code>storyFinished</code> event, which comes after <code>play</code> and <code>afterEach</code>. Until then the story runs as it does in plain Storybook: <code>play</code> sees real durations and every end event, so a step that awaits an animation works the same.</p>
+  <p>The end state comes only after that, at capture. An end screen worth a baseline is written as a story with <code>play</code>.</p>
+
+  <h2 id="an-reduced-motion">Reduced motion</h2>
+  <p>The capture reports no preference for reduced motion: to the page, <code>prefers-reduced-motion</code> matches <code>no-preference</code>. Stories render the motion most people see, and the snapshot shows where it ends. visual-check adds no stylesheet that turns animations off.</p>
+
+  <h2 id="an-left">What's left to you</h2>
+  <p>Some motion is out of visual-check's reach. Each of these shows whatever frame it's on at capture, so it can differ from run to run:</p>
+  <ul>
+    <li>SVG in an <code>&lt;img&gt;</code>, and CSS animations inside an SVG image;</li>
+    <li>SVG animation used as a CSS image behind a URL that doesn't end in <code>.svg</code>, or cross-origin without CORS;</li>
+    <li>GIFs as CSS backgrounds, at a URL without <code>.gif</code>, or picked by a <code>&lt;source&gt;</code> in <code>&lt;picture&gt;</code>;</li>
+    <li>a video that hasn't loaded anything;</li>
+    <li>APNG, animated WebP, canvas, Lottie and other script-driven motion;</li>
+    <li>animations and media inside cross-origin frames.</li>
+  </ul>
+  <p>Mask what can't be stopped, or wait in a <code>wait</code> hook for it to reach a stable state. The hook runs before the end state:</p>
+  <div class="vc-code" data-lang="tsx" data-title="Upload.stories.tsx">
+    <div class="vc-code__bar"><span class="vc-code__title"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-file"/></svg>Upload.stories.tsx</span><button class="vc-code__copy" type="button" data-copy-btn><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+<pre><code><span class="k">import</span> { visualCheck } <span class="k">from</span> <span class="s">'../.storybook/visual-check'</span>
+
+<span class="k">export const</span> Uploading: Story = {
+  parameters: {
+    ...visualCheck({
+      masks: { lottie: { selector: <span class="s">'[data-lottie]'</span> } },
+    }),
+  },
+}
+
+<span class="k">export const</span> Done: Story = {
+  parameters: {
+    ...visualCheck({
+      <span class="c">// The canvas chart sets its label once it has drawn</span>
+      wait: <span class="k">async</span> ({ canvas }) => {
+        <span class="k">await</span> canvas.findByRole(<span class="s">'img'</span>, { name: <span class="s">'Uploads by day'</span> })
+      },
+    }),
+  },
+}</code></pre>
+  </div>
+  <p>A mask paints an opaque box in <code>maskColor</code> over the element's box, in the baseline and the snapshot alike. If the element grows or moves, its box does too, and those pixels count.</p>
+</div>
+
+<!-- ======================================================================= stub (filled per route) -->
+<div class="dp" data-page="stub" hidden></div>
+
+          <!-- TOC footer slot again, inline, for when the rail is hidden -->
+          <aside class="sp-agents sp-agents--inline" aria-label="For agents" data-agents></aside>
+
+          <!-- DocsPage footer: PageLastUpdate · EditOnGitHub · prev/next (Footer) -->
+          <footer class="pf">
+            <div class="pf__meta">
+              <span id="pf-updated"></span>
+              <a class="vc-btn vc-btn--ghost vc-btn--sm" id="pf-edit" href="#" target="_blank" rel="noopener"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-edit"/></svg>Edit on GitHub</a>
+            </div>
+            <nav class="pf__nav" aria-label="Previous and next page" id="pf-nav"></nav>
+          </footer>
+        </article>
+      </main>
+
+      <!-- div#nd-toc — DocsPage tableOfContent { style: 'block' | 'clerk', footer }. -->
+      <aside id="nd-toc" aria-label="On this page">
+        <nav class="toc" data-toc aria-label="On this page"></nav>
+        <div class="sp-agents" data-agents></div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- aiChat — DocsLayout `aiChat={{ open, onOpenChange, panel }}`: docked beside the page on wide screens, floating below 1280px. Static mock. -->
+  <aside class="sp-chat" id="sp-chat" aria-labelledby="chat-title">
+    <div class="chat__head">
+      <svg class="vc-icon" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-chat"/></svg>
+      <div><h2 class="chat__title" id="chat-title">Ask AI</h2><div class="chat__sub">Answers from these docs</div></div>
+      <button class="vc-icon-btn" type="button" data-ai-toggle aria-label="Close Ask AI"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="chat__log" role="log" aria-label="Conversation">
+      <div class="msg msg--user"><p>A story fails with "84 differ, 80 allowed (20 at scale 2)". Why 80, when <code>pixels</code> is 20?</p></div>
+      <div class="msg msg--ai">
+        <div class="msg__who"><svg class="vc-icon" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-page"/></svg>From 2 pages</div>
+        <p><code>pixels</code> counts CSS pixels. The story's mode captures at scale 2, where one CSS pixel is 2 × 2 image pixels, so a count of 20 allows ⌊20 × 2²⌋ = 80 image pixels. The snapshot has 84, so it fails.</p>
+        <ul>
+          <li>Open the visual diff the failure names and look at what changed.</li>
+          <li>If the change is intended, run <code>visual-check update</code> and commit the new baseline.</li>
+          <li>If it isn't, fix the code. Raising <code>pixels</code> hides real changes too: at scale 2, a one-character change covers a median of 199 image pixels, so <code>pixels: 50</code> would let about half of them through.</li>
+        </ul>
+        <div class="msg__sources">
+          <a class="msg__src" href="#cp-css-pixels"><svg class="vc-icon" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-hash"/></svg><span><code>color</code> and <code>pixels</code> › CSS pixels</span></a>
+          <a class="msg__src" href="#baselines"><svg class="vc-icon" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-hash"/></svg>Baselines</a>
+        </div>
+      </div>
+    </div>
+    <form class="chat__form" id="chat-form">
+      <div class="chat__box">
+        <label class="sr-only" for="chat-input">Ask a question about visual-check</label>
+        <textarea id="chat-input" rows="1" placeholder="Ask about visual-check" aria-describedby="chat-note"></textarea>
+        <button class="vc-icon-btn" type="submit" aria-label="Send"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-send"/></svg></button>
+      </div>
+      <p class="chat__note" id="chat-note">Answers come from these docs and can be wrong. Check the page they cite.</p>
+    </form>
+  </aside>
+</div>
+
+<!-- Search dialog — SearchDialog{Overlay, Content, Header, Input, List, Footer} over a static index (useStaticSearch). -->
+<dialog class="sd" id="search" aria-label="Search the docs" closedby="any">
+  <div class="sd__head">
+    <svg class="vc-icon vc-icon--20" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-search"/></svg>
+    <input class="sd__input" id="sd-input" type="text" role="combobox" aria-expanded="true" aria-controls="sd-list" aria-autocomplete="list" aria-label="Search the docs" placeholder="Search the docs" autocomplete="off" spellcheck="false">
+    <kbd class="vc-kbd">Esc</kbd>
+  </div>
+  <ul class="sd__list" id="sd-list" role="listbox" aria-label="Results"></ul>
+  <div class="sd__foot" aria-hidden="true">
+    <span><kbd class="vc-kbd">↑</kbd><kbd class="vc-kbd">↓</kbd>to move</span>
+    <span><kbd class="vc-kbd">↵</kbd>to open</span>
+    <span><kbd class="vc-kbd">Esc</kbd>to close</span>
+  </div>
+</dialog>
+
+<!-- Mobile sidebar drawer: the same page tree, from the end edge (w 85%, max 380px). -->
+<dialog class="drawer" id="drawer" aria-label="Docs menu" closedby="any">
+  <div class="sb-head">
+    <div class="sb-brand">
+      <a class="sb-logo" href="../landing/a.html" aria-label="visual-check home">
+        <img class="vc-only-light" src="../shared/logo/logo-horizontal.svg" alt="visual-check">
+        <img class="vc-only-dark" src="../shared/logo/logo-horizontal-dark.svg" alt="visual-check">
+      </a>
+      <button class="vc-icon-btn" type="button" data-drawer-close aria-label="Close the docs menu"><svg class="vc-icon vc-icon--20" viewBox="0 0 16 16"><use href="#i-close"/></svg></button>
+    </div>
+    <button class="vc-search sb-search" type="button" data-search-open aria-haspopup="dialog">
+      <svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-search"/></svg><span class="vc-search__label">Search docs</span>
+    </button>
+  </div>
+  <nav class="sb-nav" aria-label="Docs pages" data-nav></nav>
+  <div class="sb-foot">
+    <div class="sb-foot__row">
+      <a class="sb-foot__llms" href="https://visual-check.vercel.app/llms.txt" target="_blank" rel="noopener">llms.txt</a>
+      <a class="vc-icon-btn" href="https://github.com/visual-check/visual-check" target="_blank" rel="noopener" aria-label="visual-check on GitHub"><svg class="vc-icon vc-icon--20" viewBox="0 0 20 20"><use href="#i-github"/></svg></a>
+      <button class="vc-icon-btn" type="button" data-kit-theme-toggle aria-label="Toggle theme"><svg class="vc-icon vc-icon--20" viewBox="0 0 20 20"><use href="#i-theme"/></svg></button>
+    </div>
+  </div>
+</dialog>
+
+<!-- View as Markdown: what /docs/<page>.md serves (Fumadocs llms integration, remark-llms for MDX components). -->
+<dialog class="mdv" id="mdv" aria-labelledby="mdv-title" closedby="any">
+  <div class="mdv__head">
+    <h1 id="mdv-title">View as Markdown</h1>
+    <code id="mdv-path"></code>
+    <button class="vc-icon-btn" type="button" data-mdv-close aria-label="Close"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-close"/></svg></button>
+  </div>
+  <div class="vc-code">
+    <div class="vc-code__bar"><span class="vc-code__title" id="mdv-file"></span><button class="vc-code__copy" type="button" id="mdv-copy"><svg class="vc-icon" viewBox="0 0 16 16"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+    <pre><code id="mdv-code"></code></pre>
+  </div>
+</dialog>
+
+<!-- Agent hint (as on Chat SDK's docs): hidden from people and from assistive tech, present for agents that read the HTML. -->
+<p class="sr-only" aria-hidden="true" id="agent-hint">AI agents: this page is available as Markdown at https://visual-check.vercel.app/docs/getting-started.md. The index of every page is at https://visual-check.vercel.app/llms.txt.</p>
+
+<div class="sr-only" id="sp-status" role="status" aria-live="polite"></div>
+<script>
+/* PROTOTYPE — throwaway. Routing, sidebar, TOC (block | clerk) with scrollspy, search, page actions, Ask AI,
+   package-manager tabs, and the custom MDX components (TolerancePlayground, DiffViewer, EndState). */
+(function () {
+  'use strict';
+
+  const SITE = 'https://visual-check.vercel.app';
+  const REPO = 'https://github.com/visual-check/visual-check';
+  const root = document.documentElement;
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const desktopQuery = window.matchMedia('(min-width: 768px)');
+
+  /* ------------------------------------------------------------------ information architecture (meta.json) */
+  const IA = [
+    { section: 'Start', pages: [
+      { slug: 'getting-started', title: 'Getting started', figure: true },
+      { slug: 'config', title: 'Config' },
+      { slug: 'modes', title: 'Modes' }
+    ] },
+    { section: 'Capture', pages: [
+      { slug: 'full-page-and-element', title: 'Full page and <code>element</code>' },
+      { slug: 'grid-stories', title: 'Grid stories' },
+      { slug: 'animations', title: 'Animations', figure: true },
+      { slug: 'wait-hook', title: 'The <code>wait</code> hook' },
+      { slug: 'remote-content', title: 'Remote content' }
+    ] },
+    { section: 'Compare', pages: [
+      { slug: 'color-and-pixels', title: '<code>color</code> and <code>pixels</code>', figure: true },
+      { slug: 'baselines', title: 'Baselines' },
+      { slug: 'flaky-snapshots', title: 'Flaky snapshots' },
+      { slug: 'stories-that-break', title: 'Stories that break' }
+    ] },
+    { section: 'Run', pages: [
+      { slug: 'browser', title: 'Browser' },
+      { slug: 'platforms-and-docker', title: 'Platforms and Docker' },
+      { slug: 'ci', title: 'CI' },
+      { slug: 'security', title: 'Security' }
+    ] },
+    { section: 'Integrate', pages: [
+      { slug: 'storybook-addon', title: 'Storybook addon' },
+      { slug: 'agent-skill', title: 'Agent skill' },
+      { slug: 'supported-storybooks', title: 'Supported Storybooks' }
+    ] },
+    { section: 'Reference', pages: [
+      { slug: 'json-reference', title: 'JSON reference' }
+    ] }
+  ];
+
+  /* What each page not drafted here will cover, from docs/prd/20-docs-site.md. */
+  const STUBS = {
+    'config': ['Every key and its default.', "tsconfig `paths` don't work in the config.", '`init` under Rush.', '`timezone`, `locale` and `colorScheme`.', '`url` takes no user name or password, because visual-check sends no login.'],
+    'modes': ['Declaring modes in code and picking them by exact list. `modes: []`.', 'Moving from a list of breakpoint widths.', 'Phone modes are recommended at scale 2.'],
+    'full-page-and-element': ['What each captures, and what happens to portaled content.'],
+    'grid-stories': ['An example for each port.', 'The caption rules.', "Forced states, and what they can't force.", "Running beside Storybook's pseudo-states addon.", "Fixes for a grid that's too wide or too tall."],
+    'wait-hook': ['For every story, for one file, for one story, and turning it off.'],
+    'remote-content': ["Linked from the hint and from `update`'s warning.", "Why a CDN's bytes differ by machine.", 'Three fixes, in order: serve the image from Storybook through `staticDirs` or an import, mock it with MSW, mask it by host.', 'For MSW: use `mswLoader`, so the worker controls the page before images load. CDN URLs with no file extension warn as unhandled.'],
+    'baselines': ['Who writes them and how to review them.', "Bot PRs: pushing baselines to a bot's PR stops Dependabot rebasing it, and Renovate marks it as edited. `@dependabot recreate`, or Renovate's rebase checkbox, regenerates the branch and drops those commits.", 'Long file names are shortened with a hash.'],
+    'flaky-snapshots': ['What makes a snapshot flaky, where flaky snapshots are listed, and the `retries` setting.'],
+    'stories-that-break': ['Each reason and its fix.', 'A stories file that fails to load.', 'A story that navigates away: await the new page before clicking, or render `MemoryRouter` with `useTransitions={false}`.'],
+    'browser': ['A browser bump is a Renovate PR plus `update`.', "Building a custom image from the browser package's image.", '`host`: its cache folder, the proxy and mirror variables, and the Linux libraries and font package it needs. `host` baselines only match on the same OS.'],
+    'platforms-and-docker': ['The two ways to get parity: stay on `linux/amd64`, or use `linux/arm64` with the default tolerance.', '`host` gives no parity across machines. It suits a repo with no CI, or one where no machine can run Docker.', "macOS: runtimes that use Rosetta, Docker Desktop's default memory and the worker count.", "Windows: Docker Desktop, running inside WSL with Docker Engine, and when Docker Desktop needs a paid licence.", 'Setups that are untested and may work.'],
+    'ci': ['The Action and the reusable workflow: build, serve, wait, run.', 'Why Linux runners only.', 'Sharding: both ways to lay out the shard jobs, `fail-fast: false`, and shard jobs waiting for the consistency job.', 'Each shard building its own Storybook, building once and passing the build along, or pointing at a deployed Storybook.', 'A deployed Storybook behind a login: visual-check sends none, so the run fails. Serve Storybook in the job instead, or let the runner reach the deployment without one.', 'From a failed check to the report artifact.', "A job container on visual-check's image, a job container on another image, and devcontainers that use the host's Docker."],
+    'security': ["What visual-check trusts: the stories' code. What it doesn't: remote content, and a pinned browser that gets old, so take browser package bumps.", 'Where the browser runs and what the boundary is in each case.', 'There are no setup steps and no flags.'],
+    'storybook-addon': ["Installing it, Check and Update, and that Update's baselines come from the dev server.", 'The panel in a static build.', 'It needs Storybook 10.'],
+    'agent-skill': ['What `init` writes.', 'How the skill refreshes after an upgrade.', "Allowing the command in the agent's own settings."],
+    'supported-storybooks': ['9.1, 10 and 11, and when a major is dropped.', 'The test-path warning.', "`.test()` entries aren't captured. An end screen worth a baseline is written as a story with `play`."],
+    'json-reference': ['Every field of the report.', 'The `status`, `reason` and `kind` values.', 'What each path is relative to, and the versioning rules.']
+  };
+
+  const UPDATED = {
+    'getting-started': '21 November 2026',
+    'color-and-pixels': '18 November 2026',
+    'animations': '12 November 2026'
+  };
+
+  const ORDER = IA.flatMap((group) => group.pages.map((page) => Object.assign({ section: group.section }, page)));
+  const BY_SLUG = Object.fromEntries(ORDER.map((page) => [page.slug, page]));
+  const DEFAULT_SLUG = 'getting-started';
+
+  /* ------------------------------------------------------------------ helpers */
+  const $ = (selector, scope) => (scope || document).querySelector(selector);
+  const $$ = (selector, scope) => Array.from((scope || document).querySelectorAll(selector));
+  const icon = (id, viewBox) => `<svg class="vc-icon" viewBox="${viewBox || '0 0 16 16'}" aria-hidden="true"><use href="#${id}"/></svg>`;
+  const escapeHtml = (text) => text.replace(/[&<>"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char]);
+  const ticksToCode = (text) => escapeHtml(text).replace(/`([^`]+)`/g, '<code>$1</code>');
+  const textOf = (html) => {
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    return template.content.textContent.trim();
+  };
+  const store = (key, value) => {
+    try {
+      if (value === undefined) {
+        return localStorage.getItem('vc-docs3:' + key);
+      }
+      localStorage.setItem('vc-docs3:' + key, value);
+    } catch (error) {
+      /* Storage blocked: the choice lives for this visit only. */
+    }
+    return null;
+  };
+  const mdUrl = (slug) => `${SITE}/docs/${slug}.md`;
+  const status = (message) => {
+    const region = $('#sp-status');
+    region.textContent = '';
+    window.setTimeout(() => { region.textContent = message; }, 30);
+  };
+
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (error) {
+      const area = document.createElement('textarea');
+      area.value = text;
+      area.setAttribute('readonly', '');
+      area.style.position = 'fixed';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.select();
+      let copied = false;
+      try {
+        copied = document.execCommand('copy');
+      } catch (innerError) {
+        copied = false;
+      }
+      area.remove();
+      return copied;
+    }
+  }
+
+  /** Swaps a button's label to "Copied" for a moment. */
+  function flashCopied(button, label) {
+    const span = button.querySelector('span');
+    const iconUse = button.querySelector('use');
+    if (!span) {
+      return;
+    }
+    const before = span.textContent;
+    span.textContent = label || 'Copied';
+    if (iconUse) {
+      iconUse.setAttribute('href', '#i-check');
+    }
+    window.clearTimeout(button._copyTimer);
+    button._copyTimer = window.setTimeout(() => {
+      span.textContent = before;
+      if (iconUse) {
+        iconUse.setAttribute('href', '#i-copy');
+      }
+    }, 1600);
+  }
+
+  /* ------------------------------------------------------------------ sidebar (page tree) */
+  const navHtml = () => IA.map((group, groupIndex) => {
+    const items = group.pages.map((page) => {
+      const fig = page.figure
+        ? `<span class="sb-fig" title="Has an interactive figure">${icon('i-fig')}<span class="sr-only">, has an interactive figure</span></span>`
+        : '';
+      return `<li><a class="sb-item" href="#${page.slug}" data-slug="${page.slug}">${page.title}${fig}</a></li>`;
+    }).join('');
+    return `<p class="sb-sep" id="sb-sep-${groupIndex}-__N__">${group.section}</p><ul class="sb-list" aria-labelledby="sb-sep-${groupIndex}-__N__">${items}</ul>`;
+  }).join('');
+  $$('[data-nav]').forEach((nav, navIndex) => {
+    nav.innerHTML = navHtml().replace(/__N__/g, String(navIndex));
+  });
+
+  /* ------------------------------------------------------------------ prose enhancements (MDX → design-system classes) */
+  function enhance(scope) {
+    $$('code', scope).forEach((code) => {
+      if (code.closest('pre, h1, h2, h3, .card__title, th, .ctl__label, .pf__title, .vc-code, .files__row, .sb-item, .msg__src')) {
+        return;
+      }
+      code.classList.add('vc-inline-code');
+    });
+    $$('p a, li a, td a', scope).forEach((link) => {
+      if (link.closest('.vc-callout, .card, .pf__card, .msg__sources, .sp-agents')) {
+        return;
+      }
+      link.classList.add('vc-link');
+    });
+    $$('h2[id], h3[id]', scope).forEach((heading) => {
+      if (heading.querySelector('.hd-anchor') || heading.closest('.fig, .sp-chat')) {
+        return;
+      }
+      heading.insertAdjacentHTML('beforeend', `<a class="hd-anchor" href="#${heading.id}" aria-label="Link to this section">#</a>`);
+    });
+  }
+  enhance($('#nd-page'));
+  enhance($('#sp-chat'));
+
+  /* ------------------------------------------------------------------ package-manager tabs (remark-npm, groupId persisted) */
+  const MANAGERS = ['npm', 'pnpm', 'yarn', 'bun'];
+  let manager = store('pm');
+  if (MANAGERS.indexOf(manager) < 0) {
+    manager = 'npm';
+  }
+  function pmCommand(spec, name) {
+    const kind = spec.slice(0, spec.indexOf(':'));
+    const argument = spec.slice(spec.indexOf(':') + 1);
+    if (kind === 'dlx') {
+      return { npm: 'npx ', pnpm: 'pnpm dlx ', yarn: 'yarn dlx ', bun: 'bunx ' }[name] + argument;
+    }
+    return { npm: 'npm run ', pnpm: 'pnpm ', yarn: 'yarn ', bun: 'bun run ' }[name] + argument;
+  }
+  function closingMessage(name) {
+    const steps = [
+      [pmCommand('run:storybook', name), 'Start Storybook, and keep it running'],
+      [pmCommand('run:visual:update', name), 'Write the first baselines'],
+      [pmCommand('run:visual:check', name), 'Check the stories against the baselines']
+    ];
+    const width = Math.max.apply(null, steps.map((step) => step[0].length)) + 3;
+    const rows = steps.map((step, index) => `  ${index + 1}  <span class="s">${step[0]}</span>${' '.repeat(width - step[0].length)}${step[1]}`);
+    return '<span class="o-ok">✓</span> <span class="o-b">visual-check is set up</span>\n\n' +
+      '<span class="o-b">Next</span>\n' + rows.join('\n') + '\n  4  Commit the changes, baselines included\n\n' +
+      '<span class="c">To set options for every story, see </span><span class="s">.storybook/visual-check.ts</span><span class="c">.</span>\n' +
+      '<span class="c">To run visual-check in CI, see </span><span class="s">https://visual-check.vercel.app/docs/ci</span><span class="c">.</span>';
+  }
+  $$('[data-pm-block]').forEach((block, blockIndex) => {
+    const list = $('.cb-tabs', block);
+    const pre = $('pre', block);
+    pre.id = `pm-panel-${blockIndex}`;
+    list.innerHTML = MANAGERS.map((name) => `<button class="cb-tab" type="button" role="tab" id="pm-tab-${blockIndex}-${name}" aria-controls="${pre.id}" data-pm-tab="${name}">${name}</button>`).join('');
+    list.addEventListener('click', (event) => {
+      const tab = event.target.closest('[data-pm-tab]');
+      if (tab) {
+        setManager(tab.dataset.pmTab);
+      }
+    });
+    list.addEventListener('keydown', (event) => {
+      const tabs = $$('[role="tab"]', list);
+      const at = tabs.indexOf(document.activeElement);
+      let next = -1;
+      if (event.key === 'ArrowRight') {
+        next = (at + 1) % tabs.length;
+      } else if (event.key === 'ArrowLeft') {
+        next = (at - 1 + tabs.length) % tabs.length;
+      } else if (event.key === 'Home') {
+        next = 0;
+      } else if (event.key === 'End') {
+        next = tabs.length - 1;
+      }
+      if (next >= 0) {
+        event.preventDefault();
+        setManager(tabs[next].dataset.pmTab);
+        tabs[next].focus();
+      }
+    });
+  });
+  function setManager(name) {
+    manager = name;
+    store('pm', name);
+    $$('[data-pm-tab]').forEach((tab) => {
+      const selected = tab.dataset.pmTab === name;
+      tab.setAttribute('aria-selected', String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+    });
+    $$('[data-pm-block] pre').forEach((pre) => {
+      pre.setAttribute('aria-labelledby', `${pre.id.replace('panel', 'tab')}-${name}`);
+    });
+    $$('[data-pm-cmd]').forEach((node) => {
+      node.textContent = pmCommand(node.dataset.pmCmd, name);
+    });
+    const closing = $('#closing-message');
+    if (closing) {
+      closing.innerHTML = closingMessage(name);
+    }
+  }
+  setManager(manager);
+
+  /* Copy buttons on code blocks: commands only, never the `$` prompt or the output. */
+  document.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-copy-btn]');
+    if (!button) {
+      return;
+    }
+    const block = button.closest('.vc-code');
+    const commands = $$('.cmd', block);
+    const text = commands.length ? commands.map((node) => node.textContent).join('\n') : $('pre', block).textContent;
+    if (await copyText(text)) {
+      flashCopied(button);
+      status('Copied to the clipboard');
+    }
+  });
+
+  /* ------------------------------------------------------------------ Markdown form of a page (what /docs/<page>.md serves) */
+  function mdHref(href) {
+    if (!href || href.charAt(0) !== '#') {
+      return href;
+    }
+    const id = href.slice(1);
+    if (BY_SLUG[id]) {
+      return `${SITE}/docs/${id}`;
+    }
+    const target = document.getElementById(id);
+    const host = target && target.closest('[data-page]');
+    return host ? `${SITE}/docs/${host.dataset.page}#${id}` : href;
+  }
+  function inlineMd(node) {
+    let out = '';
+    node.childNodes.forEach((child) => {
+      if (child.nodeType === Node.TEXT_NODE) {
+        out += child.textContent;
+        return;
+      }
+      if (child.nodeType !== Node.ELEMENT_NODE || child.matches('.hd-anchor, [aria-hidden="true"], .sr-only, svg')) {
+        return;
+      }
+      const tag = child.tagName;
+      if (tag === 'CODE') {
+        out += '`' + child.textContent + '`';
+      } else if (tag === 'A') {
+        out += `[${inlineMd(child)}](${mdHref(child.getAttribute('href'))})`;
+      } else if (tag === 'STRONG' || tag === 'B') {
+        out += `**${inlineMd(child)}**`;
+      } else if (child.classList.contains('cell-note')) {
+        out += ` — ${inlineMd(child)}`;
+      } else if (child.classList.contains('tag')) {
+        out += ` (${inlineMd(child)})`;
+      } else {
+        out += inlineMd(child);
+      }
+    });
+    return out.replace(/\s+/g, ' ').trim();
+  }
+  function codeMd(block) {
+    if (block.hasAttribute('data-pm-block')) {
+      return '```npm\n' + $$('.cmd', block).map((node) => pmCommand(node.dataset.pmCmd, 'npm')).join('\n') + '\n```';
+    }
+    const lang = block.dataset.mdLang || block.dataset.lang || 'text';
+    const title = block.dataset.title ? ` title="${block.dataset.title}"` : '';
+    return '```' + lang + title + '\n' + $('pre', block).textContent + '\n```';
+  }
+  function tableMd(table) {
+    const rows = $$('tr', table).map((row) => '| ' + $$('th, td', row).map((cell) => inlineMd(cell).replace(/\|/g, '\\|')).join(' | ') + ' |');
+    const columns = table.rows[0].cells.length;
+    rows.splice(1, 0, '|' + ' --- |'.repeat(columns));
+    return rows.join('\n');
+  }
+  function walkMd(parent, out) {
+    Array.from(parent.children).forEach((element) => {
+      if (element.hidden) {
+        return;
+      }
+      if (element.dataset.md) {
+        out.push(element.dataset.md);
+        return;
+      }
+      const tag = element.tagName;
+      if (/^H[1-3]$/.test(tag)) {
+        out.push('#'.repeat(Number(tag.charAt(1))) + ' ' + inlineMd(element));
+      } else if (tag === 'P') {
+        out.push(inlineMd(element));
+      } else if (tag === 'UL' || tag === 'OL') {
+        out.push(Array.from(element.children).map((item, index) => (tag === 'OL' ? `${index + 1}. ` : '- ') + inlineMd(item)).join('\n'));
+      } else if (element.classList.contains('vc-code')) {
+        out.push(codeMd(element));
+      } else if (element.classList.contains('vc-callout')) {
+        out.push(`> **${inlineMd($('.vc-callout__title', element))}**\n>\n> ${inlineMd($('p', element))}`);
+      } else if (element.classList.contains('tbl')) {
+        out.push(tableMd($('table', element)));
+      } else if (element.classList.contains('cards')) {
+        out.push($$('.card', element).map((card) => `- [${inlineMd($('.card__title', card))}](${mdHref(card.getAttribute('href'))}): ${inlineMd($('.card__desc', card))}`).join('\n'));
+      } else if (/^(DIV|SECTION|FIGURE)$/.test(tag)) {
+        walkMd(element, out);
+      }
+    });
+  }
+  function pageMarkdown() {
+    const out = [];
+    walkMd(current.el, out);
+    return out.join('\n\n') + '\n';
+  }
+
+  /* ------------------------------------------------------------------ router (location.hash) */
+  const panel = $('#sp-panel');
+  const stubEl = $('.dp[data-page="stub"]');
+  const pageEls = $$('.dp');
+  let current = null;
+
+  function renderStub(page) {
+    stubEl.innerHTML = `<h1 class="dp__title">${page.title}</h1>` +
+      '<p class="dp__lede">Not drafted in this prototype. The page sits here in the sidebar, and covers:</p>' +
+      `<div class="stub"><p class="stub__label">What the finished page says</p><ul>${(STUBS[page.slug] || []).map((item) => `<li>${ticksToCode(item)}</li>`).join('')}</ul></div>`;
+    enhance(stubEl);
+  }
+
+  function agentsHtml(slug) {
+    return `<p class="sp-agents__title">${icon('i-terminal')}For agents</p>` +
+      '<p>Every page is also plain Markdown.</p>' +
+      `<ul><li><button type="button" class="sp-agents__md" data-md-view>/docs/${slug}.md</button><span>this page</span></li>` +
+      `<li><a href="${SITE}/llms.txt" target="_blank" rel="noopener">/llms.txt</a><span>an index</span></li>` +
+      `<li><a href="${SITE}/llms-full.txt" target="_blank" rel="noopener">/llms-full.txt</a><span>every page</span></li></ul>` +
+      '<p class="sp-agents__skill"><a href="#agent-skill">The agent skill</a> runs visual-check for a coding agent and reports what changed.</p>';
+  }
+
+  function showPage(slug) {
+    const page = BY_SLUG[slug];
+    pageEls.forEach((element) => { element.hidden = true; });
+    let element = $(`.dp[data-page="${slug}"]`);
+    if (!element) {
+      element = stubEl;
+      renderStub(page);
+    }
+    element.hidden = false;
+    current = { slug: slug, el: element, page: page, heads: [] };
+
+    $$('.sb-item').forEach((link) => {
+      if (link.dataset.slug === slug) {
+        link.setAttribute('aria-current', 'page');
+      } else {
+        link.removeAttribute('aria-current');
+      }
+    });
+    const sidebarLink = $('#nd-sidebar .sb-item[aria-current="page"]');
+    const sidebarNav = $('#nd-sidebar .sb-nav');
+    if (sidebarLink && sidebarNav.clientHeight) {
+      const linkBox = sidebarLink.getBoundingClientRect();
+      const navBox = sidebarNav.getBoundingClientRect();
+      if (linkBox.top < navBox.top || linkBox.bottom > navBox.bottom) {
+        sidebarNav.scrollTop += linkBox.top - navBox.top - navBox.height / 2;
+      }
+    }
+    $('#crumbs').innerHTML =`<li>${page.section}</li><li><span aria-current="page">${page.title}</span></li>`;
+    document.title = `${textOf(page.title)} · visual-check docs`;
+    $('#md-alternate').href = mdUrl(slug);
+    $('#agent-hint').textContent = `AI agents: this page is available as Markdown at ${mdUrl(slug)}. The index of every page is at ${SITE}/llms.txt.`;
+
+    const prompt = `Read ${mdUrl(slug)}, I want to ask questions about it.`;
+    const links = {
+      chatgpt: `https://chatgpt.com/?hints=search&q=${encodeURIComponent(prompt)}`,
+      claude: `https://claude.ai/new?q=${encodeURIComponent(prompt)}`,
+      cursor: `https://cursor.com/link/prompt?text=${encodeURIComponent(prompt)}`
+    };
+    $$('[data-open-ai]').forEach((link) => { link.href = links[link.dataset.openAi]; });
+    $$('[data-github-src]').forEach((link) => { link.href = `${REPO}/blob/main/site/content/docs/${slug}.mdx`; });
+    $('#pf-edit').href = `${REPO}/edit/main/site/content/docs/${slug}.mdx`;
+    $('#pf-updated').textContent = UPDATED[slug] ? `Last updated on ${UPDATED[slug]}` : 'Not drafted yet';
+    $$('[data-agents]').forEach((block) => { block.innerHTML = agentsHtml(slug); });
+
+    const at = ORDER.findIndex((entry) => entry.slug === slug);
+    const prev = ORDER[at - 1];
+    const next = ORDER[at + 1];
+    $('#pf-nav').innerHTML =
+      (prev ? `<a class="pf__card" href="#${prev.slug}"><span class="pf__label">${icon('i-arrow-left')} Previous</span><span class="pf__title">${prev.title}</span></a>` : '') +
+      (next ? `<a class="pf__card pf__card--next" href="#${next.slug}"><span class="pf__label">Next ${icon('i-arrow')}</span><span class="pf__title">${next.title}</span></a>` : '');
+
+    buildToc(element);
+  }
+
+  function scrollToTop() {
+    panel.scrollTop = 0;
+    window.scrollTo(0, 0);
+  }
+
+  function route(smooth) {
+    const raw = decodeURIComponent(location.hash.slice(1));
+    let slug = raw;
+    let anchor = null;
+    if (!BY_SLUG[slug]) {
+      const target = raw ? document.getElementById(raw) : null;
+      const host = target ? target.closest('.dp[data-page]') : null;
+      if (host && host.dataset.page !== 'stub') {
+        slug = host.dataset.page;
+        anchor = target;
+      } else {
+        slug = DEFAULT_SLUG;
+      }
+    }
+    const samePage = current && current.slug === slug;
+    if (!samePage) {
+      showPage(slug);
+    }
+    closeTocPopover();
+    if (anchor) {
+      requestAnimationFrame(() => {
+        anchor.scrollIntoView({ block: 'start', behavior: smooth && samePage && !reducedMotion.matches ? 'smooth' : 'auto' });
+        spy();
+      });
+    } else if (!samePage) {
+      scrollToTop();
+      requestAnimationFrame(spy);
+    }
+  }
+
+  window.addEventListener('hashchange', () => route(true));
+  document.addEventListener('click', (event) => {
+    const link = event.target.closest('a[href^="#"]');
+    if (link && link.getAttribute('href') === location.hash) {
+      event.preventDefault();
+      route(true);
+    }
+  });
+
+  /* ------------------------------------------------------------------ TOC: block | clerk, scrollspy over the panel */
+  const tocNavs = $$('[data-toc]');
+  let lastRange = '';
+
+  function buildToc(pageEl) {
+    const heads = $$('h2[id], h3[id]', pageEl).filter((heading) => !heading.closest('.fig'));
+    current.heads = heads;
+    let count = 0;
+    const items = heads.map((heading) => {
+      const depth = heading.tagName === 'H2' ? 2 : 3;
+      if (depth === 2) {
+        count += 1;
+      }
+      const clone = heading.cloneNode(true);
+      $$('.hd-anchor', clone).forEach((node) => node.remove());
+      const chip = depth === 2 ? `<span class="toc__chip" aria-hidden="true">${String(count).padStart(2, '0')}</span>` : '';
+      return `<li class="toc__item" data-depth="${depth}"><a class="toc__link" href="#${heading.id}">${chip}<span>${clone.innerHTML}</span></a></li>`;
+    }).join('');
+    tocNavs.forEach((nav, navIndex) => {
+      nav.innerHTML = heads.length
+        ? `<p class="toc__title">${icon('i-list')}On this page</p><div class="toc__body">` +
+          `<svg class="toc__track" aria-hidden="true"><defs><clipPath id="toc-clip-${navIndex}"><rect x="-4" y="0" width="28" height="0"/></clipPath></defs>` +
+          `<path class="base"/><path class="hi" clip-path="url(#toc-clip-${navIndex})"/></svg>` +
+          `<span class="toc__block" aria-hidden="true"></span><ul class="toc__list">${items}</ul></div>`
+        : '';
+    });
+    $('.sp-tocpop').style.visibility = heads.length ? '' : 'hidden';
+    lastRange = '';
+    drawTracks();
+  }
+
+  function drawTrack(nav) {
+    const list = $('.toc__list', nav);
+    const svg = $('.toc__track', nav);
+    if (!list || !svg || !list.offsetHeight) {
+      return;
+    }
+    const items = Array.from(list.children);
+    const xs = items.map((item) => (item.dataset.depth === '3' ? 12.5 : 1.5));
+    let path = '';
+    items.forEach((item, index) => {
+      const x = xs[index];
+      const top = item.offsetTop + (index > 0 && xs[index - 1] !== x ? 6 : 0);
+      const bottom = item.offsetTop + item.offsetHeight - (index < items.length - 1 && xs[index + 1] !== x ? 6 : 0);
+      path += `${index === 0 ? 'M' : 'L'}${x} ${top} L${x} ${bottom} `;
+    });
+    const height = list.offsetHeight;
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', String(height));
+    svg.setAttribute('viewBox', `0 0 16 ${height}`);
+    $$('path', svg).forEach((node) => node.setAttribute('d', path));
+  }
+  function drawTracks() {
+    tocNavs.forEach(drawTrack);
+    lastRange = '';
+    spy();
+  }
+
+  function applyActive(first, last) {
+    const key = `${current.slug}:${first}:${last}`;
+    if (key === lastRange) {
+      return;
+    }
+    lastRange = key;
+    tocNavs.forEach((nav) => {
+      const items = $$('.toc__item', nav);
+      items.forEach((item, index) => item.classList.toggle('is-active', first >= 0 && index >= first && index <= last));
+      const block = $('.toc__block', nav);
+      const rect = $('.toc__track rect', nav);
+      if (!items.length || first < 0) {
+        if (block) {
+          block.classList.remove('is-on');
+        }
+        if (rect) {
+          rect.setAttribute('height', '0');
+        }
+        return;
+      }
+      const top = items[first].offsetTop;
+      const bottom = items[last].offsetTop + items[last].offsetHeight;
+      block.style.transform = `translateY(${top}px)`;
+      block.style.height = `${bottom - top}px`;
+      block.classList.add('is-on');
+      rect.setAttribute('y', String(top));
+      rect.setAttribute('height', String(bottom - top));
+    });
+    const label = $('#tocpop-current');
+    if (first >= 0) {
+      const clone = current.heads[first].cloneNode(true);
+      $$('.hd-anchor', clone).forEach((node) => node.remove());
+      label.innerHTML = clone.innerHTML;
+    } else {
+      label.textContent = '';
+    }
+  }
+
+  function spy() {
+    if (!current || !current.heads.length) {
+      return;
+    }
+    const desktop = desktopQuery.matches;
+    const box = desktop ? panel.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+    const barHeight = desktop ? $('.sp-bar').offsetHeight : $('#nd-subnav').offsetHeight;
+    const pop = $('.sp-tocpop');
+    const popHeight = getComputedStyle(pop).display === 'none' ? 0 : pop.offsetHeight;
+    const viewTop = box.top + barHeight + popHeight + 8;
+    const viewBottom = box.bottom;
+    const heads = current.heads;
+    const tops = heads.map((heading) => heading.getBoundingClientRect().top);
+    const pageEnd = current.el.getBoundingClientRect().bottom;
+    let first = -1;
+    let last = -1;
+    tops.forEach((top, index) => {
+      const end = index + 1 < tops.length ? tops[index + 1] : pageEnd;
+      /* A section counts once more than its heading's top margin of it is in view. */
+      if (top < viewBottom - 32 && end > viewTop + 56) {
+        if (first < 0) {
+          first = index;
+        }
+        last = index;
+      }
+    });
+    if (first < 0 && tops[tops.length - 1] < viewTop) {
+      first = last = tops.length - 1;
+    }
+    applyActive(first, last);
+  }
+
+  let spyFrame = 0;
+  const queueSpy = () => {
+    if (!spyFrame) {
+      spyFrame = requestAnimationFrame(() => {
+        spyFrame = 0;
+        spy();
+      });
+    }
+  };
+  panel.addEventListener('scroll', () => {
+    panel.classList.toggle('is-scrolled', panel.scrollTop > 4);
+    queueSpy();
+  }, { passive: true });
+  window.addEventListener('scroll', queueSpy, { passive: true });
+  window.addEventListener('resize', () => {
+    drawTracks();
+  });
+  if ('ResizeObserver' in window) {
+    new ResizeObserver(() => drawTracks()).observe($('#nd-toc'));
+  }
+
+  /* TOC popover ("On this page ▾") */
+  const tocButton = $('#tocpop-btn');
+  const tocPanel = $('#tocpop-panel');
+  function closeTocPopover(returnFocus) {
+    if (tocPanel.hidden) {
+      return;
+    }
+    tocPanel.hidden = true;
+    tocButton.setAttribute('aria-expanded', 'false');
+    if (returnFocus) {
+      tocButton.focus();
+    }
+  }
+  tocButton.addEventListener('click', () => {
+    const open = tocPanel.hidden;
+    tocPanel.hidden = !open;
+    tocButton.setAttribute('aria-expanded', String(open));
+    if (open) {
+      drawTrack($('[data-toc]', tocPanel));
+      lastRange = '';
+      spy();
+    }
+  });
+  tocPanel.addEventListener('click', (event) => {
+    if (event.target.closest('a')) {
+      closeTocPopover();
+    }
+  });
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('.sp-tocpop')) {
+      closeTocPopover();
+    }
+  });
+  $('.sp-tocpop').addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      closeTocPopover(true);
+    }
+  });
+
+  /* ------------------------------------------------------------------ search dialog (⌘K / Ctrl K) */
+  const searchDialog = $('#search');
+  const searchInput = $('#sd-input');
+  const searchList = $('#sd-list');
+  const INDEX = [];
+  ORDER.forEach((page) => {
+    const pageEl = $(`.dp[data-page="${page.slug}"]`);
+    const lede = pageEl ? $('.dp__lede', pageEl).textContent : '';
+    INDEX.push({ kind: 'page', slug: page.slug, href: '#' + page.slug, html: page.title, text: textOf(page.title), section: page.section, keywords: lede + ' ' + (STUBS[page.slug] || []).join(' ') });
+    if (pageEl) {
+      $$('h2[id], h3[id]', pageEl).filter((heading) => !heading.closest('.fig')).forEach((heading) => {
+        const clone = heading.cloneNode(true);
+        $$('.hd-anchor', clone).forEach((node) => node.remove());
+        const next = heading.nextElementSibling;
+        INDEX.push({ kind: 'heading', slug: page.slug, href: '#' + heading.id, html: clone.innerHTML, text: clone.textContent.trim(), section: page.section, pageHtml: page.title, keywords: textOf(page.title) + ' ' + (next ? next.textContent : '') });
+      });
+    }
+  });
+  const SUGGESTED = ['getting-started', 'color-and-pixels', 'animations', 'ci', 'config'];
+  let results = [];
+  let activeIndex = 0;
+
+  function highlight(html, words) {
+    if (!words.length) {
+      return html;
+    }
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) {
+      nodes.push(walker.currentNode);
+    }
+    const pattern = new RegExp('(' + words.map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')', 'gi');
+    nodes.forEach((node) => {
+      if (!pattern.test(node.textContent)) {
+        return;
+      }
+      pattern.lastIndex = 0;
+      const span = document.createElement('span');
+      span.innerHTML = escapeHtml(node.textContent).replace(pattern, '<mark>$1</mark>');
+      node.replaceWith(...span.childNodes);
+    });
+    const holder = document.createElement('div');
+    holder.appendChild(template.content);
+    return holder.innerHTML;
+  }
+
+  function searchIndex(query) {
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) {
+      return { words: words, list: SUGGESTED.map((slug) => INDEX.find((entry) => entry.kind === 'page' && entry.slug === slug)) };
+    }
+    const scored = [];
+    INDEX.forEach((entry) => {
+      const title = entry.text.toLowerCase();
+      const rest = entry.keywords.toLowerCase();
+      let score = 0;
+      for (const word of words) {
+        if (title.indexOf(word) === 0) {
+          score += 5;
+        } else if (title.indexOf(word) > 0) {
+          score += 3;
+        } else if (rest.indexOf(word) >= 0) {
+          score += 1;
+        } else {
+          score = 0;
+          break;
+        }
+      }
+      if (score) {
+        scored.push({ entry: entry, score: score + (entry.kind === 'page' ? 0.5 : 0) });
+      }
+    });
+    scored.sort((a, b) => b.score - a.score);
+    return { words: words, list: scored.slice(0, 12).map((item) => item.entry) };
+  }
+
+  function renderResults() {
+    const found = searchIndex(searchInput.value.trim());
+    results = found.list;
+    activeIndex = 0;
+    if (!results.length) {
+      searchList.innerHTML = `<li class="sd__empty" role="presentation">No page mentions "${escapeHtml(searchInput.value.trim())}".</li>`;
+      searchInput.removeAttribute('aria-activedescendant');
+      return;
+    }
+    const groups = [];
+    results.forEach((entry, index) => {
+      const label = found.words.length ? entry.section : 'Suggested';
+      let group = groups.find((item) => item.label === label);
+      if (!group) {
+        group = { label: label, items: [] };
+        groups.push(group);
+      }
+      group.items.push({ entry: entry, index: index });
+    });
+    const order = [];
+    searchList.innerHTML = groups.map((group, groupIndex) => {
+      const options = group.items.map((item) => {
+        order.push(item.index);
+        const entry = item.entry;
+        const path = entry.kind === 'page' ? entry.section : `${entry.section} › ${entry.pageHtml}`;
+        return `<li class="sd__opt" role="option" id="sd-opt-${item.index}" data-index="${item.index}" aria-selected="false">` +
+          icon(entry.kind === 'page' ? 'i-page' : 'i-hash') +
+          `<span class="sd__txt"><span class="sd__t">${highlight(entry.html, found.words)}</span><span class="sd__p">${path}</span></span>` +
+          `<svg class="vc-icon sd__go" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-arrow"/></svg></li>`;
+      }).join('');
+      return `<li role="group" aria-labelledby="sd-group-${groupIndex}"><div class="sd__group" id="sd-group-${groupIndex}">${group.label}</div><ul role="none" style="list-style:none;margin:0;padding:0">${options}</ul></li>`;
+    }).join('');
+    results = order.map((index) => results[index]);
+    $$('.sd__opt', searchList).forEach((option, index) => {
+      option.id = `sd-opt-${index}`;
+      option.dataset.index = String(index);
+    });
+    setActive(0);
+  }
+
+  function setActive(index) {
+    const options = $$('.sd__opt', searchList);
+    if (!options.length) {
+      return;
+    }
+    activeIndex = (index + options.length) % options.length;
+    options.forEach((option, optionIndex) => option.setAttribute('aria-selected', String(optionIndex === activeIndex)));
+    searchInput.setAttribute('aria-activedescendant', options[activeIndex].id);
+    options[activeIndex].scrollIntoView({ block: 'nearest' });
+  }
+
+  function go(href) {
+    searchDialog.close();
+    if (location.hash === href) {
+      route(true);
+    } else {
+      location.hash = href;
+    }
+  }
+
+  function openSearch() {
+    const drawer = $('#drawer');
+    if (drawer.open) {
+      drawer.close();
+    }
+    if (searchDialog.open) {
+      searchInput.select();
+      return;
+    }
+    searchInput.value = '';
+    renderResults();
+    searchDialog.showModal();
+    searchInput.focus();
+  }
+
+  searchInput.addEventListener('input', renderResults);
+  searchInput.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActive(activeIndex + 1);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActive(activeIndex - 1);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      if (results[activeIndex]) {
+        go(results[activeIndex].href);
+      }
+    }
+  });
+  searchList.addEventListener('mousemove', (event) => {
+    const option = event.target.closest('.sd__opt');
+    if (option && Number(option.dataset.index) !== activeIndex) {
+      setActive(Number(option.dataset.index));
+    }
+  });
+  searchList.addEventListener('click', (event) => {
+    const option = event.target.closest('.sd__opt');
+    if (option) {
+      go(results[Number(option.dataset.index)].href);
+    }
+  });
+  document.addEventListener('click', (event) => {
+    if (event.target.closest('[data-search-open]')) {
+      openSearch();
+    }
+  });
+  document.addEventListener('keydown', (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+      event.preventDefault();
+      openSearch();
+    }
+  }, true);
+  const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+  $$('[data-kbd-mod]').forEach((kbd) => { kbd.textContent = isMac ? '⌘K' : 'Ctrl K'; });
+
+  /* ------------------------------------------------------------------ mobile drawer */
+  const drawer = $('#drawer');
+  document.addEventListener('click', (event) => {
+    if (event.target.closest('[data-drawer-open]')) {
+      drawer.showModal();
+      const currentLink = $('.sb-item[aria-current="page"]', drawer);
+      if (currentLink) {
+        currentLink.scrollIntoView({ block: 'center' });
+      }
+    }
+    if (event.target.closest('[data-drawer-close]') || (drawer.open && event.target.closest('#drawer .sb-item'))) {
+      drawer.close();
+    }
+  });
+
+  /* ------------------------------------------------------------------ page actions: Copy Markdown, Open ▾, View as Markdown */
+  $('#copy-md').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    if (await copyText(pageMarkdown())) {
+      flashCopied(button, 'Copied');
+      status('Copied this page as Markdown');
+    }
+  });
+
+  const openButton = $('#open-btn');
+  const openMenu = $('#open-menu');
+  const menuItems = () => $$('.menu__item', openMenu);
+  let openedByPointer = false;
+  const anchorSupported = window.CSS && CSS.supports('position-area: block-end');
+  openButton.addEventListener('pointerdown', () => { openedByPointer = true; });
+  openButton.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      if (!openMenu.matches(':popover-open')) {
+        openMenu.showPopover();
+      }
+      menuItems()[0].focus();
+    }
+  });
+  openMenu.addEventListener('toggle', (event) => {
+    const open = event.newState === 'open';
+    openButton.setAttribute('aria-expanded', String(open));
+    if (open && !anchorSupported) {
+      const box = openButton.getBoundingClientRect();
+      openMenu.style.position = 'fixed';
+      openMenu.style.top = `${box.bottom + 6}px`;
+      openMenu.style.left = `${Math.max(8, box.right - openMenu.offsetWidth)}px`;
+      openMenu.style.margin = '0';
+    }
+    if (open && !openedByPointer) {
+      menuItems()[0].focus();
+    }
+    openedByPointer = false;
+  });
+  openMenu.addEventListener('keydown', (event) => {
+    const items = menuItems();
+    const at = items.indexOf(document.activeElement);
+    let next = -1;
+    if (event.key === 'ArrowDown') {
+      next = (at + 1) % items.length;
+    } else if (event.key === 'ArrowUp') {
+      next = (at - 1 + items.length) % items.length;
+    } else if (event.key === 'Home') {
+      next = 0;
+    } else if (event.key === 'End') {
+      next = items.length - 1;
+    } else if (event.key === 'Tab') {
+      openMenu.hidePopover();
+    }
+    if (next >= 0) {
+      event.preventDefault();
+      items[next].focus();
+    }
+  });
+  openMenu.addEventListener('click', (event) => {
+    if (event.target.closest('.menu__item')) {
+      openMenu.hidePopover();
+    }
+  });
+
+  const mdDialog = $('#mdv');
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('[data-md-view]')) {
+      return;
+    }
+    $('#mdv-path').textContent = `/docs/${current.slug}.md`;
+    $('#mdv-file').textContent = `${current.slug}.md`;
+    $('#mdv-code').textContent = pageMarkdown();
+    mdDialog.showModal();
+  });
+  $('[data-mdv-close]').addEventListener('click', () => mdDialog.close());
+  $('#mdv-copy').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    if (await copyText($('#mdv-code').textContent)) {
+      flashCopied(button);
+      status('Copied this page as Markdown');
+    }
+  });
+
+  /* ------------------------------------------------------------------ Ask AI (aiChat): synced with the prototype bar's toggle */
+  const chat = $('#sp-chat');
+  let focusChatOnOpen = false;
+  function syncAi() {
+    const docked = root.getAttribute('data-t-ai') === 'docked';
+    $$('.sp-actions [data-ai-toggle]').forEach((button) => button.setAttribute('aria-pressed', String(docked)));
+    if (docked && focusChatOnOpen) {
+      $('#chat-input').focus();
+    }
+    if (!docked && chat.contains(document.activeElement)) {
+      $('.sp-actions [data-ai-toggle]').focus();
+    }
+    focusChatOnOpen = false;
+    requestAnimationFrame(drawTracks);
+  }
+  function setAi(open) {
+    const want = open ? 'docked' : 'hidden';
+    focusChatOnOpen = open;
+    if (root.getAttribute('data-t-ai') === want) {
+      syncAi();
+      return;
+    }
+    const kitButton = $('.kit-bar__btn[title="Cycle Ask AI"]');
+    if (kitButton) {
+      kitButton.click();
+    } else {
+      root.setAttribute('data-t-ai', want);
+      syncAi();
+    }
+  }
+  document.addEventListener('click', (event) => {
+    if (event.target.closest('[data-ai-toggle]')) {
+      setAi(root.getAttribute('data-t-ai') !== 'docked');
+    }
+  });
+  chat.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !window.matchMedia('(min-width: 1280px)').matches) {
+      setAi(false);
+    }
+  });
+  $('#chat-form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    $('#chat-note').textContent = 'This prototype answers one question only. The real panel sends yours to the docs search and a model.';
+  });
+  document.addEventListener('vc-proto:toggle', (event) => {
+    if (event.detail.id === 'ai') {
+      syncAi();
+    } else {
+      requestAnimationFrame(drawTracks);
+    }
+  });
+  syncAi();
+
+  /* ------------------------------------------------------------------ <TolerancePlayground> */
+  (function initPlayground() {
+    const fig = $('#tp');
+    if (!fig) {
+      return;
+    }
+    /* Ten CSS pixels across a stroke's edge: ink share in the baseline and the snapshot, and the colour difference on `color`'s 0–1 scale. */
+    const PIXELS = [
+      { base: 0, snap: 0, d: 0 },
+      { base: 8, snap: 8.4, d: 0.004 },
+      { base: 46, snap: 48, d: 0.017 },
+      { base: 94, snap: 94, d: 0 },
+      { base: 100, snap: 100, d: 0 },
+      { base: 62, snap: 66, d: 0.034 },
+      { base: 12, snap: 12.8, d: 0.008 },
+      { base: 0, snap: 0, d: 0 },
+      { base: 0, snap: 55, d: 0.48, change: true },
+      { base: 0, snap: 22, d: 0.19, change: true }
+    ];
+    const STOPS = [0, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1];
+    const mix = (share) => `color-mix(in oklab, var(--brand-ink) ${share}%, var(--brand-paper))`;
+    const strip = $('#tp-strip');
+    const cell = (share) => `<div class="tp-cell" style="--px:${mix(share)}"></div>`;
+    let html = '<span class="tp-corner"></span>' + PIXELS.map((pixel, index) => `<span class="tp-idx">${index + 1}</span>`).join('');
+    html += '<span class="tp-lab">Baseline</span>' + PIXELS.map((pixel) => cell(pixel.base)).join('');
+    html += '<span class="tp-lab">Snapshot</span><div class="tp-row-snap" style="display:contents">' + PIXELS.map((pixel) => cell(pixel.snap)).join('') + '</div>';
+    html += '<span class="tp-lab">Colour difference</span>' + PIXELS.map(() => '<span class="tp-d"></span>').join('');
+    html += '<span class="tp-lab">Visual diff</span><div class="tp-row-diff" style="display:contents">' + PIXELS.map((pixel) => cell(pixel.base * 0.16)).join('') + '</div>';
+    strip.innerHTML = html;
+    strip.setAttribute('aria-hidden', 'true');
+    const snapCells = $$('.tp-row-snap .tp-cell', strip);
+    const diffCells = $$('.tp-row-diff .tp-cell', strip);
+    const diffNumbers = $$('.tp-d', strip);
+
+    const colorInput = $('#tp-color');
+    const pixelsInput = $('#tp-pixels');
+    const changeInput = $('#tp-change');
+    const ticks = (element, labels) => {
+      element.innerHTML = labels.map((label, index) => `<span style="left: calc(9px + (100% - 18px) * ${index / (labels.length - 1)})">${label}</span>`).join('');
+    };
+    ticks($('#tp-color-ticks'), STOPS.map((stop) => String(stop).replace(/^0\./, '.')));
+    ticks($('#tp-pixels-ticks'), Array.from({ length: 11 }, (item, index) => String(index)));
+    let liveTimer = 0;
+
+    function update() {
+      const color = STOPS[Number(colorInput.value)];
+      const budget = Number(pixelsInput.value);
+      const scale = Number($('input[name="tp-scale"]:checked', fig).value);
+      const change = changeInput.checked;
+      const counted = [];
+      PIXELS.forEach((pixel, index) => {
+        const off = pixel.change && !change;
+        const d = off ? 0 : pixel.d;
+        const snap = off ? pixel.base : pixel.snap;
+        const isCount = d > color;
+        const isWithin = d > 0 && !isCount;
+        if (isCount) {
+          counted.push(index + 1);
+        }
+        snapCells[index].style.setProperty('--px', mix(snap));
+        diffCells[index].classList.toggle('is-diff', isCount);
+        diffCells[index].classList.toggle('is-within', isWithin);
+        diffNumbers[index].textContent = d === 0 ? '0' : d.toFixed(3).replace(/^0\./, '.');
+        diffNumbers[index].classList.toggle('is-count', isCount);
+        diffNumbers[index].classList.toggle('is-within', isWithin);
+      });
+      const differ = counted.length * scale * scale;
+      const allowed = Math.floor(budget * scale * scale);
+      const passed = differ <= allowed;
+      fig.dataset.scale = String(scale);
+      $('#tp-color-out').textContent = String(color);
+      $('#tp-pixels-out').textContent = String(budget);
+      colorInput.setAttribute('aria-valuetext', String(color));
+      $$('#tp-color-ticks span').forEach((span, index) => span.classList.toggle('is-on', index === Number(colorInput.value)));
+      $$('#tp-pixels-ticks span').forEach((span, index) => span.classList.toggle('is-on', index === budget));
+      $('#tp-count').innerHTML = `<b>${differ}</b> differ <span class="muted">·</span> <b>${allowed}</b> allowed`;
+      $('#tp-badge').innerHTML = passed
+        ? '<span class="vc-badge vc-badge--passed"><span class="vc-badge__glyph" aria-hidden="true">✓</span>passed</span>'
+        : '<span class="vc-badge vc-badge--changed"><span class="vc-badge__glyph" aria-hidden="true">✗</span>changed</span>';
+      $('#tp-rule').innerHTML = `allowed = ⌊pixels × scale²⌋ = ⌊${budget} × ${scale}²⌋ = <b>${allowed}</b>`;
+      const mode = scale === 2 ? '  mobile' : '';
+      $('#tp-cli').innerHTML = passed
+        ? `<span class="o-ok">✓</span> web  button--primary${mode}  <span class="c">142 ms</span>`
+        : `<span class="o-x">✗</span> web  button--primary${mode}  <span class="k">differs: ${differ} differ, ${allowed} allowed${scale === 2 ? ` (${budget} at scale 2)` : ''}</span>`;
+      window.clearTimeout(liveTimer);
+      liveTimer = window.setTimeout(() => {
+        $('#tp-live').textContent = `${differ} differ, ${allowed} allowed: ${passed ? 'passed' : 'changed'}. Pixels counted as differing: ${counted.length ? counted.join(', ') : 'none'}.`;
+      }, 300);
+    }
+    [colorInput, pixelsInput, changeInput].concat($$('input[name="tp-scale"]', fig)).forEach((input) => {
+      input.addEventListener('input', update);
+      input.addEventListener('change', update);
+    });
+    update();
+  })();
+
+  /* ------------------------------------------------------------------ <DiffViewer> */
+  (function initDiffViewer() {
+    const fig = $('#dv');
+    if (!fig) {
+      return;
+    }
+    const stage = $('#dv-stage');
+    const wipe = $('#dv-wipe');
+    const setWipe = (value) => {
+      const clamped = Math.max(0, Math.min(100, value));
+      stage.style.setProperty('--wipe', `${clamped}%`);
+      wipe.value = String(Math.round(clamped));
+      wipe.setAttribute('aria-valuetext', `${Math.round(clamped)}%`);
+    };
+    setWipe(50);
+    wipe.addEventListener('input', () => setWipe(Number(wipe.value)));
+    $$('input[name="dv-view"]', fig).forEach((input) => input.addEventListener('change', () => { fig.dataset.view = input.value; }));
+    let dragging = false;
+    const move = (event) => {
+      const box = stage.getBoundingClientRect();
+      setWipe(((event.clientX - box.left) / box.width) * 100);
+    };
+    stage.addEventListener('pointerdown', (event) => {
+      if (fig.dataset.view === 'diff') {
+        return;
+      }
+      dragging = true;
+      stage.setPointerCapture(event.pointerId);
+      move(event);
+    });
+    stage.addEventListener('pointermove', (event) => {
+      if (dragging) {
+        move(event);
+      }
+    });
+    ['pointerup', 'pointercancel'].forEach((type) => stage.addEventListener(type, () => { dragging = false; }));
+
+    /* The mock story is drawn with the light theme's tokens, as a Storybook on this design system would render it. */
+    const probe = document.createElement('div');
+    probe.setAttribute('data-theme', 'light');
+    probe.hidden = true;
+    document.body.appendChild(probe);
+    const token = (name) => getComputedStyle(probe).getPropertyValue(name).trim();
+    const t = {
+      page: token('--bg-page'), raised: token('--bg-raised'), subtle: token('--border-subtle'), strong: token('--border-strong'),
+      ink: token('--brand-ink'), paper: token('--brand-paper'), muted: token('--text-muted'), magenta: token('--brand-magenta')
+    };
+    const W = 360;
+    const H = 200;
+    const S = 2;
+
+    function roundRect(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+    function drawStory(canvas, padY) {
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.setTransform(S, 0, 0, S, 0, 0);
+      ctx.fillStyle = t.page;
+      ctx.fillRect(0, 0, W, H);
+      /* The page behind the modal */
+      ctx.fillStyle = t.subtle;
+      [[16, 14, 120, 12], [16, 36, 300, 8], [16, 50, 260, 8], [16, 64, 280, 8], [16, 178, 200, 8], [16, 190, 150, 8]].forEach((r) => ctx.fillRect(r[0], r[1], r[2], r[3]));
+      ctx.globalAlpha = 0.45;
+      ctx.fillStyle = t.ink;
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = 1;
+      /* The modal */
+      const x = 24;
+      const y = 26;
+      const w = 312;
+      const buttonHeight = 20 + padY * 2;
+      const buttonY = y + 84;
+      const h = 84 + buttonHeight + 20;
+      ctx.fillStyle = t.raised;
+      roundRect(ctx, x, y, w, h, 10);
+      ctx.fill();
+      ctx.fillStyle = t.ink;
+      ctx.textBaseline = 'alphabetic';
+      ctx.font = '700 18px "Bricolage Grotesque", system-ui, sans-serif';
+      ctx.fillText('Discard changes?', x + 20, y + 36);
+      ctx.fillStyle = t.muted;
+      ctx.font = '400 14px "Atkinson Hyperlegible Next", system-ui, sans-serif';
+      ctx.fillText('You have 3 unsaved edits in this form.', x + 20, y + 60);
+      ctx.font = '600 14px "Atkinson Hyperlegible Next", system-ui, sans-serif';
+      ctx.textBaseline = 'middle';
+      const discardWidth = Math.round(ctx.measureText('Discard').width) + 32;
+      const discardX = x + w - 20 - discardWidth;
+      ctx.fillStyle = t.ink;
+      roundRect(ctx, discardX, buttonY, discardWidth, buttonHeight, 6);
+      ctx.fill();
+      ctx.fillStyle = t.paper;
+      ctx.fillText('Discard', discardX + 16, buttonY + buttonHeight / 2);
+      const cancelWidth = Math.round(ctx.measureText('Cancel').width) + 32;
+      const cancelX = discardX - 8 - cancelWidth;
+      ctx.strokeStyle = t.strong;
+      ctx.lineWidth = 1;
+      roundRect(ctx, cancelX + 0.5, buttonY + 0.5, cancelWidth - 1, buttonHeight - 1, 6);
+      ctx.stroke();
+      ctx.fillStyle = t.ink;
+      ctx.fillText('Cancel', cancelX + 16, buttonY + buttonHeight / 2);
+      return ctx;
+    }
+    const rgb = (hex) => {
+      const value = hex.replace('#', '');
+      return [0, 2, 4].map((offset) => parseInt(value.slice(offset, offset + 2), 16));
+    };
+    /* pixelmatch's YIQ colour distance, squared. */
+    const yiq = (r, g, b) => [r * 0.29889531 + g * 0.58662247 + b * 0.11448223, r * 0.59597799 - g * 0.2741761 - b * 0.32180189, r * 0.21147017 - g * 0.52261711 + b * 0.31114694];
+    function render() {
+      const baseCtx = drawStory($('.dv-base', fig), 8);
+      const snapCtx = drawStory($('.dv-snap', fig), 10);
+      const width = W * S;
+      const height = H * S;
+      const a = baseCtx.getImageData(0, 0, width, height).data;
+      const b = snapCtx.getImageData(0, 0, width, height).data;
+      const diffCtx = $('.dv-diff', fig).getContext('2d');
+      const out = diffCtx.createImageData(width, height);
+      const maxDelta = 35215 * 0.01 * 0.01;
+      const magenta = rgb(t.magenta);
+      let differ = 0;
+      for (let index = 0; index < a.length; index += 4) {
+        const p = yiq(a[index], a[index + 1], a[index + 2]);
+        const q = yiq(b[index], b[index + 1], b[index + 2]);
+        const delta = 0.5053 * (p[0] - q[0]) ** 2 + 0.299 * (p[1] - q[1]) ** 2 + 0.1957 * (p[2] - q[2]) ** 2;
+        if (delta > maxDelta) {
+          out.data[index] = magenta[0];
+          out.data[index + 1] = magenta[1];
+          out.data[index + 2] = magenta[2];
+          differ += 1;
+        } else {
+          const grey = 255 + (p[0] - 255) * 0.12;
+          out.data[index] = grey;
+          out.data[index + 1] = grey;
+          out.data[index + 2] = grey;
+        }
+        out.data[index + 3] = 255;
+      }
+      diffCtx.putImageData(out, 0, 0);
+      fig.dataset.drawnDiffer = String(differ);
+      /* The page quotes the count this browser drew, so the transcript, the figure and the prose agree. */
+      $$('[data-dv-count]').forEach((node) => { node.textContent = String(differ); });
+    }
+    const fonts = ['700 18px "Bricolage Grotesque"', '400 14px "Atkinson Hyperlegible Next"', '600 14px "Atkinson Hyperlegible Next"'];
+    Promise.all(fonts.map((font) => document.fonts.load(font))).catch(() => null).then(render);
+  })();
+
+  /* ------------------------------------------------------------------ <EndState> */
+  (function initEndState() {
+    const fig = $('#es');
+    const button = $('#es-play');
+    if (!fig || !button) {
+      return;
+    }
+    button.addEventListener('click', () => {
+      const playing = fig.hasAttribute('data-playing');
+      if (playing) {
+        fig.removeAttribute('data-playing');
+      } else {
+        fig.setAttribute('data-playing', '');
+      }
+      $('span', button).textContent = playing ? 'Play in Storybook' : 'Stop';
+      $('use', button).setAttribute('href', playing ? '#i-play' : '#i-stop');
+    });
+  })();
+
+  /* ------------------------------------------------------------------ boot */
+  route(false);
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(drawTracks);
+  }
+})();
+</script>
+</body>
+</html>

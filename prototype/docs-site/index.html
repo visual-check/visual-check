@@ -1,0 +1,148 @@
+<meta charset="utf-8">
+<title>visual-check site prototypes</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="icon" href="shared/logo/favicon.svg">
+<link rel="stylesheet" href="shared/tokens.css">
+<link rel="stylesheet" href="shared/bundle.css">
+<script>
+  (function () {
+    var t = null;
+    try { t = localStorage.getItem('vc-proto:theme'); } catch (e) {}
+    if (!t) t = document.documentElement.getAttribute('data-theme');
+    if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+    document.documentElement.classList.toggle('dark', t === 'dark');
+  })();
+</script>
+<style>
+  /* PROTOTYPE hub (issue #102). Layout: one reading column, a ledger of variants per surface. */
+  :root { color-scheme: light; }
+  [data-theme="dark"] { color-scheme: dark; }
+  *, *::before, *::after { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg-page); color: var(--text-primary); font: var(--text-body); -webkit-font-smoothing: antialiased; }
+  .hub { max-width: 960px; margin: 0 auto; padding-block: var(--space-12) var(--space-24); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .hub-top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
+  .hub-top img { height: 28px; width: auto; }
+  .hub h1 { font: var(--text-h1); letter-spacing: -0.015em; margin: var(--space-12) 0 var(--space-4); text-wrap: balance; }
+  .hub-lead { font: var(--text-body-lg); color: var(--text-muted); max-width: 64ch; margin: 0; }
+  .hub-how { margin: var(--space-6) 0 0; padding: 0; list-style: none; display: grid; gap: var(--space-2); font: var(--text-small); color: var(--text-muted); max-width: 72ch; }
+  .hub-how li { display: grid; grid-template-columns: 9.5rem 1fr; gap: var(--space-3); }
+  .hub-how b { font: var(--text-label); color: var(--text-primary); padding-top: 2px; }
+  .hub h2 { font: var(--text-h2); letter-spacing: -0.01em; margin: var(--space-24) 0 var(--space-2); }
+  .hub-sub { margin: 0 0 var(--space-6); color: var(--text-muted); }
+  .ledger { border-top: 1px solid var(--border-subtle); }
+  .row { display: grid; grid-template-columns: 3rem minmax(0, 1fr) auto; gap: var(--space-4); align-items: start; padding: var(--space-6) 0; border-bottom: 1px solid var(--border-subtle); }
+  .row__key { font: 700 30px/36px var(--font-display); color: var(--text-magenta); }
+  .row--docs .row__key { color: var(--text-cyan); }
+  .row__name { font: var(--text-h3); margin: 0 0 var(--space-1); }
+  .row__idea { margin: 0; color: var(--text-muted); max-width: 62ch; }
+  .row__look { margin: var(--space-2) 0 0; font: var(--text-small); color: var(--text-muted); }
+  .row__look b { color: var(--text-primary); font-weight: 600; }
+  .row__go { align-self: center; }
+  .files { display: grid; gap: var(--space-2); padding: 0; margin: 0; list-style: none; }
+  .files a { color: var(--text-cyan); }
+  .files span { color: var(--text-muted); font: var(--text-small); }
+  .q { margin: 0; padding-left: 1.25rem; display: grid; gap: var(--space-3); max-width: 72ch; }
+  code { font: 400 .875em/1 var(--font-mono); padding: 2px 5px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); }
+  @media (max-width: 640px) {
+    .row { grid-template-columns: 2.25rem minmax(0, 1fr); }
+    .row__go { grid-column: 2; justify-self: start; }
+    .hub-how li { grid-template-columns: 1fr; gap: 0; }
+    .hub h1 { font-size: 34px; line-height: 38px; }
+  }
+</style>
+
+<main class="hub">
+  <div class="hub-top">
+    <img class="vc-only-light" src="shared/logo/logo-horizontal.svg" alt="visual-check">
+    <img class="vc-only-dark" src="shared/logo/logo-horizontal-dark.svg" alt="visual-check">
+    <button class="vc-icon-btn" type="button" aria-label="Toggle theme" id="hub-theme"><svg class="vc-icon vc-icon--20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="M10 3.5a6.5 6.5 0 0 0 0 13z" fill="currentColor"/></svg></button>
+  </div>
+
+  <h1>Site prototypes for the landing page and docs</h1>
+  <p class="hub-lead">Throwaway prototypes for issue #102: five landing page concepts you can mix section by section, and three docs layouts built to map onto Fumadocs. Everything uses the visual-check design system's tokens, fonts and components.</p>
+  <ul class="hub-how">
+    <li><b>‹ ›  or  ← →</b><span>The bar at the bottom of every prototype switches variants.</span></li>
+    <li><b>Copy</b><span>Cycles the headline and copy alternatives written for that variant.</span></li>
+    <li><b>Idea toggles</b><span>Each variant has two or three switches for a design question inside it.</span></li>
+    <li><b>Motion</b><span>How demos play: when seen, on click, or only their end state (reduced motion).</span></li>
+    <li><b>Sections ▴</b><span>On the mixer: take each landing section from any variant, A to E.</span></li>
+  </ul>
+
+  <h2>Landing page</h2>
+  <p class="hub-sub">One message, five ways to tell it. Every page has the same eight sections, so any mix works.</p>
+  <div class="ledger" id="landing-list"></div>
+
+  <h2>Docs</h2>
+  <p class="hub-sub">The same two pages, Getting started and <code>color</code> and <code>pixels</code>, in three Fumadocs layouts, plus one page each that shows the layout's strength.</p>
+  <div class="ledger" id="docs-list"></div>
+
+  <h2>Can we animate SVGs?</h2>
+  <p class="hub-sub">Yes, but only for brand motifs. Variant A builds its hero demo both ways; flip <b>Demo tech</b> to compare.</p>
+  <ul class="files">
+    <li><span><b>Inline SVG with CSS keyframes</b> gives exact vector overprint and logo-true shapes, follows the theme, and can play once and pause. Its text can’t reflow, so at phone width the notes shrink to 8–10px, and terminal output can’t live inside it. As an <code>&lt;img&gt;</code> it loses pause and the theme toggle.</span></li>
+    <li><span><b>HTML scenes on a small timeline</b> keep real, selectable text that reflows, follow the tokens in both themes, and support chapters, pause and replay. Warp, Linear, Raycast, Bun and Ghostty rebuild their product UI the same way; none of the 13 sites inspected uses SMIL, Lottie or Rive.</span></li>
+    <li><span>So: HTML scenes for the CLI, addon, pull request and agent demos; animated SVG for the mark, the plates and READMEs.</span></li>
+  </ul>
+
+  <h2>Briefs and research</h2>
+  <p class="hub-sub">What the prototypes were built from. These are the inputs for the real build.</p>
+  <ul class="files">
+    <li><a href="LANDING-BRIEF.md">LANDING-BRIEF.md</a> <span>positioning, message hierarchy, proof points, objections, voice</span></li>
+    <li><a href="DOCS-BRIEF.md">DOCS-BRIEF.md</a> <span>docs contract, IA, content rules</span></li>
+    <li><a href="research/landing.md">research/landing.md</a> <span>dev-tool landing pages, competitors and their users' pains, AI-page tells</span></li>
+    <li><a href="research/fumadocs.md">research/fumadocs.md</a> <span>Fumadocs layouts, dimensions, components, showcase, token mapping</span></li>
+    <li><a href="research/animation.md">research/animation.md</a> <span>how to animate product demos; animated SVG versus DOM scenes</span></li>
+    <li><a href="research/product-facts.md">research/product-facts.md</a> <span>exact CLI, addon, Action and skill strings; numbers we can claim</span></li>
+  </ul>
+
+  <h2>Decided</h2>
+  <ul class="files">
+    <li><span><b>Landing:</b> hero A; problem, demo and commands D; features A; agent D; FAQ and last call A. Built as variant F with half the text.</span></li>
+    <li><span><b>Header:</b> reveal. Only the logo while the hero is on screen; a compact bar with section links and Get started slides in once the hero’s install command scrolls past. Now F’s default, and the design system’s SiteHeader (F renders it from the system’s classes). The other four stay on the Header switch for reference.</span></li>
+    <li><span><b>Docs:</b> Illustrated (3), with inline figures and the clerk TOC.</span></li>
+    <li><span><b>Design system:</b> the accent button is a deeper magenta (<code>#d9006c</code>, hover <code>#c7005f</code>) with a white label. White on the plate magenta is 3.5:1, so the fill had to deepen to pass 4.5:1.</span></li>
+  </ul>
+
+  <h2>Open questions</h2>
+  <ol class="q" id="questions">
+    <li><b>Motion.</b> The demos play once when first seen, which the design system’s “nothing animates on its own” rule forbids today. Amend the rule to allow one play on first view (never looping, always pausable, end state under reduced motion), or ship every demo as click to play? The bar’s Motion button shows all three behaviours.</li>
+    <li><b>Words.</b> The CLI prints <code>differs</code>; the design system’s badge says <code>changed</code>. Which one does the site use?</li>
+    <li><b>Design-system gaps</b> the prototypes ran into, to add as tokens before the build: a container width (1200px), a hero size above <code>display</code> and phone sizes for headings, the docs layout widths (sidebar 268px, TOC 268–304px, article 760–900px), a dialog scrim and a selected-item tint. Also: the SiteHeader doesn’t fit four nav links and the search field between 768 and about 1120px; the prototypes collapse it in two steps.</li>
+    <li><b>Docs layout.</b> Classic, Notebook or Spacious? Spacious exists only in the Base UI build of Fumadocs and is a client component. And is Fumadocs’ primary colour cyan (links, active items) or ink?</li>
+    <li><b>Hosting.</b> Static export or a server build? It decides how search and the per-page Markdown routes for agents work.</li>
+    <li><b>Demo numbers.</b> Pixel counts and timings in the demos are illustrative and labelled so. The research recommends generating each scene from real CLI output in CI, so the page can’t drift from the product.</li>
+  </ol>
+</main>
+
+<script>
+  var LANDING = [
+    ['A', 'Proof sheet', 'The page as a printer’s proof: paper, ink, registration marks, plates off register. The hero is a 3× proof of a Button story whose padding changed.', 'landing/a.html', 'the <b>Demo tech</b> toggle, which shows the same hero demo as animated SVG and as a DOM scene (the answer to “can we animate SVGs?”), and <b>Sheet marks</b>.'],
+    ['B', 'One terminal', 'The whole pitch is one real terminal session, from init to an approved change. Quiet paper everywhere else; dark only inside terminals.', 'landing/b.html', 'scroll the “One session” section, which drives the terminal chapter by chapter; the <b>Reporter</b> toggle (CI’s log vs the local live output).'],
+    ['C', 'Page under test', 'The page tests itself: every section is a story with a badge. Change something, run a simulated visual-check, see which stories differ, then update or revert.', 'landing/c.html', 'pick a change in the hero and press Run visual-check; the <b>Run</b> toggle (one click vs step by step) and <b>Diff</b> (overlay vs side by side).'],
+    ['D', 'Three surfaces', 'A before/after wipe slider over a checkout story in the hero, then the terminal, the Storybook addon, the pull request and the agent as rebuilt UIs.', 'landing/d.html', 'drag the hero slider; the <b>Demo</b> toggle (one tabbed player vs four stacked surfaces); the features spec table, where every number says where it was measured.'],
+    ['E', 'Agent speed', 'Leads with coding agents: your agent can’t see the UI. With the skill it runs visual-check and reports what moved; you approve the baselines.', 'landing/e.html', 'the <b>Lead</b> toggle (agent-first vs human-first copy, to see which story sells) and “Copy a prompt for your agent”.'],
+    ['F', 'Chosen mix, tightened', 'Your pick (hero A; problem, demo, commands D; features A; agent D; FAQ and last call A) on one page: about half the words, alternating bands, says up front that it is a free, open-source library and which problem it solves.', 'landing/f.html', 'the <b>Header</b> toggle: five header prototypes (bare, slug line, install command, reveal on scroll, corner marks). The accent button now has a white label.'],
+    ['Mix', 'Mix and match', 'Each of the eight sections from any variant. It opens on the recommended combination: hero A, problem D, demo D, commands B, features D, agent E, FAQ B, last call A.', 'landing/mix.html', '<b>Sections ▴</b> in the bar. The URL keeps your mix; each section keeps the toggles you last set on its own page.']
+  ];
+  var DOCS = [
+    ['1', 'Classic', 'Stock Fumadocs docs layout, reference-first. The third page is Config, with Vitest-style blocks per key.', 'docs/1.html', 'the <b>Header</b> toggle (nav in the sidebar vs the landing page’s header across both) and <b>TOC</b> default vs clerk.'],
+    ['2', 'Notebook', 'Notebook layout with top tabs and one header shared with the landing page. The third page is a docs home hub.', 'docs/2.html#home', 'the docs home; the <b>Tabs</b> toggle (sections in the header vs a switcher in the sidebar) and <b>Width</b>.'],
+    ['3', 'Illustrated · chosen', 'Spacious layout that teaches with interactive figures. Chosen with inline figures and the clerk TOC (now its defaults). The third page is Animations, with the end state drawn.', 'docs/3.html#color-and-pixels', 'the ten-pixel tolerance playground on <code>color</code> and <code>pixels</code>; the <b>Figures</b> toggle (sticky beside the prose) and the docked <b>Ask AI</b> panel.']
+  ];
+  function rows(list, el, cls) {
+    document.getElementById(el).innerHTML = list.map(function (r) {
+      return '<div class="row ' + cls + '"><span class="row__key">' + r[0] + '</span><div><h3 class="row__name">' + r[1] + '</h3><p class="row__idea">' + r[2] + '</p>' +
+        (r[4] ? '<p class="row__look"><b>Look at:</b> ' + r[4] + '</p>' : '') +
+        '</div><a class="vc-btn vc-btn--secondary vc-btn--sm row__go" href="' + r[3] + '">Open<svg class="vc-icon vc-btn__arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></a></div>';
+    }).join('');
+  }
+  rows(LANDING, 'landing-list', 'row--landing');
+  rows(DOCS, 'docs-list', 'row--docs');
+  document.getElementById('hub-theme').addEventListener('click', function () {
+    var t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', t);
+    document.documentElement.classList.toggle('dark', t === 'dark');
+    try { localStorage.setItem('vc-proto:theme', t); } catch (e) {}
+  });
+</script>

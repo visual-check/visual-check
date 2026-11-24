@@ -1,0 +1,2682 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Getting started · visual-check docs</title>
+<!-- PROTOTYPE — throwaway. Docs variant 1: "Classic" (the "Field manual" direction).
+     Stock Fumadocs DocsLayout (v16 grid: sidebar 268, TOC 268 from 1280px, article up to 900), skinned only by
+     design-system tokens. Reference-first, Vitest-grade: every key with Type / Default, exact CLI strings. -->
+<link rel="icon" href="../shared/logo/favicon.svg">
+<link rel="stylesheet" href="../shared/tokens.css">
+<link rel="stylesheet" href="../shared/bundle.css">
+<link rel="stylesheet" href="../shared/proto-base.css">
+<style>
+  /* Values the design system doesn't have yet (become tokens before the real build):
+     - --x-sidebar-w 268px, --x-toc-w 268px: Fumadocs v16 --fd-sidebar-width / --fd-toc-width
+     - --x-layout-w 1552px (97rem): Fumadocs --fd-layout-width
+     - --x-article-max 900px: #nd-page max width
+     - --x-subnav-h 56px: docs header on phones (#nd-subnav)
+     - --x-site-header-h 64px: the SiteHeader's height (.vc-header__inner sets it, no token)
+     - --x-tocbar-h 40px: the "On this page" bar under 1280px
+     - --x-measure 72ch: the brand book's 64–72 character measure for body copy, as a value
+     - --x-search-w 640px and a top of calc(50% - 250px): the search dialog
+     - --x-drawer-w min(85vw, 380px): the sidebar drawer on phones
+     - --x-tint: the selected fill (text-cyan at 10%, 16% in dark) for the current sidebar item
+     - --x-overlay: the scrim behind dialogs (brand-ink at 45% in light, bg-page at 80% in dark)
+     - docs title on phones: the h2 size (30/36); the h1 token is 44/48 everywhere
+     - steps marker: a 32px circle; folder rail at 10px; TOC track 16px wide
+     - config key headings: 600 19px/28px mono (no mono heading token)
+     - the worked example's pixel greys are content (the data being shown), not tokens
+  */
+  :root {
+    --x-sidebar-w: 268px;
+    --x-toc-w: 268px;
+    --x-layout-w: 1552px;
+    --x-article-max: 900px;
+    --x-subnav-h: 56px;
+    --x-site-header-h: 64px;
+    --x-tocbar-h: 40px;
+    --x-measure: 72ch;
+    --x-search-w: 640px;
+    --x-drawer-w: min(85vw, 380px);
+    --x-tint: color-mix(in srgb, var(--text-cyan) 10%, transparent);
+    --x-overlay: color-mix(in srgb, var(--brand-ink) 45%, transparent);
+    /* Derived per breakpoint and toggle */
+    --x-header-h: 0px;
+    --x-sidebar-col: 0px;
+    --x-toc-col: 0px;
+    --x-sticky-top: var(--x-header-h);
+    --x-scroll-offset: calc(var(--x-sticky-top) + var(--x-tocbar-h) + var(--space-4));
+  }
+  [data-theme="dark"] {
+    --x-tint: color-mix(in srgb, var(--text-cyan) 16%, transparent);
+    --x-overlay: color-mix(in srgb, var(--bg-page) 80%, transparent);
+  }
+  html[data-t-header="site-header"] { --x-header-h: var(--x-site-header-h); }
+  @media (max-width: 767px) {
+    html:not([data-t-header="site-header"]) { --x-sticky-top: var(--x-subnav-h); }
+  }
+  @media (min-width: 768px) { :root { --x-sidebar-col: var(--x-sidebar-w); } }
+  @media (min-width: 1280px) {
+    :root { --x-toc-col: var(--x-toc-w); --x-scroll-offset: calc(var(--x-header-h) + var(--space-6)); }
+  }
+
+  /* ---------- shared bits ---------- */
+  .x-sr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .skip-link { position: absolute; left: var(--space-2); top: var(--space-2); z-index: 100; padding: var(--space-2) var(--space-4); border-radius: var(--radius-md); background: var(--action-primary); color: var(--on-action-primary); font: var(--text-ui); translate: 0 -200%; }
+  .skip-link:focus-visible { translate: 0 0; }
+  button { font: inherit; color: inherit; }
+  kbd.vc-kbd { font-family: var(--font-mono); }
+
+  /* ---------- SiteHeader (toggle: Header = site-header) ---------- */
+  /* display: contents lets the kit's sticky <header> stick to the page, not to this wrapper */
+  [data-kit="header"] { display: none; }
+  html[data-t-header="site-header"] [data-kit="header"] { display: contents; }
+
+  /* ---------- DocsLayout grid (Fumadocs v16) ---------- */
+  #nd-docs-layout {
+    display: grid;
+    grid-template-areas:
+      "sidebar sidebar header toc toc"
+      "sidebar sidebar tocnav toc toc"
+      "sidebar sidebar main   toc toc";
+    grid-template-rows: auto auto 1fr;
+    grid-template-columns:
+      minmax(0, 1fr) var(--x-sidebar-col)
+      minmax(0, calc(var(--x-layout-w) - var(--x-sidebar-col) - var(--x-toc-col)))
+      var(--x-toc-col) minmax(0, 1fr);
+    min-height: calc(100dvh - var(--x-header-h));
+  }
+  #nd-docs-layout[data-sidebar-collapsed] { --x-sidebar-col: 0px; }
+
+  /* Mobile header */
+  #nd-subnav {
+    grid-area: header;
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    height: var(--x-subnav-h);
+    padding: 0 10px 0 var(--space-4);
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-page);
+  }
+  #nd-subnav .x-logo { margin-right: auto; }
+  @media (min-width: 768px) { #nd-subnav { display: none; } }
+  html[data-t-header="site-header"] #nd-subnav { display: none; }
+  .x-logo { display: inline-flex; align-items: center; border-radius: var(--radius-sm); }
+  .x-logo img { height: 24px; width: auto; }
+
+  /* Sidebar */
+  .sb-placeholder {
+    grid-area: sidebar;
+    position: sticky;
+    top: var(--x-header-h);
+    z-index: 20;
+    align-self: start;
+    display: none;
+    height: calc(100dvh - var(--x-header-h));
+  }
+  @media (min-width: 768px) { .sb-placeholder { display: block; } }
+  #nd-docs-layout[data-sidebar-collapsed] .sb-placeholder { display: none; }
+  #nd-sidebar {
+    display: flex;
+    justify-content: flex-end;
+    height: 100%;
+    background: var(--bg-surface);
+    border-right: 1px solid var(--border-subtle);
+  }
+  .sb-inner { display: flex; flex-direction: column; width: var(--x-sidebar-w); min-height: 0; }
+  .sb-head { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4) var(--space-4) var(--space-2); }
+  .sb-title { display: flex; align-items: center; justify-content: space-between; min-height: 36px; }
+  .sb-title .vc-icon-btn { margin-right: -6px; }
+  .sb-search.vc-search { width: 100%; background: var(--bg-raised); }
+  .sb-search .vc-kbd + .vc-kbd { margin-left: -4px; }
+  .sb-viewport { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-2) var(--space-4) var(--space-6); }
+  .sb-foot { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border-subtle); }
+  .sb-foot .theme-switch { margin-left: auto; }
+  html[data-t-header="site-header"] #nd-sidebar :is(.sb-head, .sb-foot) { display: none; }
+  html[data-t-header="site-header"] #nd-sidebar .sb-viewport { padding-top: var(--space-6); }
+
+  /* Page tree */
+  .nav-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+  .nav-group + .nav-group { margin-top: var(--space-6); }
+  .nav-sep { margin: 0 0 var(--space-2); padding: 0 var(--space-2); font: var(--text-label); letter-spacing: .08em; text-transform: uppercase; color: var(--text-primary); }
+  .nav-item, .nav-folder {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    padding: 6px var(--space-2);
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-muted);
+    font: var(--text-small);
+    text-align: left;
+    text-decoration: none;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+    transition: background-color var(--duration-fade) var(--ease-out), color var(--duration-fade) var(--ease-out);
+  }
+  .nav-item code, .nav-folder code { font-family: var(--font-mono); font-size: .93em; }
+  .nav-item:hover { background: var(--bg-raised); color: var(--text-primary); }
+  .nav-item[aria-current="page"] { background: var(--x-tint); color: var(--text-cyan); font-weight: 600; }
+  .nav-folder { display: none; color: var(--text-primary); font-weight: 600; }
+  .nav-folder:hover { background: var(--bg-raised); }
+  .nav-folder .vc-icon { margin-left: auto; color: var(--text-muted); transition: transform var(--duration-spring) var(--ease-spring); }
+  .nav-group.is-open .nav-folder .vc-icon { transform: rotate(90deg); }
+  /* Toggle: Sidebar = folders. Collapsible groups, nested items on a rail. */
+  html[data-t-sidebar="folders"] .nav-sep { display: none; }
+  html[data-t-sidebar="folders"] .nav-folder { display: flex; }
+  html[data-t-sidebar="folders"] .nav-group + .nav-group { margin-top: 2px; }
+  html[data-t-sidebar="folders"] .nav-group:not(.is-open) > .nav-list { display: none; }
+  html[data-t-sidebar="folders"] .nav-group > .nav-list { position: relative; margin: 2px 0 var(--space-2); }
+  html[data-t-sidebar="folders"] .nav-group > .nav-list::before { content: ""; position: absolute; left: 10px; top: 0; bottom: 0; width: 1px; background: var(--border-subtle); }
+  html[data-t-sidebar="folders"] .nav-group > .nav-list .nav-item { position: relative; padding-left: 20px; }
+  html[data-t-sidebar="folders"] .nav-group > .nav-list .nav-item[aria-current="page"]::before { content: ""; position: absolute; left: 10px; top: 6px; bottom: 6px; width: 1px; background: var(--text-cyan); }
+
+  /* Theme switch (Fumadocs ThemeToggle) */
+  .theme-switch { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-raised); }
+  .theme-switch button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-muted); cursor: pointer; transition: background-color var(--duration-fade) var(--ease-out), color var(--duration-fade) var(--ease-out); }
+  .theme-switch button:hover { color: var(--text-primary); }
+  .theme-switch button[aria-pressed="true"] { background: var(--bg-surface); color: var(--text-primary); }
+  .theme-switch button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  /* Collapsed sidebar: floating pill (Fumadocs collapsed state) */
+  .sb-pill { position: fixed; top: calc(var(--x-header-h) + var(--space-3)); left: var(--space-3); z-index: 40; display: none; gap: 2px; padding: var(--space-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-raised); box-shadow: var(--shadow-raised); }
+  @media (min-width: 768px) { #nd-docs-layout[data-sidebar-collapsed] .sb-pill { display: flex; } }
+
+  /* TOC popover bar (< 1280px) */
+  #nd-tocnav { grid-area: tocnav; position: sticky; top: var(--x-sticky-top); z-index: 25; min-width: 0; border-bottom: 1px solid var(--border-subtle); background: var(--bg-page); }
+  @media (min-width: 1280px) { #nd-tocnav { display: none; } }
+  .tocnav-inner { max-width: var(--x-article-max); margin: 0 auto; }
+  .tocnav-btn {
+    display: flex; align-items: center; gap: var(--space-2);
+    width: 100%; height: var(--x-tocbar-h); padding: 0 var(--space-4);
+    border: 0; background: transparent; color: var(--text-muted); font: var(--text-small); text-align: left; cursor: pointer;
+  }
+  @media (min-width: 768px) { .tocnav-btn { padding: 0 var(--space-6); } .tocnav-panel { padding-inline: var(--space-6); } }
+  .tocnav-btn:focus-visible { outline-offset: -2px; }
+  .tocnav-ring { flex: none; transform: rotate(-90deg); }
+  .tocnav-ring circle { fill: none; stroke-width: 2; }
+  .tocnav-ring .track { stroke: var(--border-subtle); }
+  .tocnav-ring .bar { stroke: var(--text-cyan); transition: stroke-dashoffset var(--duration-fade) var(--ease-out); }
+  .tocnav-label { color: var(--text-primary); white-space: nowrap; }
+  .tocnav-current { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tocnav-current code { font-family: var(--font-mono); font-size: .93em; }
+  .tocnav-btn > .vc-icon { margin-left: auto; transition: transform var(--duration-spring) var(--ease-spring); }
+  .tocnav-btn[aria-expanded="true"] > .vc-icon { transform: rotate(180deg); }
+  .tocnav-panel { max-height: 50dvh; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-2) var(--space-4) var(--space-4); }
+
+  /* Article */
+  main[data-layout-main] { grid-area: main; display: grid; justify-items: center; align-content: start; min-width: 0; }
+  #nd-page { display: flex; flex-direction: column; gap: var(--space-4); width: 100%; max-width: var(--x-article-max); min-width: 0; padding: var(--space-6) var(--space-4) 128px; }
+  @media (min-width: 768px) { #nd-page { padding: var(--space-8) var(--space-6) 128px; } }
+  @media (min-width: 1280px) { #nd-page { padding: 56px var(--space-8) 128px; } }
+  #nd-page:focus { outline: none; }
+
+  .crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); margin: 0; padding: 0; list-style: none; font: var(--text-label); letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+  .crumbs a { color: inherit; text-decoration: none; border-radius: var(--radius-sm); transition: color var(--duration-fade) var(--ease-out); }
+  .crumbs a:hover { color: var(--text-primary); }
+  .crumbs [aria-current] { color: var(--text-magenta); }
+  .crumbs .vc-icon { width: 12px; height: 12px; }
+  .page-title { margin: 0; overflow-wrap: anywhere; }
+  .page-title code { font-family: var(--font-mono); font-size: .86em; font-weight: 600; letter-spacing: -0.03em; }
+  @media (max-width: 767px) { .page-title { font-size: 30px; line-height: 36px; } }
+  .page-desc { margin: 0; max-width: var(--x-measure); font: var(--text-body-lg); color: var(--text-muted); }
+  .page-desc code { font: 400 .875em/1 var(--font-mono); padding: 2px 5px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); color: var(--text-primary); }
+  .page-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-2) 0 var(--space-6); border-bottom: 1px solid var(--border-subtle); }
+  .page-actions .vc-btn { font-weight: 600; }
+  .page-actions .vc-btn .vc-icon { color: var(--text-muted); }
+  .page-actions .is-copied .vc-icon { color: var(--info-fg); }
+  .open-chev { transition: transform var(--duration-spring) var(--ease-spring); }
+  [aria-expanded="true"] > .open-chev { transform: rotate(180deg); }
+
+  /* Open ▾ (Fumadocs ViewOptionsPopover) */
+  .menu[popover] { position: fixed; inset: auto; margin: 0; min-width: 232px; padding: var(--space-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-raised); color: var(--text-primary); box-shadow: var(--shadow-raised); }
+  .menu a { display: flex; align-items: center; gap: 10px; padding: var(--space-2) 10px; border-radius: var(--radius-md); color: var(--text-primary); font: var(--text-small); text-decoration: none; transition: background-color var(--duration-fade) var(--ease-out); }
+  .menu a:hover, .menu a:focus-visible { background: var(--bg-surface); }
+  .menu a:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  .menu a .vc-icon { color: var(--text-muted); }
+  .menu a .ext { margin-left: auto; width: 12px; height: 12px; }
+  .menu hr { margin: var(--space-1) 0; border: 0; border-top: 1px solid var(--border-subtle); }
+
+  /* ---------- Prose (DocsBody) ---------- */
+  .prose { min-width: 0; font: var(--text-body); color: var(--text-primary); }
+  [data-body] { padding-top: var(--space-2); }
+  .prose .page > :first-child { margin-top: 0; }
+  .prose p, .prose ul, .prose ol { margin: var(--space-4) 0 0; max-width: var(--x-measure); }
+  .prose ul, .prose ol { padding-left: var(--space-6); }
+  .prose li + li { margin-top: var(--space-1); }
+  .prose li > ul, .prose li > ol { margin-top: var(--space-1); }
+  .prose li::marker { color: var(--text-muted); }
+  .prose strong { font-weight: 600; }
+  .prose a:not([class]) { color: var(--text-cyan); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; border-radius: var(--radius-sm); }
+  .prose a:not([class]):hover { text-decoration-thickness: 2px; }
+  .prose .vc-callout a:not([class]) { color: inherit; font-weight: 600; }
+  .prose :not(pre) > code { font: 400 .875em/1 var(--font-mono); padding: 2px 5px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); overflow-wrap: anywhere; }
+  .prose h2 { margin: var(--space-12) 0 0; padding-top: var(--space-6); border-top: 1px solid var(--border-subtle); font: var(--text-h2); letter-spacing: -0.01em; }
+  .prose .page > h2:first-child { margin-top: var(--space-2); padding-top: 0; border-top: 0; }
+  .prose h3 { margin: var(--space-8) 0 0; font: var(--text-h3); }
+  .prose h2 + *, .prose h3 + * { margin-top: var(--space-3); }
+  .prose :is(h2, h3) { position: relative; scroll-margin-top: var(--x-scroll-offset); overflow-wrap: anywhere; }
+  .prose :is(h2, h3) code { font-size: .86em; }
+  .heading-anchor { display: inline-grid; place-items: center; width: 24px; height: 24px; margin-left: var(--space-1); vertical-align: middle; border-radius: var(--radius-sm); color: var(--text-muted); opacity: 0; transition: opacity var(--duration-fade) var(--ease-out), color var(--duration-fade) var(--ease-out); }
+  :is(h2, h3):hover .heading-anchor, .heading-anchor:focus-visible { opacity: 1; }
+  .heading-anchor:hover { color: var(--text-cyan); }
+
+  /* Tables */
+  .table-wrap { margin-top: var(--space-4); overflow-x: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); }
+  .table-wrap:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .prose table { width: 100%; border-collapse: collapse; font: var(--text-small); font-variant-numeric: tabular-nums; }
+  .prose th { padding: var(--space-2) var(--space-3); background: var(--bg-surface); font-weight: 600; text-align: left; vertical-align: bottom; }
+  .prose td { padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border-subtle); vertical-align: top; }
+  .prose :is(th, td).num { text-align: right; }
+  .prose td.num { white-space: nowrap; }
+  .prose tr.is-default td { background: var(--x-tint); font-weight: 600; }
+  .prose tfoot td { border-top-color: var(--border-strong); font-weight: 600; }
+  .prose caption { caption-side: bottom; padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border-subtle); color: var(--text-muted); font: var(--text-small); text-align: left; }
+  .prose td code, .prose th code { font-size: .93em; overflow-wrap: normal; }
+  .muted { color: var(--text-muted); }
+  .no-wrap { white-space: nowrap; }
+
+  /* Callouts (vc-callout; Fumadocs Callout remapped) */
+  .prose .vc-callout { margin-top: var(--space-4); }
+  .prose .vc-callout p + p { margin-top: var(--space-2); }
+  .prose .vc-callout p { max-width: none; }
+
+  /* Code blocks (vc-code; Fumadocs CodeBlock + CodeBlockTabs) */
+  .prose .vc-code { position: relative; margin-top: var(--space-4); }
+  .vc-code pre code { font: inherit; }
+  .vc-code pre { scrollbar-color: var(--code-muted) transparent; }
+  .vc-code pre:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  .vc-code__bar { gap: var(--space-3); min-height: 40px; }
+  .vc-code__title { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .vc-code__copy { display: inline-flex; align-items: center; gap: 6px; flex: none; transition: color var(--duration-fade) var(--ease-out); }
+  .vc-code__copy:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .vc-code__copy.is-copied { color: var(--code-cyan); }
+  .vc-code--bare .vc-code__copy { position: absolute; top: var(--space-2); right: var(--space-2); background: var(--code-bg); }
+  .vc-code .o { color: var(--code-fg); }
+  .vc-code .m { color: var(--code-magenta); }
+  .cb-tabs { display: flex; gap: var(--space-1); align-self: stretch; margin: calc(-1 * var(--space-2)) 0 -9px calc(-1 * var(--space-2)); }
+  .cb-tab { padding: 0 var(--space-2); border: 0; border-bottom: 2px solid transparent; background: none; color: var(--code-muted); font: var(--text-label); letter-spacing: .02em; cursor: pointer; transition: color var(--duration-fade) var(--ease-out), border-color var(--duration-fade) var(--ease-out); }
+  .cb-tab:hover { color: var(--code-fg); }
+  .cb-tab[aria-selected="true"] { color: var(--code-fg); border-bottom-color: var(--code-cyan); }
+  .cb-tab:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: var(--radius-sm); }
+
+  /* Steps (Fumadocs .fd-steps) */
+  .fd-steps { counter-reset: step; margin-top: var(--space-4); margin-left: var(--space-4); padding-left: var(--space-8); border-left: 1px solid var(--border-subtle); }
+  .fd-step { position: relative; counter-increment: step; padding-bottom: var(--space-8); }
+  .fd-step:last-child { padding-bottom: 0; }
+  .fd-step::before {
+    content: counter(step);
+    position: absolute;
+    top: 0;
+    left: calc(-1 * var(--space-8) - 16.5px);
+    display: grid; place-items: center;
+    width: 32px; height: 32px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-pill);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    font: 600 14px/1 var(--font-mono);
+  }
+  .prose .fd-step > h3:first-child { margin-top: 2px; }
+  @media (max-width: 479px) { .fd-steps { margin-left: var(--space-3); padding-left: var(--space-6); } .fd-step::before { left: calc(-1 * var(--space-6) - 16.5px); } }
+
+  /* Spec sheet (requirements; config key meta) */
+  .spec { display: grid; grid-template-columns: max-content minmax(0, 1fr); margin: var(--space-4) 0 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); overflow: hidden; font: var(--text-small); }
+  .spec > div { display: contents; }
+  .spec dt { padding: 10px var(--space-4); background: var(--bg-surface); color: var(--text-muted); font: var(--text-label); letter-spacing: .08em; text-transform: uppercase; }
+  .spec dd { margin: 0; padding: var(--space-2) var(--space-4); min-width: 0; overflow-wrap: anywhere; }
+  .spec > div + div > * { border-top: 1px solid var(--border-subtle); }
+  .spec dd code { font-size: .93em; }
+  .spec--key { border-radius: var(--radius-md); }
+
+  /* Config: one block per key (Vitest-style) */
+  .prose h3.key { font: 600 19px/28px var(--font-mono); letter-spacing: -0.01em; }
+  .prose h3.key code { font: inherit; padding: 0; background: none; border: 0; color: var(--text-primary); }
+  .prose h3.key .k-name { color: var(--text-cyan); }
+
+  /* TypeTable (Fumadocs TypeTable) */
+  .tt { margin-top: var(--space-4); padding: var(--space-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-raised); font: var(--text-small); }
+  .tt-head, .tt-row > summary { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1.25fr) minmax(0, 1fr) 16px; gap: var(--space-3); align-items: start; padding: var(--space-2) var(--space-3); }
+  .tt-head { color: var(--text-muted); font: var(--text-label); letter-spacing: .08em; text-transform: uppercase; }
+  .tt-row { border-radius: var(--radius-md); transition: background-color var(--duration-fade) var(--ease-out); }
+  .tt-row + .tt-row { border-top: 1px solid var(--border-subtle); }
+  .tt-row[open], .tt-row:hover { background: var(--bg-surface); }
+  .tt-row[open] + .tt-row, .tt-row:hover + .tt-row { border-top-color: transparent; }
+  .tt-row > summary { list-style: none; cursor: pointer; border-radius: var(--radius-md); }
+  .tt-row > summary::-webkit-details-marker { display: none; }
+  .tt-row > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  .tt-key { font-family: var(--font-mono); font-weight: 600; color: var(--text-cyan); overflow-wrap: anywhere; }
+  .tt-type, .tt-default { font-family: var(--font-mono); color: var(--text-muted); overflow-wrap: anywhere; }
+  .tt-default.is-prose { font-family: var(--font-sans); }
+  .tt-row > summary .vc-icon { margin-top: 2px; color: var(--text-muted); transition: transform var(--duration-spring) var(--ease-spring); }
+  .tt-row[open] > summary .vc-icon { transform: rotate(90deg); }
+  .tt-body { padding: 0 var(--space-3) var(--space-3); }
+  .tt-body p { margin: 0 0 var(--space-2); max-width: none; }
+  .tt-body .spec { margin-top: 0; background: var(--bg-raised); }
+  .tt-jump { display: inline-flex; align-items: center; gap: var(--space-1); margin-top: var(--space-2); }
+  @media (max-width: 639px) {
+    .tt-head, .tt-row > summary { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 16px; }
+    .tt-type { display: none; }
+  }
+
+  /* Files (Fumadocs Files) */
+  .files { margin-top: var(--space-4); padding: var(--space-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-raised); font: var(--text-small); }
+  .files summary, .files .file { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--space-2); padding: 6px var(--space-2); border-radius: var(--radius-md); }
+  .files summary { list-style: none; cursor: pointer; transition: background-color var(--duration-fade) var(--ease-out); }
+  .files summary::-webkit-details-marker { display: none; }
+  .files summary:hover { background: var(--bg-surface); }
+  .files summary:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  .files .nest { margin-left: var(--space-3); padding-left: var(--space-2); border-left: 1px solid var(--border-subtle); }
+  .files .vc-icon { color: var(--text-muted); }
+  .files .f-name { font-family: var(--font-mono); overflow-wrap: anywhere; }
+  .files .f-note { margin-left: auto; padding-left: var(--space-2); color: var(--text-muted); text-align: right; }
+  .files .is-later { opacity: .6; }
+  .files details:not([open]) > summary .i-open, .files details[open] > summary .i-closed { display: none; }
+
+  /* Cards (Fumadocs Cards) */
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: var(--space-3); margin-top: var(--space-4); }
+  .card { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-4); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-raised); color: var(--text-primary); text-decoration: none; transition: border-color var(--duration-fade) var(--ease-out); }
+  .card:hover { border-color: var(--border-strong); }
+  .card__title { display: flex; align-items: center; gap: var(--space-2); font: var(--text-ui); }
+  .card__title .vc-icon { margin-left: auto; color: var(--text-muted); transition: transform var(--duration-spring) var(--ease-spring); }
+  .card:hover .card__title .vc-icon { transform: translateX(3px); color: var(--text-primary); }
+  .card__desc { color: var(--text-muted); font: var(--text-small); }
+
+  /* Worked example: <PixelStrip> (custom MDX component) */
+  .px { margin: var(--space-4) 0 0; padding: var(--space-4); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-raised); }
+  .px-row { display: grid; grid-template-columns: 112px minmax(0, 400px) 1fr; grid-template-areas: "label cells verdict"; align-items: center; column-gap: var(--space-4); }
+  .px-row + .px-row { margin-top: var(--space-2); }
+  .px-row + .px-row--sep { margin-top: var(--space-4); }
+  .px-label { grid-area: label; font: var(--text-small); color: var(--text-muted); }
+  .px-label code { font-family: var(--font-mono); font-size: .93em; color: var(--text-primary); }
+  .px-cells { grid-area: cells; display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 3px; }
+  .px-cells span { aspect-ratio: 1; border-radius: 2px; box-shadow: inset 0 0 0 1px var(--border-subtle); }
+  .px-cells span.hit { background: var(--brand-magenta); box-shadow: none; }
+  .px-cells span.faded { opacity: .28; }
+  .px-index { font: var(--text-label); color: var(--text-muted); text-align: center; }
+  .px-index span { box-shadow: none; aspect-ratio: auto; }
+  .px-verdict { grid-area: verdict; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font: var(--text-small); color: var(--text-muted); }
+  .px-verdict strong { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+  .px-caption { margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--border-subtle); color: var(--text-muted); font: var(--text-small); }
+  .px-key { display: inline-flex; align-items: center; gap: 6px; margin-right: var(--space-4); }
+  .px-key i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; background: var(--brand-magenta); }
+  .px-key i.faded { background: var(--text-muted); opacity: .28; }
+  @media (max-width: 639px) {
+    .px { padding: var(--space-3); }
+    .px-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "label verdict" "cells cells"; row-gap: 6px; }
+    .px-row + .px-row { margin-top: var(--space-3); }
+    .px-row--index .px-label { display: none; }
+  }
+
+  /* Stub page */
+  .stub { margin-top: var(--space-2); padding: var(--space-6); border: 1px dashed var(--border-strong); border-radius: var(--radius-lg); }
+  .stub__label { margin: 0; font: var(--text-label); letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+  .prose .stub h2 { margin-top: var(--space-3); padding-top: 0; border-top: 0; font: var(--text-h3); }
+
+  /* Footer: last update + prev/next (PageLastUpdate, DocsPage footer) */
+  .page-footer { display: flex; flex-direction: column; gap: var(--space-6); margin-top: var(--space-12); }
+  .last-updated { margin: 0; color: var(--text-muted); font: var(--text-small); }
+  .page-nav { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
+  .page-nav__card { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: var(--space-4); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); color: var(--text-primary); text-decoration: none; transition: border-color var(--duration-fade) var(--ease-out), background-color var(--duration-fade) var(--ease-out); }
+  .page-nav__card:hover { border-color: var(--border-strong); background: var(--bg-surface); }
+  .page-nav__card--next { grid-column: 2; text-align: right; align-items: flex-end; }
+  .page-nav__label { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--text-muted); font: var(--text-label); letter-spacing: .08em; text-transform: uppercase; }
+  .page-nav__label .vc-icon { transition: transform var(--duration-spring) var(--ease-spring); }
+  .page-nav__card:hover .page-nav__label .vc-icon { transform: translateX(-3px); }
+  .page-nav__card--next:hover .page-nav__label .vc-icon { transform: translateX(3px); }
+  .page-nav__title { font: var(--text-ui); overflow-wrap: anywhere; }
+  .page-nav__title code { font-family: var(--font-mono); font-size: .93em; }
+  .page-nav__desc { color: var(--text-muted); font: var(--text-small); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
+  @media (max-width: 479px) { .page-nav__desc { display: none; } }
+
+  /* ---------- TOC (#nd-toc; style normal / clerk) ---------- */
+  #nd-toc { grid-area: toc; position: sticky; top: var(--x-header-h); align-self: start; display: none; height: calc(100dvh - var(--x-header-h)); overflow-y: auto; overscroll-behavior: contain; }
+  @media (min-width: 1280px) { #nd-toc { display: block; } }
+  .toc-inner { width: var(--x-toc-w); padding: var(--space-12) var(--space-4) var(--space-8) 0; }
+  .toc-title { display: flex; align-items: center; gap: 6px; margin: 0 0 var(--space-3); color: var(--text-muted); font: var(--text-small); }
+  .toc-list { position: relative; }
+  .toc-item { position: relative; display: block; padding: 6px 0 6px 14px; color: var(--text-muted); font: var(--text-small); text-decoration: none; overflow-wrap: anywhere; border-radius: var(--radius-sm); transition: color var(--duration-fade) var(--ease-out); }
+  .toc-item[data-depth="3"] { padding-left: 26px; }
+  .toc-item:hover { color: var(--text-primary); }
+  .toc-item.is-active { color: var(--text-cyan); }
+  .toc-item code { font-family: var(--font-mono); font-size: .93em; }
+  .toc-item:focus-visible { outline-offset: 0; }
+  .toc-track { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+  .toc-track path { fill: none; stroke: var(--border-subtle); stroke-width: 1; }
+  .toc-thumb { position: absolute; left: 0; top: 0; width: 16px; background: var(--text-cyan); pointer-events: none; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: 0 0; mask-position: 0 0; transition: clip-path var(--duration-fade) var(--ease-out); }
+  html[data-t-toc="clerk"] .toc-track path { stroke: var(--border-strong); }
+  html[data-t-toc="clerk"] .toc-item { padding-left: 16px; }
+  html[data-t-toc="clerk"] .toc-item[data-depth="3"] { padding-left: 28px; }
+  .toc-empty { margin: 0; color: var(--text-muted); font: var(--text-small); }
+
+  /* ---------- Search dialog (Fumadocs SearchDialog) ---------- */
+  .search-dialog { width: calc(100% - var(--space-4)); max-width: var(--x-search-w); max-height: calc(100dvh - 32px); margin: var(--space-4) auto auto; padding: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-raised); color: var(--text-primary); box-shadow: var(--shadow-raised); overflow: hidden; }
+  @media (min-width: 768px) { .search-dialog { margin-top: max(var(--space-4), calc(50dvh - 250px)); } }
+  .search-dialog[open] { display: flex; flex-direction: column; }
+  .search-dialog:modal { overscroll-behavior: contain; }
+  .search-dialog::backdrop, .drawer::backdrop { background: var(--x-overlay); overflow: hidden; overscroll-behavior: contain; }
+  .search-head { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-3) 0 var(--space-4); border-bottom: 1px solid var(--border-subtle); }
+  .search-head:focus-within { box-shadow: inset 0 -2px 0 var(--focus); }
+  .search-head > .vc-icon { color: var(--text-muted); }
+  .search-input { flex: 1; min-width: 0; height: 52px; border: 0; background: transparent; color: var(--text-primary); font: 400 16px/24px var(--font-sans); outline: none; }
+  .search-input::placeholder { color: var(--text-muted); }
+  .search-close { flex: none; padding: 2px 6px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-surface); color: var(--text-muted); font: 500 11px/16px var(--font-mono); cursor: pointer; }
+  .search-close:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .search-list { flex: 1; min-height: 0; max-height: min(460px, 60dvh); overflow-y: auto; overscroll-behavior: contain; padding: var(--space-2); }
+  .search-group { margin: var(--space-2) var(--space-2) var(--space-1); color: var(--text-muted); font: var(--text-label); letter-spacing: .08em; text-transform: uppercase; }
+  .search-group:first-child { margin-top: var(--space-1); }
+  .search-opt { display: flex; align-items: center; gap: 10px; padding: var(--space-2) 10px; border-radius: var(--radius-md); color: var(--text-primary); font: var(--text-small); text-decoration: none; scroll-margin: var(--space-2); }
+  .search-opt[data-kind="heading"] { margin-left: 18px; padding-left: var(--space-3); border-left: 1px solid var(--border-subtle); border-radius: 0 var(--radius-md) var(--radius-md) 0; }
+  .search-opt .vc-icon { color: var(--text-muted); }
+  .search-opt code { font-family: var(--font-mono); font-size: .93em; }
+  .search-opt__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .search-opt__where { margin-left: auto; flex: none; color: var(--text-muted); font: var(--text-label); }
+  .search-opt[aria-selected="true"] { background: var(--bg-surface); }
+  .search-opt[aria-selected="true"] .vc-icon { color: var(--text-cyan); }
+  .search-opt mark { background: none; color: var(--text-cyan); font-weight: 700; }
+  .search-empty { margin: var(--space-6) var(--space-4); color: var(--text-muted); font: var(--text-small); text-align: center; }
+  .search-foot { display: flex; flex-wrap: wrap; gap: var(--space-4); padding: var(--space-2) var(--space-4); border-top: 1px solid var(--border-subtle); background: var(--bg-surface); color: var(--text-muted); font: var(--text-label); }
+  .search-foot span { display: inline-flex; align-items: center; gap: var(--space-1); }
+  @media (max-width: 479px) { .search-foot { display: none; } }
+
+  /* ---------- Drawer (phones) ---------- */
+  .drawer { position: fixed; inset: 0 0 0 auto; width: var(--x-drawer-w); max-width: none; height: 100dvh; max-height: none; margin: 0; padding: 0; border: 0; border-left: 1px solid var(--border-subtle); background: var(--bg-surface); color: var(--text-primary); translate: 100% 0; transition: translate var(--duration-spring) var(--ease-out), display var(--duration-spring) allow-discrete, overlay var(--duration-spring) allow-discrete; }
+  .drawer[open] { display: flex; flex-direction: column; translate: 0 0; }
+  @starting-style { .drawer[open] { translate: 100% 0; } }
+  .drawer:modal { overscroll-behavior: contain; }
+  .drawer-head { display: flex; align-items: center; justify-content: space-between; height: var(--x-subnav-h); padding: 0 10px 0 var(--space-4); border-bottom: 1px solid var(--border-subtle); }
+  .drawer-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-4); }
+  .drawer-body .sb-search { margin-bottom: var(--space-6); }
+  .drawer-links { display: none; margin: 0 0 var(--space-6); padding: 0 0 var(--space-4); list-style: none; border-bottom: 1px solid var(--border-subtle); }
+  html[data-t-header="site-header"] .drawer-links { display: grid; gap: 2px; }
+  .drawer-links a { display: block; padding: 6px var(--space-2); border-radius: var(--radius-md); color: var(--text-primary); font: 600 17px/24px var(--font-display); text-decoration: none; }
+  .drawer-links a:hover { background: var(--bg-raised); }
+  .drawer-links a[aria-current] { color: var(--text-cyan); }
+  .drawer .sb-foot { padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom, 0px)); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .nav-item, .nav-folder, .nav-folder .vc-icon, .toc-item, .toc-thumb, .drawer, .card, .card__title .vc-icon,
+    .page-nav__card, .page-nav__label .vc-icon, .open-chev, .tt-row, .tt-row > summary .vc-icon, .tocnav-btn > .vc-icon,
+    .tocnav-ring .bar, .heading-anchor, .cb-tab, .theme-switch button { transition: none; }
+  }
+</style>
+<script>
+  window.VC_PAGE = {
+    set: 'docs',
+    key: '1',
+    /* Idea toggles: each becomes a bar button and sets html[data-t-<id>="<option>"]. */
+    toggles: [
+      { id: 'toc', label: 'TOC', options: ['default', 'clerk'] },
+      { id: 'sidebar', label: 'Sidebar', options: ['separators', 'folders'] },
+      { id: 'header', label: 'Header', options: ['sidebar-nav', 'site-header'] }
+    ]
+  };
+</script>
+<script src="../shared/proto-kit.js"></script>
+</head>
+<body>
+<!-- Icons: the design system's line style (16px grid, 1.5px stroke, currentColor), as one sprite. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 16 16"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></symbol>
+  <symbol id="i-close" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></symbol>
+  <symbol id="i-chev-right" viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></symbol>
+  <symbol id="i-chev-down" viewBox="0 0 16 16"><path d="M3.5 6 8 10.5 12.5 6"/></symbol>
+  <symbol id="i-arrow-left" viewBox="0 0 16 16"><path d="M13 8H3M7 4 3 8l4 4"/></symbol>
+  <symbol id="i-arrow-right" viewBox="0 0 16 16"><path d="M3 8h10M9 4l4 4-4 4"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5V3A1.5 1.5 0 0 0 9 1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/></symbol>
+  <symbol id="i-check" viewBox="0 0 16 16"><path d="M3 8.5 6.5 12 13 4.5"/></symbol>
+  <symbol id="i-external" viewBox="0 0 16 16"><path d="M9 2.5h4.5V7M13.5 2.5l-6 6M12 9.5v3a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3"/></symbol>
+  <symbol id="i-github" viewBox="0 0 20 20"><path d="M7 15.5c-3 1-3-1.5-4.5-2M12.5 17.5v-2.6a2.3 2.3 0 0 0-.6-1.7c2.1-.2 4.3-1 4.3-4.7a3.6 3.6 0 0 0-1-2.5 3.4 3.4 0 0 0 0-2.5s-.8-.2-2.6 1a9 9 0 0 0-4.7 0C6.1 3.3 5.3 3.5 5.3 3.5a3.4 3.4 0 0 0 0 2.5 3.6 3.6 0 0 0-1 2.5c0 3.7 2.2 4.5 4.3 4.7a2.3 2.3 0 0 0-.6 1.7v2.6"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.75"/><path d="M8 1.5V3M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.05 1.05M11.55 11.55l1.05 1.05M3.4 12.6l1.05-1.05M11.55 4.45l1.05-1.05"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 16 16"><path d="M13.5 9.6A5.75 5.75 0 1 1 6.4 2.5a4.5 4.5 0 0 0 7.1 7.1z"/></symbol>
+  <symbol id="i-file" viewBox="0 0 16 16"><path d="M9 1.5H4.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V5z"/><path d="M9 1.5V5h3.5"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 16 16"><path d="M1.5 4.5a1 1 0 0 1 1-1h3.6l1.4 1.5h5.9a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H2.5a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="i-folder-open" viewBox="0 0 16 16"><path d="M1.5 12V4.5a1 1 0 0 1 1-1h3.6l1.4 1.5h5a1 1 0 0 1 1 1V7"/><path d="M1.5 12.5 3.3 7.7a1 1 0 0 1 .94-.7h9.8a.75.75 0 0 1 .7 1l-1.6 4.5a1 1 0 0 1-.94.7H2.5a1 1 0 0 1-1-.7z"/></symbol>
+  <symbol id="i-link" viewBox="0 0 16 16"><path d="M6.5 9.5l3-3M7 4.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1M9 11.5l-1 1A2.5 2.5 0 0 1 4.5 9l1-1"/></symbol>
+  <symbol id="i-hash" viewBox="0 0 16 16"><path d="M6.5 2.5 5 13.5M11 2.5 9.5 13.5M2.5 6h11M2 10h11"/></symbol>
+  <symbol id="i-text" viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h11M2.5 12h7"/></symbol>
+  <symbol id="i-sidebar" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M6 2.5v11"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 16 16"><path d="M10.5 2.5l3 3-8 8h-3v-3z"/><path d="M9 4l3 3"/></symbol>
+  <symbol id="i-markdown" viewBox="0 0 16 16"><rect x="1.5" y="3.5" width="13" height="9" rx="1.5"/><path d="M4 10V6l2 2 2-2v4M11.5 6v4M10 8.5l1.5 1.5L13 8.5"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7.5h-6l-3 2.5V11h-2z"/></symbol>
+  <symbol id="i-pointer" viewBox="0 0 16 16"><path d="M3 2.5l10 4.25-4.25 1.5-1.5 4.25z"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4.5 6l2 2-2 2M8.5 10.5h3"/></symbol>
+</svg>
+
+<a class="skip-link" href="#nd-page" data-skip>Skip to content</a>
+
+<!-- Toggle "Header: site-header": the design system's SiteHeader across the top, shared with the landing page.
+     Fumadocs: DocsLayout with nav.enabled false plus this header as a custom nav (sets --fd-nav-height), the same
+     header HomeLayout renders through baseOptions(). -->
+<div data-kit="header" data-current="docs"></div>
+
+<!-- Fumadocs: DocsLayout (fumadocs-ui/layouts/docs), v16 grid. div#nd-docs-layout. -->
+<div id="nd-docs-layout">
+
+  <!-- Fumadocs: DocsLayout mobile header, header#nd-subnav (< 768px): nav.title, searchToggle, sidebar trigger. -->
+  <header id="nd-subnav">
+    <a class="x-logo" href="../landing/a.html" aria-label="visual-check home">
+      <img class="vc-only-light" src="../shared/logo/logo-horizontal.svg" alt="visual-check">
+      <img class="vc-only-dark" src="../shared/logo/logo-horizontal-dark.svg" alt="visual-check">
+    </a>
+    <button class="vc-icon-btn" type="button" aria-label="Search the docs" data-open-search><svg class="vc-icon vc-icon--20" aria-hidden="true"><use href="#i-search"/></svg></button>
+    <button class="vc-icon-btn" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="nav-drawer" data-open-drawer><svg class="vc-icon vc-icon--20" aria-hidden="true"><use href="#i-menu"/></svg></button>
+  </header>
+
+  <!-- Fumadocs: div[data-sidebar-placeholder] > aside#nd-sidebar. Title row (nav.title + collapse), SearchToggle,
+       the page tree from meta.json (separators "---Start---", or folders with collapsible + defaultOpen), and the
+       footer: links of type 'icon' (GitHub) + ThemeToggle. Override: #nd-sidebar { background: var(--bg-surface) }. -->
+  <div class="sb-placeholder" data-sidebar-placeholder>
+    <aside id="nd-sidebar" aria-label="Docs sidebar">
+      <div class="sb-inner">
+        <div class="sb-head">
+          <div class="sb-title">
+            <a class="x-logo" href="../landing/a.html" aria-label="visual-check home">
+              <img class="vc-only-light" src="../shared/logo/logo-horizontal.svg" alt="visual-check">
+              <img class="vc-only-dark" src="../shared/logo/logo-horizontal-dark.svg" alt="visual-check">
+            </a>
+            <button class="vc-icon-btn" type="button" aria-label="Collapse the sidebar" data-collapse><svg class="vc-icon" aria-hidden="true"><use href="#i-sidebar"/></svg></button>
+          </div>
+          <button class="vc-search sb-search" type="button" data-open-search>
+            <svg class="vc-icon" aria-hidden="true"><use href="#i-search"/></svg>
+            <span class="vc-search__label">Search</span>
+            <kbd class="vc-kbd" data-mod>⌘</kbd><kbd class="vc-kbd">K</kbd>
+          </button>
+        </div>
+        <nav class="sb-viewport" aria-label="Docs" data-nav></nav>
+        <div class="sb-foot">
+          <a class="vc-icon-btn" href="https://github.com/visual-check/visual-check" target="_blank" rel="noopener" aria-label="visual-check on GitHub"><svg class="vc-icon vc-icon--20" aria-hidden="true"><use href="#i-github"/></svg></a>
+          <div class="theme-switch" role="group" aria-label="Theme" data-theme-switch>
+            <button type="button" data-set-theme="light" aria-label="Light theme"><svg class="vc-icon" aria-hidden="true"><use href="#i-sun"/></svg></button>
+            <button type="button" data-set-theme="dark" aria-label="Dark theme"><svg class="vc-icon" aria-hidden="true"><use href="#i-moon"/></svg></button>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- Fumadocs: collapsed sidebar, the floating pill top-left (collapse + search). -->
+  <div class="sb-pill">
+    <button class="vc-icon-btn" type="button" aria-label="Expand the sidebar" data-expand><svg class="vc-icon" aria-hidden="true"><use href="#i-sidebar"/></svg></button>
+    <button class="vc-icon-btn" type="button" aria-label="Search the docs" data-open-search><svg class="vc-icon" aria-hidden="true"><use href="#i-search"/></svg></button>
+  </div>
+
+  <!-- Fumadocs: DocsPage tableOfContentPopover (< 1280px): sticky "On this page" bar under the header. -->
+  <div id="nd-tocnav">
+    <div class="tocnav-inner">
+      <button class="tocnav-btn" type="button" aria-expanded="false" aria-controls="tocnav-panel">
+        <svg class="tocnav-ring" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle class="track" cx="8" cy="8" r="6"/><circle class="bar" cx="8" cy="8" r="6" stroke-dasharray="37.7" stroke-dashoffset="37.7"/></svg>
+        <span class="tocnav-label">On this page</span>
+        <span class="tocnav-current" aria-hidden="true"></span>
+        <svg class="vc-icon" aria-hidden="true"><use href="#i-chev-down"/></svg>
+      </button>
+      <div class="tocnav-panel" id="tocnav-panel" hidden>
+        <div class="toc-list" data-toc="popover"></div>
+      </div>
+    </div>
+  </div>
+
+  <main data-layout-main>
+    <!-- Fumadocs: DocsPage → article#nd-page: breadcrumb (customised as a mono eyebrow), DocsTitle, DocsDescription,
+         an actions row (MarkdownCopyButton · ViewOptionsPopover · EditOnGitHub), DocsBody, PageLastUpdate, footer. -->
+    <article id="nd-page" tabindex="-1">
+      <nav aria-label="Breadcrumb"><ol class="crumbs" data-crumbs></ol></nav>
+      <h1 class="h1 page-title" data-title>Getting started</h1>
+      <p class="page-desc" data-desc></p>
+      <div class="page-actions">
+        <button class="vc-btn vc-btn--secondary vc-btn--sm" type="button" data-copy-md>
+          <svg class="vc-icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy Markdown</span>
+        </button>
+        <button class="vc-btn vc-btn--secondary vc-btn--sm" type="button" id="open-trigger" popovertarget="open-menu" aria-haspopup="true" aria-expanded="false">
+          Open <svg class="vc-icon open-chev" aria-hidden="true"><use href="#i-chev-down"/></svg>
+        </button>
+        <div class="menu" id="open-menu" popover aria-label="Open this page">
+          <a data-open="md" href="#" target="_blank" rel="noopener"><svg class="vc-icon" aria-hidden="true"><use href="#i-markdown"/></svg>View as Markdown<svg class="vc-icon ext" aria-hidden="true"><use href="#i-external"/></svg></a>
+          <hr>
+          <a data-open="chatgpt" href="#" target="_blank" rel="noopener"><svg class="vc-icon" aria-hidden="true"><use href="#i-chat"/></svg>Open in ChatGPT<svg class="vc-icon ext" aria-hidden="true"><use href="#i-external"/></svg></a>
+          <a data-open="claude" href="#" target="_blank" rel="noopener"><svg class="vc-icon" aria-hidden="true"><use href="#i-chat"/></svg>Open in Claude<svg class="vc-icon ext" aria-hidden="true"><use href="#i-external"/></svg></a>
+          <a data-open="cursor" href="#" target="_blank" rel="noopener"><svg class="vc-icon" aria-hidden="true"><use href="#i-pointer"/></svg>Open in Cursor<svg class="vc-icon ext" aria-hidden="true"><use href="#i-external"/></svg></a>
+        </div>
+        <a class="vc-btn vc-btn--ghost vc-btn--sm" data-edit href="#" target="_blank" rel="noopener">
+          <svg class="vc-icon" aria-hidden="true"><use href="#i-pencil"/></svg>Edit on GitHub
+        </a>
+      </div>
+
+      <!-- Fumadocs: DocsBody (.prose). Each section below is one MDX page; routed by location.hash. -->
+      <div class="prose" data-body>
+
+        <!-- ============================== Getting started ============================== -->
+        <section class="page" data-page="getting-started" hidden>
+          <!-- Fumadocs: Callout type="info" → vc-callout (note) -->
+          <div class="vc-callout" role="note">
+            <span class="vc-callout__glyph" aria-hidden="true">i</span>
+            <div>
+              <strong class="vc-callout__title">Readiness never waits for the network</strong>
+              <p>visual-check captures a story once Storybook says it has finished, its images have decoded and its fonts have loaded. It doesn't wait for requests that come later. So if a story fails on your first <code>test</code>, the story needs tuning: a <a href="#wait-hook"><code>wait</code> hook</a> for content that arrives late, a mask for content that changes, or a look at its <a href="#animations">animations</a>.</p>
+            </div>
+          </div>
+
+          <h2 id="before-you-start">Before you start</h2>
+          <dl class="spec">
+            <div><dt>Node</dt><dd>22.17.0 or later</dd></div>
+            <div><dt>Storybook</dt><dd>9.1, 10 or 11, with <code>.storybook/main.*</code> committed to git</dd></div>
+            <div><dt>Docker</dt><dd>Installed and running. The browser runs in visual-check's own container, so every machine renders the same pixels.</dd></div>
+            <div><dt>Packages</dt><dd>npm, pnpm, Yarn 1 or Yarn 4.17.1 and later. Bun works too.</dd></div>
+          </dl>
+
+          <h2 id="set-up">Set up</h2>
+          <p>Four steps. Run every command at the root of your repo.</p>
+          <!-- Fumadocs: Steps (remark-steps: ### Run init [step]) -->
+          <div class="fd-steps">
+            <div class="fd-step">
+              <h3 id="run-init">Run <code>init</code></h3>
+              <p><code>init</code> finds every Storybook, asks a few questions with a default for each, installs visual-check's packages and writes the setup. There's no separate install.</p>
+              <!-- Fumadocs: ```npm fence (remark-npm): npx → pnpm dlx / yarn dlx / bunx, tab-group persists -->
+              <div class="vc-code" data-pm="init"></div>
+              <p><code>init --yes</code> takes every default. Each question shows its default after <code>›</code>, and an answered question collapses to one line:</p>
+              <div class="vc-code" data-title="Terminal" data-nocopy>
+<pre><code><span class="s">✓</span><span class="k">✓</span> visual-check <span class="c">init · v0.1.0</span>
+<span class="s">━━━━━━━━━━</span><span class="c">────────── Step 3 of 6</span>
+<span class="s">✓</span> Name of the Storybook in <span class="s">apps/web</span> web
+<span class="k">?</span> URL of web
+  <span class="c">Where visual-check opens it, locally and in CI. Use 127.0.0.1, not localhost.</span>
+<span class="s">›</span> http://127.0.0.1:6006</code></pre>
+              </div>
+            </div>
+            <div class="fd-step">
+              <h3 id="write-the-first-baselines">Write the first baselines</h3>
+              <p>Start Storybook and keep it running: visual-check connects to a running Storybook and never starts or builds one. Then, in a second terminal:</p>
+              <div class="vc-code" data-pm="update"></div>
+              <p><code>update</code> captures every story and writes its baseline to <code>.visual-check/baselines/</code>, next to the Storybook. Before it writes one, it loads the story a second time and captures the page again a second later, so each missing baseline takes about a second.</p>
+              <div class="vc-code" data-title="Terminal" data-nocopy>
+<pre><code><span class="c">visual-check 0.1.0 · update · 108 snapshots · 4 workers</span>
+108 written
+<span class="c">written .visual-check/baselines/components-alert--info.png
+written .visual-check/baselines/components-button--default.png
+…</span></code></pre>
+              </div>
+              <p>If it ends with a warning about remote content, read <a href="#remote-content">Remote content</a> before you commit. Those stories show images from another server, and a CDN can serve different bytes to different machines.</p>
+            </div>
+            <div class="fd-step">
+              <h3 id="check-the-stories">Check the stories</h3>
+              <div class="vc-code" data-pm="check"></div>
+              <p><code>test</code> captures each story again and compares the snapshot with its baseline. Straight after <code>update</code>, every snapshot should pass.</p>
+              <div class="vc-code" data-title="Terminal" data-nocopy>
+<pre><code><span class="c">visual-check 0.1.0 · test · 108 snapshots · 4 workers</span>
+108 passed · 10.8s
+<span class="c">Report: .visual-check/report/report.json</span></code></pre>
+              </div>
+              <p>On your machine, <code>test</code> checks only the affected stories: the ones your changed files reach. <code>--all</code> checks every story. In CI it checks every story unless you pass <code>--affected</code>.</p>
+            </div>
+            <div class="fd-step">
+              <h3 id="commit-the-baselines">Commit the baselines</h3>
+              <p>Commit the changes, baselines included. CI compares against the committed baselines and never writes its own: only <code>update</code>, run by a person, writes them.</p>
+              <div class="vc-code" data-title="Terminal">
+<pre><code><span class="p">$ </span>git add .
+<span class="p">$ </span>git commit -m <span class="s">"Set up visual-check"</span></code></pre>
+              </div>
+            </div>
+          </div>
+
+          <h2 id="what-init-asks">What <code>init</code> asks</h2>
+          <p>Each question has a hint under it and a default you can take with Enter. The ones about a Storybook are asked once for each Storybook you tick.</p>
+          <div class="table-wrap" tabindex="0" role="region" aria-label="The questions init asks">
+            <table>
+              <thead><tr><th scope="col">Question</th><th scope="col">Default</th><th scope="col">Asked when</th></tr></thead>
+              <tbody>
+                <tr><td><code>Package manager</code></td><td>npm</td><td>No lockfile or <code>packageManager</code> field names one</td></tr>
+                <tr><td><code>Storybooks to set up</code></td><td>All ticked</td><td>There's more than one</td></tr>
+                <tr><td><code>Name of the Storybook in apps/web</code></td><td>The package's name</td><td>Always</td></tr>
+                <tr><td><code>URL of web</code></td><td><code>http://127.0.0.1:&lt;port&gt;</code></td><td>Always</td></tr>
+                <tr><td><code>Command that starts web</code></td><td>None</td><td>No script starts this Storybook</td></tr>
+                <tr><td><code>Name of the script that runs visual-check test</code></td><td><code>visual:check</code></td><td>Always</td></tr>
+                <tr><td><code>Name of the script that runs visual-check update</code></td><td><code>visual:update</code></td><td>Always</td></tr>
+                <tr><td><code>Install the agent skill?</code></td><td>Yes</td><td>Always</td></tr>
+                <tr><td><code>Add the Storybook addon to web?</code></td><td>Yes</td><td>A Storybook is on Storybook 10</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>It never asks about the platform, tolerance, workers or a CI URL. One <code>url</code> serves both your machine and CI, and the rest keep their defaults until you <a href="#config">set them in the config</a>.</p>
+          <div class="vc-callout vc-callout--warning" role="note">
+            <span class="vc-callout__glyph" aria-hidden="true">!</span>
+            <div>
+              <strong class="vc-callout__title">Yarn 4 on a release day</strong>
+              <p>Yarn 4 refuses a package version published less than a day ago, so <code>yarn dlx @visual-check/cli init</code> can fail on the day of a release. Wait a day, or list <code>@visual-check/*</code> under <code>npmPreapprovedPackages</code> in <code>.yarnrc.yml</code>.</p>
+            </div>
+          </div>
+
+          <h2 id="what-init-writes">What <code>init</code> writes</h2>
+          <p>In a monorepo with one Storybook in <code>apps/web</code>, <code>init</code> adds these files. The baselines folder appears after your first <code>update</code>.</p>
+          <!-- Fumadocs: Files / Folder / File -->
+          <div class="files" role="group" aria-label="Files init writes">
+            <details open>
+              <summary><svg class="vc-icon i-open" aria-hidden="true"><use href="#i-folder-open"/></svg><svg class="vc-icon i-closed" aria-hidden="true"><use href="#i-folder"/></svg><span class="f-name">acme-monorepo</span><span class="f-note">The workspace root</span></summary>
+              <div class="nest">
+                <details>
+                  <summary><svg class="vc-icon i-open" aria-hidden="true"><use href="#i-folder-open"/></svg><svg class="vc-icon i-closed" aria-hidden="true"><use href="#i-folder"/></svg><span class="f-name">.agents/skills/visual-check</span><span class="f-note">The agent skill</span></summary>
+                  <div class="nest">
+                    <div class="file"><svg class="vc-icon" aria-hidden="true"><use href="#i-file"/></svg><span class="f-name">SKILL.md</span></div>
+                    <div class="file"><svg class="vc-icon" aria-hidden="true"><use href="#i-file"/></svg><span class="f-name">scripts/run.mjs</span></div>
+                    <div class="file"><svg class="vc-icon" aria-hidden="true"><use href="#i-file"/></svg><span class="f-name">setup.json</span></div>
+                  </div>
+                </details>
+                <div class="file"><svg class="vc-icon" aria-hidden="true"><use href="#i-link"/></svg><span class="f-name">.claude/skills/visual-check</span><span class="f-note">A link to the skill; a copy on Windows</span></div>
+                <div class="file"><svg class="vc-icon" aria-hidden="true"><use href="#i-file"/></svg><span class="f-name">.visual-check/.gitignore</span><span class="f-note">Keeps the report out of git</span></div>
+                <details open>
+                  <summary><svg class="vc-icon i-open" aria-hidden="true"><use href="#i-folder-open"/></svg><svg class="vc-icon i-closed" aria-hidden="true"><use href="#i-folder"/></svg><span class="f-name">apps/web</span><span class="f-note">The Storybook's package</span></summary>
+                  <div class="nest">
+                    <div class="file"><svg class="vc-icon" aria-hidden="true"><use href="#i-file"/></svg><span class="f-name">.storybook/visual-check.ts</span><span class="f-note">Modes, and the <code>visualCheck</code> helper</span></div>
+                    <div class="file"><svg class="vc-icon" aria-hidden="true"><use href="#i-file"/></svg><span class="f-name">.visual-check/.gitignore</span><span class="f-note">Keeps only <code>baselines/</code> in git</span></div>
+                    <div class="file is-later"><svg class="vc-icon" aria-hidden="true"><use href="#i-folder"/></svg><span class="f-name">.visual-check/baselines/</span><span class="f-note">Written by <code>update</code></span></div>
+                    <div class="file"><svg class="vc-icon" aria-hidden="true"><use href="#i-file"/></svg><span class="f-name">package.json</span><span class="f-note">Scripts that check only web</span></div>
+                  </div>
+                </details>
+                <div class="file"><svg class="vc-icon" aria-hidden="true"><use href="#i-file"/></svg><span class="f-name">package.json</span><span class="f-note"><code>visual:check</code> and <code>visual:update</code></span></div>
+                <div class="file"><svg class="vc-icon" aria-hidden="true"><use href="#i-file"/></svg><span class="f-name">visual-check.config.ts</span><span class="f-note">Names every Storybook</span></div>
+              </div>
+            </details>
+          </div>
+          <ul>
+            <li>The root gets <code>@visual-check/cli</code> and <code>@visual-check/chromium</code>, the browser package. Each Storybook's package gets <code>@visual-check/storybook</code>, and the addon if you said yes.</li>
+            <li>The config holds only what differs from the defaults:</li>
+          </ul>
+          <div class="vc-code" data-title="visual-check.config.ts">
+<pre><code><span class="k">import</span> { defineConfig } <span class="k">from</span> <span class="s">'@visual-check/cli'</span>
+
+<span class="k">export default</span> defineConfig({
+  storybooks: {
+    web: { dir: <span class="s">'apps/web'</span>, url: <span class="s">'http://127.0.0.1:6006'</span> },
+  },
+})</code></pre>
+          </div>
+          <p>Each Storybook's <code>visual-check.ts</code> declares its modes and exports the helper your stories use for their options:</p>
+          <div class="vc-code" data-title="apps/web/.storybook/visual-check.ts">
+<pre><code><span class="k">import</span> { defineVisualCheck } <span class="k">from</span> <span class="s">'@visual-check/storybook'</span>
+
+<span class="c">// To set options for every story, spread visualCheck into the parameters in your preview file:
+//   import { visualCheck } from './visual-check'
+//   parameters: { ...visualCheck({}) },</span>
+<span class="k">export const</span> visualCheck = defineVisualCheck({
+  modes: {
+    <span class="c">// Each mode a story lists adds one snapshot besides its default capture. For example:
+    // mobile: { viewport: { width: 375, height: 667, deviceScaleFactor: 2, touch: true } },</span>
+  },
+})</code></pre>
+          </div>
+          <p>It writes no GitHub workflow. It never edits <code>preview.*</code>, your other scripts or the root <code>.gitignore</code>, and it touches <code>main.*</code> only through <code>storybook add</code>, to add the addon.</p>
+
+          <h2 id="when-init-finishes">When <code>init</code> finishes</h2>
+          <p>It prints the next steps, with the commands for your package manager. They're the steps above:</p>
+          <div class="vc-code" data-title="Terminal" data-nocopy data-closing></div>
+          <p>In a monorepo, run them from the workspace root. When <code>init</code> runs inside a package, the heading names the root's folder, as in <code>Next, from acme-monorepo</code>, and a line names the packages whose own scripts check only their Storybook.</p>
+
+          <h2 id="if-the-first-test-fails">If the first <code>test</code> fails</h2>
+          <p>A snapshot that differs straight after <code>update</code> comes from a story that doesn't render the same way twice. visual-check doesn't wait for it, so the story needs one of three fixes:</p>
+          <div class="table-wrap" tabindex="0" role="region" aria-label="Fixes for a story that differs">
+            <table>
+              <thead><tr><th scope="col">What you see in the visual diff</th><th scope="col">Fix</th></tr></thead>
+              <tbody>
+                <tr><td>Content that arrives late: data, an icon set, a chart</td><td>A <a href="#wait-hook"><code>wait</code> hook</a> that waits for it</td></tr>
+                <tr><td>Content that changes by itself: a clock, a random avatar, an image from a CDN</td><td>A mask, by selector or by host. See <a href="#remote-content">Remote content</a></td></tr>
+                <tr><td>Motion visual-check can't finish: a canvas, Lottie, a GIF background</td><td>A mask or a <code>wait</code> hook. See <a href="#animations">Animations</a></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>A line that starts with <code>!</code> is a broken story, and it names the reason: see <a href="#stories-that-break">Stories that break</a>. Exit code 2 is a problem with the setup, not a story. For example:</p>
+          <div class="vc-code vc-code--bare" data-nocopy>
+<pre><code>Storybook web doesn't answer at http://127.0.0.1:6006/index.json. Start it, or set its URL in the config or with --url.</code></pre>
+          </div>
+          <p>Don't raise <a href="#color-and-pixels">tolerance</a> to make a first run pass. It hides the real changes you want <code>test</code> to catch.</p>
+
+          <h2 id="next">Next</h2>
+          <!-- Fumadocs: Cards / Card (getPageTreePeers for "further reading") -->
+          <div class="cards">
+            <a class="card" href="#modes"><span class="card__title">Modes<svg class="vc-icon" aria-hidden="true"><use href="#i-arrow-right"/></svg></span><span class="card__desc">Capture a story in dark and at phone size too.</span></a>
+            <a class="card" href="#ci"><span class="card__title">CI<svg class="vc-icon" aria-hidden="true"><use href="#i-arrow-right"/></svg></span><span class="card__desc">Run <code>test</code> on every pull request with the GitHub Action.</span></a>
+            <a class="card" href="#storybook-addon"><span class="card__title">Storybook addon<svg class="vc-icon" aria-hidden="true"><use href="#i-arrow-right"/></svg></span><span class="card__desc">Check and update the open story from inside Storybook.</span></a>
+            <a class="card" href="#agent-skill"><span class="card__title">Agent skill<svg class="vc-icon" aria-hidden="true"><use href="#i-arrow-right"/></svg></span><span class="card__desc">Let a coding agent run visual-check and report what changed.</span></a>
+          </div>
+        </section>
+
+        <!-- ============================== color and pixels ============================== -->
+        <section class="page" data-page="color-and-pixels" hidden>
+          <h2 id="two-questions">Two questions</h2>
+          <p>A snapshot passes when it differs from its baseline by no more than the story's tolerance. Tolerance answers two questions, one key each:</p>
+          <div class="table-wrap" tabindex="0" role="region" aria-label="The two parts of tolerance">
+            <table>
+              <thead><tr><th scope="col">Key</th><th scope="col">Question</th><th scope="col">Default</th></tr></thead>
+              <tbody>
+                <tr><td><code>color</code></td><td>Did this pixel change?</td><td><code>0.01</code></td></tr>
+                <tr><td><code>pixels</code></td><td>How many changed pixels are allowed?</td><td><code>20</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>Every snapshot goes through the same steps:</p>
+          <ol>
+            <li>If its bytes equal the baseline's, it passes at once, with no decoding. On unchanged snapshots that happens 98–99% of the time.</li>
+            <li>If its width or height differs, it fails, whatever the tolerance.</li>
+            <li>Each pixel counts as changed when its colour moved further than <code>color</code>.</li>
+            <li>It passes when no more pixels changed than <code>pixels</code> allows.</li>
+          </ol>
+
+          <h2 id="worked-example">A worked example</h2>
+          <p>Take a snapshot ten pixels wide, cut across the edge of a letter, compared with <code>pixels: 3</code>. Each pixel is a grey, so one number from 0 (black) to 255 (white) gives its colour. The letter changed, a border and a fill got slightly darker, and two pixels carry render noise.</p>
+          <!-- Custom MDX component: <PixelStrip> (static). Diff rows draw the visual diff's own colours. -->
+          <figure class="px" aria-labelledby="px-cap">
+            <div class="px-row px-row--index" aria-hidden="true">
+              <span class="px-label">Pixel</span>
+              <div class="px-cells px-index"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span></div>
+            </div>
+            <div class="px-row" data-px="base">
+              <span class="px-label">Baseline</span>
+              <div class="px-cells" aria-hidden="true"></div>
+            </div>
+            <div class="px-row" data-px="snap">
+              <span class="px-label">Snapshot</span>
+              <div class="px-cells" aria-hidden="true"></div>
+            </div>
+            <div class="px-row px-row--diff px-row--sep" data-px="0">
+              <span class="px-label"><code>color: 0</code></span>
+              <div class="px-cells" aria-hidden="true"></div>
+              <span class="px-verdict"><span><strong>6</strong> changed</span><span class="vc-badge vc-badge--changed"><span class="vc-badge__glyph">✗</span>differs</span></span>
+            </div>
+            <div class="px-row px-row--diff" data-px="0.01">
+              <span class="px-label"><code>color: 0.01</code></span>
+              <div class="px-cells" aria-hidden="true"></div>
+              <span class="px-verdict"><span><strong>4</strong> changed</span><span class="vc-badge vc-badge--changed"><span class="vc-badge__glyph">✗</span>differs</span></span>
+            </div>
+            <div class="px-row px-row--diff" data-px="0.1">
+              <span class="px-label"><code>color: 0.1</code></span>
+              <div class="px-cells" aria-hidden="true"></div>
+              <span class="px-verdict"><span><strong>2</strong> changed</span><span class="vc-badge vc-badge--passed"><span class="vc-badge__glyph">✓</span>passes</span></span>
+            </div>
+            <figcaption class="px-caption" id="px-cap">
+              <span class="px-key"><i aria-hidden="true"></i>Counts as changed</span>
+              <span class="px-key"><i class="faded" aria-hidden="true"></i>Unchanged, shown faded</span>
+              <span>The same pixels compared at three values of <code>color</code>, against <code>pixels: 3</code>. The visual diff draws them the same way.</span>
+            </figcaption>
+          </figure>
+          <div class="table-wrap" tabindex="0" role="region" aria-label="The ten pixels">
+            <table>
+              <thead>
+                <tr><th scope="col">Pixel</th><th scope="col">What it is</th><th scope="col" class="num">Baseline</th><th scope="col" class="num">Snapshot</th><th scope="col" class="num">Moved</th><th scope="col"><code>color: 0</code></th><th scope="col"><code>0.01</code></th><th scope="col"><code>0.1</code></th></tr>
+              </thead>
+              <tbody data-px-table></tbody>
+              <tfoot>
+                <tr><td colspan="5">Changed pixels, against <code>pixels: 3</code></td><td class="no-wrap">6, fails</td><td class="no-wrap">4, fails</td><td class="no-wrap">2, passes</td></tr>
+              </tfoot>
+            </table>
+          </div>
+          <ul>
+            <li><strong>At <code>color: 0</code></strong>, the two noise pixels count. Render noise is never zero, so <code>pixels</code> would have to grow to absorb it.</li>
+            <li><strong>At <code>color: 0.01</code></strong>, the default, noise doesn't count and the darker border and fill do. 4 is more than 3, so the snapshot fails.</li>
+            <li><strong>At <code>color: 0.1</code></strong>, <code>pixelmatch</code>'s own default, only the letter counts. The darker border and fill pass unseen.</li>
+          </ul>
+          <p>visual-check measures colour distance as <code>pixelmatch</code> 8 does, so the cut-offs are approximate. At <code>0.01</code>, a grey that moves about 2 of 255 doesn't count.</p>
+
+          <h2 id="measured-table">The measured table behind the defaults</h2>
+          <p>The defaults come from 606 stories of HeroUI's Storybook, captured in Chromium at scale 1, on amd64 runners and on arm64, with every pixel counted. Each deliberate change was made on arm64 and compared with an amd64 baseline. A row's budget is the largest count that arm64's own differences reached at that <code>color</code>, and a change counts as caught when it went over the budget.</p>
+          <div class="table-wrap" tabindex="0" role="region" aria-label="Changes caught at each value of color">
+            <table>
+              <thead>
+                <tr><th scope="col"><code>color</code></th><th scope="col" class="num">Budget that absorbs arm64</th><th scope="col" class="num">1 px shift (606)</th><th scope="col" class="num">One character (533)</th><th scope="col" class="num">Hidden icon (286)</th><th scope="col" class="num">Background ±4 (517)</th><th scope="col" class="num">±8 (517)</th><th scope="col" class="num">±16 (518)</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><code>0</code></td><td class="num">18,859 px</td><td class="num">45</td><td class="num">1</td><td class="num">1</td><td class="num">50</td><td class="num">50</td><td class="num">50</td></tr>
+                <tr><td><code>0.005</code></td><td class="num">3,054 px</td><td class="num">305</td><td class="num">15</td><td class="num">1</td><td class="num">310</td><td class="num">312</td><td class="num">312</td></tr>
+                <tr class="is-default"><td><code>0.01</code> <span class="muted">default</span></td><td class="num">19 px</td><td class="num">606</td><td class="num">527</td><td class="num">285</td><td class="num">462</td><td class="num">481</td><td class="num">505</td></tr>
+                <tr><td><code>0.02</code></td><td class="num">0 px</td><td class="num">606</td><td class="num">533</td><td class="num">286</td><td class="num">3</td><td class="num">453</td><td class="num">492</td></tr>
+                <tr><td><code>0.05</code></td><td class="num">0 px</td><td class="num">604</td><td class="num">533</td><td class="num">286</td><td class="num">1</td><td class="num">0</td><td class="num">444</td></tr>
+                <tr><td><code>0.1</code> <span class="muted">pixelmatch's default</span></td><td class="num">0 px</td><td class="num">601</td><td class="num">533</td><td class="num">286</td><td class="num">0</td><td class="num">0</td><td class="num">0</td></tr>
+              </tbody>
+              <caption>Changes caught, out of the stories where each was visible.</caption>
+            </table>
+          </div>
+          <ul>
+            <li><code>color: 0.01</code> with 19 pixels absorbs every difference between arm64 and amd64. It still catches every 1 px shift, 99% of changed characters and hidden icons, and 89% of background changes of 4 levels. The default budget is 20.</li>
+            <li>At <code>0.02</code>, arm64 needs no budget at all, but a background 4 levels darker goes unseen: 3 caught of 517.</li>
+            <li>At <code>0.1</code>, <code>pixelmatch</code>'s own default, no background change of up to 16 levels is caught.</li>
+          </ul>
+          <p>The changes: the story's root moved 1 px to the right; the first visible lowercase letter changed; the smallest visible icon of 8 px or more hidden; the largest background in view 4, 8 or 16 levels darker per channel.</p>
+
+          <h2 id="lower-color">Why a lower <code>color</code> isn't stricter</h2>
+          <p>A lower <code>color</code> is stricter about each pixel and looser about the snapshot. Noise starts to count as change, the budget has to grow to absorb it, and a large budget hides real changes.</p>
+          <p>The table shows it. At <code>color: 0</code>, arm64's differences reach 18,859 pixels. A budget that size catches 45 of 606 one-pixel shifts and 1 of 533 changed characters.</p>
+          <p>The default absorbs arm64's differences from amd64, and a dev server's small drift from a static build, on every platform.</p>
+
+          <h2 id="anti-aliasing">Why anti-aliased pixels count</h2>
+          <p><code>pixelmatch</code> can skip a changed pixel that looks like an anti-aliased edge in either image. visual-check keeps that off: every pixel counts, and v1 has no option for it.</p>
+          <p>Text and icons are mostly edges, so skipping edges skips most of what they're made of. Measured on the same amd64 runner captures, at <code>color: 0.01</code> and <code>pixels: 20</code>:</p>
+          <div class="table-wrap" tabindex="0" role="region" aria-label="Every pixel counted against edges skipped">
+            <table>
+              <thead><tr><th scope="col"></th><th scope="col" class="num">Every pixel counts</th><th scope="col" class="num">Edges skipped</th></tr></thead>
+              <tbody>
+                <tr><td>Budget that absorbs runner noise</td><td class="num">2 px</td><td class="num">0 px</td></tr>
+                <tr><td>1 px shift caught</td><td class="num">606 of 606</td><td class="num">596 of 606</td></tr>
+                <tr><td>One character caught</td><td class="num">488 of 494</td><td class="num">476 of 494</td></tr>
+                <tr><td>Hidden icon caught</td><td class="num">259 of 260</td><td class="num">118 of 260</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>Skipping edges is for comparing different renderers. visual-check renders every baseline and snapshot in the same container, which leaves 2 pixels of noise on the default platform, so there's little to absorb. <code>pixelmatch</code>'s filter that drops a lone changed pixel stays off too.</p>
+
+          <h2 id="css-pixels">CSS pixels at scale 2</h2>
+          <p>A count in <code>pixels</code> is in CSS pixels. At device scale factor <em>s</em>, a snapshot may have ⌊<code>pixels</code> × <em>s</em>²⌋ changed image pixels, rounded down.</p>
+          <div class="table-wrap" tabindex="0" role="region" aria-label="What pixels: 20 allows at each scale">
+            <table>
+              <thead><tr><th scope="col">Device scale factor</th><th scope="col" class="num">Image pixels per CSS pixel</th><th scope="col" class="num"><code>pixels: 20</code> allows</th></tr></thead>
+              <tbody>
+                <tr><td>1</td><td class="num">1</td><td class="num">20</td></tr>
+                <tr><td>1.5</td><td class="num">2.25</td><td class="num">45</td></tr>
+                <tr class="is-default"><td>2, the scale for phone modes</td><td class="num">4</td><td class="num">80</td></tr>
+                <tr><td>3</td><td class="num">9</td><td class="num">180</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>A failure shows image pixels against the scaled budget:</p>
+          <div class="vc-code" data-title="Terminal" data-nocopy>
+<pre><code><span class="m">✗</span> web  components-card--default  mobile  differs: <span class="m">84 differ</span>, 80 allowed (20 at scale 2)</code></pre>
+          </div>
+          <p>The budget scales because the defaults were measured at scale 1, and phone modes are recommended at scale 2. At scale 2 a change covers 3 to 4 times as many image pixels, and arm64's differences need 69 pixels where they needed 19. An unscaled 20 would fail arm64. 80 absorbs it, and catches nearly as many changes as 20 does at scale 1.</p>
+
+          <h2 id="percent-strings">Percent strings</h2>
+          <p><code>pixels</code> also takes a share of the image, as a string from <code>'0%'</code> to <code>'100%'</code>:</p>
+          <div class="vc-code" data-title="Button.stories.tsx">
+<pre><code>parameters: { ...visualCheck({ tolerance: { pixels: <span class="s">'0.1%'</span> } }) },</code></pre>
+          </div>
+          <ul>
+            <li>A share counts against the image's own pixels, rounded down to a whole pixel. A 1280 × 720 capture has 921,600 pixels, so <code>'0.1%'</code> allows 921.</li>
+            <li>A share isn't scaled: it already counts image pixels.</li>
+            <li>On a full-page capture, the share grows with the page.</li>
+            <li>Anything else exits 2, such as <code>1.5</code>, <code>-1</code> or <code>'0.1'</code>.</li>
+          </ul>
+          <p>A level sets a count or a share, never both. A share in a story replaces the count it inherits.</p>
+
+          <h2 id="where-to-set-tolerance">Where to set it</h2>
+          <p><code>tolerance</code> is the same object at every level. The most specific level wins, key by key, so a level can set only <code>color</code> or only <code>pixels</code>.</p>
+          <div class="table-wrap" tabindex="0" role="region" aria-label="Levels that set tolerance">
+            <table>
+              <thead><tr><th scope="col">Level</th><th scope="col">Where</th><th scope="col">Covers</th></tr></thead>
+              <tbody>
+                <tr><td>Config</td><td><code>tolerance</code> in <code>visual-check.config.ts</code></td><td>Every story</td></tr>
+                <tr><td>Preview</td><td><code>parameters</code> in <code>.storybook/preview.ts</code></td><td>Every story of one Storybook</td></tr>
+                <tr><td>Meta</td><td>A stories file's default export</td><td>That file's stories</td></tr>
+                <tr><td>Story</td><td>The story</td><td>That story</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="vc-code" data-title="Chart.stories.tsx">
+<pre><code><span class="k">import</span> { visualCheck } <span class="k">from</span> <span class="s">'../.storybook/visual-check'</span>
+
+<span class="k">export const</span> Heatmap: Story = {
+  parameters: {
+    ...visualCheck({ tolerance: { pixels: <span class="s">'0.5%'</span> } }),
+  },
+}</code></pre>
+          </div>
+          <div class="vc-callout vc-callout--warning" role="note">
+            <span class="vc-callout__glyph" aria-hidden="true">!</span>
+            <div>
+              <strong class="vc-callout__title">Raise tolerance last</strong>
+              <p>A snapshot that differs between runs is a <a href="#flaky-snapshots">flaky snapshot</a>. A mask or a <code>wait</code> hook fixes it without hiding the changes <code>test</code> is there to catch.</p>
+            </div>
+          </div>
+
+          <h2 id="size-differences">Size differences</h2>
+          <p>A snapshot whose width or height differs from its baseline always fails, whatever <code>pixels</code> and the masks say. Render noise moves colours, not layout, so a size change is never noise.</p>
+          <div class="vc-code" data-title="Terminal" data-nocopy>
+<pre><code><span class="m">✗</span> web  components-card--default  differs: size changed: 1280×2400 → 1280×2432</code></pre>
+          </div>
+          <p>The visual diff is padded to the larger size, anchored at the top left, and the padding counts as changed pixels. Changed pixels are magenta and the padding is cyan, over a faded copy of the baseline.</p>
+        </section>
+
+        <!-- ============================== Config ============================== -->
+        <section class="page" data-page="config" hidden>
+          <h2 id="all-keys">All keys</h2>
+          <p>Only <code>storybooks</code> is required. Open a key for its description, or jump to its section below.</p>
+          <!-- Fumadocs: TypeTable (or AutoTypeTable from the Config type in @visual-check/cli) -->
+          <div class="tt" data-type-table></div>
+
+          <h2 id="the-config-file">The config file</h2>
+          <ul>
+            <li><strong>Name:</strong> <code>visual-check.config.ts</code>, at the workspace root. <code>.mts</code>, <code>.js</code> and <code>.mjs</code> work too. JSON and YAML don't.</li>
+            <li><strong>Search:</strong> the current folder, then each parent up to the git root. The first config found wins, and <code>--config &lt;path&gt;</code> skips the search.</li>
+            <li><strong>Helper:</strong> <code>defineConfig</code>, from <code>@visual-check/cli</code>, gives your editor the config's types. It returns the config unchanged.</li>
+            <li><strong>Checks:</strong> an unknown key or a wrong type exits 2 before anything is captured.</li>
+          </ul>
+          <div class="vc-code" data-title="visual-check.config.ts">
+<pre><code><span class="k">import</span> { defineConfig } <span class="k">from</span> <span class="s">'@visual-check/cli'</span>
+
+<span class="k">export default</span> defineConfig({
+  storybooks: {
+    web: { dir: <span class="s">'apps/web'</span>, url: <span class="s">'http://127.0.0.1:6006'</span> },
+    ui: {
+      dir: <span class="s">'packages/ui'</span>,
+      url: { local: <span class="s">'http://127.0.0.1:2137'</span>, ci: <span class="s">'http://127.0.0.1:6007'</span> },
+    },
+  },
+})</code></pre>
+          </div>
+          <div class="vc-callout vc-callout--warning" role="note">
+            <span class="vc-callout__glyph" aria-hidden="true">!</span>
+            <div>
+              <strong class="vc-callout__title">tsconfig <code>paths</code> don't work in the config</strong>
+              <p>visual-check loads the config through jiti, on every supported Node, and jiti doesn't read <code>paths</code> from your tsconfig. Import with relative paths or package names.</p>
+            </div>
+          </div>
+          <p>Everything outside <code>storybooks</code> applies to the whole project. One Storybook's own tolerance or viewport goes in its <code>preview</code>, through <code>visualCheck(...)</code>, and its modes go in <code>.storybook/visual-check.ts</code>. See <a href="#modes">Modes</a>.</p>
+
+          <h2 id="storybooks"><code>storybooks</code></h2>
+          <p>One entry per Storybook, by name. A name takes lowercase letters, digits and <code>-</code>, and it's what the report and <code>--storybook &lt;name&gt;</code> call that Storybook. Every entry runs unless <code>--storybook</code> narrows the run.</p>
+
+          <h3 id="key-url" class="key"><code>storybooks.&lt;name&gt;.<span class="k-name">url</span></code></h3>
+          <dl class="spec spec--key">
+            <div><dt>Type</dt><dd><code>string | { local?: string; ci?: string }</code></dd></div>
+            <div><dt>Default</dt><dd>None, required</dd></div>
+            <div><dt>CLI</dt><dd><code>--url &lt;url&gt;</code></dd></div>
+          </dl>
+          <p>Where the running Storybook is served, as an <code>http:</code> or <code>https:</code> URL. visual-check connects to it and never starts or builds one. Use <code>127.0.0.1</code>, not <code>localhost</code>.</p>
+          <div class="vc-code" data-title="visual-check.config.ts">
+<pre><code>storybooks: {
+  web: { url: <span class="s">'http://127.0.0.1:6006'</span> },
+},</code></pre>
+          </div>
+          <div class="vc-callout vc-callout--warning" role="note">
+            <span class="vc-callout__glyph" aria-hidden="true">!</span>
+            <div>
+              <strong class="vc-callout__title">No user name or password</strong>
+              <p><code>url</code> takes no user name or password, because visual-check sends no login. A URL with one exits 2, and the message never shows the password. A Storybook that asks for a login fails the run too.</p>
+              <p>Serve Storybook where visual-check runs instead: <code>storybook dev</code>, or its static build served in the same CI job.</p>
+            </div>
+          </div>
+
+          <h3 id="key-dir" class="key"><code>storybooks.&lt;name&gt;.<span class="k-name">dir</span></code></h3>
+          <dl class="spec spec--key">
+            <div><dt>Type</dt><dd><code>string</code></dd></div>
+            <div><dt>Default</dt><dd>The config file's folder</dd></div>
+          </dl>
+          <p>The folder Storybook runs in, relative to the config file's folder. <code>index.json</code>'s <code>importPath</code> is relative to it. An absolute path works too.</p>
+          <div class="vc-code" data-title="visual-check.config.ts">
+<pre><code>web: { dir: <span class="s">'apps/web'</span>, url: <span class="s">'http://127.0.0.1:6006'</span> },</code></pre>
+          </div>
+
+          <h3 id="key-configdir" class="key"><code>storybooks.&lt;name&gt;.<span class="k-name">configDir</span></code></h3>
+          <dl class="spec spec--key">
+            <div><dt>Type</dt><dd><code>string</code></dd></div>
+            <div><dt>Default</dt><dd><code>'.storybook'</code>, inside <code>dir</code></dd></div>
+          </dl>
+          <p>Storybook's config folder, relative to <code>dir</code>. visual-check reads the Storybook's modes from <code>visual-check.ts</code> in it.</p>
+          <div class="vc-code" data-title="visual-check.config.ts">
+<pre><code>docs: { dir: <span class="s">'apps/docs'</span>, configDir: <span class="s">'config/storybook'</span>, url: <span class="s">'http://127.0.0.1:6008'</span> },</code></pre>
+          </div>
+
+          <h3 id="key-baselines" class="key"><code>storybooks.&lt;name&gt;.<span class="k-name">baselines</span></code></h3>
+          <dl class="spec spec--key">
+            <div><dt>Type</dt><dd><code>string</code></dd></div>
+            <div><dt>Default</dt><dd><code>'.visual-check/baselines'</code>, inside <code>dir</code></dd></div>
+          </dl>
+          <p>The folder that holds the Storybook's baselines, relative to <code>dir</code>. It's the only folder you can move in v1. Two Storybooks whose baselines resolve to one folder exit 2.</p>
+          <div class="vc-code" data-title="visual-check.config.ts">
+<pre><code>web: { dir: <span class="s">'apps/web'</span>, baselines: <span class="s">'visual/baselines'</span>, url: <span class="s">'http://127.0.0.1:6006'</span> },</code></pre>
+          </div>
+
+          <h2 id="capture">Capture</h2>
+          <h3 id="key-platform" class="key"><code><span class="k-name">platform</span></code></h3>
+          <dl class="spec spec--key">
+            <div><dt>Type</dt><dd><code>'linux/amd64' | 'linux/arm64' | 'host'</code></dd></div>
+            <div><dt>Default</dt><dd><code>'linux/amd64'</code></dd></div>
+          </dl>
+          <p>Where the browser runs: visual-check's Linux container for either CPU architecture, or the machine itself. <code>'linux/arm64'</code> differs from amd64 by at most 2 of 255 per channel, which the default tolerance absorbs. <code>'host'</code> gives no parity across machines. There's no flag for it. See <a href="#platforms-and-docker">Platforms and Docker</a>.</p>
+          <div class="vc-code" data-title="visual-check.config.ts">
+<pre><code>platform: <span class="s">'linux/arm64'</span>,</code></pre>
+          </div>
+
+          <h3 id="key-image" class="key"><code><span class="k-name">image</span></code></h3>
+          <dl class="spec spec--key">
+            <div><dt>Type</dt><dd><code>string</code></dd></div>
+            <div><dt>Default</dt><dd>The browser package's image</dd></div>
+          </dl>
+          <p>The Docker image the browser runs in. A custom image must be built <code>FROM</code> the browser package's image. See <a href="#browser">Browser</a>.</p>
+          <div class="vc-code" data-title="visual-check.config.ts">
+<pre><code>image: <span class="s">'ghcr.io/acme/visual-check-chromium:157.0.0'</span>,</code></pre>
+          </div>
+
+          <h3 id="key-viewport" class="key"><code><span class="k-name">viewport</span></code></h3>
+          <dl class="spec spec--key">
+            <div><dt>Type</dt><dd><code>{ width?: number; height?: number; deviceScaleFactor?: number; touch?: boolean }</code></dd></div>
+            <div><dt>Default</dt><dd><code>{ width: 1280, height: 720, deviceScaleFactor: 1 }</code>, <code>touch</code> off</dd></div>
+          </dl>
+          <p>The default capture's viewport, in CSS pixels, when <code>preview</code> sets none. <code>preview</code>, a meta or a story can override any part of it. <code>touch: true</code> turns on touch and mobile emulation together: no hover, a coarse pointer and overlay scrollbars.</p>
+          <div class="vc-code" data-title="visual-check.config.ts">
+<pre><code>viewport: { width: <span class="o">1440</span>, height: <span class="o">900</span> },</code></pre>
+          </div>
+
+          <h3 id="key-maskcolor" class="key"><code><span class="k-name">maskColor</span></code></h3>
+          <dl class="spec spec--key">
+            <div><dt>Type</dt><dd><code>string</code>, as <code>#RGB</code> or <code>#RRGGBB</code></dd></div>
+            <div><dt>Default</dt><dd><code>'#FF00FF'</code></dd></div>
+          </dl>
+          <p>The colour masks are painted in. Changing it changes every baseline that has a mask.</p>
+          <div class="vc-code" data-title="visual-check.config.ts">
+<pre><code>maskColor: <span class="s">'#000'</span>,</code></pre>
+          </div>
+
+          <h2 id="timezone-locale-colour-scheme">Timezone, locale and colour scheme</h2>
+          <p>The browser emulates all three, so every machine renders the same dates, numbers and colour scheme. Each changes pixels, so each is one committed value: it can't differ between your machine and CI, and a mode can't set it in v1.</p>
+
+          <h3 id="key-timezone" class="key"><code><span class="k-name">timezone</span></code></h3>
+          <dl class="spec spec--key">
+            <div><dt>Type</dt><dd><code>string</code>, an IANA name</dd></div>
+            <div><dt>Default</dt><dd><code>'UTC'</code></dd></div>
+          </dl>
+          <p>The timezone every story renders in, whatever the machine's own.</p>
+          <div class="vc-code" data-title="visual-check.config.ts">
+<pre><code>timezone: <span class="s">'Europe/Warsaw'</span>,</code></pre>
+          </div>
+
+          <h3 id="key-locale" class="key"><code><span class="k-name">locale</span></code></h3>
+          <dl class="spec spec--key">
+            <div><dt>Type</dt><dd><code>string</code>, a BCP 47 tag</dd></div>
+            <div><dt>Default</dt><dd><code>'en-US'</code></dd></div>
+          </dl>
+          <p>The locale the browser reports, which sets how <code>Intl</code> formats dates and numbers.</p>
+          <div class="vc-code" data-title="visual-check.config.ts">
+<pre><code>locale: <span class="s">'en-GB'</span>,</code></pre>
+          </div>
+
+          <h3 id="key-colorscheme" class="key"><code><span class="k-name">colorScheme</span></code></h3>
+          <dl class="spec spec--key">
+            <div><dt>Type</dt><dd><code>'light' | 'dark'</code></dd></div>
+            <div><dt>Default</dt><dd><code>'light'</code></dd></div>
+          </dl>
+          <p>The colour scheme the browser reports to <code>prefers-color-scheme</code>. A dark theme your stories pick through a global is a <a href="#modes">mode</a>, not this key.</p>
+          <div class="vc-code" data-title="visual-check.config.ts">
+<pre><code>colorScheme: <span class="s">'dark'</span>,</code></pre>
+          </div>
+
+          <h2 id="comparison">Comparison</h2>
+          <h3 id="key-tolerance" class="key"><code><span class="k-name">tolerance</span></code></h3>
+          <dl class="spec spec--key">
+            <div><dt>Type</dt><dd><code>{ color?: number; pixels?: number | `${number}%` }</code></dd></div>
+            <div><dt>Default</dt><dd><code>{ color: 0.01, pixels: 20 }</code></dd></div>
+          </dl>
+          <p>How much a snapshot may differ from its baseline before it fails. <code>preview</code>, a meta or a story can override either part. See <a href="#color-and-pixels"><code>color</code> and <code>pixels</code></a>.</p>
+          <div class="vc-code" data-title="visual-check.config.ts">
+<pre><code>tolerance: { pixels: <span class="o">10</span> },</code></pre>
+          </div>
+
+          <h3 id="key-retries" class="key"><code><span class="k-name">retries</span></code></h3>
+          <dl class="spec spec--key">
+            <div><dt>Type</dt><dd><code>number</code></dd></div>
+            <div><dt>Default</dt><dd><code>1</code></dd></div>
+          </dl>
+          <p>How many more times <code>test</code> captures a snapshot that differs before it fails. The first capture that passes makes it pass, as a <a href="#flaky-snapshots">flaky snapshot</a>. A broken story isn't retried, <code>update</code> doesn't use it, and <code>0</code> turns retries off.</p>
+          <div class="vc-code" data-title="visual-check.config.ts">
+<pre><code>retries: <span class="o">0</span>,</code></pre>
+          </div>
+
+          <h2 id="run">Run</h2>
+          <h3 id="key-workers" class="key"><code><span class="k-name">workers</span></code></h3>
+          <dl class="spec spec--key">
+            <div><dt>Type</dt><dd><code>'auto' | number | { local?, ci? }</code></dd></div>
+            <div><dt>Default</dt><dd><code>'auto'</code></dd></div>
+            <div><dt>CLI</dt><dd><code>--workers &lt;n&gt;</code></dd></div>
+          </dl>
+          <p>The size of the one worker pool for the whole run. <code>'auto'</code> is the smaller of the CPU count and the memory in GiB, rounded to the nearest GiB, minus 1, read where the browser runs. That gives 2 on a private repo's hosted runner, 4 on a public repo's, and 7 in Docker Desktop's default VM.</p>
+          <div class="vc-code" data-title="visual-check.config.ts">
+<pre><code>workers: { local: <span class="s">'auto'</span>, ci: <span class="o">2</span> },</code></pre>
+          </div>
+
+          <h3 id="key-readytimeout" class="key"><code><span class="k-name">readyTimeout</span></code></h3>
+          <dl class="spec spec--key">
+            <div><dt>Type</dt><dd><code>number | { local?, ci? }</code>, in milliseconds</dd></div>
+            <div><dt>Default</dt><dd><code>10_000</code></dd></div>
+          </dl>
+          <p>One limit for everything before the capture, the <code>wait</code> hook and the end state included. Running out makes a broken story, and the message says which step it was in.</p>
+          <div class="vc-code" data-title="visual-check.config.ts">
+<pre><code>readyTimeout: { ci: <span class="o">20_000</span> },</code></pre>
+          </div>
+
+          <h3 id="key-silencehosts" class="key"><code><span class="k-name">silenceHosts</span></code></h3>
+          <dl class="spec spec--key">
+            <div><dt>Type</dt><dd><code>string[]</code></dd></div>
+            <div><dt>Default</dt><dd><code>[]</code></dd></div>
+          </dl>
+          <p>Exact hosts, or <code>*.example.com</code> patterns. <code>update</code>'s two end-of-run warnings, about real network requests and about remote content, stay silent for these hosts.</p>
+          <div class="vc-code" data-title="visual-check.config.ts">
+<pre><code>silenceHosts: [<span class="s">'images.example.com'</span>, <span class="s">'*.cdn.example.com'</span>],</code></pre>
+          </div>
+
+          <h3 id="key-selectall" class="key"><code>affected.<span class="k-name">selectAll</span></code></h3>
+          <dl class="spec spec--key">
+            <div><dt>Type</dt><dd><code>string[]</code>, globs</dd></div>
+            <div><dt>Default</dt><dd><code>[]</code></dd></div>
+          </dl>
+          <p>Globs relative to the config file's folder. A changed file that matches selects every story. <code>*</code> and <code>**</code> skip names that start with <code>.</code>, so name the dot, as in <code>**/.env*</code>.</p>
+          <div class="vc-code" data-title="visual-check.config.ts">
+<pre><code>affected: { selectAll: [<span class="s">'packages/tokens/**'</span>, <span class="s">'**/.env*'</span>] },</code></pre>
+          </div>
+
+          <h3 id="key-ignore" class="key"><code>affected.<span class="k-name">ignore</span></code></h3>
+          <dl class="spec spec--key">
+            <div><dt>Type</dt><dd><code>string[]</code>, globs</dd></div>
+            <div><dt>Default</dt><dd><code>[]</code></dd></div>
+          </dl>
+          <p>Globs relative to the config file's folder. A changed file that matches selects nothing, whatever else it is.</p>
+          <div class="vc-code" data-title="visual-check.config.ts">
+<pre><code>affected: { ignore: [<span class="s">'**/*.md'</span>, <span class="s">'docs/**'</span>] },</code></pre>
+          </div>
+
+          <h2 id="local-and-ci">Local runs and CI</h2>
+          <p>Three keys take a <code>{ local, ci }</code> pair: <code>storybooks.&lt;name&gt;.url</code>, <code>workers</code> and <code>readyTimeout</code>. They set how visual-check reaches Storybook and how fast it runs. Nothing that changes pixels can differ between your machine and CI, and the type rejects a pair on any other key.</p>
+          <div class="vc-code" data-title="visual-check.config.ts">
+<pre><code><span class="k">export default</span> defineConfig({
+  storybooks: {
+    web: { url: { local: <span class="s">'http://127.0.0.1:6006'</span>, ci: <span class="s">'http://127.0.0.1:8080'</span> } },
+  },
+  workers: { ci: <span class="o">2</span> },
+  readyTimeout: { ci: <span class="o">20_000</span> },
+})</code></pre>
+          </div>
+          <ul>
+            <li>The <code>CI</code> environment variable picks the side.</li>
+            <li>A missing side takes the key's default, except for <code>url</code>, which has none: a run on that side exits 2.</li>
+            <li>There are no <code>local</code> or <code>ci</code> blocks.</li>
+          </ul>
+
+          <h2 id="init-under-rush"><code>init</code> under Rush</h2>
+          <p><code>init</code> reads the package manager from <code>rush.json</code>. Rush owns installs, so <code>init</code> prints the install steps instead of running them:</p>
+          <div class="vc-code" data-title="Terminal" data-nocopy>
+<pre><code>Install visual-check's packages yourself, then add the addon:
+  <span class="s">cd . &amp;&amp; rush add --dev --exact --skip-update -p @visual-check/cli@0.1.0</span>
+  <span class="s">rush update</span>
+  <span class="s">cd libs/ui &amp;&amp; pnpm exec storybook add @visual-check/storybook-addon@0.1.0 --yes --skip-install</span></code></pre>
+          </div>
+          <ul>
+            <li>The workspace root needs a <code>package.json</code>, for the root's scripts and the CLI. Without one, <code>init</code> stops and writes nothing.</li>
+            <li>A package only Rush lists gets no scripts of its own, since its scripts can't find the root's CLI. Run <code>visual-check test --storybook &lt;name&gt;</code> from the root instead.</li>
+          </ul>
+        </section>
+
+        <!-- Pages not drafted in this prototype: real title + the bullet list from 20-docs-site.md -->
+        <section class="page" data-page="stub" hidden>
+          <div class="stub">
+            <p class="stub__label">Not drafted in this prototype</p>
+            <h2 id="what-this-page-covers">What this page covers</h2>
+            <ul data-stub-list></ul>
+          </div>
+        </section>
+      </div>
+
+      <footer class="page-footer">
+        <p class="last-updated">Last updated on <time data-updated datetime="2026-11-21">21 November 2026</time></p>
+        <nav class="page-nav" aria-label="Previous and next page" data-page-nav></nav>
+      </footer>
+    </article>
+  </main>
+
+  <!-- Fumadocs: #nd-toc (≥ 1280px). DocsPage tableOfContent.style: 'normal' (track + thumb) or 'clerk' (the track
+       follows heading depth as an SVG path; the thumb is the same path, clipped to the active headings). -->
+  <div id="nd-toc">
+    <div class="toc-inner">
+      <p class="toc-title" id="toc-title"><svg class="vc-icon" aria-hidden="true"><use href="#i-text"/></svg>On this page</p>
+      <nav aria-labelledby="toc-title"><div class="toc-list" data-toc="main"></div></nav>
+    </div>
+  </div>
+</div>
+
+<!-- Fumadocs: SearchDialog (default search, static index). ⌘K / Ctrl K; Esc closes; focus returns to the invoker. -->
+<dialog class="search-dialog" id="search-dialog" aria-label="Search the docs" closedby="any">
+  <div class="search-head">
+    <svg class="vc-icon vc-icon--20" aria-hidden="true"><use href="#i-search"/></svg>
+    <input class="search-input" id="search-input" type="text" role="combobox" aria-expanded="true" aria-controls="search-list" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="Search the docs">
+    <button class="search-close" type="button" data-close-search aria-label="Close search">Esc</button>
+  </div>
+  <div class="search-list" id="search-list" role="listbox" aria-label="Results"></div>
+  <div class="search-foot" aria-hidden="true">
+    <span><kbd class="vc-kbd">↑</kbd><kbd class="vc-kbd">↓</kbd> to move</span>
+    <span><kbd class="vc-kbd">↵</kbd> to open</span>
+    <span><kbd class="vc-kbd">Esc</kbd> to close</span>
+  </div>
+</dialog>
+
+<!-- Fumadocs: the sidebar as a drawer on phones (from the end edge, 85% / 380px). -->
+<dialog class="drawer" id="nav-drawer" aria-label="Docs navigation" closedby="any">
+  <div class="drawer-head">
+    <a class="x-logo" href="../landing/a.html" aria-label="visual-check home">
+      <img class="vc-only-light" src="../shared/logo/logo-horizontal.svg" alt="visual-check">
+      <img class="vc-only-dark" src="../shared/logo/logo-horizontal-dark.svg" alt="visual-check">
+    </a>
+    <button class="vc-icon-btn" type="button" aria-label="Close navigation" data-close-drawer><svg class="vc-icon vc-icon--20" aria-hidden="true"><use href="#i-close"/></svg></button>
+  </div>
+  <div class="drawer-body">
+    <ul class="drawer-links" aria-label="Site">
+      <li><a href="#getting-started" data-site-link="docs">Docs</a></li>
+      <li><a href="#storybook-addon" data-site-link="storybook-addon">Storybook addon</a></li>
+      <li><a href="#agent-skill" data-site-link="agent-skill">Agent skill</a></li>
+      <li><a href="https://github.com/visual-check/visual-check/releases" target="_blank" rel="noopener">Changelog</a></li>
+    </ul>
+    <button class="vc-search sb-search" type="button" data-open-search>
+      <svg class="vc-icon" aria-hidden="true"><use href="#i-search"/></svg>
+      <span class="vc-search__label">Search</span>
+      <kbd class="vc-kbd" data-mod>⌘</kbd><kbd class="vc-kbd">K</kbd>
+    </button>
+    <nav aria-label="Docs" data-nav></nav>
+  </div>
+  <div class="sb-foot">
+    <a class="vc-icon-btn" href="https://github.com/visual-check/visual-check" target="_blank" rel="noopener" aria-label="visual-check on GitHub"><svg class="vc-icon vc-icon--20" aria-hidden="true"><use href="#i-github"/></svg></a>
+    <div class="theme-switch" role="group" aria-label="Theme" data-theme-switch>
+      <button type="button" data-set-theme="light" aria-label="Light theme"><svg class="vc-icon" aria-hidden="true"><use href="#i-sun"/></svg></button>
+      <button type="button" data-set-theme="dark" aria-label="Dark theme"><svg class="vc-icon" aria-hidden="true"><use href="#i-moon"/></svg></button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+(function () {
+  'use strict';
+
+  const DOCS_BASE = 'https://visual-check.vercel.app/docs/';
+  const REPO = 'https://github.com/visual-check/visual-check';
+
+  /**
+   * The sidebar, in order: one section per separator (or folder), each with its page slugs.
+   */
+  const IA = [
+    { id: 'start', title: 'Start', pages: ['getting-started', 'config', 'modes'] },
+    { id: 'capture', title: 'Capture', pages: ['full-page-and-element', 'grid-stories', 'animations', 'wait-hook', 'remote-content'] },
+    { id: 'compare', title: 'Compare', pages: ['color-and-pixels', 'baselines', 'flaky-snapshots', 'stories-that-break'] },
+    { id: 'run', title: 'Run', pages: ['browser', 'platforms-and-docker', 'ci', 'security'] },
+    { id: 'integrate', title: 'Integrate', pages: ['storybook-addon', 'agent-skill', 'supported-storybooks'] },
+    { id: 'reference', title: 'Reference', pages: ['json-reference'] }
+  ];
+
+  /**
+   * Every page: its title (HTML, for code spans), description, and, for pages not drafted here, what it covers
+   * (the bullets of 20-docs-site.md).
+   */
+  const PAGES = {
+    'getting-started': { title: 'Getting started', drafted: true,
+      desc: 'Install visual-check, write the first baselines and check your stories against them.' },
+    'config': { title: 'Config', drafted: true,
+      desc: '<code>visual-check.config.ts</code> names every Storybook. Every other key has a default, listed here with its type.' },
+    'modes': { title: 'Modes', desc: 'Capture a story in more than one theme or viewport.', covers: [
+      'Declaring modes in code and picking them by exact list. <code>modes: []</code>.',
+      'Moving from a list of breakpoint widths.',
+      'Phone modes are recommended at scale 2.'] },
+    'full-page-and-element': { title: 'Full page and <code>element</code>', desc: 'Capture the whole page, or one element of it.', covers: [
+      'What each captures, and what happens to portaled content.'] },
+    'grid-stories': { title: 'Grid stories', desc: 'Lay out a component\'s states in one story, captured as one snapshot.', covers: [
+      'An example for each port.',
+      'The caption rules.',
+      'Forced states, and what they can\'t force.',
+      'Running beside Storybook\'s pseudo-states addon.',
+      'Fixes for a grid that\'s too wide or too tall.'] },
+    'animations': { title: 'Animations', desc: 'What a snapshot shows when a story moves.', covers: [
+      'What a snapshot shows: the end state.',
+      'What\'s left to the project, with a mask or a <code>wait</code> hook for it.',
+      '<code>play</code> runs as in Storybook.',
+      'Capture reports no preference for reduced motion.'] },
+    'wait-hook': { title: 'The <code>wait</code> hook', desc: 'Wait for content that arrives after the story has finished.', covers: [
+      'For every story, for one file, for one story, and turning it off.'] },
+    'remote-content': { title: 'Remote content', desc: 'Images and frames from another origin, and why they differ from machine to machine.', covers: [
+      'Linked from the hint and from <code>update</code>\'s warning.',
+      'Why a CDN\'s bytes differ by machine.',
+      'Three fixes, in order: serve the image from Storybook through <code>staticDirs</code> or an import, mock it with MSW, mask it by host.',
+      'For MSW: use <code>mswLoader</code>, so the worker controls the page before images load. CDN URLs with no file extension warn as unhandled.'] },
+    'color-and-pixels': { title: '<code>color</code> and <code>pixels</code>', drafted: true,
+      desc: 'Tolerance has two parts. <code>color</code> decides whether a pixel changed, and <code>pixels</code> decides how many changed pixels a snapshot may have.' },
+    'baselines': { title: 'Baselines', desc: 'Who writes baselines, and how to review them.', covers: [
+      'Who writes them and how to review them.',
+      'Bot PRs: pushing baselines to a bot\'s PR stops Dependabot rebasing it, and Renovate marks it as edited. <code>@dependabot recreate</code>, or Renovate\'s rebase checkbox, regenerates the branch and drops those commits.',
+      'Long file names are shortened with a hash.'] },
+    'flaky-snapshots': { title: 'Flaky snapshots', desc: 'Snapshots that pass only on a retry.', covers: [
+      'What makes a snapshot flaky, where flaky snapshots are listed, and the <code>retries</code> setting.'] },
+    'stories-that-break': { title: 'Stories that break', desc: 'Each reason a story breaks, and its fix.', covers: [
+      'Each reason and its fix.',
+      'A stories file that fails to load.',
+      'A story that navigates away: await the new page before clicking, or render <code>MemoryRouter</code> with <code>useTransitions={false}</code>.'] },
+    'browser': { title: 'Browser', desc: 'The pinned browser, custom images and <code>host</code>.', covers: [
+      'A browser bump is a Renovate PR plus <code>update</code>.',
+      'Building a custom image from the browser package\'s image.',
+      '<code>host</code>: its cache folder, the proxy and mirror variables, and the Linux libraries and font package it needs. <code>host</code> baselines only match on the same OS.'] },
+    'platforms-and-docker': { title: 'Platforms and Docker', desc: 'Where the browser runs, and how every machine gets the same pixels.', covers: [
+      'The two ways to get parity: stay on <code>linux/amd64</code>, or use <code>linux/arm64</code> with the default tolerance.',
+      '<code>host</code> gives no parity across machines. It suits a project with no CI, or one where no machine can run Docker.',
+      'macOS: runtimes that use Rosetta, Docker Desktop\'s default memory and the worker count.',
+      'Windows: Docker Desktop, running inside WSL with Docker Engine, and Docker Desktop\'s licence threshold.',
+      'Setups that are untested and may work.'] },
+    'ci': { title: 'CI', desc: 'Run <code>test</code> on every pull request with the GitHub Action.', covers: [
+      'The Action and the reusable workflow: build, serve, wait, run.',
+      'Why Linux runners only.',
+      'Sharding: both matrix shapes, <code>fail-fast: false</code>, and shard jobs waiting for the consistency job.',
+      'Each shard building its own Storybook, building once and passing the build along, or pointing at a deployed Storybook.',
+      'A deployed Storybook behind a login: visual-check sends none, so the run fails. Serve Storybook in the job instead, or let the runner reach the deployment without one.',
+      'From a failed check to the report artifact.',
+      'A job container on visual-check\'s image, a job container on another image, and devcontainers that use the host\'s Docker.',
+      'In a job container, that container is the only boundary, with the checkout and any stored token inside it.'] },
+    'security': { title: 'Security', desc: 'What visual-check trusts, and where the browser runs.', covers: [
+      'What visual-check trusts: the stories\' code. What it doesn\'t: remote content, and a pinned browser that gets old, so take browser package bumps.',
+      'Where the browser runs and what the boundary is in each case.',
+      'There are no setup steps and no flags.'] },
+    'storybook-addon': { title: 'Storybook addon', desc: 'Check and update the open story from inside Storybook 10.', covers: [
+      'Installing it, Check and Update, that Update\'s baselines come from the dev server, the panel in a static build, and that it needs Storybook 10.'] },
+    'agent-skill': { title: 'Agent skill', desc: 'Let a coding agent run visual-check and report what changed.', covers: [
+      'What <code>init</code> writes, how the skill refreshes after an upgrade, and allowing the command in the agent\'s own settings.'] },
+    'supported-storybooks': { title: 'Supported Storybooks', desc: 'Storybook 9.1, 10 and 11, and when a major is dropped.', covers: [
+      '9.1, 10 and 11, and when a major is dropped.',
+      'The test-path warning.',
+      '<code>.test()</code> entries aren\'t captured. An end screen worth a baseline is written as a story with <code>play</code>.'] },
+    'json-reference': { title: 'JSON reference', desc: 'Every field of <code>report.json</code>.', covers: [
+      'Every field of the report, the <code>status</code>, <code>reason</code> and <code>kind</code> values, what each path is relative to, and the versioning rules.'] }
+  };
+
+  /**
+   * Config keys for the TypeTable: anchor, type, default and a one-line description.
+   */
+  const KEYS = [
+    ['storybooks', 'storybooks', 'Record<string, Storybook>', 'Required', 'The Storybooks to capture, by name. At least one entry.'],
+    ['key-url', 'storybooks.<name>.url', 'string | { local?, ci? }', 'Required', 'Where the running Storybook is served. No user name or password.'],
+    ['key-dir', 'storybooks.<name>.dir', 'string', 'The config\'s folder', 'The folder Storybook runs in, relative to the config file.'],
+    ['key-configdir', 'storybooks.<name>.configDir', 'string', '\'.storybook\'', 'Storybook\'s config folder, relative to dir.'],
+    ['key-baselines', 'storybooks.<name>.baselines', 'string', '\'.visual-check/baselines\'', 'The folder that holds the baselines, relative to dir.'],
+    ['key-platform', 'platform', '\'linux/amd64\' | \'linux/arm64\' | \'host\'', '\'linux/amd64\'', 'Where the browser runs.'],
+    ['key-image', 'image', 'string', 'The browser package\'s', 'The Docker image the browser runs in.'],
+    ['key-viewport', 'viewport', '{ width?, height?, deviceScaleFactor?, touch? }', '{ width: 1280, height: 720, deviceScaleFactor: 1 }', 'The default capture\'s viewport, in CSS pixels.'],
+    ['key-maskcolor', 'maskColor', 'string', '\'#FF00FF\'', 'The colour masks are painted in.'],
+    ['key-timezone', 'timezone', 'string', '\'UTC\'', 'The timezone the browser emulates.'],
+    ['key-locale', 'locale', 'string', '\'en-US\'', 'The locale the browser emulates.'],
+    ['key-colorscheme', 'colorScheme', '\'light\' | \'dark\'', '\'light\'', 'The colour scheme the browser emulates.'],
+    ['key-tolerance', 'tolerance', '{ color?, pixels? }', '{ color: 0.01, pixels: 20 }', 'How much a snapshot may differ from its baseline.'],
+    ['key-retries', 'retries', 'number', '1', 'How many more times test captures a snapshot that differs.'],
+    ['key-workers', 'workers', '\'auto\' | number | { local?, ci? }', '\'auto\'', 'The size of the one worker pool for the run.'],
+    ['key-readytimeout', 'readyTimeout', 'number | { local?, ci? }', '10_000', 'How long a story may take to be ready, in milliseconds.'],
+    ['key-silencehosts', 'silenceHosts', 'string[]', '[]', 'Hosts whose update warnings stay silent.'],
+    ['key-selectall', 'affected.selectAll', 'string[]', '[]', 'Globs: a changed file that matches selects every story.'],
+    ['key-ignore', 'affected.ignore', 'string[]', '[]', 'Globs: a changed file that matches selects nothing.']
+  ];
+
+  /**
+   * The worked example's ten pixels: baseline grey, snapshot grey, what the pixel is, and the colour values it counts at.
+   */
+  const PIXELS = [
+    [255, 255, 'Page background', []],
+    [255, 254, 'Render noise', ['0']],
+    [250, 248, 'Render noise', ['0']],
+    [244, 244, 'Border', []],
+    [236, 232, 'Border, 4 levels darker', ['0', '0.01']],
+    [200, 184, 'Fill, 16 levels darker', ['0', '0.01']],
+    [128, 196, 'Edge of the letter, anti-aliased', ['0', '0.01', '0.1']],
+    [21, 244, 'Inside the letter, now gone', ['0', '0.01', '0.1']],
+    [21, 21, 'Inside the letter', []],
+    [255, 255, 'Page background', []]
+  ];
+
+  const PM = ['npm', 'pnpm', 'yarn', 'bun'];
+  const PM_COMMANDS = {
+    init: { npm: 'npx @visual-check/cli init', pnpm: 'pnpm dlx @visual-check/cli init', yarn: 'yarn dlx @visual-check/cli init', bun: 'bunx @visual-check/cli init' },
+    update: { npm: 'npm run visual:update', pnpm: 'pnpm run visual:update', yarn: 'yarn run visual:update', bun: 'bun run visual:update' },
+    check: { npm: 'npm run visual:check', pnpm: 'pnpm run visual:check', yarn: 'yarn run visual:check', bun: 'bun run visual:check' }
+  };
+
+  const ORDER = IA.reduce(function (all, group) {
+    return all.concat(group.pages);
+  }, []);
+  const root = document.documentElement;
+  const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+  let currentSlug = null;
+  let packageManager = readStore('pm') || 'npm';
+  const tocs = [];
+
+  /**
+   * Reads a per-viewer convenience from localStorage, or null when storage is blocked.
+   */
+  function readStore(key) {
+    try {
+      return localStorage.getItem('vc-docs-1:' + key);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /**
+   * Writes a per-viewer convenience to localStorage, ignoring blocked storage.
+   */
+  function writeStore(key, value) {
+    try {
+      localStorage.setItem('vc-docs-1:' + key, value);
+    } catch (error) {
+      /* storage blocked: the choice lasts for this page only */
+    }
+  }
+
+  /**
+   * Turns a page title's HTML into plain text.
+   */
+  function plain(html) {
+    const element = document.createElement('span');
+    element.innerHTML = html;
+    return element.textContent;
+  }
+
+  /**
+   * Escapes text for use inside HTML.
+   */
+  function escapeHtml(text) {
+    return text.replace(/[&<>"]/g, function (character) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[character];
+    });
+  }
+
+  /**
+   * Returns the inline SVG for a sprite icon.
+   */
+  function icon(name, extraClass) {
+    return '<svg class="vc-icon' + (extraClass ? ' ' + extraClass : '') + '" aria-hidden="true"><use href="#i-' + name + '"/></svg>';
+  }
+
+  /**
+   * Finds the sidebar section a page belongs to.
+   */
+  function groupOf(slug) {
+    return IA.find(function (group) {
+      return group.pages.indexOf(slug) >= 0;
+    });
+  }
+
+  /* ---------- sidebar ---------- */
+
+  /**
+   * Renders the page tree into a container. Separators and folders share one structure; CSS shows one of them.
+   */
+  function renderNav(container, prefix) {
+    container.innerHTML = IA.map(function (group) {
+      const listId = prefix + '-' + group.id;
+      const items = group.pages.map(function (slug) {
+        return '<li><a class="nav-item" href="#' + slug + '" data-slug="' + slug + '">' + PAGES[slug].title + '</a></li>';
+      }).join('');
+      return '<div class="nav-group" data-group="' + group.id + '">' +
+        '<p class="nav-sep">' + group.title + '</p>' +
+        '<button class="nav-folder" type="button" aria-expanded="false" aria-controls="' + listId + '">' + group.title + icon('chev-right') + '</button>' +
+        '<ul class="nav-list" id="' + listId + '">' + items + '</ul></div>';
+    }).join('');
+  }
+
+  /**
+   * Marks the current page in every page tree and opens its folder.
+   */
+  function markNav(slug) {
+    document.querySelectorAll('.nav-item').forEach(function (link) {
+      if (link.dataset.slug === slug) {
+        link.setAttribute('aria-current', 'page');
+      } else {
+        link.removeAttribute('aria-current');
+      }
+    });
+    const group = groupOf(slug);
+    document.querySelectorAll('.nav-group[data-group="' + group.id + '"]').forEach(function (element) {
+      setFolder(element, true);
+    });
+  }
+
+  /**
+   * Opens or closes a folder in the page tree.
+   */
+  function setFolder(groupElement, open) {
+    groupElement.classList.toggle('is-open', open);
+    groupElement.querySelector('.nav-folder').setAttribute('aria-expanded', String(open));
+  }
+
+  /* ---------- page chrome ---------- */
+
+  /**
+   * Renders the breadcrumb, title, description, page actions and footer for a page.
+   */
+  function renderChrome(slug) {
+    const page = PAGES[slug];
+    const group = groupOf(slug);
+    document.querySelector('[data-crumbs]').innerHTML =
+      '<li><a href="#getting-started">Docs</a></li><li aria-hidden="true">' + icon('chev-right') + '</li>' +
+      '<li><span aria-current="location">' + group.title + '</span></li>';
+    document.querySelector('[data-title]').innerHTML = page.title;
+    document.querySelector('[data-desc]').innerHTML = page.desc;
+    document.title = plain(page.title) + ' · visual-check docs';
+
+    const markdownUrl = DOCS_BASE + slug + '.md';
+    const prompt = encodeURIComponent('Read ' + markdownUrl + ', I want to ask questions about it.');
+    const links = {
+      md: markdownUrl,
+      chatgpt: 'https://chatgpt.com/?hints=search&q=' + prompt,
+      claude: 'https://claude.ai/new?q=' + prompt,
+      cursor: 'https://cursor.com/link/prompt?text=' + prompt
+    };
+    document.querySelectorAll('[data-open]').forEach(function (link) {
+      link.href = links[link.dataset.open];
+    });
+    document.querySelector('[data-edit]').href = REPO + '/edit/main/packages/site/content/docs/' + slug + '.mdx';
+
+    const index = ORDER.indexOf(slug);
+    const previous = ORDER[index - 1];
+    const next = ORDER[index + 1];
+    let html = '';
+    if (previous) {
+      html += '<a class="page-nav__card" rel="prev" href="#' + previous + '"><span class="page-nav__label">' + icon('arrow-left') + 'Previous</span>' +
+        '<span class="page-nav__title">' + PAGES[previous].title + '</span><span class="page-nav__desc">' + PAGES[previous].desc + '</span></a>';
+    }
+    if (next) {
+      html += '<a class="page-nav__card page-nav__card--next" rel="next" href="#' + next + '"><span class="page-nav__label">Next' + icon('arrow-right') + '</span>' +
+        '<span class="page-nav__title">' + PAGES[next].title + '</span><span class="page-nav__desc">' + PAGES[next].desc + '</span></a>';
+    }
+    document.querySelector('[data-page-nav]').innerHTML = html;
+  }
+
+  /**
+   * Returns the section that holds a page's body.
+   */
+  function sectionFor(slug) {
+    return document.querySelector('[data-page="' + (PAGES[slug].drafted ? slug : 'stub') + '"]');
+  }
+
+  /**
+   * Finds the page and the in-page target a hash points to. Unknown hashes go to the first page.
+   */
+  function resolveHash() {
+    const id = decodeURIComponent(location.hash.replace(/^#/, ''));
+    if (!id) {
+      return { slug: ORDER[0], target: null };
+    }
+    if (PAGES[id]) {
+      return { slug: id, target: null };
+    }
+    const element = document.getElementById(id);
+    const section = element && element.closest('[data-page]');
+    if (section && section.dataset.page !== 'stub') {
+      return { slug: section.dataset.page, target: element };
+    }
+    if (section && currentSlug && !PAGES[currentSlug].drafted) {
+      return { slug: currentSlug, target: element };
+    }
+    return { slug: ORDER[0], target: null };
+  }
+
+  /**
+   * Shows the page the hash points to, then scrolls to the top or to the heading it names.
+   */
+  function route(isInitial) {
+    const resolved = resolveHash();
+    const slug = resolved.slug;
+    const changed = slug !== currentSlug;
+    if (changed) {
+      document.querySelectorAll('[data-page]').forEach(function (section) {
+        section.hidden = true;
+      });
+      if (!PAGES[slug].drafted) {
+        document.querySelector('[data-stub-list]').innerHTML = PAGES[slug].covers.map(function (item) {
+          return '<li>' + item + '</li>';
+        }).join('');
+      }
+      sectionFor(slug).hidden = false;
+      currentSlug = slug;
+      renderChrome(slug);
+      markNav(slug);
+      markSiteHeader(slug);
+      buildTocs();
+      closeDrawer();
+    }
+    if (resolved.target) {
+      /* A new page jumps straight to the heading; within a page the browser's own smooth anchor scroll runs. */
+      resolved.target.scrollIntoView({ block: 'start', behavior: changed ? 'instant' : 'smooth' });
+    } else if (changed) {
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    }
+    if (changed && !isInitial && !resolved.target) {
+      document.getElementById('nd-page').focus({ preventScroll: true });
+    }
+    updateActive();
+  }
+
+  /**
+   * Marks the matching link in the shared SiteHeader and the drawer's site links.
+   */
+  function markSiteHeader(slug) {
+    const current = slug === 'storybook-addon' || slug === 'agent-skill' ? slug : 'docs';
+    const labels = { docs: 'Docs', 'storybook-addon': 'Storybook addon', 'agent-skill': 'Agent skill' };
+    document.querySelectorAll('.kit-header .vc-header__nav a, .kit-menu-sheet a').forEach(function (link) {
+      if (link.textContent === labels[current]) {
+        link.setAttribute('aria-current', 'page');
+      } else {
+        link.removeAttribute('aria-current');
+      }
+    });
+    document.querySelectorAll('[data-site-link]').forEach(function (link) {
+      if (link.dataset.siteLink === current) {
+        link.setAttribute('aria-current', 'page');
+      } else {
+        link.removeAttribute('aria-current');
+      }
+    });
+  }
+
+  /* ---------- TOC (normal and clerk) ---------- */
+
+  /**
+   * Headings of the current page that the TOC lists.
+   */
+  function currentHeadings() {
+    return Array.prototype.slice.call(sectionFor(currentSlug).querySelectorAll('h2[id], h3[id]'));
+  }
+
+  /**
+   * Renders both TOCs (sidebar column and popover) for the current page.
+   */
+  function buildTocs() {
+    const headings = currentHeadings();
+    tocs.forEach(function (toc) {
+      toc.headings = headings;
+      if (!headings.length) {
+        toc.list.innerHTML = '<p class="toc-empty">No headings on this page.</p>';
+        return;
+      }
+      toc.list.innerHTML = headings.map(function (heading) {
+        const copy = heading.cloneNode(true);
+        copy.querySelectorAll('.heading-anchor').forEach(function (anchor) {
+          anchor.remove();
+        });
+        return '<a class="toc-item" href="#' + heading.id + '" data-depth="' + heading.tagName.slice(1) + '">' + copy.innerHTML + '</a>';
+      }).join('') + '<svg class="toc-track" aria-hidden="true"><path/></svg><div class="toc-thumb" aria-hidden="true"></div>';
+      toc.items = Array.prototype.slice.call(toc.list.querySelectorAll('.toc-item'));
+      layoutToc(toc);
+    });
+  }
+
+  /**
+   * Draws the TOC's track: a straight line (normal), or a path that steps in with heading depth (clerk).
+   */
+  function layoutToc(toc) {
+    if (!toc.items || !toc.items.length || !toc.list.offsetHeight) {
+      return;
+    }
+    const clerk = root.getAttribute('data-t-toc') === 'clerk';
+    const height = toc.list.offsetHeight;
+    let path = '';
+    toc.items.forEach(function (item, index) {
+      const x = clerk && item.dataset.depth === '3' ? 10.5 : 0.5;
+      const top = item.offsetTop;
+      const bottom = top + item.offsetHeight;
+      const last = index === toc.items.length - 1;
+      path += (index === 0 ? 'M' + x + ' ' + top : ' L' + x + ' ' + (top + 6)) + ' L' + x + ' ' + (last ? bottom : bottom - 6);
+    });
+    const svg = toc.list.querySelector('.toc-track');
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', String(height));
+    svg.setAttribute('viewBox', '0 0 16 ' + height);
+    svg.querySelector('path').setAttribute('d', path);
+    const mask = 'url("data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="' + height + '" viewBox="0 0 16 ' + height + '"><path d="' + path + '" fill="none" stroke="black" stroke-width="2"/></svg>') + '")';
+    const thumb = toc.list.querySelector('.toc-thumb');
+    thumb.style.height = height + 'px';
+    thumb.style.webkitMaskImage = mask;
+    thumb.style.maskImage = mask;
+    toc.height = height;
+    paintToc(toc);
+  }
+
+  /**
+   * Colours the active TOC items and clips the thumb to them.
+   */
+  function paintToc(toc) {
+    if (!toc.items || !toc.items.length) {
+      return;
+    }
+    let top = null;
+    let bottom = null;
+    toc.items.forEach(function (item, index) {
+      const active = toc.active.indexOf(index) >= 0;
+      item.classList.toggle('is-active', active);
+      if (active) {
+        top = top === null ? item.offsetTop : Math.min(top, item.offsetTop);
+        bottom = Math.max(bottom || 0, item.offsetTop + item.offsetHeight);
+      }
+    });
+    const thumb = toc.list.querySelector('.toc-thumb');
+    if (top === null) {
+      thumb.style.clipPath = 'inset(0 0 100% 0)';
+      return;
+    }
+    thumb.style.clipPath = 'inset(' + top + 'px 0 ' + Math.max(0, toc.height - bottom) + 'px 0)';
+  }
+
+  /**
+   * Scrollspy: a heading is active while any part of its section is in view below the sticky bars.
+   */
+  function updateActive() {
+    if (!currentSlug) {
+      return;
+    }
+    const headings = currentHeadings();
+    const tocBar = document.getElementById('nd-tocnav');
+    const header = document.querySelector('.kit-header');
+    let top = 0;
+    if (tocBar.offsetParent) {
+      top = tocBar.getBoundingClientRect().bottom;
+    } else if (header && header.offsetParent) {
+      top = header.getBoundingClientRect().bottom;
+    }
+    const footer = document.querySelector('.page-footer').getBoundingClientRect().top;
+    const viewBottom = window.innerHeight;
+    const active = [];
+    headings.forEach(function (heading, index) {
+      const start = heading.getBoundingClientRect().top;
+      const end = index + 1 < headings.length ? headings[index + 1].getBoundingClientRect().top : footer;
+      /* 32px: a sliver of the previous section, left above a heading scrolled to, doesn't count. */
+      if (end > top + 32 && start < viewBottom - 8) {
+        active.push(index);
+      }
+    });
+    tocs.forEach(function (toc) {
+      toc.active = active;
+      paintToc(toc);
+    });
+    const last = active.length ? active[active.length - 1] : -1;
+    const current = document.querySelector('.tocnav-current');
+    const first = active.length ? headings[active[0]] : null;
+    if (first) {
+      const copy = first.cloneNode(true);
+      copy.querySelectorAll('.heading-anchor').forEach(function (anchor) {
+        anchor.remove();
+      });
+      current.innerHTML = '<span class="muted">·</span> ' + copy.innerHTML;
+    } else {
+      current.textContent = '';
+    }
+    const ring = document.querySelector('.tocnav-ring .bar');
+    const progress = headings.length ? (last + 1) / headings.length : 0;
+    ring.setAttribute('stroke-dashoffset', String(37.7 * (1 - progress)));
+  }
+
+  /* ---------- code blocks ---------- */
+
+  /**
+   * Copies text and shows "Copied" on the button for a moment.
+   */
+  function copyWithFeedback(button, text, label) {
+    const done = function () {
+      button.classList.add('is-copied');
+      button.innerHTML = icon('check') + '<span>Copied</span>';
+      setTimeout(function () {
+        button.classList.remove('is-copied');
+        button.innerHTML = icon('copy') + '<span>' + label + '</span>';
+      }, 1600);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, done);
+    } else {
+      done();
+    }
+  }
+
+  /**
+   * The text a code block copies: the code without its shell prompts.
+   */
+  function codeText(pre) {
+    const copy = pre.cloneNode(true);
+    copy.querySelectorAll('.p').forEach(function (prompt) {
+      prompt.remove();
+    });
+    return copy.textContent.replace(/\n$/, '');
+  }
+
+  /**
+   * Adds the title bar and copy button to each titled or bare code block.
+   */
+  function enhanceCodeBlocks() {
+    document.querySelectorAll('.vc-code:not([data-pm]):not([data-closing])').forEach(function (block) {
+      const pre = block.querySelector('pre');
+      pre.tabIndex = 0;
+      const canCopy = !block.hasAttribute('data-nocopy');
+      const title = block.dataset.title;
+      if (title) {
+        const bar = document.createElement('div');
+        bar.className = 'vc-code__bar';
+        bar.innerHTML = '<span class="vc-code__title">' + (title === 'Terminal' ? icon('terminal') : icon('file')) + escapeHtml(title) + '</span>' +
+          (canCopy ? '<button class="vc-code__copy" type="button" aria-label="Copy code">' + icon('copy') + '<span>Copy</span></button>' : '');
+        block.insertBefore(bar, pre);
+      } else {
+        block.classList.add('vc-code--bare');
+        if (canCopy) {
+          block.insertAdjacentHTML('beforeend', '<button class="vc-code__copy" type="button" aria-label="Copy code">' + icon('copy') + '<span>Copy</span></button>');
+        }
+      }
+    });
+    document.addEventListener('click', function (event) {
+      const button = event.target.closest('.vc-code__copy');
+      if (!button) {
+        return;
+      }
+      const block = button.closest('.vc-code');
+      copyWithFeedback(button, codeText(block.querySelector('pre')), 'Copy');
+    });
+  }
+
+  /**
+   * Builds the package-manager code tabs. All of them share one choice, as Fumadocs' tab-group does.
+   */
+  function buildPackageTabs() {
+    document.querySelectorAll('.vc-code[data-pm]').forEach(function (block, blockIndex) {
+      const command = block.dataset.pm;
+      const panelId = 'pm-panel-' + blockIndex;
+      block.innerHTML = '<div class="vc-code__bar"><div class="cb-tabs" role="tablist" aria-label="Package manager">' +
+        PM.map(function (name) {
+          return '<button class="cb-tab" type="button" role="tab" id="pm-' + blockIndex + '-' + name + '" aria-controls="' + panelId + '" data-pm-name="' + name + '">' + name + '</button>';
+        }).join('') + '</div><button class="vc-code__copy" type="button" aria-label="Copy command">' + icon('copy') + '<span>Copy</span></button></div>' +
+        '<pre role="tabpanel" id="' + panelId + '" tabindex="0"><code></code></pre>';
+      block.dataset.command = command;
+    });
+    document.addEventListener('click', function (event) {
+      const tab = event.target.closest('.cb-tab');
+      if (tab) {
+        setPackageManager(tab.dataset.pmName);
+      }
+    });
+    /* On each tablist, so it runs before the kit's document listener, which reads ← and → as "next variant". */
+    document.querySelectorAll('.cb-tabs').forEach(function (tablist) {
+      tablist.addEventListener('keydown', onTabKey);
+    });
+    setPackageManager(packageManager);
+  }
+
+  /**
+   * Arrow keys, Home and End move between package-manager tabs.
+   */
+  function onTabKey(event) {
+    const tab = event.target.closest('.cb-tab');
+    if (!tab || ['ArrowLeft', 'ArrowRight', 'Home', 'End'].indexOf(event.key) < 0) {
+      return;
+    }
+    event.preventDefault();
+    let index = PM.indexOf(tab.dataset.pmName);
+    if (event.key === 'ArrowLeft') {
+      index = (index + PM.length - 1) % PM.length;
+    } else if (event.key === 'ArrowRight') {
+      index = (index + 1) % PM.length;
+    } else if (event.key === 'Home') {
+      index = 0;
+    } else {
+      index = PM.length - 1;
+    }
+    setPackageManager(PM[index]);
+    tab.parentElement.querySelector('[data-pm-name="' + PM[index] + '"]').focus();
+  }
+
+  /**
+   * Switches every package-manager tab and the closing message to one package manager.
+   */
+  function setPackageManager(name) {
+    packageManager = PM.indexOf(name) >= 0 ? name : 'npm';
+    writeStore('pm', packageManager);
+    document.querySelectorAll('.vc-code[data-pm]').forEach(function (block) {
+      block.querySelectorAll('.cb-tab').forEach(function (tab) {
+        const selected = tab.dataset.pmName === packageManager;
+        tab.setAttribute('aria-selected', String(selected));
+        tab.tabIndex = selected ? 0 : -1;
+      });
+      block.querySelector('pre').setAttribute('aria-labelledby', block.querySelector('.cb-tab[aria-selected="true"]').id);
+      block.querySelector('code').innerHTML = '<span class="p">$ </span>' + escapeHtml(PM_COMMANDS[block.dataset.command][packageManager]);
+    });
+    renderClosingMessage();
+  }
+
+  /**
+   * The closing message init prints, with the commands for the chosen package manager.
+   */
+  function renderClosingMessage() {
+    const block = document.querySelector('[data-closing]');
+    if (!block) {
+      return;
+    }
+    const rows = [
+      [packageManager + ' run storybook', 'Start Storybook, and keep it running'],
+      [packageManager + ' run visual:update', 'Write the first baselines'],
+      [packageManager + ' run visual:check', 'Check the stories against the baselines']
+    ];
+    const width = Math.max.apply(null, rows.map(function (row) {
+      return row[0].length;
+    }));
+    const lines = rows.map(function (row, index) {
+      return '  ' + (index + 1) + '  <span class="s">' + row[0] + '</span>' + ' '.repeat(width - row[0].length + 3) + row[1];
+    });
+    if (!block.querySelector('pre')) {
+      block.innerHTML = '<div class="vc-code__bar"><span class="vc-code__title">' + icon('terminal') + 'Terminal</span></div><pre tabindex="0"><code></code></pre>';
+    }
+    block.querySelector('code').innerHTML =
+      '<span class="s">✓</span> visual-check is set up\n\n' +
+      '<strong>Next</strong>\n' + lines.join('\n') + '\n  4  Commit the changes, baselines included\n\n' +
+      '<span class="c">To set options for every story, see </span><span class="s">.storybook/visual-check.ts</span><span class="c">.\n' +
+      'To run visual-check in CI, see </span><span class="s">https://visual-check.vercel.app/docs/ci</span><span class="c">.</span>';
+  }
+
+  /* ---------- worked example ---------- */
+
+  /**
+   * Paints the pixel strip and fills the ten-pixel table.
+   */
+  function buildPixelExample() {
+    document.querySelectorAll('[data-px]').forEach(function (row) {
+      const kind = row.dataset.px;
+      row.querySelector('.px-cells').innerHTML = PIXELS.map(function (pixel) {
+        if (kind === 'base' || kind === 'snap') {
+          const grey = kind === 'base' ? pixel[0] : pixel[1];
+          return '<span style="background: rgb(' + grey + ' ' + grey + ' ' + grey + ')"></span>';
+        }
+        if (pixel[3].indexOf(kind) >= 0) {
+          return '<span class="hit"></span>';
+        }
+        return '<span class="faded" style="background: rgb(' + pixel[0] + ' ' + pixel[0] + ' ' + pixel[0] + ')"></span>';
+      }).join('');
+    });
+    const body = document.querySelector('[data-px-table]');
+    body.innerHTML = PIXELS.map(function (pixel, index) {
+      const mark = function (value) {
+        return pixel[3].indexOf(value) >= 0 ? '<td>Counts</td>' : '<td class="muted">–</td>';
+      };
+      return '<tr><td class="num">' + (index + 1) + '</td><td>' + pixel[2] + '</td><td class="num">' + pixel[0] + '</td><td class="num">' + pixel[1] + '</td>' +
+        '<td class="num">' + Math.abs(pixel[0] - pixel[1]) + '</td>' + mark('0') + mark('0.01') + mark('0.1') + '</tr>';
+    }).join('');
+  }
+
+  /* ---------- TypeTable ---------- */
+
+  /**
+   * Builds the summary TypeTable at the top of Config.
+   */
+  function buildTypeTable() {
+    const table = document.querySelector('[data-type-table]');
+    if (!table) {
+      return;
+    }
+    table.innerHTML = '<div class="tt-head" aria-hidden="true"><span>Key</span><span class="tt-type">Type</span><span>Default</span><span></span></div>' +
+      KEYS.map(function (key) {
+        const isCode = /^['\d[{]/.test(key[3]);
+        return '<details class="tt-row"><summary><span class="tt-key">' + escapeHtml(key[1]) + '</span><span class="tt-type">' + escapeHtml(key[2]) + '</span>' +
+          '<span class="tt-default' + (isCode ? '' : ' is-prose') + '">' + escapeHtml(key[3]) + '</span>' + icon('chev-right') + '</summary>' +
+          '<div class="tt-body"><p>' + escapeHtml(key[4]) + '</p><dl class="spec spec--key"><div><dt>Type</dt><dd><code>' + escapeHtml(key[2]) + '</code></dd></div>' +
+          '<div><dt>Default</dt><dd>' + (isCode ? '<code>' + escapeHtml(key[3]) + '</code>' : escapeHtml(key[3])) + '</dd></div></dl>' +
+          '<a class="tt-jump vc-link" href="#' + key[0] + '">Go to <code>' + escapeHtml(key[1]) + '</code>' + icon('arrow-right') + '</a></div></details>';
+      }).join('');
+  }
+
+  /* ---------- headings ---------- */
+
+  /**
+   * Adds a hover link to each h2 and h3, as Fumadocs' headings have.
+   */
+  function addHeadingAnchors() {
+    document.querySelectorAll('.prose :is(h2, h3)[id]').forEach(function (heading) {
+      heading.insertAdjacentHTML('beforeend', '<a class="heading-anchor" href="#' + heading.id + '" aria-label="Link to this section">' + icon('hash') + '</a>');
+    });
+  }
+
+  /* ---------- Copy Markdown ---------- */
+
+  /**
+   * Inline HTML to Markdown: code spans and links, nothing else.
+   */
+  function inlineMarkdown(element) {
+    const copy = element.cloneNode(true);
+    copy.querySelectorAll('.heading-anchor, svg').forEach(function (node) {
+      node.remove();
+    });
+    copy.querySelectorAll('code').forEach(function (code) {
+      code.replaceWith('`' + code.textContent + '`');
+    });
+    copy.querySelectorAll('a').forEach(function (link) {
+      const href = link.getAttribute('href') || '';
+      link.replaceWith('[' + link.textContent + '](' + (href.charAt(0) === '#' ? '/docs/' + href.slice(1) : href) + ')');
+    });
+    return copy.textContent.replace(/\s+/g, ' ').trim();
+  }
+
+  /**
+   * The page as Markdown, as Fumadocs serves it at /docs/<page>.md.
+   */
+  function pageMarkdown() {
+    const out = ['# ' + inlineMarkdown(document.querySelector('[data-title]')), '', inlineMarkdown(document.querySelector('[data-desc]'))];
+    const walk = function (parent) {
+      Array.prototype.forEach.call(parent.children, function (node) {
+        if (node.matches('h2, h3')) {
+          out.push('', (node.tagName === 'H2' ? '## ' : '### ') + inlineMarkdown(node));
+        } else if (node.matches('p')) {
+          out.push('', inlineMarkdown(node));
+        } else if (node.matches('ul, ol')) {
+          out.push('');
+          Array.prototype.forEach.call(node.children, function (item, index) {
+            out.push((node.tagName === 'OL' ? (index + 1) + '. ' : '- ') + inlineMarkdown(item));
+          });
+        } else if (node.matches('.vc-code')) {
+          const shell = node.dataset.pm || node.dataset.title === 'Terminal' || node.hasAttribute('data-closing') || !node.dataset.title;
+          out.push('', '```' + (shell ? 'sh' : (/\.tsx$/.test(node.dataset.title) ? 'tsx' : 'ts')), codeText(node.querySelector('pre')), '```');
+        } else if (node.matches('.vc-callout')) {
+          out.push('', '> **' + inlineMarkdown(node.querySelector('.vc-callout__title')) + '**');
+          node.querySelectorAll('p').forEach(function (paragraph) {
+            out.push('> ' + inlineMarkdown(paragraph));
+          });
+        } else if (node.matches('.table-wrap')) {
+          node.querySelectorAll('tr').forEach(function (row, index) {
+            out.push((index === 0 ? '\n' : '') + '| ' + Array.prototype.map.call(row.children, inlineMarkdown).join(' | ') + ' |');
+            if (index === 0) {
+              out.push('|' + Array.prototype.map.call(row.children, function () { return ' --- '; }).join('|') + '|');
+            }
+          });
+        } else if (node.matches('.fd-steps, .fd-step, .stub, .cards')) {
+          walk(node);
+        }
+      });
+    };
+    walk(sectionFor(currentSlug));
+    return out.join('\n').replace(/\n{3,}/g, '\n\n') + '\n';
+  }
+
+  /* ---------- Open ▾ ---------- */
+
+  /**
+   * Places the Open menu under its trigger, kept inside the viewport.
+   */
+  function placeMenu() {
+    const trigger = document.getElementById('open-trigger');
+    const menu = document.getElementById('open-menu');
+    const rect = trigger.getBoundingClientRect();
+    const left = Math.min(rect.left, window.innerWidth - menu.offsetWidth - 8);
+    menu.style.left = Math.max(8, left) + 'px';
+    menu.style.top = (rect.bottom + 6) + 'px';
+  }
+
+  /**
+   * Wires the Open menu: placement, aria-expanded, keyboard entry and arrow keys between its links.
+   */
+  function setUpOpenMenu() {
+    const trigger = document.getElementById('open-trigger');
+    const menu = document.getElementById('open-menu');
+    let fromKeyboard = false;
+    trigger.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') {
+        fromKeyboard = true;
+        if (event.key === 'ArrowDown') {
+          event.preventDefault();
+          if (!menu.matches(':popover-open')) {
+            menu.showPopover();
+          } else {
+            menu.querySelector('a').focus();
+          }
+        }
+      }
+    });
+    trigger.addEventListener('pointerdown', function () {
+      fromKeyboard = false;
+    });
+    menu.addEventListener('toggle', function (event) {
+      const open = event.newState === 'open';
+      trigger.setAttribute('aria-expanded', String(open));
+      if (open) {
+        placeMenu();
+        if (fromKeyboard) {
+          menu.querySelector('a').focus();
+        }
+      }
+    });
+    menu.addEventListener('keydown', function (event) {
+      const links = Array.prototype.slice.call(menu.querySelectorAll('a'));
+      const index = links.indexOf(document.activeElement);
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const step = event.key === 'ArrowDown' ? 1 : -1;
+        links[(index + step + links.length) % links.length].focus();
+      } else if (event.key === 'Home' || event.key === 'End') {
+        event.preventDefault();
+        links[event.key === 'Home' ? 0 : links.length - 1].focus();
+      }
+    });
+    menu.addEventListener('click', function (event) {
+      if (event.target.closest('a')) {
+        menu.hidePopover();
+      }
+    });
+    window.addEventListener('resize', function () {
+      if (menu.matches(':popover-open')) {
+        placeMenu();
+      }
+    });
+    window.addEventListener('scroll', function () {
+      if (menu.matches(':popover-open')) {
+        placeMenu();
+      }
+    }, { passive: true });
+  }
+
+  /* ---------- search ---------- */
+
+  let searchIndex = [];
+  let searchOptions = [];
+  let searchSelected = 0;
+
+  /**
+   * Builds the static index: every page, with its headings and text, from the IA and the drafted pages.
+   */
+  function buildSearchIndex() {
+    searchIndex = ORDER.map(function (slug) {
+      const page = PAGES[slug];
+      const entry = { slug: slug, title: page.title, group: groupOf(slug).title, headings: [], text: plain(page.desc) };
+      if (page.drafted) {
+        const section = sectionFor(slug);
+        entry.text += ' ' + section.textContent;
+        entry.headings = Array.prototype.map.call(section.querySelectorAll('h2[id], h3[id]'), function (heading) {
+          const copy = heading.cloneNode(true);
+          copy.querySelectorAll('.heading-anchor').forEach(function (anchor) {
+            anchor.remove();
+          });
+          return { id: heading.id, html: copy.innerHTML, text: copy.textContent.trim() };
+        });
+      } else {
+        entry.text += ' ' + page.covers.map(plain).join(' ');
+      }
+      entry.titleText = plain(page.title);
+      return entry;
+    });
+  }
+
+  /**
+   * Wraps the first match of the query in a mark, inside an HTML title.
+   */
+  function highlight(html, query) {
+    if (!query) {
+      return html;
+    }
+    const pattern = new RegExp('(' + query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'i');
+    return html.split(/(<[^>]+>)/).map(function (part) {
+      return part.charAt(0) === '<' ? part : part.replace(pattern, '<mark>$1</mark>');
+    }).join('');
+  }
+
+  /**
+   * Finds pages and headings for a query, grouped by page, best match first.
+   */
+  function searchFor(query) {
+    const needle = query.toLowerCase();
+    const results = [];
+    searchIndex.forEach(function (entry) {
+      const title = entry.titleText.toLowerCase();
+      let score = 0;
+      if (title.indexOf(needle) === 0) {
+        score = 100;
+      } else if (title.indexOf(needle) > 0) {
+        score = 80;
+      } else if (entry.text.toLowerCase().indexOf(needle) >= 0) {
+        score = 20;
+      }
+      const headings = entry.headings.filter(function (heading) {
+        return heading.text.toLowerCase().indexOf(needle) >= 0;
+      }).slice(0, 4);
+      if (headings.length) {
+        score = Math.max(score, 60);
+      }
+      if (score) {
+        results.push({ entry: entry, score: score, headings: headings });
+      }
+    });
+    results.sort(function (a, b) {
+      return b.score - a.score;
+    });
+    return results.slice(0, 6);
+  }
+
+  /**
+   * Renders the result list for the input's current value.
+   */
+  function renderSearch() {
+    const input = document.getElementById('search-input');
+    const list = document.getElementById('search-list');
+    const query = input.value.trim();
+    let html = '';
+    searchOptions = [];
+    const option = function (href, kind, contentHtml, where) {
+      const id = 'search-opt-' + searchOptions.length;
+      searchOptions.push(id);
+      return '<a class="search-opt" role="option" id="' + id + '" href="' + href + '" tabindex="-1" data-kind="' + kind + '" aria-selected="false">' +
+        icon(kind === 'heading' ? 'hash' : 'file') + '<span class="search-opt__text">' + contentHtml + '</span>' +
+        (where ? '<span class="search-opt__where">' + where + '</span>' : '') + '</a>';
+    };
+    if (!query) {
+      html += '<p class="search-group" role="presentation">Suggested</p>';
+      ['getting-started', 'config', 'color-and-pixels', 'ci', 'flaky-snapshots'].forEach(function (slug) {
+        html += option('#' + slug, 'page', PAGES[slug].title, groupOf(slug).title);
+      });
+    } else {
+      const results = searchFor(query);
+      if (!results.length) {
+        html = '<p class="search-empty">No results for “' + escapeHtml(query) + '”.</p>';
+      }
+      results.forEach(function (result) {
+        html += option('#' + result.entry.slug, 'page', highlight(result.entry.title, query), result.entry.group);
+        result.headings.forEach(function (heading) {
+          html += option('#' + heading.id, 'heading', highlight(heading.html, query), '');
+        });
+      });
+    }
+    list.innerHTML = html;
+    selectSearch(0);
+  }
+
+  /**
+   * Moves the selection in the result list and keeps it in view.
+   */
+  function selectSearch(index) {
+    const input = document.getElementById('search-input');
+    if (!searchOptions.length) {
+      input.removeAttribute('aria-activedescendant');
+      return;
+    }
+    searchSelected = (index + searchOptions.length) % searchOptions.length;
+    searchOptions.forEach(function (id, optionIndex) {
+      document.getElementById(id).setAttribute('aria-selected', String(optionIndex === searchSelected));
+    });
+    const selected = document.getElementById(searchOptions[searchSelected]);
+    input.setAttribute('aria-activedescendant', selected.id);
+    selected.scrollIntoView({ block: 'nearest' });
+  }
+
+  /**
+   * Opens the search dialog.
+   */
+  function openSearch() {
+    const dialog = document.getElementById('search-dialog');
+    if (dialog.open) {
+      return;
+    }
+    if (document.getElementById('nav-drawer').open) {
+      closeDrawer();
+    }
+    const input = document.getElementById('search-input');
+    input.value = '';
+    renderSearch();
+    dialog.showModal();
+    input.focus();
+  }
+
+  /**
+   * Wires the search dialog: input, keyboard, pointer and light dismiss.
+   */
+  function setUpSearch() {
+    const dialog = document.getElementById('search-dialog');
+    const input = document.getElementById('search-input');
+    const list = document.getElementById('search-list');
+    buildSearchIndex();
+    input.addEventListener('input', renderSearch);
+    input.addEventListener('keydown', function (event) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        selectSearch(searchSelected + (event.key === 'ArrowDown' ? 1 : -1));
+      } else if (event.key === 'Enter' && !event.isComposing) {
+        event.preventDefault();
+        const selected = searchOptions[searchSelected] && document.getElementById(searchOptions[searchSelected]);
+        if (selected) {
+          selected.click();
+        }
+      }
+    });
+    list.addEventListener('mousemove', function (event) {
+      const optionElement = event.target.closest('.search-opt');
+      if (optionElement) {
+        selectSearch(searchOptions.indexOf(optionElement.id));
+      }
+    });
+    list.addEventListener('click', function (event) {
+      if (event.target.closest('.search-opt')) {
+        dialog.close();
+      }
+    });
+    dialog.querySelector('[data-close-search]').addEventListener('click', function () {
+      dialog.close();
+    });
+    dialog.addEventListener('click', function (event) {
+      if (event.target === dialog && !('closedBy' in dialog)) {
+        const rect = dialog.getBoundingClientRect();
+        const inside = event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+        if (!inside) {
+          dialog.close();
+        }
+      }
+    });
+    document.addEventListener('keydown', function (event) {
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        if (dialog.open) {
+          dialog.close();
+        } else {
+          openSearch();
+        }
+      }
+    });
+    document.addEventListener('click', function (event) {
+      if (event.target.closest('[data-open-search], .kit-header .vc-search, .kit-header .vc-header__search-icon')) {
+        openSearch();
+      }
+    });
+    document.querySelectorAll('[data-mod]').forEach(function (kbd) {
+      kbd.textContent = isMac ? '⌘' : 'Ctrl';
+    });
+  }
+
+  /* ---------- drawer ---------- */
+
+  /**
+   * Opens the sidebar drawer (phones).
+   */
+  function openDrawer() {
+    const drawer = document.getElementById('nav-drawer');
+    if (!drawer.open) {
+      drawer.showModal();
+      drawer.querySelector('[data-close-drawer]').focus();
+    }
+    syncDrawerTriggers(true);
+  }
+
+  /**
+   * Closes the sidebar drawer.
+   */
+  function closeDrawer() {
+    const drawer = document.getElementById('nav-drawer');
+    if (drawer.open) {
+      drawer.close();
+    }
+  }
+
+  /**
+   * Keeps aria-expanded on every drawer trigger in step with the drawer.
+   */
+  function syncDrawerTriggers(open) {
+    document.querySelectorAll('[data-open-drawer], .kit-header [data-kit-menu]').forEach(function (trigger) {
+      trigger.setAttribute('aria-expanded', String(open));
+    });
+  }
+
+  /**
+   * Wires the drawer, and borrows the SiteHeader's menu button for it in the site-header layout.
+   */
+  function setUpDrawer() {
+    const drawer = document.getElementById('nav-drawer');
+    drawer.addEventListener('close', function () {
+      syncDrawerTriggers(false);
+    });
+    drawer.addEventListener('click', function (event) {
+      if (event.target.closest('[data-close-drawer]') || event.target.closest('.nav-item, .drawer-links a[href^="#"]')) {
+        closeDrawer();
+        return;
+      }
+      if (event.target === drawer && !('closedBy' in drawer)) {
+        const rect = drawer.getBoundingClientRect();
+        if (event.clientX < rect.left) {
+          closeDrawer();
+        }
+      }
+    });
+    /* Capture phase: the kit's own menu sheet never opens; the docs drawer does instead. */
+    document.addEventListener('click', function (event) {
+      const trigger = event.target.closest('[data-open-drawer], .kit-header [data-kit-menu]');
+      if (!trigger) {
+        return;
+      }
+      event.stopPropagation();
+      event.preventDefault();
+      openDrawer();
+    }, true);
+    document.querySelectorAll('.kit-header [data-kit-menu]').forEach(function (button) {
+      button.setAttribute('aria-controls', 'nav-drawer');
+      button.setAttribute('aria-label', 'Open navigation');
+    });
+  }
+
+  /* ---------- theme switch, collapse, folders ---------- */
+
+  /**
+   * Shows which theme is on in every theme switch.
+   */
+  function syncThemeSwitches() {
+    const dark = root.getAttribute('data-theme') === 'dark';
+    document.querySelectorAll('[data-set-theme]').forEach(function (button) {
+      button.setAttribute('aria-pressed', String((button.dataset.setTheme === 'dark') === dark));
+    });
+  }
+
+  /**
+   * Wires the theme switches, the sidebar collapse and the folder toggles.
+   */
+  function setUpControls() {
+    document.addEventListener('click', function (event) {
+      const themeButton = event.target.closest('[data-set-theme]');
+      if (themeButton && window.VCProto) {
+        window.VCProto.setTheme(themeButton.dataset.setTheme);
+      }
+      const folder = event.target.closest('.nav-folder');
+      if (folder) {
+        const group = folder.closest('.nav-group');
+        setFolder(group, !group.classList.contains('is-open'));
+      }
+      const layout = document.getElementById('nd-docs-layout');
+      if (event.target.closest('[data-collapse]')) {
+        layout.setAttribute('data-sidebar-collapsed', '');
+        document.querySelector('[data-expand]').focus();
+        relayout();
+      }
+      if (event.target.closest('[data-expand]')) {
+        layout.removeAttribute('data-sidebar-collapsed');
+        document.querySelector('[data-collapse]').focus();
+        relayout();
+      }
+      if (event.target.closest('[data-skip]')) {
+        event.preventDefault();
+        document.getElementById('nd-page').focus();
+      }
+    });
+    new MutationObserver(syncThemeSwitches).observe(root, { attributes: true, attributeFilter: ['data-theme'] });
+    syncThemeSwitches();
+
+    const tocButton = document.querySelector('.tocnav-btn');
+    const tocPanel = document.getElementById('tocnav-panel');
+    tocButton.addEventListener('click', function () {
+      const open = tocPanel.hidden;
+      tocPanel.hidden = !open;
+      tocButton.setAttribute('aria-expanded', String(open));
+      if (open) {
+        relayout();
+      }
+    });
+    tocPanel.addEventListener('click', function (event) {
+      if (event.target.closest('.toc-item')) {
+        tocPanel.hidden = true;
+        tocButton.setAttribute('aria-expanded', 'false');
+      }
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && !tocPanel.hidden) {
+        tocPanel.hidden = true;
+        tocButton.setAttribute('aria-expanded', 'false');
+        tocButton.focus();
+      }
+    });
+  }
+
+  /**
+   * Recomputes TOC geometry and the scrollspy after a layout change.
+   */
+  function relayout() {
+    tocs.forEach(layoutToc);
+    updateActive();
+  }
+
+  /* ---------- boot ---------- */
+
+  /**
+   * Builds everything once the kit has rendered its header.
+   */
+  function init() {
+    document.querySelectorAll('[data-nav]').forEach(function (container, index) {
+      renderNav(container, index === 0 ? 'nav' : 'drawer-nav');
+    });
+    document.querySelectorAll('[data-toc]').forEach(function (list) {
+      tocs.push({ list: list, headings: [], items: [], active: [], height: 0 });
+    });
+    addHeadingAnchors();
+    enhanceCodeBlocks();
+    buildPackageTabs();
+    buildPixelExample();
+    buildTypeTable();
+    setUpOpenMenu();
+    setUpSearch();
+    setUpDrawer();
+    setUpControls();
+
+    document.querySelector('[data-copy-md]').addEventListener('click', function (event) {
+      copyWithFeedback(event.currentTarget, pageMarkdown(), 'Copy Markdown');
+    });
+
+    window.addEventListener('hashchange', function () {
+      route(false);
+    });
+    let ticking = false;
+    window.addEventListener('scroll', function () {
+      if (ticking) {
+        return;
+      }
+      ticking = true;
+      requestAnimationFrame(function () {
+        ticking = false;
+        updateActive();
+      });
+    }, { passive: true });
+    window.addEventListener('resize', function () {
+      requestAnimationFrame(relayout);
+    });
+    document.addEventListener('vc-proto:toggle', relayout);
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(relayout);
+    }
+    route(true);
+  }
+
+  /* The kit renders the SiteHeader on DOMContentLoaded; this listener runs after it. */
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>

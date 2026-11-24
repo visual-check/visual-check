@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Landing mixer</title>
+<!-- PROTOTYPE — throwaway. Mix and match: each landing section (slot) comes from any variant, A to E.
+     Every slot is that variant's own page in an iframe (?embed=1&slot=…), so variants can't break each other.
+     Each slot keeps the idea toggles and copy alternative last chosen on that variant's own page. -->
+<link rel="icon" href="../shared/logo/favicon.svg">
+<link rel="stylesheet" href="../shared/tokens.css">
+<link rel="stylesheet" href="../shared/bundle.css">
+<link rel="stylesheet" href="../shared/proto-base.css">
+<style>
+  .mix-frame { display: block; width: 100%; height: 480px; border: 0; background: var(--bg-page); }
+  .mix-slot { position: relative; }
+  .mix-tag {
+    position: absolute; top: 8px; right: max(8px, env(safe-area-inset-right, 0px)); z-index: 5;
+    padding: 2px 8px; border-radius: 999px; background: #111; color: #f5f5f5;
+    font: 500 11px/16px ui-sans-serif, system-ui, sans-serif; opacity: .8; pointer-events: none;
+  }
+  html[data-t-tags="hidden"] .mix-tag { display: none; }
+  .mix-panel {
+    position: fixed; left: 50%; bottom: calc(56px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%);
+    z-index: 2147483001; width: min(560px, calc(100vw - 16px)); max-height: 70vh; overflow: auto;
+    padding: 12px; border-radius: 14px; background: #111; color: #f5f5f5;
+    box-shadow: 0 6px 24px rgba(0,0,0,.35), 0 0 0 1px rgba(255,255,255,.12);
+    font: 500 12px/16px ui-sans-serif, system-ui, -apple-system, sans-serif;
+  }
+  .mix-panel[hidden] { display: none; }
+  .mix-row { display: grid; grid-template-columns: 84px 1fr; align-items: center; gap: 8px; padding: 4px 0; }
+  .mix-row__name { color: #bbb; }
+  .mix-seg { display: flex; flex-wrap: wrap; gap: 2px; }
+  .mix-seg button {
+    min-width: 34px; height: 28px; padding: 0 8px; border: 0; border-radius: 999px;
+    background: rgba(255,255,255,.08); color: inherit; font: inherit; cursor: pointer;
+  }
+  .mix-seg button[aria-pressed="true"] { background: #f5f5f5; color: #111; }
+  .mix-panel__foot { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.15); }
+  .mix-panel__foot button { height: 28px; padding: 0 10px; border: 0; border-radius: 999px; background: rgba(255,255,255,.12); color: inherit; font: inherit; cursor: pointer; }
+</style>
+<script>
+  window.VC_PAGE = {
+    set: 'landing',
+    key: 'Mix',
+    toggles: [{ id: 'tags', label: 'Slot tags', options: ['shown', 'hidden'] }],
+    extraParams: function (p) { (window.MIX_STATE || []).forEach(function (s) { p.set(s.slot, s.variant); }); }
+  };
+</script>
+<script src="../shared/proto-kit.js"></script>
+</head>
+<body id="top">
+<div data-kit="header"></div>
+<main id="mix-root"></main>
+<div data-kit="footer"></div>
+<div class="mix-panel" id="mix-panel" hidden role="dialog" aria-label="Choose a variant for each section"></div>
+<script>
+(function () {
+  var VARIANTS = ['A', 'B', 'C', 'D', 'E'];
+  var FILES = { A: 'a.html', B: 'b.html', C: 'c.html', D: 'd.html', E: 'e.html' };
+  var NAMES = { hero: 'Hero', problem: 'Problem', demo: 'Demo', commands: 'Commands', features: 'Features', agent: 'Agent', faq: 'FAQ', cta: 'Last call' };
+  /* The starting mix: the recommended combination. Change it in the panel; the URL keeps it. */
+  var DEFAULT = { hero: 'A', problem: 'D', demo: 'D', commands: 'B', features: 'D', agent: 'E', faq: 'B', cta: 'A' };
+  var params = new URLSearchParams(location.search);
+  var state = VCProto.SLOTS.map(function (slot) {
+    var v = params.get(slot) || DEFAULT[slot];
+    if (v !== 'off' && VARIANTS.indexOf(v) < 0) v = DEFAULT[slot];
+    return { slot: slot, variant: v };
+  });
+  window.MIX_STATE = state;
+  var rootEl = document.getElementById('mix-root');
+
+  function src(s) {
+    var p = new URLSearchParams({ embed: '1', slot: s.slot, theme: VCProto.theme, motion: VCProto.motion });
+    return FILES[s.variant] + '#' + p.toString();
+  }
+  function render() {
+    rootEl.innerHTML = '';
+    state.forEach(function (s) {
+      if (s.variant === 'off') return;
+      var wrap = document.createElement('div');
+      wrap.className = 'mix-slot';
+      wrap.innerHTML = '<span class="mix-tag">' + NAMES[s.slot] + ' · ' + s.variant + '</span>';
+      var f = document.createElement('iframe');
+      f.className = 'mix-frame';
+      f.setAttribute('data-kit-frame', '');
+      f.setAttribute('data-slot', s.slot);
+      f.title = NAMES[s.slot] + ' section from variant ' + s.variant;
+      f.src = src(s);
+      wrap.appendChild(f);
+      rootEl.appendChild(wrap);
+    });
+  }
+  window.addEventListener('message', function (event) {
+    var d = event.data || {};
+    if (d.type !== 'vc-proto:height') return;
+    var frames = rootEl.querySelectorAll('iframe');
+    for (var index = 0; index < frames.length; index++) {
+      if (frames[index].contentWindow === event.source) frames[index].style.height = d.height + 'px';
+    }
+  });
+
+  var panel = document.getElementById('mix-panel');
+  function renderPanel() {
+    panel.innerHTML = state.map(function (s, index) {
+      return '<div class="mix-row"><span class="mix-row__name">' + NAMES[s.slot] + '</span><span class="mix-seg">' +
+        VARIANTS.concat(['off']).map(function (v) {
+          return '<button type="button" data-i="' + index + '" data-v="' + v + '" aria-pressed="' + (s.variant === v) + '">' + v + '</button>';
+        }).join('') + '</span></div>';
+    }).join('') +
+      '<div class="mix-panel__foot">' + VARIANTS.map(function (v) { return '<button type="button" data-all="' + v + '">All ' + v + '</button>'; }).join('') +
+      '<button type="button" data-shuffle>Shuffle</button></div>';
+  }
+  panel.addEventListener('click', function (event) {
+    var b = event.target.closest('button'); if (!b) return;
+    if (b.hasAttribute('data-all')) state.forEach(function (s) { s.variant = b.getAttribute('data-all'); });
+    else if (b.hasAttribute('data-shuffle')) state.forEach(function (s) { s.variant = VARIANTS[Math.floor(Math.random() * VARIANTS.length)]; });
+    else state[+b.getAttribute('data-i')].variant = b.getAttribute('data-v');
+    VCProto.syncUrl(); renderPanel(); render();
+  });
+  VCProto.addBarButton(function () { return 'Sections ▴'; }, 'Pick a variant for each section', function () {
+    panel.hidden = !panel.hidden; if (!panel.hidden) renderPanel();
+  });
+  document.addEventListener('keydown', function (event) { if (event.key === 'Escape') panel.hidden = true; });
+  render();
+  VCProto.syncUrl();
+})();
+</script>
+</body>
+</html>

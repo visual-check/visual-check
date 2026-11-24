@@ -1,0 +1,404 @@
+/* PROTOTYPE — throwaway. Landing F: five top headers, one per option of the `header` idea toggle
+   (html[data-t-header="bare|slug|command|reveal|corners"]). f-headers.js renders all five into
+   <div id="f-header" data-f-headers> and shows the active one. Load after tokens.css and bundle.css.
+   Every class is prefixed fh-; the design system's own vc- classes are used as they are.
+
+   Values the design system doesn't have yet (become tokens before the real build):
+   - page container: 1200px of content; gutter 16px (space-4) on phones, 32px (space-8) from 768px, as landing A
+   - compact bar: 48px tall (space-12), for command and reveal; slug line 40px (a 16px label line + space-3 above and below)
+   - logo heights: 20px in a compact bar (the logo README's minimum), 24px in a full row (as the SiteHeader);
+     mark 24px on phones, 16px in the slug (its minimum), 28px in a corner
+   - registration mark in the slug: 15px, 1px stroke; colour-bar patch 8px (landing A's are 22px and 12px)
+   - mono link and glyph button target: 28px (WCAG 2.5.8 asks for 24px)
+   - install chip: 32px tall (space-8), the command at 14px mono (the code size), 12px label size under 640px
+   - corners: fixed 32px in from the screen's corners from 1440px, links set vertically in a 28px column (34px clear of
+     the 1200px container's crop marks at 1440px); under 1440px a 64px band above the hero that scrolls away
+   - crop mark: 18px long, 8px off the corner (10px and 4px under 1440px), 1px text-muted, as landing A
+   - layer: 40 for sticky and fixed headers (the design system has no z-index scale; the prototype bar sits above)
+   - copy confirmation shown for 1600ms
+   - collapse steps besides the system's 768px: 640px (command: mark and icon-only copy; slug: drops its middle text),
+     720px (reveal: drops the in-page links), 900px (slug: drops the colour bar), 1024px (reveal: mark for the logo)
+   - the phone chip's fade is a mask (alpha only), not a colour
+*/
+
+/* ---------- shared ---------- */
+.fh-host { display: block; }
+.fh-host [hidden] { display: none !important; }
+
+.fh {
+  --fh-gutter: var(--space-4);
+  --fh-crop-len: 10px;
+  --fh-crop-gap: 4px;
+  color: var(--text-primary);
+  font: var(--text-ui);
+}
+@media (min-width: 768px) {
+  .fh { --fh-gutter: var(--space-8); }
+}
+
+.fh-wrap {
+  box-sizing: border-box;
+  max-width: calc(1200px + 2 * var(--fh-gutter));
+  margin-inline: auto;
+  padding-inline: max(var(--fh-gutter), env(safe-area-inset-left, 0px)) max(var(--fh-gutter), env(safe-area-inset-right, 0px));
+}
+
+.fh-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.fh :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* The logo link. Images keep their own display so vc-only-light / vc-only-dark still switch them. */
+.fh-home { display: inline-flex; align-items: center; flex: none; border-radius: var(--radius-sm); text-decoration: none; }
+.fh-home__full, .fh-home__mark { display: flex; align-items: center; }
+.fh-home__mark { display: none; }
+.fh-logo { height: 24px; width: auto; }
+.fh-logo--bar { height: 20px; }
+.fh-mark { width: 24px; height: 24px; }
+
+/* Text link: the SiteHeader nav look. Muted at rest; on hover the ink comes up and the rule springs out. */
+.fh-link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font: 600 16px/20px var(--font-display);
+  letter-spacing: -0.005em;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color var(--duration-fade) var(--ease-out);
+}
+.fh-link::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 6px;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--duration-spring) var(--ease-spring);
+}
+.fh-link:hover { color: var(--text-primary); }
+.fh-link:hover::after { transform: scaleX(1); }
+.fh-link[aria-current] { color: var(--text-primary); }
+.fh-link[aria-current]::after { transform: scaleX(1); background: var(--text-cyan); }
+
+/* Mono link: print furniture (slug, corners). Same spring rule, 1px. */
+.fh-mono {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 28px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font: var(--text-label);
+  letter-spacing: .02em;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color var(--duration-fade) var(--ease-out);
+}
+.fh-mono::after {
+  content: "";
+  position: absolute;
+  left: var(--space-1);
+  right: var(--space-1);
+  bottom: 4px;
+  height: 1px;
+  background: currentColor;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--duration-spring) var(--ease-spring);
+}
+.fh-mono:hover { color: var(--text-primary); }
+.fh-mono:hover::after { transform: scaleX(1); }
+
+/* Glyph button: a 28px icon button for the mono contexts. Needs an aria-label. */
+.fh-glyph {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--duration-fade) var(--ease-out);
+}
+.fh-glyph .vc-icon { width: 16px; height: 16px; transition: transform var(--duration-spring) var(--ease-spring); }
+.fh-glyph:hover { color: var(--text-primary); }
+.fh-glyph:hover .vc-icon { transform: scale(1.15) rotate(-8deg); }
+.fh-glyph:active .vc-icon { transform: scale(.88); transition-duration: var(--duration-snap); transition-timing-function: var(--ease-snap); }
+
+.fh-reg { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 1; }
+
+/* Sticky and fixed headers leave room above in-page anchors. */
+html[data-fh-header="command"] .fh-target,
+html[data-fh-header="reveal"] .fh-target { scroll-margin-top: calc(var(--space-12) + env(safe-area-inset-top, 0px)); }
+
+/* ---------- 1 · bare: a row on the hero's paper that scrolls away ---------- */
+.fh-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-block: var(--space-6);
+}
+.fh-row__end { display: flex; align-items: center; gap: var(--space-1); margin-right: -8px; }
+.fh-nav { display: flex; align-items: center; }
+
+/* ---------- 2 · slug: the job line along the top edge of a proof sheet ---------- */
+.fh-slug__line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-4);
+  box-sizing: border-box;
+  min-height: 40px;
+  padding-block: var(--space-1);
+  padding-inline: max(var(--fh-gutter), env(safe-area-inset-left, 0px)) max(var(--fh-gutter), env(safe-area-inset-right, 0px));
+  color: var(--text-muted);
+  font: var(--text-label);
+  letter-spacing: .02em;
+}
+.fh-slug__start { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.fh-slug__job {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  min-height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  text-decoration: none;
+}
+.fh-slug__job .fh-mark { width: 16px; height: 16px; }
+.fh-slug__meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fh-slug__end { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-1); }
+.fh-slug__end .fh-reg { margin-left: var(--space-1); }
+.fh-slug__nav { display: flex; align-items: center; gap: var(--space-2); }
+
+.fh-cbar { display: inline-flex; }
+.fh-cbar span { display: block; width: 8px; height: 8px; }
+.fh-cbar .fh-cbar__c { background: var(--brand-cyan); }
+.fh-cbar .fh-cbar__m { background: var(--brand-magenta); }
+.fh-cbar .fh-cbar__k { background: var(--text-primary); }
+.fh-cbar .fh-cbar__p { background: var(--bg-raised); box-shadow: inset 0 0 0 1px var(--border-strong); }
+
+@media (max-width: 899px) {
+  .fh-slug__line { grid-template-columns: minmax(0, 1fr) auto; }
+  .fh-slug .fh-cbar { display: none; }
+}
+@media (max-width: 639px) {
+  .fh-slug__meta { display: none; }
+}
+/* Narrower than the 375px target: keep everything on one line. */
+@media (max-width: 359px) {
+  .fh-slug__end .fh-reg { display: none; }
+  .fh-row .fh-logo { height: 20px; }
+  .fh-row .fh-link { padding: 0 6px; }
+  .fh-row .fh-link::after { left: 6px; right: 6px; }
+}
+
+/* The header's slug replaces the hero's own slug row (f-headers.js marks the hero's first *slug* element). */
+html[data-fh-header="slug"] .fh-absorbed { display: none; }
+
+/* ---------- 3 · command: the install is the header ---------- */
+.fh-host[data-fh-active="command"] { position: sticky; top: 0; z-index: 40; }
+.fh-command {
+  padding-top: env(safe-area-inset-top, 0px);
+  background: var(--bg-page);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.fh-command__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-4);
+  height: var(--space-12);
+}
+.fh-command__start { display: flex; flex: none; }
+.fh-command__end { display: flex; flex: none; align-items: center; justify-content: flex-end; gap: var(--space-1); margin-right: -8px; }
+
+.fh-chip {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-width: 0;
+  height: var(--space-8);
+  padding-left: var(--space-3);
+  border: 1px solid var(--code-bg);
+  border-radius: var(--radius-md);
+  background: var(--code-bg);
+  color: var(--code-fg);
+  font: 400 14px/20px var(--font-mono);
+}
+[data-theme="dark"] .fh-chip { border-color: var(--border-subtle); }
+.fh-chip { transition: opacity var(--duration-fade) var(--ease-out), visibility 0s; }
+/* While the hero's own install command is on screen, the chip waits (f-headers.js sets .is-away). */
+.fh-chip.is-away { opacity: 0; visibility: hidden; transition: opacity var(--duration-fade) var(--ease-out), visibility 0s linear var(--duration-fade); }
+.fh-chip__prompt { flex: none; margin-right: 1ch; color: var(--code-cyan); user-select: none; }
+.fh-chip__cmd {
+  display: block;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  white-space: nowrap;
+  font: inherit;
+  user-select: all;
+}
+.fh-chip__cmd::-webkit-scrollbar { display: none; }
+.fh-chip__copy {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: none;
+  box-sizing: border-box;
+  height: 100%;
+  margin-left: var(--space-3);
+  padding: 0 var(--space-3) 0 var(--space-2);
+  border: 0;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: transparent;
+  color: var(--code-muted);
+  font: var(--text-label);
+  letter-spacing: .02em;
+  cursor: pointer;
+  transition: color var(--duration-fade) var(--ease-out);
+}
+.fh-chip__copy .vc-icon { transition: transform var(--duration-spring) var(--ease-spring); }
+.fh-chip__copy:hover { color: var(--code-fg); }
+.fh-chip__copy:hover .vc-icon { transform: scale(1.15) rotate(-8deg); }
+.fh-chip__copy:focus-visible { outline-offset: -2px; }
+.fh-chip__copy.is-copied { color: var(--code-cyan); }
+.fh-chip__copy .fh-chip__done, .fh-chip__copy.is-copied .fh-chip__idle { display: none; }
+.fh-chip__copy.is-copied .fh-chip__done { display: inline; }
+
+@media (max-width: 639px) {
+  .fh-command__row { display: flex; gap: var(--space-2); }
+  .fh-command .fh-home__full { display: none; }
+  .fh-command .fh-home__mark { display: flex; }
+  .fh-chip { flex: 1 1 auto; font: var(--text-label); }
+  .fh-chip__prompt { display: none; }
+  .fh-chip__cmd { mask-image: linear-gradient(to right, #000 calc(100% - var(--space-4)), transparent); }
+  .fh-chip__copy { margin-left: var(--space-1); padding: 0 var(--space-2); }
+  .fh-chip__copy .fh-chip__word {
+    position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
+  .fh-command__end { gap: 0; }
+  .fh-command__end .fh-link { padding: 0 var(--space-2); }
+  .fh-command__end .fh-link::after { left: var(--space-2); right: var(--space-2); }
+}
+
+/* ---------- 4 · reveal: nothing on the hero; a bar once it has gone ---------- */
+.fh-reveal__bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  padding-top: env(safe-area-inset-top, 0px);
+  background: var(--bg-page);
+  border-bottom: 1px solid var(--border-subtle);
+  transform: translateY(-100%);
+  visibility: hidden;
+  transition: transform var(--duration-spring) var(--ease-out), visibility 0s linear var(--duration-spring);
+}
+.fh-reveal__bar.is-shown {
+  transform: none;
+  visibility: visible;
+  transition: transform var(--duration-spring) var(--ease-out), visibility 0s;
+}
+.fh-reveal__row { display: flex; align-items: center; gap: var(--space-6); height: var(--space-12); }
+.fh-reveal__toc { display: flex; align-items: center; min-width: 0; margin-left: calc(-1 * var(--space-2)); }
+.fh-reveal__end { display: flex; align-items: center; gap: var(--space-1); margin-left: auto; }
+.fh-reveal__end .vc-btn { margin-left: var(--space-2); }
+
+@media (max-width: 1023px) {
+  .fh-reveal__row { gap: var(--space-4); }
+  .fh-reveal__bar .fh-home__full { display: none; }
+  .fh-reveal__bar .fh-home__mark { display: flex; }
+}
+@media (max-width: 719px) {
+  .fh-reveal__toc { display: none; }
+}
+
+/* ---------- 5 · corners: no bar, marks in the corners of the screen ---------- */
+/* Under 1440px the corners sit in a 64px band above the hero's trim and scroll away with it: a phone has no margin,
+   and the 32px gutter of a laptop already holds every section's own crop marks. */
+.fh-corners__frame { position: relative; height: 64px; }
+.fh-corner {
+  position: absolute;
+  top: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.fh-corner--tl { left: max(var(--space-4), env(safe-area-inset-left, 0px)); }
+.fh-corner--tr { right: max(var(--space-4), env(safe-area-inset-right, 0px)); }
+.fh-corner--bl, .fh-corner--br { display: none; }
+.fh-corner .fh-home { min-height: 28px; }
+.fh-corner .fh-mark { width: 28px; height: 28px; }
+.fh-corner__nav { display: flex; align-items: center; }
+.fh-corner__dot { color: var(--text-muted); font: var(--text-label); }
+
+/* Crop marks outside the outer corner of each group: one line along the top or bottom edge, one along the side. */
+.fh-corner::before, .fh-corner::after { content: ""; position: absolute; background: var(--text-muted); pointer-events: none; }
+.fh-corner::before { width: var(--fh-crop-len); height: 1px; }
+.fh-corner::after { width: 1px; height: var(--fh-crop-len); }
+.fh-corner--tl::before { top: 0; right: calc(100% + var(--fh-crop-gap)); }
+.fh-corner--tl::after { left: 0; bottom: calc(100% + var(--fh-crop-gap)); }
+.fh-corner--tr::before { top: 0; left: calc(100% + var(--fh-crop-gap)); }
+.fh-corner--tr::after { right: 0; bottom: calc(100% + var(--fh-crop-gap)); }
+.fh-corner--bl::before { bottom: 0; right: calc(100% + var(--fh-crop-gap)); }
+.fh-corner--bl::after { left: 0; top: calc(100% + var(--fh-crop-gap)); }
+.fh-corner--br::before { bottom: 0; left: calc(100% + var(--fh-crop-gap)); }
+.fh-corner--br::after { right: 0; top: calc(100% + var(--fh-crop-gap)); }
+
+/* From 1440px the side margins are empty: the corners stay on screen, 32px in from its corners. The links are set
+   vertically down the right edge in a 28px column, like a slug along the side of a sheet, so both corners keep
+   the same 34px clear of the hero's crop marks and colour bar, and nothing ever covers the page.
+   The frame is fixed over the whole screen and lets clicks through. */
+@media (min-width: 1440px) {
+  .fh-corners__frame { position: fixed; inset: 0; z-index: 40; height: auto; pointer-events: none; --fh-crop-len: 18px; --fh-crop-gap: 8px; }
+  .fh-corner { top: calc(var(--space-8) + env(safe-area-inset-top, 0px)); pointer-events: auto; }
+  .fh-corner--tl { left: calc(var(--space-8) + env(safe-area-inset-left, 0px)); }
+  .fh-corner--tr { right: calc(var(--space-8) + env(safe-area-inset-right, 0px)); flex-direction: column; gap: var(--space-2); }
+  .fh-corner__nav { writing-mode: vertical-rl; }
+  .fh-corner__nav .fh-mono { min-height: 0; padding: var(--space-1) 6px; }
+  /* Vertical text: the rule runs down the left side, under the rotated letters. */
+  .fh-corner__nav .fh-mono::after { left: 5px; right: auto; top: var(--space-1); bottom: var(--space-1); width: 1px; height: auto; transform: scaleY(0); transform-origin: top; }
+  .fh-corner__nav .fh-mono:hover::after { transform: scaleY(1); }
+  .fh-corner__nav .fh-mono__out { text-orientation: upright; }
+  .fh-corner__dot { padding-block: 2px; }
+  .fh-corner--bl, .fh-corner--br { display: block; top: auto; width: 0; height: 0; bottom: calc(var(--space-8) + env(safe-area-inset-bottom, 0px)); }
+  .fh-corner--bl { left: calc(var(--space-8) + env(safe-area-inset-left, 0px)); }
+  .fh-corner--br { right: calc(var(--space-8) + env(safe-area-inset-right, 0px)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fh-link::after, .fh-mono::after, .fh-glyph .vc-icon, .fh-chip__copy .vc-icon { transition: none; }
+  .fh-glyph:hover .vc-icon, .fh-chip__copy:hover .vc-icon { transform: none; }
+  /* The reveal bar appears in place: no slide. */
+  .fh-reveal__bar, .fh-reveal__bar.is-shown { transform: none; transition: none; }
+  .fh-chip, .fh-chip.is-away { transition: none; }
+}

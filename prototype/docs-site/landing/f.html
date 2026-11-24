@@ -1,0 +1,1482 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>visual-check · Landing F</title>
+<!-- PROTOTYPE — throwaway. Landing variant F: "Chosen mix, tightened". The owner's pick on one page: hero A; problem, demo
+     and commands D; features A; agent D; FAQ and last call A. Markup, CSS and JS are copied from a.html and d.html with
+     their a- / d- prefixes; what F adds is prefixed fm-. About half the words of the sources, the grounds alternate
+     lighter / darker from the hero down, and the first screen says what visual-check is and which problem it solves.
+     The header is another prototype's: f-headers.js renders it into #f-header (toggle "Header"). Without those files
+     the page simply has no header. The hero proof keeps A's DOM scene (it reflows on phones); A's SVG version is dropped. -->
+<link rel="icon" href="../shared/logo/favicon.svg">
+<link rel="stylesheet" href="../shared/tokens.css">
+<link rel="stylesheet" href="../shared/bundle.css">
+<link rel="stylesheet" href="../shared/proto-base.css">
+<link rel="stylesheet" href="f-headers.css">
+<style>
+  /* Values the design system doesn't have yet (become tokens before the real build):
+     Page frame
+     - container: 1200px of content; page gutter 16px on phones, 32px from 768px
+     - landing section padding on phones: 72px (space-24 = 96px from 768px)
+     - section heading on phones: 32px/36px (h1 is 44px/48px from 768px)
+     - hero headline: clamp(36px, 6.2vw, 92px), line-height 0.95, tracking -0.03em (larger than `display`)
+     Bands (toggle "Bands")
+     - band-deep: #eceaf7 light / #1e1b4d dark, a darker band than bg-surface for the alternating sections
+       (in light it equals neutral-bg; in dark it equals bg-raised, so cards on it need the next value)
+     - raised-on-band-deep, dark only: #27245a, for cards on the #1e1b4d band (text-muted reads 6:1 on it)
+     From A (hero, features, FAQ, last call)
+     - margin-note figure: 30px/34px Bricolage, 700
+     - print furniture: crop mark 18px long and 8px off the trim (10px / 4px on phones), 1px, in text-muted;
+       registration mark 22px; colour-bar patch 12px
+     - proof art ratio 640:300
+     From D (problem, demo, commands, agent)
+     - snapshot unit: a capture is laid out in em and scaled with its frame (1em = frame width / 30, or / 23.4375 for
+       the 375px mobile capture), so it scales like the PNG it stands for
+     - story content colours: the user's app inside a snapshot, fixed in both site themes (zinc greys
+       #f4f4f5 #ffffff #e4e4e7 #c4c4cc #18181b #71717a; dark #09090b #18181b #27272a #3f3f46 #fafafa #a1a1aa)
+     - visual diff mark colour = brand-magenta (#ff2d87); wipe handle ink #15133c with a white keyline
+     - dense mock UI type: 600 13px/18px sans for UI, 500 12px/16px mono for paths; mock row padding 8px
+     - demo stage minimum heights: terminal 380px, Storybook 600px, pull request 520px, agent 560px
+     - table cell padding 14px 16px
+  */
+  :root { --a-gutter: 16px; --a-crop-len: 10px; --a-crop-gap: 4px; --a-sec-pad: 72px; }
+  @media (min-width: 768px) { :root { --a-gutter: 32px; --a-crop-len: 18px; --a-crop-gap: 8px; --a-sec-pad: var(--space-24); } }
+
+  /* ---------- page frame: A and D sections share one container, padding and heading scale ---------- */
+  .a-wrap, .d-wrap {
+    position: relative;
+    max-width: calc(1200px + 2 * var(--a-gutter));
+    margin-inline: auto;
+    padding-inline: max(var(--a-gutter), env(safe-area-inset-left, 0px)) max(var(--a-gutter), env(safe-area-inset-right, 0px));
+  }
+  .a-sec, .d-sec { color: var(--text-primary); padding-block: var(--a-sec-pad); }
+  :where(.a-sec, .d-sec) p { margin: 0; }
+  .a-h2, .d-h2 { margin: 0; font: 700 32px/36px var(--font-display); letter-spacing: -0.015em; }
+  @media (min-width: 768px) { .a-h2, .d-h2 { font: var(--text-h1); letter-spacing: -0.015em; } }
+  .d-h2 { max-width: 24ch; }
+  .a-h3, .d-h3 { margin: 0; font: var(--text-h3); }
+  .a-lead, .d-lead { font: var(--text-body-lg); }
+  .d-lead { max-width: 62ch; }
+  .d-p { font: var(--text-body); }
+  .d-small { font: var(--text-small); color: var(--text-muted); }
+  .d-sec code:not(pre code) { font-family: var(--font-mono); overflow-wrap: anywhere; }
+  .d-head { display: grid; gap: var(--space-4); margin-bottom: var(--space-12); }
+  .a-muted { color: var(--text-muted); }
+  /* Single-column grids get one track that may shrink below its content, so long code lines scroll inside their block. */
+  :where(.a-hero__grid, .a-hero__lead, .a-hero__figure, .a-feat__lead, .a-feat__text, .a-imp, .a-spec__row, .a-spec__body,
+    .a-spec__notes, .a-faq__head, .a-faq__list, .a-cta__inner) { grid-template-columns: minmax(0, 1fr); }
+
+  /* ---------- grounds: lighter, darker, lighter… from the hero down ---------- */
+  .fm-page { background: var(--bg-page); }
+  .fm-band { background: var(--bg-surface); }
+  html[data-t-bands="deeper"] .fm-band { background: #eceaf7; }
+  html[data-t-bands="deeper"][data-theme="dark"] .fm-band { background: #1e1b4d; --bg-raised: #27245a; }
+  /* On a band, what used bg-surface to stand apart from the page stands on bg-raised instead. */
+  .fm-band .vc-inline-code, .fm-band .d-today thead th { background: var(--bg-raised); }
+
+  /* ---------- A: print furniture ---------- */
+  /* Crop marks sit outside the four corners of each section's trim (its content box). */
+  .a-crop { position: absolute; top: 0; bottom: 0; left: max(var(--a-gutter), env(safe-area-inset-left, 0px)); right: max(var(--a-gutter), env(safe-area-inset-right, 0px)); pointer-events: none; }
+  .a-crop i { position: absolute; width: 0; height: 0; }
+  .a-crop i::before, .a-crop i::after { content: ""; position: absolute; background: var(--text-muted); }
+  .a-crop i::before { top: 0; height: 1px; width: var(--a-crop-len); }
+  .a-crop i::after { left: 0; width: 1px; height: var(--a-crop-len); }
+  .a-crop i:nth-child(1) { top: 0; left: 0; }
+  .a-crop i:nth-child(1)::before { right: var(--a-crop-gap); }
+  .a-crop i:nth-child(1)::after { bottom: var(--a-crop-gap); }
+  .a-crop i:nth-child(2) { top: 0; right: 0; }
+  .a-crop i:nth-child(2)::before { left: var(--a-crop-gap); }
+  .a-crop i:nth-child(2)::after { bottom: var(--a-crop-gap); }
+  .a-crop i:nth-child(3) { bottom: 0; left: 0; }
+  .a-crop i:nth-child(3)::before { right: var(--a-crop-gap); }
+  .a-crop i:nth-child(3)::after { top: var(--a-crop-gap); }
+  .a-crop i:nth-child(4) { bottom: 0; right: 0; }
+  .a-crop i:nth-child(4)::before { left: var(--a-crop-gap); }
+  .a-crop i:nth-child(4)::after { top: var(--a-crop-gap); }
+  /* The slug: the job line a printer runs along the edge of the sheet. */
+  .a-slug {
+    display: flex; align-items: center; justify-content: space-between; gap: var(--space-4);
+    margin: 0 0 var(--space-12); color: var(--text-muted);
+    font: var(--text-label); letter-spacing: .02em;
+  }
+  .a-reg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1; }
+  .a-cbar { display: inline-flex; gap: 0; }
+  .a-cbar i { width: 12px; height: 12px; display: block; }
+  .a-cbar .c { background: var(--brand-cyan); }
+  .a-cbar .m { background: var(--brand-magenta); }
+  .a-cbar .k { background: var(--text-primary); }
+  .a-cbar .p { background: var(--bg-raised); box-shadow: inset 0 0 0 1px var(--border-strong); }
+  @media (max-width: 479px) { .a-slug__long, .a-slug__r { display: none; } }
+
+  /* Proof notes: what a proofreader writes in the margin, with a leader line to the thing. */
+  .a-note { display: grid; gap: 2px; padding-left: 20px; position: relative; font: var(--text-small); color: var(--text-muted); }
+  .a-note::before { content: ""; position: absolute; left: 0; top: 9px; width: 12px; height: 1px; background: var(--text-muted); }
+  .a-note strong { font: 700 30px/34px var(--font-display); letter-spacing: -0.01em; color: var(--text-primary); }
+  .a-note code { font: 500 14px/20px var(--font-mono); color: var(--text-primary); white-space: nowrap; }
+
+  .a-copy-btn { min-width: 64px; }
+  .vc-code__copy:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  /* ---------- hero (A) ---------- */
+  .a-hero { padding-top: var(--space-8); }
+  @media (min-width: 768px) { .a-hero { padding-top: var(--space-12); } }
+  /* The hero keeps the press marks without a job line: a registration mark in the middle, the colour bar right. */
+  .a-hero .a-slug { display: grid; grid-template-columns: 1fr auto 1fr; margin-bottom: var(--space-8); }
+  .a-hero .a-reg { grid-column: 2; }
+  .a-hero .a-cbar { grid-column: 3; justify-self: end; }
+  .a-hero__title {
+    margin: 0 0 var(--space-6);
+    max-width: 14.5em;
+    font-size: clamp(36px, 6.2vw, 92px);
+    line-height: .95;
+    letter-spacing: -0.03em;
+  }
+  /* What it is, in plain words, right under the headline. */
+  .fm-what { margin: 0 0 var(--space-8); max-width: 36em; font: var(--text-h3); }
+  @media (min-width: 768px) { .fm-what { margin-bottom: var(--space-12); } }
+  .a-hero__grid { display: grid; gap: var(--space-12); }
+  @media (min-width: 1024px) {
+    .a-hero__grid { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); column-gap: 64px; align-items: start; }
+  }
+  .a-hero__lead { display: grid; gap: var(--space-6); align-content: start; }
+  .a-hero__lead .a-lead { max-width: 34em; }
+  .a-install .vc-code__bar { color: var(--code-muted); }
+  .a-install pre { font-size: 16px; line-height: 24px; padding: 18px var(--space-4); }
+  .a-hero__small { margin-top: calc(-1 * var(--space-3)); font: var(--text-small); color: var(--text-muted); }
+  .a-hero__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4) var(--space-6); }
+  .a-hero__proofs { display: grid; gap: var(--space-4); margin-top: var(--space-2); }
+  .a-hero__figure { display: grid; }
+
+  .a-proof { margin: 0; display: grid; gap: 0; background: var(--bg-raised); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); overflow: hidden; }
+  .a-proof__head, .a-proof__foot {
+    display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4);
+    padding: var(--space-3) var(--space-4); font: var(--text-label); letter-spacing: .02em; color: var(--text-muted);
+  }
+  .a-proof__head { justify-content: space-between; }
+  .a-plates { display: inline-flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+  .a-plate { display: inline-flex; align-items: center; gap: 6px; color: var(--text-primary); }
+  .a-plate i { width: 10px; height: 10px; display: block; }
+  .a-plate--c i { background: var(--brand-cyan); }
+  .a-plate--m i { background: var(--brand-magenta); }
+  .a-proof__foot { min-height: 56px; }
+  .a-proof__cap { padding: 0 var(--space-4) var(--space-4); font: var(--text-small); color: var(--text-muted); max-width: 62ch; }
+  .a-art { container: a-art / inline-size; }
+  .a-term { margin-top: var(--space-4); }
+  .a-term pre { font-size: 13px; line-height: 21px; }
+
+  /* The hero proof as a DOM scene: 640 × 300 units, drawn with elements. */
+  .a-ds { --u: calc(100cqw / 640); position: relative; height: calc(var(--u) * 300); font-family: var(--font-sans); }
+  .a-ds__press { position: absolute; left: 0; top: 0; width: calc(var(--u) * 400); height: calc(var(--u) * 300); }
+  .a-ds__plate { position: absolute; inset: 0; transition: opacity 260ms var(--ease-out), transform 900ms var(--ease-out); }
+  /* Baseline button: 40,90 272×120. Snapshot button (padding 10px 16px → 8px 20px, centred): 28,96 296×108.
+     Ink is where both print: 40,96 272×108. The label is centred and identical, so it stays paper. */
+  .a-ds__btn {
+    position: absolute; left: calc(var(--u) * 40); top: calc(var(--u) * 90);
+    width: calc(var(--u) * 272); height: calc(var(--u) * 120); border-radius: calc(var(--u) * 18);
+    transition: left 600ms var(--ease-spring), top 600ms var(--ease-spring), width 600ms var(--ease-spring), height 600ms var(--ease-spring);
+  }
+  .a-ds__plate--c .a-ds__btn { background: var(--brand-cyan); }
+  .a-ds__plate--m .a-ds__btn { background: var(--brand-magenta); left: calc(var(--u) * 28); top: calc(var(--u) * 96); width: calc(var(--u) * 296); height: calc(var(--u) * 108); }
+  .a-ds__plate--k .a-ds__btn { background: var(--text-primary); top: calc(var(--u) * 96); height: calc(var(--u) * 108); }
+  .a-ds__label {
+    position: absolute; left: calc(var(--u) * 40); top: calc(var(--u) * 90); width: calc(var(--u) * 272); height: calc(var(--u) * 120);
+    display: flex; align-items: center; justify-content: center; white-space: nowrap;
+    font: 600 calc(var(--u) * 45) / 1 var(--font-sans); letter-spacing: 0.02em; color: var(--bg-raised);
+  }
+  .a-ds__svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .a-ds__svg .reg { fill: none; stroke-width: 1.5; }
+  .a-ds__plate--c .reg { stroke: var(--brand-cyan); }
+  .a-ds__plate--m .reg { stroke: var(--brand-magenta); }
+  .a-ds__plate--k .reg { stroke: var(--text-primary); }
+  .a-ds__ring, .a-ds__lead { fill: none; stroke: var(--change-fg); stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 100; transition: stroke-dashoffset 520ms var(--ease-out); }
+  .a-ds__lead { stroke: var(--text-muted); stroke-width: 1.5; transition-delay: 380ms; }
+  .a-ds__note {
+    position: absolute; left: calc(var(--u) * 436); top: calc(var(--u) * 74);
+    display: grid; gap: 4px; justify-items: start;
+    transition: opacity 300ms var(--ease-out), transform 300ms var(--ease-out);
+  }
+  .a-ds__num { font: 700 calc(var(--u) * 52) / 1 var(--font-display); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+  .a-ds__px { font: 400 max(13px, calc(var(--u) * 17)) / 1.3 var(--font-sans); color: var(--text-primary); }
+  .a-ds__allowed { font: 400 max(12px, calc(var(--u) * 14)) / 1.3 var(--font-sans); color: var(--text-muted); }
+  .a-ds__note .vc-badge { margin-top: 6px; transition: opacity 300ms var(--ease-out); }
+  /* Start states. The end state is the default, so the page is complete at rest. */
+  .a-ds:not(.is-c) .a-ds__plate--c { opacity: 0; }
+  .a-ds:not(.is-m) .a-ds__plate--m { opacity: 0; transform: translate(calc(var(--u) * 26), calc(var(--u) * 20)); }
+  .a-ds:not(.is-k) .a-ds__plate--k { opacity: 0; }
+  .a-ds:not(.is-diff) :is(.a-ds__plate--m, .a-ds__plate--k) .a-ds__btn { left: calc(var(--u) * 40); top: calc(var(--u) * 90); width: calc(var(--u) * 272); height: calc(var(--u) * 120); }
+  .a-ds:not(.is-mark) :is(.a-ds__ring, .a-ds__lead) { stroke-dashoffset: 100; }
+  .a-ds:not(.is-mark) .a-ds__note { opacity: 0; transform: translateY(6px); }
+  .a-ds:not(.is-done) .a-ds__note .vc-badge { opacity: 0; }
+  /* On a narrow proof the note moves under the button, at a readable size. */
+  @container a-art (max-width: 520px) {
+    .a-ds { --u: calc(100cqw / 400); height: auto; }
+    .a-ds__press { position: relative; height: calc(var(--u) * 300); }
+    .a-ds__lead { display: none; }
+    .a-ds__note { position: static; padding: 0 var(--space-4) var(--space-2); grid-template-columns: auto 1fr; column-gap: var(--space-3); align-items: baseline; }
+    .a-ds__num { font-size: 40px; grid-row: span 2; }
+    .a-ds__note .vc-badge { grid-column: 1 / -1; }
+  }
+
+  /* ---------- D: shared mock pieces ---------- */
+  .d-frame { background: var(--bg-raised); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); overflow: hidden; color: var(--text-primary); }
+  .d-fbtn {
+    display: inline-flex; align-items: center; min-height: 28px; padding: 4px 10px;
+    border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+    background: var(--bg-raised); color: var(--text-primary); font: 600 13px/18px var(--font-sans);
+    transition: background-color var(--duration-fade) var(--ease-out), box-shadow var(--duration-spring) var(--ease-spring);
+  }
+  .d-fbtn.is-pressed { background: var(--bg-surface); box-shadow: 0 0 0 3px var(--border-subtle); }
+  .d-mono { font: 500 12px/16px var(--font-mono); letter-spacing: .01em; color: var(--text-muted); }
+  .d-copybtn { min-width: 64px; text-align: right; }
+
+  /* Storybook panel (the Storybook chapter of the demo) */
+  .d-panel__tabs { display: flex; gap: 4px; padding: 0 12px; border-bottom: 1px solid var(--border-subtle); }
+  .d-panel__tabs span { padding: 10px 8px; font: 600 13px/18px var(--font-sans); color: var(--text-muted); }
+  .d-panel__tabs .is-active { color: var(--text-primary); box-shadow: inset 0 -2px 0 var(--text-cyan); }
+  .d-panel__bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border-subtle); }
+  .d-panel__status { display: inline-flex; align-items: center; gap: 6px; margin-left: 4px; font: 600 13px/18px var(--font-sans); color: var(--text-muted); }
+  .d-panel__status[data-tone="change"] { color: var(--change-fg); }
+  .d-panel__status[data-tone="pass"] { color: var(--info-fg); }
+  .d-panel__body { display: grid; grid-template-columns: 172px minmax(0, 1fr); }
+  .d-rows { list-style: none; margin: 0; padding: 8px; display: grid; align-content: start; gap: 2px; border-right: 1px solid var(--border-subtle); }
+  .d-row {
+    display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 8px; width: 100%;
+    padding: 8px; border: 0; border-radius: var(--radius-md); background: transparent; color: var(--text-primary);
+    font: 600 13px/18px var(--font-sans); text-align: left;
+  }
+  .d-row.is-selected { background: var(--bg-surface); box-shadow: inset 2px 0 0 var(--text-primary); }
+  .d-row .vc-badge { padding: 2px 8px 2px 6px; }
+  .d-row__note { grid-column: 1 / -1; font: 500 12px/16px var(--font-mono); color: var(--text-muted); overflow-wrap: anywhere; }
+  .d-view { padding: 12px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+  .d-view[hidden] { display: none; }
+  .d-view__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+  .d-seg { display: inline-flex; padding: 2px; border-radius: var(--radius-md); background: var(--bg-surface); }
+  .d-seg > * {
+    padding: 4px 10px; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted);
+    font: 600 13px/18px var(--font-sans);
+    transition: background-color var(--duration-fade) var(--ease-out), color var(--duration-fade) var(--ease-out);
+  }
+  .d-seg > .is-on { background: var(--bg-raised); color: var(--text-primary); box-shadow: 0 0 0 1px var(--border-subtle); }
+  .d-view__caption { margin: 0; font: 500 12px/16px var(--font-mono); color: var(--text-muted); white-space: pre; }
+  .d-view__caption b { font-weight: 600; }
+  .d-view__caption .is-base { color: var(--text-cyan); }
+  .d-view__caption .is-snap { color: var(--text-magenta); }
+  .d-view:has(.d-stage[data-view="diff"]) .d-view__caption { display: none; }
+  .d-view__meta { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; font: var(--text-small); color: var(--text-muted); }
+  .d-view__msg { color: var(--change-fg); font-weight: 600; }
+
+  /* The wipe stage: baseline in flow, snapshot clipped on top, visual diff in its own layer */
+  .d-stage { position: relative; display: grid; justify-items: center; border-radius: var(--radius-md); background: var(--bg-surface); overflow: hidden; }
+  .d-stage__frame { position: relative; width: 100%; container-type: inline-size; overflow: hidden; background: #ffffff; }
+  .d-stage[data-mode="mobile"] .d-stage__frame { width: 56%; }
+  .d-cap { position: relative; font-size: calc(100cqw / 30); line-height: 1.5; }
+  .d-stage[data-mode="mobile"] .d-cap { font-size: calc(100cqw / 23.4375); }
+  .d-cap--snap, .d-cap--diff { position: absolute; inset: 0; }
+  .d-cap--snap { clip-path: inset(0 0 0 var(--wipe, 50%)); }
+  .d-cap--diff { display: none; }
+  .d-cap--diff > * { position: absolute; inset: 0; }
+  .d-stage[data-view="diff"] .d-cap--base { visibility: hidden; }
+  .d-stage[data-view="diff"] .d-cap--snap { clip-path: none; opacity: .2; filter: grayscale(1); }
+  .d-stage[data-view="diff"] .d-cap--diff { display: block; }
+  .d-stage__handle { position: absolute; top: 0; bottom: 0; left: var(--wipe, 50%); width: 2px; margin-left: -1px; background: #15133c; box-shadow: 0 0 0 1px rgba(255, 255, 255, .85); pointer-events: none; }
+  .d-stage__handle::after {
+    content: "‹ ›"; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%;
+    background: #15133c; color: #f4f2ff; box-shadow: 0 0 0 1px rgba(255, 255, 255, .85);
+    font: 700 14px/1 var(--font-sans); letter-spacing: -1px; white-space: pre;
+  }
+  .d-stage[data-view="diff"] .d-stage__handle { display: none; }
+
+  /* The story inside a snapshot: someone's app, in its own colours, laid out in capture pixels (1em = 16) */
+  .d-sb {
+    --sb-canvas: #f4f4f5; --sb-card: #ffffff; --sb-line: #e4e4e7; --sb-line-2: #c4c4cc;
+    --sb-ink: #18181b; --sb-muted: #71717a; --sb-btn: #18181b; --sb-on-btn: #fafafa;
+    padding: 1.5em; background: var(--sb-canvas); color: var(--sb-ink); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 1em; line-height: 1.5em;
+  }
+  .d-sb__card { padding: 1.25em 1.25em 1.125em; border: .0625em solid var(--sb-line); border-radius: .75em; background: var(--sb-card); }
+  .d-sb.is-snap .d-sb__card { border-width: .125em; border-color: var(--sb-line-2); padding: 1.1875em 1.1875em 1.0625em; }
+  .d-sb__head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: .625em; }
+  .d-sb__title { font-weight: 700; font-size: 1.125em; }
+  .d-sb__count { font-size: .875em; color: var(--sb-muted); }
+  .d-sb__lines { list-style: none; margin: 0; padding: 0 0 .625em; border-bottom: .0625em solid var(--sb-line); }
+  .d-sb__lines li, .d-sb__sums > span { display: flex; justify-content: space-between; gap: 1em; padding: .1875em 0; font-size: .9375em; }
+  .d-sb__sums { display: block; padding-top: .5em; }
+  .d-sb__sums > span { color: var(--sb-muted); }
+  .d-sb__sums > .is-total { padding-top: .375em; color: var(--sb-ink); font-weight: 700; font-size: 1.0625em; }
+  .d-sb__actions { display: flex; align-items: center; gap: 1em; margin-top: 1em; }
+  .d-sb__btn { position: relative; display: inline-block; padding: .625em 1em; border-radius: .5em; background: var(--sb-btn); color: var(--sb-on-btn); font-weight: 700; white-space: nowrap; }
+  .d-sb.is-snap .d-sb__btn { padding-inline: 1.75em; }
+  .d-sb__link { font-size: .9375em; text-decoration: underline; text-underline-offset: .2em; }
+  .d-sb__note { margin: .75em 0 0; font-size: .8125em; color: var(--sb-muted); }
+  /* Visual diff layers: everything clear except the pixels that differ, in magenta */
+  .d-sb.is-diff, .d-sb.is-diff * { color: transparent !important; background: transparent !important; border-color: transparent !important; text-decoration-color: transparent !important; }
+  .d-sb.is-diff .d-sb__btn, .d-sb.is-diff .d-sb__link { color: #ff2d87 !important; text-decoration-color: #ff2d87 !important; }
+  .d-sb.is-diff.is-snap .d-sb__card { border-color: #ff2d87 !important; }
+  .d-sb.is-diff.is-snap .d-sb__btn::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; width: 1.5em; border-radius: 0 .5em .5em 0; background: #ff2d87; }
+
+  /* ---------- problem (D) ---------- */
+  .fm-pains { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--space-2); max-width: 62ch; }
+  .fm-pains li { position: relative; padding-left: 20px; font: var(--text-body-lg); }
+  .fm-pains li::before { content: ""; position: absolute; left: 0; top: 15px; width: 12px; height: 1px; background: var(--text-muted); }
+  .fm-fix { max-width: 62ch; margin-top: var(--space-2); font: 600 18px/30px var(--font-sans); }
+  .d-prob__pair { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--space-6); align-items: stretch; }
+  .d-prob__panel { display: grid; grid-template-rows: auto 1fr auto; }
+  .d-prob__panel > header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border-subtle); }
+  .d-prob__panel > header h3 { margin: 0; font: var(--text-ui); }
+  .d-prob__panel > footer { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border-subtle); font: var(--text-small); color: var(--text-muted); }
+  .d-diffcode { margin: 0; padding: 12px 0; font: 400 14px/24px var(--font-mono); overflow-x: auto; }
+  .d-diffcode span { display: block; padding: 0 16px; white-space: pre; }
+  .d-diffcode .is-del { background: var(--danger-bg); color: var(--danger-fg); }
+  .d-diffcode .is-add { background: var(--info-bg); color: var(--info-fg); }
+  .d-diffcode i { font-style: normal; color: var(--text-muted); display: inline-block; width: 4ch; user-select: none; }
+  .d-found { list-style: none; margin: 0; padding: 8px 16px; display: grid; gap: 4px; }
+  .d-found li { display: grid; grid-template-columns: 148px minmax(0, 1fr); gap: 16px; align-items: center; padding: 8px 0; }
+  .d-found li + li { border-top: 1px solid var(--border-subtle); }
+  .d-found__id { font: 600 14px/20px var(--font-mono); overflow-wrap: anywhere; }
+  .d-found__msg { display: block; margin-top: 4px; font: var(--text-small); color: var(--text-muted); }
+  .d-thumb { position: relative; height: 100px; border-radius: var(--radius-md); background: #ffffff; overflow: hidden; container-type: inline-size; box-shadow: inset 0 0 0 1px var(--border-subtle); }
+  .d-thumb__ghost { position: absolute; inset: 0; opacity: .22; filter: grayscale(1); }
+  .d-thumb__marks { position: absolute; inset: 0; }
+  .d-tb { position: absolute; font: 700 calc(100cqw / 12)/1 var(--font-sans); white-space: nowrap; }
+  .d-tb--btn { left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 7px 14px; border-radius: 6px; background: #18181b; color: #fafafa; }
+  .d-thumb__marks .d-tb--btn { background: transparent; color: transparent; box-shadow: -3px 0 0 #ff2d87, 3px 0 0 #ff2d87; }
+  .d-tb--phone { left: 50%; top: 8px; bottom: -40px; width: 66%; transform: translateX(-50%); background: #a1a1aa; }
+  .d-tb--dlg { left: 50%; top: 18px; width: 58%; transform: translateX(-50%); padding: 6px 6px 5px; border-radius: 4px; background: #fff; color: #18181b; font-size: 6.5px; line-height: 9px; font-weight: 400; white-space: normal; }
+  .d-tb--dlg b { display: block; font-size: 8px; margin-bottom: 3px; }
+  .d-tb--dlg span { display: flex; justify-content: flex-end; gap: 3px; margin-top: 5px; }
+  .d-tb--dlg i { font-style: normal; font-weight: 700; padding: 3px 5px; border-radius: 3px; background: #18181b; color: #fafafa; }
+  .d-tb--dlg i:first-child { background: #e4e4e7; color: #18181b; }
+  .d-thumb__marks .d-tb--dlg { background: transparent; color: transparent; }
+  .d-thumb__marks .d-tb--dlg i { background: transparent; color: #ff2d87; box-shadow: -2px 0 0 #ff2d87, 2px 0 0 #ff2d87; }
+  .d-today { width: 100%; margin-top: var(--space-12); border-collapse: collapse; font: var(--text-body); }
+  .d-today caption { text-align: left; padding-bottom: var(--space-4); font: var(--text-h3); }
+  .d-today th, .d-today td { padding: 14px 16px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border-subtle); }
+  .d-today thead th { font: var(--text-body-strong); background: var(--bg-surface); }
+  .d-today tbody th { font: var(--text-body-strong); width: 28%; }
+  @media (max-width: 900px) { .d-prob__pair { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 640px) {
+    .d-found li { grid-template-columns: 96px minmax(0, 1fr); gap: 12px; }
+    .d-thumb { height: 72px; }
+    .d-today thead { display: none; }
+    .d-today caption { display: block; }
+    .d-today tbody th { width: auto; }
+    .d-today, .d-today tbody, .d-today tr, .d-today th, .d-today td { display: block; width: auto; }
+    .d-today tr { padding: 12px 0; border-bottom: 1px solid var(--border-subtle); }
+    .d-today th, .d-today td { padding: 4px 0; border: 0; }
+    .d-today td::before { content: attr(data-label); display: block; font: var(--text-small); font-weight: 600; color: var(--text-muted); }
+  }
+
+  /* ---------- demo (D): four surfaces in tabs ---------- */
+  .d-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-2); margin-bottom: var(--space-6); }
+  .d-tab {
+    display: grid; gap: 2px; padding: 12px 16px; border: 0; border-radius: var(--radius-md);
+    background: transparent; color: var(--text-primary); text-align: left; cursor: pointer;
+    transition: background-color var(--duration-fade) var(--ease-out);
+  }
+  .d-tab:hover { background: var(--bg-raised); }
+  .d-tab[aria-selected="true"] { background: var(--bg-raised); box-shadow: inset 0 -3px 0 var(--text-primary); }
+  .d-tab__name { font: 700 18px/24px var(--font-display); }
+  .d-tab__sub { font: var(--text-small); color: var(--text-muted); }
+  .d-surface { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: var(--space-12); align-items: start; }
+  .d-surface[hidden] { display: none; }
+  .d-surface__text { display: grid; gap: var(--space-4); }
+  .d-surface__text .d-p { max-width: 46ch; }
+  .d-surface__stage { display: grid; gap: var(--space-3); min-width: 0; }
+  .d-surface__controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); }
+  .d-next { margin-left: auto; }
+  @media (max-width: 960px) { .d-surface { grid-template-columns: minmax(0, 1fr); gap: var(--space-6); } }
+  @media (max-width: 640px) { .d-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); } .d-tab { padding: 10px 12px; } }
+
+  /* terminal */
+  .d-term pre { min-height: 380px; font-size: 13px; line-height: 21px; }
+  .d-term .d-l { display: block; white-space: pre; }
+  .d-term .d-l.is-dim { color: var(--code-muted); }
+  .d-term .k { color: var(--code-magenta); }
+
+  /* Storybook */
+  .d-sbk { display: grid; grid-template-columns: 172px minmax(0, 1fr); min-height: 600px; }
+  .d-sbk__side { padding: 12px 8px; background: var(--bg-surface); border-right: 1px solid var(--border-subtle); }
+  .d-sbk__search { display: block; margin: 0 4px 12px; padding: 6px 10px; border-radius: var(--radius-md); background: var(--bg-raised); color: var(--text-muted); font: 400 13px/18px var(--font-sans); box-shadow: inset 0 0 0 1px var(--border-subtle); }
+  .d-tree { list-style: none; margin: 0; padding: 0; font: 400 13px/18px var(--font-sans); }
+  .d-tree li { padding: 4px 8px; border-radius: 4px; }
+  .d-tree .is-group { margin-top: 10px; color: var(--text-muted); font-weight: 700; }
+  .d-tree .is-group:first-child { margin-top: 0; }
+  .d-tree .is-comp { padding-left: 16px; }
+  .d-tree .is-story { padding-left: 28px; color: var(--text-muted); }
+  .d-tree .is-current { background: var(--text-primary); color: var(--bg-page); }
+  .d-sbk__main { display: grid; grid-template-rows: auto 1fr; min-width: 0; }
+  .d-sbk__canvas { display: grid; place-items: center; padding: 20px; background: #f4f4f5; border-bottom: 1px solid var(--border-subtle); }
+  .d-sbk__canvas .d-capwrap { width: min(232px, 100%); container-type: inline-size; }
+  .d-sbk__canvas .d-sb { padding: 0; }
+  .d-sbk .d-panel__body { min-height: 404px; }
+  .d-sbk .d-panel__body.is-updated { grid-template-columns: minmax(0, 1fr); }
+  .d-sbk .d-panel__body.is-updated .d-rows { border-right: 0; }
+  .d-sbk .d-panel__empty { padding: 16px; color: var(--text-muted); font: var(--text-small); grid-column: 1 / -1; }
+  .d-sbk .d-stage__frame { max-width: 340px; }
+  @media (max-width: 640px) {
+    .d-sbk { min-height: 0; grid-template-columns: minmax(0, 1fr); }
+    .d-sbk__side { display: none; }
+    .d-sbk .d-panel__body { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+    .d-sbk .d-rows { border-right: 0; border-bottom: 1px solid var(--border-subtle); }
+    .d-sbk__canvas { padding: 12px; }
+    .d-sbk__canvas .d-capwrap { width: 200px; }
+  }
+
+  /* pull request */
+  .d-pr { min-height: 520px; }
+  .d-pr__head { padding: 16px; border-bottom: 1px solid var(--border-subtle); }
+  .d-pr__title { margin: 0; font: 700 20px/26px var(--font-display); }
+  .d-pr__title span { color: var(--text-muted); font-weight: 400; }
+  .d-pr__meta { margin: 4px 0 0; font: var(--text-small); color: var(--text-muted); }
+  .d-pr__meta b { color: var(--info-fg); }
+  .d-pr__tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 12px; border-bottom: 1px solid var(--border-subtle); }
+  .d-pr__tabs span { padding: 10px 8px; font: 600 13px/18px var(--font-sans); color: var(--text-muted); }
+  .d-pr__tabs .is-active { color: var(--text-primary); box-shadow: inset 0 -2px 0 var(--text-cyan); }
+  .d-pr__body { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 7fr); gap: 16px; padding: 16px; align-items: start; }
+  .d-checks { border-radius: var(--radius-md); box-shadow: inset 0 0 0 1px var(--border-subtle); }
+  .d-checks__head { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; padding: 12px; border-bottom: 1px solid var(--border-subtle); }
+  .d-checks__head b { font: var(--text-ui); }
+  .d-checks__head small { grid-column: 2; font: var(--text-small); color: var(--text-muted); }
+  .d-checks ul { list-style: none; margin: 0; padding: 4px 0; }
+  .d-chk { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; padding: 8px 12px; font: 400 13px/18px var(--font-sans); }
+  .d-chk__name { font-weight: 600; overflow-wrap: anywhere; }
+  .d-chk__state { grid-column: 2; color: var(--text-muted); }
+  .d-chk__link { grid-row: 1 / span 2; grid-column: 3; color: var(--text-cyan); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; opacity: 0; }
+  .d-chk[data-state="fail"] .d-chk__link { opacity: 1; }
+  .d-chk.is-pressed { background: var(--bg-surface); }
+  .d-glyph { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; font: 700 12px/1 var(--font-mono); }
+  [data-state="queued"] > .d-glyph { color: var(--text-muted); box-shadow: inset 0 0 0 1.5px var(--border-strong); }
+  [data-state="run"] > .d-glyph { color: var(--caution-fg); background: var(--caution-bg); }
+  [data-state="ok"] > .d-glyph { color: var(--info-fg); background: var(--info-bg); }
+  [data-state="fail"] > .d-glyph { color: var(--danger-fg); background: var(--danger-bg); }
+  .d-summary { border-radius: var(--radius-md); box-shadow: inset 0 0 0 1px var(--border-subtle); padding: 12px 14px; display: grid; gap: 10px; font: 400 14px/22px var(--font-sans); min-width: 0; }
+  .d-summary[hidden] { display: none; }
+  .d-summary__job { font: 500 12px/16px var(--font-mono); color: var(--text-muted); }
+  .d-summary h4 { margin: 0; font: 700 16px/22px var(--font-sans); }
+  .d-summary p { margin: 0; }
+  .d-summary .d-tablewrap { overflow-x: auto; }
+  .d-summary table { border-collapse: collapse; width: 100%; font: 400 12px/16px var(--font-sans); }
+  .d-summary th, .d-summary td { padding: 6px 8px; text-align: left; vertical-align: top; box-shadow: inset 0 0 0 .5px var(--border-subtle); }
+  .d-summary thead th { background: var(--bg-surface); font-weight: 700; }
+  .d-summary td.is-change { color: var(--change-fg); font-weight: 600; }
+  .d-summary code { font: 500 11.5px/16px var(--font-mono); white-space: nowrap; }
+  .d-summary .d-fakelink { color: var(--text-cyan); text-decoration: underline; text-underline-offset: 3px; font-weight: 600; }
+  @media (max-width: 760px) { .d-pr__body { grid-template-columns: minmax(0, 1fr); } }
+
+  /* agent */
+  .d-agent { display: grid; grid-template-rows: auto 1fr auto; min-height: 560px; }
+  .d-agent__head { display: flex; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border-subtle); font: 600 13px/18px var(--font-sans); }
+  .d-agent__head span:last-child { color: var(--text-muted); font: 500 12px/18px var(--font-mono); }
+  .d-agent__log { display: grid; align-content: start; gap: 12px; padding: 16px; font: 400 14px/22px var(--font-sans); min-width: 0; }
+  .d-msg { margin: 0; max-width: 64ch; }
+  .d-msg p { margin: 0; }
+  .d-msg p + p, .d-msg ul + p { margin-top: 8px; }
+  .d-msg ul { margin: 6px 0 0; padding-left: 18px; }
+  .d-msg li + li { margin-top: 4px; }
+  .d-msg code { font: 500 12.5px/20px var(--font-mono); overflow-wrap: anywhere; padding: 1px 4px; border-radius: var(--radius-sm); background: var(--bg-surface); }
+  .d-msg--user { justify-self: end; padding: 8px 12px; border-radius: var(--radius-lg); background: var(--bg-surface); }
+  .d-msg__who { display: block; margin-bottom: 2px; font: 600 12px/16px var(--font-sans); color: var(--text-muted); }
+  .d-tool { border-radius: var(--radius-md); background: var(--code-bg); color: var(--code-fg); font: 400 12.5px/20px var(--font-mono); overflow: hidden; min-width: 0; }
+  .d-tool__head { display: flex; gap: 10px; padding: 6px 12px; color: var(--code-muted); border-bottom: 1px solid rgba(244, 242, 255, .12); overflow-wrap: anywhere; }
+  .d-tool__head b { flex: none; color: var(--code-cyan); font-weight: 600; }
+  .d-tool__out { padding: 8px 12px; overflow-x: auto; }
+  .d-tool__out span { display: block; white-space: pre; }
+  .d-tool__out .is-del { color: var(--code-magenta); }
+  .d-tool__out .is-add { color: var(--code-cyan); }
+  .d-tool__out .is-dim { color: var(--code-muted); }
+  .d-agent__input { display: flex; gap: 8px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--border-subtle); }
+  .d-agent__field { flex: 1; min-height: 32px; padding: 6px 10px; border-radius: var(--radius-md); background: var(--bg-surface); font: 400 14px/20px var(--font-sans); color: var(--text-primary); }
+  .d-agent__field:empty::before { content: "Ask the agent"; color: var(--text-muted); }
+  @media (max-width: 640px) { .d-agent { min-height: 0; } .d-agent__log { padding: 12px; } }
+
+  /* ---------- commands (D) ---------- */
+  .d-cmds__grid { display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 6fr); gap: var(--space-12); align-items: start; }
+  .d-cmdlist { margin: 0; display: grid; gap: var(--space-8); }
+  .d-cmdlist > div { display: grid; gap: var(--space-2); padding-top: var(--space-6); border-top: 2px solid var(--text-primary); }
+  .d-cmdlist dt { font: 600 21px/28px var(--font-mono); letter-spacing: -0.01em; }
+  .d-cmdlist dd { margin: 0; display: grid; gap: var(--space-2); }
+  .d-cmdlist .d-help { font: var(--text-body-strong); }
+  .d-cmdlist .d-p { color: var(--text-primary); max-width: 60ch; }
+  .d-flags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: var(--space-1); }
+  .d-side { display: grid; gap: var(--space-4); position: sticky; top: 88px; min-width: 0; }
+  .d-side pre { font-size: 13px; line-height: 21px; }
+  @media (max-width: 960px) { .d-cmds__grid { grid-template-columns: minmax(0, 1fr); } .d-side { position: static; } }
+  @media (max-width: 640px) { .d-cmdlist dt { font-size: 18px; line-height: 24px; } }
+
+  /* ---------- features (A) ---------- */
+  .a-feat__lead { display: grid; gap: var(--space-12); }
+  @media (min-width: 1024px) { .a-feat__lead { grid-template-columns: minmax(0, 6fr) minmax(0, 6fr); column-gap: 64px; align-items: start; } }
+  .a-feat__text { display: grid; gap: var(--space-6); }
+  .a-imp { margin: 0; display: grid; gap: var(--space-4); padding: var(--space-6); background: var(--bg-raised); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); }
+  .a-imp__art { display: grid; place-items: center; padding: var(--space-6) 0; position: relative; }
+  .a-imp__btn { position: relative; padding: 22px 36px; border-radius: 12px; background: var(--text-primary); color: var(--bg-raised); font: 600 30px/40px var(--font-sans); letter-spacing: .02em; }
+  .a-imp__regs { position: absolute; inset: 0; display: flex; justify-content: space-between; align-items: center; color: var(--text-primary); }
+  .a-imp__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+  .a-imp__list li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-1) var(--space-4); padding: var(--space-3) 0; font: var(--text-body); }
+  .a-imp__list li + li { border-top: 1px solid var(--border-subtle); }
+  .a-imp__list code { font: 500 14px/26px var(--font-mono); color: var(--info-fg); }
+  .a-imp__cap { font: var(--text-small); color: var(--text-muted); }
+  .a-spec { margin-top: var(--space-24); display: grid; gap: var(--space-12); }
+  .a-spec__row { display: grid; gap: var(--space-6); }
+  @media (min-width: 1024px) { .a-spec__row { grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); column-gap: 64px; } }
+  .a-spec__notes { display: grid; gap: var(--space-6); align-content: start; order: 2; }
+  @media (min-width: 1024px) { .a-spec__notes { order: 0; } }
+  .a-spec__body { display: grid; gap: var(--space-4); align-content: start; }
+  .a-spec__body p { font: var(--text-body-lg); max-width: 62ch; }
+  .a-spec__body code { font: 400 .875em/1 var(--font-mono); }
+  .a-spec__code pre { font-size: 13px; line-height: 21px; }
+
+  /* ---------- agent (D) ---------- */
+  .d-agentsec__grid { display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 6fr); gap: var(--space-12); align-items: center; }
+  .d-agentsec__code { display: grid; gap: var(--space-4); }
+  .d-agentsec__text { display: grid; gap: var(--space-6); }
+  .d-agentsec__rules .d-h3 { margin-bottom: var(--space-4); }
+  .d-agentsec pre { font-size: 12.5px; line-height: 21px; }
+  .d-agentsec .vc-code pre .t { color: var(--code-fg); }
+  .d-rules { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-4); }
+  .d-rules li { padding-left: var(--space-6); position: relative; font: var(--text-body-lg); }
+  .d-rules li::before { content: "✕"; position: absolute; left: 0; top: 0; color: var(--danger-fg); font: 700 15px/30px var(--font-mono); }
+  .d-approve { margin: 0; padding: var(--space-4) var(--space-6); border-radius: var(--radius-lg); background: var(--bg-inverse); color: var(--text-inverse); font: 700 21px/28px var(--font-display); }
+  @media (max-width: 960px) { .d-agentsec__grid { grid-template-columns: minmax(0, 1fr); } .d-agentsec__code { order: 2; } }
+
+  /* ---------- faq (A) ---------- */
+  .a-faq__head { display: grid; gap: var(--space-4); margin-bottom: var(--space-12); }
+  @media (min-width: 1024px) { .a-faq__head { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); column-gap: 64px; align-items: end; } }
+  .a-faq__list { margin: 0; display: grid; gap: var(--space-8) 64px; }
+  @media (min-width: 768px) { .a-faq__list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .a-faq__list div { display: grid; gap: var(--space-2); align-content: start; }
+  .a-faq__list dt { font: var(--text-h3); }
+  .a-faq__list dd { margin: 0; font: var(--text-body); max-width: 58ch; }
+
+  /* ---------- last call (A) ---------- */
+  .a-cta__inner { display: grid; gap: var(--space-6); justify-items: center; text-align: center; max-width: 820px; margin-inline: auto; }
+  .a-cta__title { font-size: 32px; line-height: 36px; }
+  @media (min-width: 768px) { .a-cta__title { font: var(--text-h1); font-size: 56px; line-height: 60px; letter-spacing: -0.02em; } }
+  .a-cta__cmd { display: flex; flex-wrap: wrap; gap: var(--space-3); justify-content: center; align-items: stretch; width: 100%; margin-top: var(--space-2); }
+  .a-cta__cmd .vc-code { flex: 1 1 320px; max-width: 520px; text-align: left; }
+  .a-cta__cmd pre { font-size: 18px; line-height: 26px; padding: 11px var(--space-4); }
+  .a-cta__cmd .vc-btn { flex: none; }
+  .a-cta__small { font: var(--text-small); color: var(--text-muted); max-width: 56ch; }
+  .a-cta__ok { display: inline-flex; align-items: center; gap: var(--space-3); font: var(--text-label); letter-spacing: .02em; color: var(--text-muted); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .a-ds__plate, .a-ds__btn, .a-ds__ring, .a-ds__lead, .a-ds__note, .a-ds__note .vc-badge,
+    .d-fbtn, .d-tab, .d-seg > * { transition: none; }
+  }
+</style>
+<script>
+  window.VC_PAGE = {
+    set: 'landing',
+    key: 'F',
+    toggles: [
+      /* Five header prototypes, rendered into #f-header by f-headers.js (another prototype). */
+      { id: 'header', label: 'Header', options: ['reveal', 'bare', 'slug', 'command', 'corners'] },
+      /* Is the bg-page / bg-surface step enough to read as bands, or does it need a deeper value? */
+      { id: 'bands', label: 'Bands', options: ['surface', 'deeper'] }
+    ]
+  };
+</script>
+<script src="../shared/proto-kit.js"></script>
+<script src="f-headers.js" defer></script>
+</head>
+<body id="top">
+<div id="f-header" data-f-headers></div>
+<main>
+
+  <!-- ============ HERO (A) · lighter ============ -->
+  <section data-slot="hero" class="a-sec a-hero fm-page" aria-labelledby="a-hero-title">
+    <div class="a-wrap">
+      <span class="a-crop a-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      <div class="a-slug a-mark" aria-hidden="true">
+        <svg class="a-reg" viewBox="0 0 22 22"><circle cx="11" cy="11" r="5.5"/><path d="M11 0v22M0 11h22"/></svg>
+        <span class="a-cbar"><i class="c"></i><i class="m"></i><i class="k"></i><i class="p"></i></span>
+      </div>
+
+      <h1 id="a-hero-title" class="display a-hero__title" data-copy>
+        <span data-copy-alt>Proof every story before it ships.</span>
+        <span data-copy-alt>Approve how it looks once. Know when it changes.</span>
+        <span data-copy-alt>Same pixels on your laptop and in CI.</span>
+        <span data-copy-alt>See the UI changes code review misses.</span>
+      </h1>
+      <p class="fm-what">visual-check is a free, open-source library for visual regression testing of Storybook, under the MIT licence.</p>
+
+      <div class="a-hero__grid">
+        <div class="a-hero__lead">
+          <p class="a-lead" data-copy>
+            <span data-copy-alt>A one-line change to a shared component can move dozens of stories, and code review shows only the code. visual-check snapshots every story and shows exactly what moved.</span>
+            <span data-copy-alt>Code review shows the code, not the pixels. You approve each story's baseline once, and visual-check shows every story a change moves, with a visual diff.</span>
+            <span data-copy-alt>Other screenshot tests flake, because laptops and CI render fonts differently. visual-check snapshots every story in a pinned browser, so a story fails only when it moved.</span>
+            <span data-copy-alt>A one-line change to a shared token can move dozens of stories. visual-check snapshots every story, compares it with the baseline you approved and shows exactly what moved.</span>
+          </p>
+
+          <div class="vc-code vc-code--register a-install">
+            <div class="vc-code__bar"><span>Run in your repo</span><button class="vc-code__copy a-copy-btn" type="button" data-a-copy="npx @visual-check/cli init">Copy</button></div>
+            <pre><span class="p">$ </span>npx @visual-check/cli init</pre>
+          </div>
+          <p class="a-hero__small">Also <code class="vc-inline-code">pnpm dlx</code>, <code class="vc-inline-code">yarn dlx</code> or <code class="vc-inline-code">bunx</code>.</p>
+
+          <div class="a-hero__actions">
+            <a class="vc-btn vc-btn--accent vc-btn--lg" href="../docs/1.html#getting-started">Get started <svg class="vc-icon vc-btn__arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></a>
+            <a class="vc-link" href="https://github.com/visual-check/test-apps/actions" target="_blank" rel="noopener">See a real CI run</a>
+          </div>
+
+          <div class="a-hero__proofs">
+            <p class="a-note"><strong>10.8s</strong><span>108 snapshots in real CI, a GitHub-hosted runner, 4 workers.</span></p>
+            <p class="a-note"><strong>16.9s</strong><span>The same 108 on Windows with Docker Desktop.</span></p>
+          </div>
+        </div>
+
+        <div class="a-hero__figure">
+          <figure class="a-proof" aria-describedby="a-proof-cap">
+            <div class="a-proof__head">
+              <span class="a-plates">
+                <span class="a-plate a-plate--c"><i aria-hidden="true"></i>Plate C · baseline</span>
+                <span class="a-plate a-plate--m"><i aria-hidden="true"></i>Plate M · snapshot</span>
+              </span>
+              <span>components-button--default · 3×</span>
+            </div>
+
+            <!-- A VCProto.scene: elements and CSS transitions, driven by a JS timeline. -->
+            <div class="a-art" id="a-hero-dom">
+              <div class="a-ds">
+                <div class="a-ds__press" aria-hidden="true">
+                  <div class="a-ds__plate a-ds__plate--c">
+                    <div class="a-ds__btn"></div><span class="a-ds__label">Publish</span>
+                    <svg class="a-ds__svg" viewBox="0 0 400 300"><g class="reg"><circle cx="26" cy="272" r="8"/><path d="M26 257v30M11 272h30"/><circle cx="374" cy="28" r="8"/><path d="M374 13v30M359 28h30"/></g></svg>
+                  </div>
+                  <div class="a-ds__plate a-ds__plate--m">
+                    <div class="a-ds__btn"></div><span class="a-ds__label">Publish</span>
+                    <svg class="a-ds__svg" viewBox="0 0 400 300"><g class="reg"><circle cx="26" cy="272" r="8"/><path d="M26 257v30M11 272h30"/><circle cx="374" cy="28" r="8"/><path d="M374 13v30M359 28h30"/></g></svg>
+                  </div>
+                  <div class="a-ds__plate a-ds__plate--k">
+                    <div class="a-ds__btn"></div><span class="a-ds__label">Publish</span>
+                    <svg class="a-ds__svg" viewBox="0 0 400 300"><g class="reg"><circle cx="26" cy="272" r="8"/><path d="M26 257v30M11 272h30"/><circle cx="374" cy="28" r="8"/><path d="M374 13v30M359 28h30"/></g></svg>
+                  </div>
+                  <svg class="a-ds__svg" viewBox="0 0 400 300">
+                    <path class="a-ds__ring" d="M262 150a56 82 0 1 0 112 0a56 82 0 1 0-112 0" pathLength="100" transform="rotate(-8 318 150)"/>
+                    <path class="a-ds__lead" d="M380 150H426" pathLength="100"/>
+                  </svg>
+                </div>
+                <div class="a-ds__note">
+                  <span class="a-ds__num">0</span>
+                  <span class="a-ds__px">px out of register</span>
+                  <span class="a-ds__allowed">20 allowed</span>
+                  <span class="vc-badge vc-badge--changed"><span class="vc-badge__glyph" aria-hidden="true">≠</span>changed</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="a-proof__foot"><div id="a-hero-dom-controls"></div></div>
+            <figcaption class="a-proof__cap" id="a-proof-cap">The button's padding went from 10px 16px to 8px 20px, so 312 pixels differ.</figcaption>
+          </figure>
+
+          <div class="vc-code a-term">
+            <div class="vc-code__bar"><span>pnpm visual:check</span><span>real output format</span></div>
+<pre><span class="c">visual-check 0.1.0 · test · 108 snapshots · 4 workers</span>
+<span class="k">✗</span> web  components-button--default  <span class="k">differs: 312 differ, 20 allowed</span>
+<span class="k">✗</span> web  components-modal--default  mobile  <span class="k">differs: 1904 differ, 80 allowed (20 at scale 2)</span>
+106 passed · <span class="k">2 differs</span> · 11.4s
+<span class="c">Report: .visual-check/report/report.json</span></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PROBLEM (D) · darker ============ -->
+  <section class="d-sec d-prob fm-band" data-slot="problem" aria-labelledby="d-prob-title">
+    <div class="d-wrap">
+      <div class="d-head">
+        <h2 class="d-h2" id="d-prob-title">Code review shows the code, not the pixels</h2>
+        <ul class="fm-pains">
+          <li>A one-line change to a shared token or component can move dozens of stories.</li>
+          <li>Screenshot tests in other tools flake, because laptops and CI render fonts differently.</li>
+        </ul>
+        <p class="fm-fix">visual-check snapshots every story in a pinned browser, compares it with the baseline you approved and shows exactly what moved. Same pixels on your laptop and in CI.</p>
+      </div>
+
+      <div class="d-prob__pair">
+        <div class="d-frame d-prob__panel" data-ui>
+          <header><h3>What code review shows</h3><span class="d-mono">+1 −1</span></header>
+          <pre class="d-diffcode" aria-label="One line changed in src/button/Button.css"><span><i></i>src/button/Button.css</span><span><i>12</i>.button {</span><span class="is-del"><i>13</i>−  padding: 8px 16px;</span><span class="is-add"><i>13</i>+  padding: 8px 18px;</span><span><i>14</i>   border-radius: 6px;</span><span><i>15</i>}</span></pre>
+          <footer><span class="vc-badge vc-badge--passed"><span class="vc-badge__glyph" aria-hidden="true">✓</span>Approved</span> 1 file changed, 1 line</footer>
+        </div>
+        <div class="d-frame d-prob__panel" data-ui>
+          <header><h3>What visual-check shows</h3><span class="d-mono">visual-check test</span></header>
+          <ul class="d-found">
+            <li>
+              <div class="d-thumb" aria-hidden="true">
+                <div class="d-thumb__ghost"><span class="d-tb d-tb--btn">Save changes</span></div>
+                <div class="d-thumb__marks"><span class="d-tb d-tb--btn">Save changes</span></div>
+              </div>
+              <div><span class="d-found__id">components-button--default</span><span class="d-found__msg">Default · differs: 312 differ, 20 allowed</span></div>
+            </li>
+            <li>
+              <div class="d-thumb" aria-hidden="true">
+                <div class="d-thumb__ghost"><span class="d-tb d-tb--phone"></span><span class="d-tb d-tb--dlg"><b>Remove this card?</b>The card ending 0042 will be removed.<span><i>Cancel</i><i>Remove</i></span></span></div>
+                <div class="d-thumb__marks"><span class="d-tb d-tb--dlg"><b>Remove this card?</b>The card ending 0042 will be removed.<span><i>Cancel</i><i>Remove</i></span></span></div>
+              </div>
+              <div><span class="d-found__id">components-modal--default</span><span class="d-found__msg">mobile · differs: 1904 differ, 80 allowed (20 at scale 2)</span></div>
+            </li>
+          </ul>
+          <footer><span class="vc-badge vc-badge--passed"><span class="vc-badge__glyph" aria-hidden="true">✓</span><span class="vc-badge__count">106</span>&nbsp;passed</span><span class="vc-badge vc-badge--changed"><span class="vc-badge__glyph" aria-hidden="true">≠</span><span class="vc-badge__count">2</span>&nbsp;changed</span></footer>
+        </div>
+      </div>
+
+      <table class="d-today">
+        <caption>What teams use today</caption>
+        <thead><tr><th scope="col">Today</th><th scope="col">Where it hurts</th><th scope="col">visual-check</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">A hosted service</th><td data-label="Where it hurts">Billed per snapshot, images on its servers.</td><td data-label="visual-check">Runs in your CI, baselines in your repo.</td></tr>
+          <tr><th scope="row">Playwright screenshot tests</th><td data-label="Where it hurts">Mac baselines fail in Linux CI.</td><td data-label="visual-check">Same pixels everywhere, in a pinned browser.</td></tr>
+          <tr><th scope="row">A harness you wrote</th><td data-label="Where it hurts">Grows to 2,000 lines per project.</td><td data-label="visual-check">One config file, written by <code class="vc-inline-code">init</code>.</td></tr>
+          <tr><th scope="row">An open-source tool that stopped</th><td data-label="Where it hurts">No longer maintained.</td><td data-label="visual-check">Tested on Storybook 9.1, 10 and 11.</td></tr>
+          <tr><th scope="row">Your coding agent</th><td data-label="Where it hurts">Can't see what it changed.</td><td data-label="visual-check">Runs visual-check and reports what moved.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ DEMO (D) · lighter ============ -->
+  <section class="d-sec d-demo fm-page" data-slot="demo" id="d-demo" aria-labelledby="d-demo-title">
+    <div class="d-wrap">
+      <div class="d-head">
+        <h2 class="d-h2" id="d-demo-title">Four places you'll see it</h2>
+        <p class="d-lead">Simulated in HTML, with the strings visual-check prints.</p>
+      </div>
+
+      <div class="d-tabs" role="tablist" aria-label="Where you see visual-check">
+        <button class="d-tab" role="tab" type="button" id="d-tab-0" aria-controls="d-surf-0" aria-selected="true" tabindex="0"><span class="d-tab__name">Terminal</span><span class="d-tab__sub">visual-check test</span></button>
+        <button class="d-tab" role="tab" type="button" id="d-tab-1" aria-controls="d-surf-1" aria-selected="false" tabindex="-1"><span class="d-tab__name">Storybook</span><span class="d-tab__sub">The Visual check panel</span></button>
+        <button class="d-tab" role="tab" type="button" id="d-tab-2" aria-controls="d-surf-2" aria-selected="false" tabindex="-1"><span class="d-tab__name">Pull request</span><span class="d-tab__sub">The Action's check run</span></button>
+        <button class="d-tab" role="tab" type="button" id="d-tab-3" aria-controls="d-surf-3" aria-selected="false" tabindex="-1"><span class="d-tab__name">Agent</span><span class="d-tab__sub">Your coding agent's report</span></button>
+      </div>
+
+      <div class="d-surfaces">
+        <!-- Terminal -->
+        <article class="d-surface" id="d-surf-0" role="tabpanel" aria-labelledby="d-surf-0-title">
+          <div class="d-surface__text">
+            <h3 class="d-h3" id="d-surf-0-title">In your terminal</h3>
+            <p class="d-p">It prints only the stories that moved, and exits 1 so CI stops.</p>
+            <div class="vc-badge-row"><span class="vc-badge vc-badge--passed"><span class="vc-badge__glyph" aria-hidden="true">✓</span><span class="vc-badge__count">106</span>&nbsp;passed</span><span class="vc-badge vc-badge--changed"><span class="vc-badge__glyph" aria-hidden="true">≠</span><span class="vc-badge__count">2</span>&nbsp;changed</span></div>
+          </div>
+          <div class="d-surface__stage">
+            <div class="vc-code d-term" id="d-scene-term" data-ui>
+              <div class="vc-code__bar"><span>Terminal · ~/acme/web</span><span>zsh</span></div>
+              <pre class="d-term__out"></pre>
+            </div>
+            <div class="d-surface__controls"><div id="d-ctl-term"></div><button class="vc-btn vc-btn--ghost vc-btn--sm d-next" type="button" data-d-go="1">Next: Storybook <svg class="vc-icon vc-btn__arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></button></div>
+          </div>
+        </article>
+
+        <!-- Storybook -->
+        <article class="d-surface" id="d-surf-1" role="tabpanel" aria-labelledby="d-surf-1-title">
+          <div class="d-surface__text">
+            <h3 class="d-h3" id="d-surf-1-title">In Storybook</h3>
+            <p class="d-p">Check the open story in every mode, compare, and press Update when the change is intended. Needs Storybook 10.</p>
+          </div>
+          <div class="d-surface__stage">
+            <div class="d-frame d-sbk" id="d-scene-sbk" data-ui>
+              <aside class="d-sbk__side">
+                <span class="d-sbk__search">Find components</span>
+                <ul class="d-tree">
+                  <li class="is-group">Checkout</li>
+                  <li class="is-comp">Order summary</li>
+                  <li class="is-story is-current">Default</li>
+                  <li class="is-story">Empty basket</li>
+                  <li class="is-group">Components</li>
+                  <li class="is-comp">Button</li>
+                  <li class="is-comp">Modal</li>
+                  <li class="is-comp">Tabs</li>
+                </ul>
+              </aside>
+              <div class="d-sbk__main">
+                <div class="d-sbk__canvas"><div class="d-capwrap"><div class="d-cap" data-mode="default" data-d-story="snap"></div></div></div>
+                <div class="d-sbk__panel">
+                  <div class="d-panel__tabs"><span>Controls</span><span>Actions</span><span class="is-active">Visual check</span></div>
+                  <div class="d-panel__bar">
+                    <span class="d-fbtn d-fbtn--check">Check</span><span class="d-fbtn d-fbtn--update">Update</span>
+                    <span class="d-panel__status"></span>
+                  </div>
+                  <div class="d-panel__body">
+                    <ul class="d-rows"><li class="d-panel__empty">This story isn't checked yet.</li></ul>
+                    <div class="d-view" hidden>
+                      <div class="d-view__head">
+                        <div class="d-seg"><span class="is-on" data-v="slider">Slider</span><span data-v="diff">Visual diff</span></div>
+                        <p class="d-view__caption">Left: <b class="is-base">baseline</b>  Right: <b class="is-snap">snapshot</b></p>
+                      </div>
+                      <div class="d-stage" data-mode="default" data-view="slider" style="--wipe:50%">
+                        <div class="d-stage__frame">
+                          <div class="d-cap d-cap--base" data-d-story="base"></div>
+                          <div class="d-cap d-cap--snap" data-d-story="snap"></div>
+                          <div class="d-cap d-cap--diff"><div data-d-story="diff base"></div><div data-d-story="diff snap"></div></div>
+                          <span class="d-stage__handle"></span>
+                        </div>
+                      </div>
+                      <p class="d-view__meta"><span class="d-view__msg">1288 differ, 20 allowed</span></p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="d-surface__controls"><div id="d-ctl-sbk"></div><button class="vc-btn vc-btn--ghost vc-btn--sm d-next" type="button" data-d-go="2">Next: Pull request <svg class="vc-icon vc-btn__arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></button></div>
+          </div>
+        </article>
+
+        <!-- Pull request -->
+        <article class="d-surface" id="d-surf-2" role="tabpanel" aria-labelledby="d-surf-2-title">
+          <div class="d-surface__text">
+            <h3 class="d-h3" id="d-surf-2-title">In the pull request</h3>
+            <p class="d-p"><code class="vc-inline-code">uses: visual-check/action@v1</code> adds a check with a step summary and a report artifact. CI never writes baselines.</p>
+          </div>
+          <div class="d-surface__stage">
+            <div class="d-frame d-pr" id="d-scene-pr" data-ui>
+              <div class="d-pr__head">
+                <p class="d-pr__title">Roomier buttons <span>#482</span></p>
+                <p class="d-pr__meta"><b>Open</b> · wants to merge 1 commit into <code>main</code> from <code>roomier-buttons</code></p>
+              </div>
+              <div class="d-pr__tabs"><span>Conversation</span><span>Commits 1</span><span class="is-active">Checks 4</span><span>Files changed 1</span></div>
+              <div class="d-pr__body">
+                <div class="d-checks">
+                  <div class="d-checks__head" data-state="queued"><span class="d-glyph">○</span><b>Some checks haven't completed yet</b><small>4 queued checks</small></div>
+                  <ul>
+                    <li class="d-chk" data-state="queued"><span class="d-glyph">○</span><span class="d-chk__name">visual / Plan</span><span class="d-chk__state">Queued</span></li>
+                    <li class="d-chk" data-state="queued"><span class="d-glyph">○</span><span class="d-chk__name">visual / Shard 1 of 2</span><span class="d-chk__state">Queued</span><span class="d-chk__link">Details</span></li>
+                    <li class="d-chk" data-state="queued"><span class="d-glyph">○</span><span class="d-chk__name">visual / Shard 2 of 2</span><span class="d-chk__state">Queued</span></li>
+                    <li class="d-chk" data-state="queued"><span class="d-glyph">○</span><span class="d-chk__name">visual / Consistency check</span><span class="d-chk__state">Queued</span></li>
+                  </ul>
+                </div>
+                <div class="d-summary" hidden>
+                  <span class="d-summary__job">Shard 1 of 2 · Summary</span>
+                </div>
+              </div>
+            </div>
+            <div class="d-surface__controls"><div id="d-ctl-pr"></div><button class="vc-btn vc-btn--ghost vc-btn--sm d-next" type="button" data-d-go="3">Next: Agent <svg class="vc-icon vc-btn__arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></button></div>
+          </div>
+        </article>
+
+        <!-- Agent -->
+        <article class="d-surface" id="d-surf-3" role="tabpanel" aria-labelledby="d-surf-3-title">
+          <div class="d-surface__text">
+            <h3 class="d-h3" id="d-surf-3-title">From your coding agent</h3>
+            <p class="d-p">After a UI change, your agent runs visual-check and reports which stories moved, with the diff paths.</p>
+          </div>
+          <div class="d-surface__stage">
+            <div class="d-frame d-agent" id="d-scene-agent" data-ui>
+              <div class="d-agent__head"><span>Agent session</span><span>~/acme/web</span></div>
+              <div class="d-agent__log"></div>
+              <div class="d-agent__input"><span class="d-agent__field"></span><span class="d-fbtn">Send</span></div>
+            </div>
+            <div class="d-surface__controls"><div id="d-ctl-agent"></div><button class="vc-btn vc-btn--ghost vc-btn--sm d-next" type="button" data-d-go="0">Back to the terminal</button></div>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ COMMANDS (D) · darker ============ -->
+  <section class="d-sec d-cmds fm-band" data-slot="commands" aria-labelledby="d-cmds-title">
+    <div class="d-wrap">
+      <div class="d-head">
+        <h2 class="d-h2" id="d-cmds-title">Three commands and one config file</h2>
+      </div>
+      <div class="d-cmds__grid">
+        <dl class="d-cmdlist">
+          <div>
+            <dt>visual-check init</dt>
+            <dd>
+              <span class="d-help">Set up visual-check in this project</span>
+              <p class="d-p">Finds your Storybooks and writes the config, two npm scripts and the agent skill. It never edits your stories.</p>
+            </dd>
+          </div>
+          <div>
+            <dt>visual-check update</dt>
+            <dd>
+              <span class="d-help">Write missing and failing baselines and delete orphans (local only)</span>
+              <p class="d-p">You run it when a change is intended. With <code class="vc-inline-code">CI</code> set, it exits 2.</p>
+            </dd>
+          </div>
+          <div>
+            <dt>visual-check test</dt>
+            <dd>
+              <span class="d-help">Capture snapshots and compare them with baselines</span>
+              <p class="d-p">Exits 0 when every story matches, 1 when one doesn't, and 2 when setup fails.</p>
+              <div class="d-flags"><code class="vc-inline-code">--affected</code><code class="vc-inline-code">--all</code><code class="vc-inline-code">--filter &lt;regex&gt;</code><code class="vc-inline-code">--base &lt;ref&gt;</code><code class="vc-inline-code">--storybook &lt;name&gt;</code><code class="vc-inline-code">--shard &lt;k&gt;/&lt;n&gt;</code><code class="vc-inline-code">--reporter live|log|json</code></div>
+            </dd>
+          </div>
+        </dl>
+        <div class="d-side">
+          <div class="vc-code">
+            <div class="vc-code__bar"><span>package.json</span></div>
+            <pre><span class="c">"scripts": {</span>
+  <span class="s">"visual:check"</span>: <span class="s">"visual-check test"</span>,
+  <span class="s">"visual:update"</span>: <span class="s">"visual-check update"</span>
+<span class="c">}</span></pre>
+          </div>
+          <div class="vc-code">
+            <div class="vc-code__bar"><span>.github/workflows/visual.yml</span><button class="vc-code__copy d-copybtn" type="button" data-d-clip="jobs:
+  visual:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version-file: .nvmrc, cache: npm }
+      - run: npm ci
+      - run: npx storybook build
+      - run: npx http-server storybook-static -p 6006 -a 127.0.0.1 --silent &amp;
+      - run: npx wait-on tcp:127.0.0.1:6006
+      - uses: visual-check/action@v1">Copy</button></div>
+            <pre><span class="k">jobs</span>:
+  <span class="k">visual</span>:
+    <span class="k">runs-on</span>: ubuntu-24.04
+    <span class="k">steps</span>:
+      - <span class="k">uses</span>: actions/checkout@v5
+      - <span class="k">uses</span>: actions/setup-node@v5
+        <span class="k">with</span>: { node-version-file: .nvmrc, cache: npm }
+      - <span class="k">run</span>: npm ci
+      - <span class="k">run</span>: npx storybook build
+      - <span class="k">run</span>: npx http-server storybook-static -p 6006 -a 127.0.0.1 --silent &amp;
+      - <span class="k">run</span>: npx wait-on tcp:127.0.0.1:6006
+      - <span class="k">uses</span>: <span class="s">visual-check/action@v1</span></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FEATURES (A) · lighter ============ -->
+  <section data-slot="features" class="a-sec a-feat fm-page" aria-labelledby="a-feat-title">
+    <div class="a-wrap">
+      <span class="a-crop a-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      <div class="a-feat__lead">
+        <div class="a-feat__text">
+          <h2 id="a-feat-title" class="a-h2">Same pixels on every machine.</h2>
+          <p class="a-lead">The browser runs in visual-check's own Docker image, pinned by digest. A baseline written on a Mac passes in Linux CI and on Windows.</p>
+        </div>
+        <figure class="a-imp">
+          <div class="a-imp__art" aria-hidden="true">
+            <span class="a-imp__regs"><svg class="a-reg" viewBox="0 0 22 22"><circle cx="11" cy="11" r="5.5"/><path d="M11 0v22M0 11h22"/></svg><svg class="a-reg" viewBox="0 0 22 22"><circle cx="11" cy="11" r="5.5"/><path d="M11 0v22M0 11h22"/></svg></span>
+            <span class="a-imp__btn">Publish</span>
+          </div>
+          <p class="a-note"><strong>0 px</strong><span>out of register, on all three machines</span></p>
+          <ul class="a-imp__list">
+            <li><span>A Mac, in Docker</span><code>update · baseline written</code></li>
+            <li><span>Linux, GitHub-hosted runner</span><code>108 passed · 10.8s</code></li>
+            <li><span>Windows, Docker Desktop</span><code>108 passed · 16.9s</code></li>
+          </ul>
+          <figcaption class="a-imp__cap">Real CI runs, 4 workers.</figcaption>
+        </figure>
+      </div>
+
+      <div class="a-spec">
+        <div class="a-spec__row">
+          <div class="a-spec__notes">
+            <p class="a-note"><strong>3.30/s</strong><span>captures with its own browser driver, against 2.71 for Playwright's <code>run-server</code>. 2 workers on 2 vCPUs, 300 real stories.</span></p>
+            <p class="a-note"><strong>80 ms</strong><span>to a ready story, instead of 170 ms.</span></p>
+          </div>
+          <div class="a-spec__body">
+            <h3 class="a-h3">Fast because it's narrow</h3>
+            <p><code>--affected</code> captures only the stories a change can reach, and <code>--shard</code> splits a run across jobs.</p>
+          </div>
+        </div>
+
+        <div class="a-spec__row">
+          <div class="a-spec__notes">
+            <p class="a-note"><strong>1 retry</strong><span>for a failing snapshot. A flaky one never fails the run.</span></p>
+          </div>
+          <div class="a-spec__body">
+            <h3 class="a-h3">Honest with real stories</h3>
+            <p>Captures wait for fonts and images, and masks hide what you can't control.</p>
+            <div class="vc-code a-spec__code">
+              <div class="vc-code__bar"><span>card.stories.tsx</span></div>
+<pre><span class="k">export const</span> Default: StoryObj&lt;<span class="k">typeof</span> meta&gt; = {
+  parameters: {
+    ...visualCheck({
+      modes: [<span class="s">'dark'</span>, <span class="s">'mobile'</span>],
+      masks: {
+        clock: { selector: <span class="s">'[data-clock]'</span> },
+        cdn: { host: <span class="s">'images.example.com'</span> },
+      },
+      wait: <span class="k">async</span> ({ canvas }) =&gt; {
+        <span class="k">await</span> canvas.findByText(<span class="s">'Late content'</span>)
+      },
+    }),
+  },
+}</pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="a-spec__row">
+          <div class="a-spec__notes">
+            <p class="a-note"><strong>89–100%</strong><span>of small deliberate changes caught, in the measured set.</span></p>
+            <p class="a-note"><strong>259 of 260</strong><span>hidden icons caught by counting anti-aliased pixels, against 118 without.</span></p>
+            <p class="a-note"><strong>98–99%</strong><span>of unchanged snapshots pass on identical bytes.</span></p>
+          </div>
+          <div class="a-spec__body">
+            <h3 class="a-h3">A tolerance that still sees</h3>
+            <p>The default, <code>{ color: 0.01, pixels: 20 }</code>, lets rendering noise through and stops real changes.</p>
+          </div>
+        </div>
+
+        <div class="a-spec__row">
+          <div class="a-spec__notes">
+            <p class="a-note"><strong>19.1s</strong><span>React, Vue, Svelte, Solid and vanilla Storybooks in one run: <code>110 passed · 19.1s</code></span></p>
+          </div>
+          <div class="a-spec__body">
+            <h3 class="a-h3">Works with what you have</h3>
+            <p>Storybook 9.1, 10 and 11. Node 22.17 or later, with npm, pnpm, Yarn or Bun.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ AGENT (D) · darker ============ -->
+  <section class="d-sec d-agentsec fm-band" data-slot="agent" aria-labelledby="d-agent-title">
+    <div class="d-wrap">
+      <div class="d-agentsec__grid">
+        <div class="d-agentsec__code">
+          <div class="vc-code">
+            <div class="vc-code__bar"><span>What init writes for your agent</span></div>
+            <pre><span class="t">.agents/skills/visual-check/</span>
+  <span class="t">SKILL.md</span>          <span class="c">what to run, what to report</span>
+  <span class="t">scripts/run.mjs</span>   <span class="c">plain Node, no dependencies</span>
+  <span class="t">setup.json</span>        <span class="c">how to start each Storybook</span>
+<span class="t">.claude/skills/visual-check</span>  <span class="c">a link to the folder above</span></pre>
+          </div>
+          <div class="vc-code">
+            <div class="vc-code__bar"><span>What the agent runs</span></div>
+            <pre><span class="p">$ </span>node .agents/skills/visual-check/scripts/run.mjs test
+<span class="c">Starting Storybook web in apps/web: pnpm run storybook --ci --exact-port</span>
+<span class="c">Storybook web answers at http://127.0.0.1:6006 after 7.4s.</span>
+<span class="c">Stopped Storybook web.</span></pre>
+          </div>
+          <p class="d-small">The agent reads counts and diff paths from <code>--reporter json</code>, not pictures.</p>
+        </div>
+        <div class="d-agentsec__text">
+          <h2 class="d-h2" id="d-agent-title">Your agent can't see the UI it changes</h2>
+          <p class="d-lead"><code class="vc-inline-code">init</code> writes an agent skill. Your agent runs it before it calls a UI change done, and reports which stories moved.</p>
+          <div class="d-agentsec__rules">
+            <h3 class="d-h3">The skill's rules</h3>
+            <ul class="d-rules">
+              <li>Never raise tolerance, disable a story or run <code class="vc-inline-code">update</code> without your OK.</li>
+              <li>Never open a snapshot or a visual diff. Give their paths instead.</li>
+              <li>Never apply a fix before you agree.</li>
+            </ul>
+          </div>
+          <p class="d-approve">A person approves baselines. The agent never does.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FAQ (A) · lighter ============ -->
+  <section data-slot="faq" class="a-sec a-faq fm-page" aria-labelledby="a-faq-title">
+    <div class="a-wrap">
+      <span class="a-crop a-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      <div class="a-faq__head">
+        <h2 id="a-faq-title" class="a-h2">Questions before you run init</h2>
+      </div>
+      <dl class="a-faq__list">
+        <div><dt>Do I need Docker?</dt><dd>By default, yes: that's how the pixels match everywhere. <code class="vc-inline-code">platform: 'host'</code> uses a local browser instead, matching only on the same OS.</dd></div>
+        <div><dt>Is the default slow on an M-series Mac?</dt><dd>The default <code class="vc-inline-code">linux/amd64</code> image runs emulated, so it's slower. <code class="vc-inline-code">platform: 'linux/arm64'</code> is faster, and the default tolerance absorbs the difference.</dd></div>
+        <div><dt>Will it be flaky?</dt><dd>Animations are captured at their end state, and capture waits for fonts and images. A flaky snapshot never fails the run.</dd></div>
+        <div><dt>Who writes the baselines?</dt><dd>Only a person, with <code class="vc-inline-code">update</code>. With <code class="vc-inline-code">CI</code> set, <code class="vc-inline-code">update</code> exits 2.</dd></div>
+        <div><dt>Which Storybooks and CIs?</dt><dd>Storybook 9.1, 10 and 11, and the addon on 10. GitHub Actions has an Action, and the CLI runs anywhere Docker does.</dd></div>
+        <div><dt>Coming from Loki, Lost Pixel or the Storybook test-runner?</dt><dd>Run <code class="vc-inline-code">init</code> beside it. The docs have a page for moving over.</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <!-- ============ LAST CALL (A) · darker ============ -->
+  <section data-slot="cta" class="a-sec a-cta fm-band" aria-labelledby="a-cta-title">
+    <div class="a-wrap">
+      <span class="a-crop a-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      <div class="a-cta__inner">
+        <h2 id="a-cta-title" class="a-h2 a-cta__title">Run it on the Storybook you have open.</h2>
+        <div class="a-cta__cmd">
+          <div class="vc-code"><pre><span class="p">$ </span>npx @visual-check/cli init</pre></div>
+          <button class="vc-btn vc-btn--primary vc-btn--lg a-copy-btn" type="button" data-a-copy="npx @visual-check/cli init" data-a-copy-label="Copy the command">Copy the command</button>
+        </div>
+        <p class="a-cta__small">Needs Node 22.17 or later and Docker. <a class="vc-link" href="../docs/1.html#getting-started">Read the guide</a></p>
+        <p class="a-cta__ok a-mark" aria-hidden="true">
+          <svg class="a-reg" viewBox="0 0 22 22"><circle cx="11" cy="11" r="5.5"/><path d="M11 0v22M0 11h22"/></svg>
+          <span>OK to print</span>
+          <span class="a-cbar"><i class="c"></i><i class="m"></i><i class="k"></i><i class="p"></i></span>
+        </p>
+      </div>
+    </div>
+  </section>
+</main>
+<div data-kit="footer"></div>
+
+<script>
+  /* Each section initialises itself and never reaches into another section. */
+
+  /* A: copy buttons (hero, last call). */
+  document.addEventListener('click', function (event) {
+    var button = event.target.closest('[data-a-copy]');
+    if (!button) {
+      return;
+    }
+    var label = button.getAttribute('data-a-copy-label') || 'Copy';
+    function done(text) {
+      button.textContent = text;
+      setTimeout(function () { button.textContent = label; }, 1600);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(button.getAttribute('data-a-copy')).then(function () { done('Copied'); }, function () { done('Copy failed'); });
+    } else {
+      done('Copy failed');
+    }
+  });
+
+  /* A: the hero proof as a DOM scene. Its resting state is its end state. */
+  (function heroProof() {
+    if (!document.getElementById('a-hero-dom')) {
+      return;
+    }
+    VCProto.scene('#a-hero-dom', async function (t) {
+      var stage = t.$('.a-ds');
+      var count = t.$('.a-ds__num');
+      t.chapter(0);
+      stage.classList.add('is-c');
+      await t.wait(380);
+      stage.classList.add('is-m');
+      await t.wait(950);
+      stage.classList.add('is-k');
+      await t.wait(520);
+      t.chapter(1);
+      stage.classList.add('is-diff');
+      await t.wait(760);
+      t.chapter(2);
+      stage.classList.add('is-mark');
+      await t.wait(560);
+      for (var step = 1; step <= 24; step++) {
+        var progress = 1 - Math.pow(1 - step / 24, 3);
+        count.textContent = String(Math.round(312 * progress));
+        await t.wait(40);
+      }
+      await t.wait(200);
+      stage.classList.add('is-done');
+    }, { controls: '#a-hero-dom-controls', chapters: ['print', 'change', 'count'], label: 'Two plates of the Button story, printed out of register' });
+  })();
+
+  /* D: problem, demo and commands. */
+  (function () {
+    'use strict';
+
+    /* The sample story inside every snapshot: someone's checkout card. Snapshots are images, so it keeps its own
+       colours in both site themes. Variants: base | snap, plus diff (only the pixels that differ, in magenta). */
+    var STORY =
+      '<div class="d-sb"><div class="d-sb__card">' +
+        '<div class="d-sb__head"><span class="d-sb__title">Order summary</span><span class="d-sb__count">3 items</span></div>' +
+        '<ul class="d-sb__lines"><li><span>Linen shirt, sand, M</span><span>£48.00</span></li><li><span>Canvas tote</span><span>£22.00</span></li><li><span>Wool socks, two pairs</span><span>£14.00</span></li></ul>' +
+        '<span class="d-sb__sums"><span><span>Subtotal</span><span>£84.00</span></span><span><span>Delivery, 2–3 working days</span><span>£4.95</span></span><span class="is-total"><span>Total</span><span>£88.95</span></span></span>' +
+        '<div class="d-sb__actions"><span class="d-sb__btn">Pay £88.95</span><span class="d-sb__link">Edit basket</span></div>' +
+        '<p class="d-sb__note">Free returns within 30 days.</p>' +
+      '</div></div>';
+
+    function fillStories(scope) {
+      scope.querySelectorAll('[data-d-story]').forEach(function (slot) {
+        if (slot.firstElementChild) {
+          return;
+        }
+        slot.innerHTML = STORY;
+        var story = slot.firstElementChild;
+        slot.getAttribute('data-d-story').split(' ').forEach(function (name) { story.classList.add('is-' + name); });
+        slot.setAttribute('aria-hidden', 'true');
+      });
+    }
+    function bindClip(scope) {
+      scope.addEventListener('click', function (event) {
+        var button = event.target.closest('[data-d-clip]');
+        if (!button) {
+          return;
+        }
+        var text = button.getAttribute('data-d-clip');
+        function done() {
+          button.textContent = 'Copied';
+          clearTimeout(button._timer);
+          button._timer = setTimeout(function () { button.textContent = 'Copy'; }, 1600);
+        }
+        function fallback() {
+          var area = document.createElement('textarea');
+          area.value = text;
+          area.setAttribute('readonly', '');
+          area.style.position = 'fixed';
+          area.style.opacity = '0';
+          document.body.appendChild(area);
+          area.select();
+          try {
+            document.execCommand('copy');
+            done();
+          } catch (error) { /* nothing to copy with */ }
+          area.remove();
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(done, fallback);
+        } else {
+          fallback();
+        }
+      });
+    }
+    function reduced() {
+      return window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    }
+    function ease(x) {
+      return x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+    }
+
+    /* ---------- demo: four surfaces in tabs ---------- */
+    (function demo() {
+      var section = document.querySelector('.d-demo');
+      if (!section) {
+        return;
+      }
+      fillStories(section);
+      var tabs = Array.prototype.slice.call(section.querySelectorAll('.d-tab'));
+      var panels = Array.prototype.slice.call(section.querySelectorAll('.d-surface'));
+      var current = 0;
+      function select(index, focus) {
+        current = (index + tabs.length) % tabs.length;
+        panels.forEach(function (panel, panelIndex) { panel.hidden = panelIndex !== current; });
+        tabs.forEach(function (tab, tabIndex) {
+          tab.setAttribute('aria-selected', String(tabIndex === current));
+          tab.tabIndex = tabIndex === current ? 0 : -1;
+        });
+        if (focus) {
+          tabs[current].focus();
+        }
+      }
+      tabs.forEach(function (tab, index) { tab.addEventListener('click', function () { select(index); }); });
+      section.querySelector('.d-tabs').addEventListener('keydown', function (event) {
+        var steps = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: 1, ArrowUp: -1 };
+        if (event.key in steps) {
+          event.preventDefault();
+          select(current + steps[event.key], true);
+        } else if (event.key === 'Home') {
+          event.preventDefault();
+          select(0, true);
+        } else if (event.key === 'End') {
+          event.preventDefault();
+          select(tabs.length - 1, true);
+        }
+      });
+      section.querySelectorAll('[data-d-go]').forEach(function (button) {
+        button.addEventListener('click', function () {
+          select(parseInt(button.getAttribute('data-d-go'), 10), true);
+          var top = section.querySelector('.d-tabs').getBoundingClientRect().top;
+          if (top < 64) {
+            window.scrollBy({ top: top - 88, behavior: reduced() ? 'auto' : 'smooth' });
+          }
+        });
+      });
+      select(0);
+
+      function press(t, element, ms) {
+        element.classList.add('is-pressed');
+        return t.wait(ms || 180).then(function () { element.classList.remove('is-pressed'); });
+      }
+      function badge(kind, glyph, word) {
+        return '<span class="vc-badge vc-badge--' + kind + '"><span class="vc-badge__glyph" aria-hidden="true">' + glyph + '</span>' + word + '</span>';
+      }
+
+      /* 1. Terminal: visual-check test, two differ (the live reporter prints only ✗ lines above its spinner) */
+      VCProto.scene(section.querySelector('#d-scene-term'), async function (t) {
+        t.chapter(0);
+        var out = t.$('.d-term__out');
+        t.add(out, '<span class="d-l"><span class="p">$ </span><span class="d-term__cmd"></span></span>');
+        await t.type('.d-term__cmd', 'npx visual-check test');
+        await t.wait(380);
+        t.add(out, '<span class="d-l is-dim">visual-check 0.1.0 · test · 108 snapshots · 4 workers</span>');
+        var fails = [
+          [30, '<span class="d-l"><span class="k">✗</span> web  components-button--default  <span class="k">differs: 312 differ, 20 allowed</span></span>'],
+          [72, '<span class="d-l"><span class="k">✗</span> web  components-modal--default  mobile  <span class="k">differs: 1904 differ, 80 allowed (20 at scale 2)</span></span>']
+        ];
+        var spinner = t.add(out, '<span class="d-l is-dim"></span>');
+        var FRAMES = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
+        var failIndex = 0;
+        for (var done = 0, frame = 0; done <= 108; done += 3, frame++) {
+          while (failIndex < fails.length && done >= fails[failIndex][0]) {
+            spinner.insertAdjacentHTML('beforebegin', fails[failIndex][1]);
+            failIndex++;
+          }
+          spinner.textContent = FRAMES[frame % FRAMES.length] + ' ' + done + '/108 snapshots · 4 workers · ' + (done / 108 * 11.4).toFixed(1) + 's';
+          await t.wait(52);
+        }
+        spinner.remove();
+        await t.lines(out, [
+          '<span class="d-l">── 2 failures ──</span>',
+          '<span class="d-l">web  components-button--default</span>',
+          '<span class="d-l">  <span class="k">differs: 312 differ, 20 allowed</span></span>',
+          '<span class="d-l is-dim">  diff: .visual-check/report/images/web/components-button--default.diff.png</span>',
+          '<span class="d-l">web  components-modal--default  mobile</span>',
+          '<span class="d-l">  <span class="k">differs: 1904 differ, 80 allowed (20 at scale 2)</span></span>',
+          '<span class="d-l is-dim">  diff: .visual-check/report/images/web/components-modal--default.mobile.diff.png</span>',
+          '<span class="d-l">106 passed · <span class="k">2 differs</span> · 11.4s</span>',
+          '<span class="d-l is-dim">Report: .visual-check/report/report.json</span>'
+        ], 110);
+      }, { controls: section.querySelector('#d-ctl-term'), label: 'visual-check test in a terminal: 106 passed, 2 differ' });
+
+      /* 2. Storybook: Check → rows → the viewer → Update */
+      VCProto.scene(section.querySelector('#d-scene-sbk'), async function (t) {
+        t.chapter(0);
+        var status = t.$('.d-panel__status');
+        var rows = t.$('.d-rows');
+        var body = t.$('.d-panel__body');
+        var view = t.$('.d-view');
+        var stage = t.$('.d-stage');
+        var meta = t.$('.d-view__msg');
+        function say(text, tone) {
+          status.textContent = text;
+          if (tone) {
+            status.dataset.tone = tone;
+          } else {
+            delete status.dataset.tone;
+          }
+        }
+        await t.wait(450);
+        await press(t, t.$('.d-fbtn--check'));
+        say('Starting…');
+        await t.wait(500);
+        var ROWS = [
+          ['Default', badge('changed', '≠', 'Visual diff'), '1288 differ, 20 allowed'],
+          ['dark', badge('changed', '≠', 'Visual diff'), '1296 differ, 20 allowed'],
+          ['mobile', badge('passed', '✓', 'Passed'), '']
+        ];
+        rows.innerHTML = '';
+        for (var index = 0; index < ROWS.length; index++) {
+          say('Capturing ' + (index + 1) + ' of 3…');
+          await t.wait(650);
+          t.add(rows, '<li class="d-row' + (index === 0 ? ' is-selected' : '') + '"><span>' + ROWS[index][0] + '</span>' + ROWS[index][1] + (ROWS[index][2] ? '<span class="d-row__note">' + ROWS[index][2] + '</span>' : '') + '</li>');
+        }
+        say('2 visual diffs', 'change');
+        await t.wait(600);
+
+        t.chapter(1);
+        view.hidden = false;
+        meta.textContent = ROWS[0][2];
+        var keys = [50, 20, 80, 50];
+        for (var segment = 1; segment < keys.length; segment++) {
+          for (var frame = 1; frame <= 18; frame++) {
+            stage.style.setProperty('--wipe', (keys[segment - 1] + (keys[segment] - keys[segment - 1]) * ease(frame / 18)).toFixed(1) + '%');
+            await t.wait(28);
+          }
+        }
+        await t.wait(350);
+        stage.dataset.view = 'diff';
+        t.$$('.d-seg > span').forEach(function (option) { option.classList.toggle('is-on', option.dataset.v === 'diff'); });
+        await t.wait(1500);
+
+        t.chapter(2);
+        await press(t, t.$('.d-fbtn--update'));
+        for (var step = 1; step <= 3; step++) {
+          say('Updating ' + step + ' of 3…');
+          await t.wait(480);
+        }
+        view.hidden = true;
+        body.classList.add('is-updated');
+        var base = '.visual-check/baselines/checkout-ordersummary--default';
+        rows.innerHTML =
+          '<li class="d-row"><span>Default</span>' + badge('passed', '✓', 'Written') + '<span class="d-row__note">Written: differs: 1288 differ, 20 allowed · ' + base + '.png</span></li>' +
+          '<li class="d-row"><span>dark</span>' + badge('passed', '✓', 'Written') + '<span class="d-row__note">Written: differs: 1296 differ, 20 allowed · ' + base + '.dark.png</span></li>' +
+          '<li class="d-row"><span>mobile</span>' + badge('orphan', '=', 'Untouched') + '<span class="d-row__note">Untouched: identical, byte for byte · ' + base + '.mobile.png</span></li>';
+        say('2 written, 1 untouched', 'pass');
+      }, { controls: section.querySelector('#d-ctl-sbk'), chapters: ['Check', 'Slider', 'Update'], label: 'The Storybook addon checks a story, shows the visual diff, then updates two baselines' });
+
+      /* 3. Pull request: the reusable workflow's jobs, a failing shard, its step summary */
+      VCProto.scene(section.querySelector('#d-scene-pr'), async function (t) {
+        t.chapter(0);
+        var rows = t.$$('.d-chk');
+        var head = t.$('.d-checks__head');
+        var STATES = { queued: ['○', 'Queued'], run: ['◌', 'In progress'], ok: ['✓', 'Successful'], fail: ['✕', 'Failing'] };
+        function setRow(row, state) {
+          row.dataset.state = state;
+          row.querySelector('.d-glyph').textContent = STATES[state][0];
+          row.querySelector('.d-chk__state').textContent = STATES[state][1];
+        }
+        function setHead(state, title, sub) {
+          head.dataset.state = state;
+          head.querySelector('.d-glyph').textContent = STATES[state][0];
+          head.querySelector('b').textContent = title;
+          head.querySelector('small').textContent = sub;
+        }
+        await t.wait(400);
+        setRow(rows[0], 'run');
+        setHead('run', "Some checks haven't completed yet", '1 in progress and 3 queued checks');
+        await t.wait(900);
+        setRow(rows[0], 'ok');
+        setRow(rows[1], 'run');
+        setRow(rows[2], 'run');
+        setRow(rows[3], 'run');
+        setHead('run', "Some checks haven't completed yet", '3 in progress and 1 successful check');
+        await t.wait(1100);
+        setRow(rows[3], 'ok');
+        await t.wait(500);
+        setRow(rows[2], 'ok');
+        await t.wait(600);
+        setRow(rows[1], 'fail');
+        setHead('fail', 'Some checks were not successful', '1 failing and 3 successful checks');
+        await t.wait(700);
+
+        t.chapter(1);
+        await press(t, rows[1], 260);
+        var summary = t.$('.d-summary');
+        summary.hidden = false;
+        await t.lines(summary, [
+          '<h4>visual-check 0.1.0 · test · shard 1/2</h4>',
+          '<p>52 passed · 2 differs</p>',
+          '<p><strong>Failures</strong></p>',
+          '<div class="d-tablewrap"><table><thead><tr><th>Storybook</th><th>Story</th><th>Mode</th><th>Status</th><th>Message</th></tr></thead><tbody>' +
+            '<tr><td>web</td><td><code>components-button--default</code></td><td></td><td class="is-change">differs</td><td>312 differ, 20 allowed</td></tr>' +
+            '<tr><td>web</td><td><code>components-modal--default</code></td><td>mobile</td><td class="is-change">differs</td><td>1904 differ, 80 allowed (20 at scale 2)</td></tr>' +
+          '</tbody></table></div>',
+          '<p><strong>Report:</strong> <span class="d-fakelink">visual-check-report-1-of-2</span> (zipped <code>report.json</code> and images)</p>'
+        ], 420);
+      }, { controls: section.querySelector('#d-ctl-pr'), chapters: ['Checks', 'Step summary'], label: 'A pull request: the visual-check shard fails and its step summary lists two stories that differ' });
+
+      /* 4. Agent: a UI change, the skill's runner, the report */
+      VCProto.scene(section.querySelector('#d-scene-agent'), async function (t) {
+        t.chapter(0);
+        var log = t.$('.d-agent__log');
+        var field = t.$('.d-agent__field');
+        var ask = 'Make the primary button a bit roomier. The padding feels tight.';
+        await t.wait(300);
+        await t.type(field, ask, { cps: 48 });
+        await t.wait(250);
+        field.textContent = '';
+        t.add(log, '<div class="d-msg d-msg--user"><span class="d-msg__who">You</span>' + ask + '</div>');
+        await t.wait(600);
+        t.add(log, '<div class="d-msg"><span class="d-msg__who">Agent</span><p>I’ll widen its horizontal padding in <code>Button.css</code>.</p></div>');
+        await t.wait(500);
+        t.add(log, '<div class="d-tool"><div class="d-tool__head"><b>Edit</b> src/button/Button.css</div><div class="d-tool__out"><span class="is-del">−  padding: 8px 16px;</span><span class="is-add">+  padding: 8px 18px;</span></div></div>');
+        await t.wait(700);
+        var run = t.add(log, '<div class="d-tool"><div class="d-tool__head"><b>Run</b> node .agents/skills/visual-check/scripts/run.mjs test</div><div class="d-tool__out"></div></div>');
+        await t.wait(900);
+        t.add(run.querySelector('.d-tool__out'), '<span class="is-dim">Reused Storybook web, which was already running at http://127.0.0.1:6006.</span>');
+        await t.wait(800);
+        t.add(run.querySelector('.d-tool__out'), '<span class="is-dim">exit 1</span>');
+        await t.wait(500);
+        t.add(log, '<div class="d-msg"><span class="d-msg__who">Agent</span>' +
+          '<p>visual-check ran on 14 affected snapshots: 12 passed and 2 differ.</p>' +
+          '<ul><li><code>components-button--default</code> (default capture): 312 pixels differ. Diff: <code>.visual-check/report/images/web/components-button--default.diff.png</code></li>' +
+          '<li><code>components-modal--default</code> (mobile): 1904 pixels differ. Diff: <code>…/components-modal--default.mobile.diff.png</code></li></ul>' +
+          '<p>Both come from my padding change in <code>Button.css</code>. If they’re intended, run <code>pnpm visual:update</code>; I won’t run it without your OK.</p></div>');
+      }, { controls: section.querySelector('#d-ctl-agent'), label: 'A coding agent changes a button, runs visual-check through its skill and reports two stories that differ' });
+    })();
+
+    /* ---------- commands: the workflow's copy button ---------- */
+    (function commands() {
+      var section = document.querySelector('.d-cmds');
+      if (section) {
+        bindClip(section);
+      }
+    })();
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,2852 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>visual-check docs · Notebook</title>
+<!-- PROTOTYPE — throwaway. Docs variant 2: "Notebook" (the Product hub direction, research/fumadocs.md §4 B).
+     Fumadocs `layouts/notebook` with nav.mode 'top' and tabMode 'navbar': the landing page's SiteHeader runs across the top,
+     the root folders (Guides, Run, Integrations, Reference) are tabs under it, and the sidebar below shows the current tab.
+     The docs home (#home) is a `full` page: a task hub. Every page lives in this file, routed by location.hash. -->
+<link rel="icon" href="../shared/logo/favicon.svg">
+<link rel="stylesheet" href="../shared/tokens.css">
+<link rel="stylesheet" href="../shared/bundle.css">
+<link rel="stylesheet" href="../shared/proto-base.css">
+<style>
+  /* Values the design system doesn't have yet (become tokens before the real build):
+     - header: SiteHeader row 64px (DS), root-folder tabs row 44px under it (Fumadocs Notebook navbar tabs); 2px tab underline
+     - sidebar width 268px, TOC width 240px (Fumadocs: 268 / 268)
+     - article max width: 720px by default (keeps body copy near the DS 64–72 character measure), 960px wide,
+       1168px for a `full` page (Fumadocs DocsLayout `full`)
+     - sidebar row: 6px block padding (32px rows); TOC row: 5px block padding
+     - "On this page" bar under the header below 1280px: 44px
+     - search dialog: 640px wide, 12vh from the top, 56px input row; drawer 85vw up to 380px
+     - step marker 28px; icon chips 32px and 40px; pixel cells in the worked example: 2px radius, 4px gap
+     - overlay behind dialogs: ink at 48% (no `overlay` token yet)
+     - phone gutter 16px, to line up with the SiteHeader's own 16px (the DS names space-6 as the phone gutter)
+     - SiteHeader steps between 768 and 1199px (the DS header overflows there): see the container queries below
+     - h2 in docs: 48px above (space-12). The DS says space-8, which reads cramped under a 30px heading
+     - z-index: header 40, "On this page" bar 30
+     - the worked example's pixel greys are image content (literal rgb), not UI colours */
+
+  :root {
+    --nb-row-h: 64px;
+    --nb-tabs-h: 44px;
+    --nb-header-h: 109px; /* measured by the script */
+    --nb-tocbar-h: 0px;   /* measured by the script */
+    --nb-sidebar-w: 268px;
+    --nb-toc-w: 240px;
+    --nb-article-max: 720px;
+    --nb-article-full: 1168px;
+    --nb-gutter: var(--space-8);
+    --nb-overlay: color-mix(in srgb, var(--brand-ink) 48%, transparent);
+  }
+  html[data-t-width="wide"] { --nb-article-max: 960px; }
+  @media (max-width: 1279px) { :root { --nb-gutter: var(--space-6); } }
+  @media (max-width: 767px) { :root { --nb-gutter: var(--space-4); } }
+
+  body { min-height: 100dvh; }
+  .nb-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .nb-skip { position: absolute; left: var(--space-4); top: -100px; z-index: 60; padding: var(--space-2) var(--space-4); border-radius: var(--radius-md); background: var(--action-primary); color: var(--on-action-primary); font: var(--text-ui); }
+  .nb-skip:focus { top: var(--space-2); }
+
+  /* ---------- header: Fumadocs Notebook header (nav.mode 'top') ---------- */
+  .nb-header { position: sticky; top: 0; z-index: 40; }
+  .nb-header .vc-header__nav a { white-space: nowrap; }
+  .nb-brand { display: flex; align-items: center; gap: var(--space-1); flex: none; }
+  .nb-brand__slash { color: var(--border-strong); font: 300 24px/1 var(--font-display); margin-inline: var(--space-1); }
+  .nb-brand__docs {
+    padding: 6px var(--space-2);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font: 600 16px/20px var(--font-display);
+    letter-spacing: -0.005em;
+    text-decoration: none;
+    transition: background-color var(--duration-fade) var(--ease-out);
+  }
+  .nb-brand__docs:hover { background: var(--bg-surface); }
+
+  /* The shared header is wider than a tablet: between 768 and 1199px of its own width it sheds, in order, the
+     logo-area "Docs" label and the search field's label, then GitHub and Get started (GitHub stays in the sidebar
+     footer, Getting started in the sidebar). */
+  @container (max-width: 1199px) {
+    .nb-brand__slash, .nb-brand__docs { display: none; }
+    .nb-header .vc-search { display: none; }
+    .nb-header .vc-header__search-icon { display: inline-grid; }
+  }
+  @container (max-width: 959px) {
+    .nb-header .vc-header__inner { padding: 0 var(--space-6); }
+    .nb-header .vc-header__wide { display: none; }
+    .nb-tabs { padding: 0 calc(var(--space-6) - 10px); }
+  }
+  @container (max-width: 767px) {
+    .nb-header .vc-header__inner { padding: 0 var(--space-4); }
+    .nb-brand__slash, .nb-brand__docs { display: revert; }
+  }
+
+  /* Root-folder tabs (tabMode 'navbar') */
+  .nb-tabs {
+    display: flex;
+    align-items: stretch;
+    gap: var(--space-1);
+    height: var(--nb-tabs-h);
+    padding: 0 calc(var(--space-8) - 10px);
+    border-top: 1px solid var(--border-subtle);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .nb-tabs::-webkit-scrollbar { display: none; }
+  html[data-t-tabs="sidebar"] .nb-tabs { display: none; }
+  .nb-tab {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 0 10px;
+    color: var(--text-muted);
+    font: var(--text-ui);
+    font-size: 14px;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color var(--duration-fade) var(--ease-out);
+  }
+  .nb-tab::after {
+    content: "";
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    bottom: 0;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--text-muted);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform var(--duration-spring) var(--ease-spring);
+  }
+  .nb-tab:hover { color: var(--text-primary); }
+  .nb-tab:hover::after { transform: scaleX(1); }
+  .nb-tab[aria-current="page"] { color: var(--text-primary); }
+  .nb-tab[aria-current="page"]::after { transform: scaleX(1); background: var(--text-cyan); }
+  .nb-tab:focus-visible { outline-offset: -2px; }
+  .nb-tab__count { font: var(--text-label); color: var(--text-muted); }
+
+  /* ---------- layout: sidebar | (TOC bar, article, TOC) ---------- */
+  .nb-layout { display: grid; grid-template-columns: var(--nb-sidebar-w) minmax(0, 1fr); }
+  .nb-body { min-width: 0; }
+  .nb-columns { display: flex; justify-content: center; align-items: flex-start; }
+  .nb-main { flex: 0 1 var(--nb-article-max); min-width: 0; }
+  .nb-main:focus { outline: none; }
+  html.nb-is-full .nb-main { flex-basis: var(--nb-article-full); }
+
+  /* ---------- sidebar: aside#nd-sidebar ---------- */
+  .nb-sidebar {
+    position: sticky;
+    top: var(--nb-header-h);
+    height: calc(100dvh - var(--nb-header-h));
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-surface);
+    border-right: 1px solid var(--border-subtle);
+  }
+  .nb-sidebar__head { padding: var(--space-4) var(--space-4) 0 var(--space-6); }
+  .nb-sidebar__head:empty { display: none; }
+  html[data-t-tabs="navbar"] .nb-sidebar .nb-sidebar__head { display: none; }
+  .nb-sidebar__scroll { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-6) var(--space-4) var(--space-6) var(--space-6); }
+  .nb-sidebar__foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4) var(--space-3) var(--space-6);
+    border-top: 1px solid var(--border-subtle);
+    font: var(--text-label);
+    color: var(--text-muted);
+  }
+  .nb-sidebar__foot a { color: var(--text-muted); text-decoration: none; }
+  .nb-sidebar__links { display: flex; gap: var(--space-3); }
+  .nb-sidebar__foot a:hover { color: var(--text-primary); text-decoration: underline; text-underline-offset: 3px; }
+
+  .nb-side-group + .nb-side-group { margin-top: var(--space-6); }
+  .nb-side-sep { margin: 0 0 var(--space-2); padding: 0 var(--space-2); font: var(--text-label); letter-spacing: .02em; color: var(--text-muted); }
+  .nb-side-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+  .nb-side-link {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 6px var(--space-2);
+    border-radius: var(--radius-md);
+    color: var(--text-muted);
+    font: var(--text-small);
+    text-decoration: none;
+    transition: background-color var(--duration-fade) var(--ease-out), color var(--duration-fade) var(--ease-out);
+  }
+  .nb-side-link:hover { background: var(--bg-page); color: var(--text-primary); }
+  .nb-side-link[aria-current="page"] { background: var(--bg-raised); color: var(--text-cyan); font-weight: 600; box-shadow: inset 0 0 0 1px var(--border-subtle); }
+  .nb-side-link:focus-visible, .nb-folder__btn:focus-visible { outline-offset: -2px; }
+  .nb-side-link code, .nb-folder code, .nb-tab code { font: 400 13px/20px var(--font-mono); }
+  .nb-side-link .vc-icon { color: var(--text-muted); }
+
+  /* Root folders as folders: the sidebar of a page outside every root folder (the docs home) */
+  .nb-folder + .nb-folder { margin-top: 2px; }
+  .nb-folder__btn {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    padding: 6px var(--space-2);
+    border: 0;
+    border-radius: var(--radius-md);
+    background: none;
+    color: var(--text-primary);
+    font: var(--text-small);
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color var(--duration-fade) var(--ease-out);
+  }
+  .nb-folder__btn:hover { background: var(--bg-page); }
+  .nb-folder__chev { margin-left: auto; color: var(--text-muted); transition: transform var(--duration-spring) var(--ease-spring); }
+  .nb-folder__btn[aria-expanded="true"] .nb-folder__chev { transform: rotate(90deg); }
+  .nb-folder__body { margin: var(--space-1) 0 var(--space-3) 15px; padding-left: var(--space-2); border-left: 1px solid var(--border-subtle); }
+  .nb-folder__body .nb-side-group + .nb-side-group { margin-top: var(--space-3); }
+  .nb-folder__body .nb-side-sep { margin-top: var(--space-2); }
+
+  /* Root-folder switcher (tabMode off): SidebarTabsDropdown */
+  .nb-root {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    width: 100%;
+    padding: var(--space-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--bg-raised);
+    color: var(--text-primary);
+    text-align: left;
+    cursor: pointer;
+    transition: border-color var(--duration-fade) var(--ease-out);
+  }
+  .nb-root:hover { border-color: var(--border-strong); }
+  .nb-root__icon, .nb-chip-icon {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+  }
+  .nb-root__text { display: grid; min-width: 0; flex: 1; }
+  .nb-root__title { font: var(--text-ui); font-size: 14px; }
+  .nb-root__desc { font: var(--text-small); font-size: 13px; line-height: 18px; color: var(--text-muted); }
+  .nb-root > .vc-icon { color: var(--text-muted); }
+
+  /* ---------- popover menus (Open ▾, root switcher) ---------- */
+  .nb-menu {
+    position: fixed;
+    inset: auto;
+    margin: 0;
+    min-width: 232px;
+    max-width: calc(100vw - 16px);
+    padding: var(--space-1);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--bg-raised);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-raised);
+  }
+  .nb-menu__item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font: var(--text-small);
+    text-decoration: none;
+    transition: background-color var(--duration-fade) var(--ease-out);
+  }
+  .nb-menu__item:hover, .nb-menu__item:focus-visible { background: var(--bg-surface); }
+  .nb-menu__item:focus-visible { outline-offset: -2px; }
+  .nb-menu__item > .vc-icon:first-child { color: var(--text-muted); }
+  .nb-menu__end { margin-left: auto; color: var(--text-muted); }
+  .nb-menu--roots { width: 300px; }
+  .nb-menu--roots .nb-menu__item { gap: var(--space-3); padding: var(--space-2); }
+  .nb-menu--roots .nb-menu__item[aria-current="true"] .nb-root__title { color: var(--text-cyan); }
+
+  /* ---------- "On this page" bar: Fumadocs toc-popover (< 1280px) ---------- */
+  .nb-tocbar { position: sticky; top: var(--nb-header-h); z-index: 30; background: var(--bg-page); border-bottom: 1px solid var(--border-subtle); }
+  html.nb-is-full .nb-tocbar { display: none; }
+  .nb-tocbar__btn {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    height: 44px;
+    padding: 0 var(--nb-gutter);
+    border: 0;
+    background: none;
+    color: var(--text-muted);
+    font: var(--text-small);
+    text-align: left;
+    cursor: pointer;
+  }
+  .nb-tocbar__btn:focus-visible { outline-offset: -2px; }
+  .nb-tocbar__current { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
+  .nb-tocbar__chev { transition: transform var(--duration-spring) var(--ease-spring); }
+  .nb-tocbar__btn[aria-expanded="true"] .nb-tocbar__chev { transform: rotate(180deg); }
+  .nb-tocbar__panel { max-height: 55vh; overflow-y: auto; padding: 0 var(--nb-gutter) var(--space-4); }
+  .nb-tocbar__panel[hidden] { display: none; }
+
+  /* ---------- TOC: div#nd-toc ---------- */
+  .nb-toc {
+    flex: 0 0 var(--nb-toc-w);
+    position: sticky;
+    top: var(--nb-header-h);
+    max-height: calc(100dvh - var(--nb-header-h));
+    overflow-y: auto;
+    padding: var(--space-12) var(--space-6) var(--space-8) 0;
+  }
+  html.nb-is-full .nb-toc { display: none; }
+  .nb-toc__title { display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-3); font: var(--text-label); letter-spacing: .02em; color: var(--text-muted); }
+  .nb-toc__list { position: relative; list-style: none; margin: 0; padding: 0 0 0 var(--space-3); }
+  .nb-toc__list::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 1px; background: var(--border-subtle); }
+  .nb-toc__thumb {
+    position: absolute;
+    left: -0.5px;
+    width: 2px;
+    top: 0;
+    height: 0;
+    border-radius: 1px;
+    background: var(--text-cyan);
+    transition: top var(--duration-fade) var(--ease-out), height var(--duration-fade) var(--ease-out);
+  }
+  .nb-toc__link {
+    display: block;
+    padding: 5px 0;
+    color: var(--text-muted);
+    font: var(--text-small);
+    text-decoration: none;
+    transition: color var(--duration-fade) var(--ease-out);
+  }
+  .nb-toc__link[data-depth="3"] { padding-left: var(--space-3); }
+  .nb-toc__link:hover, .nb-toc__link.is-active { color: var(--text-primary); }
+  .nb-toc__link:focus-visible { outline-offset: -2px; }
+  .nb-toc__link code { font: 400 13px/20px var(--font-mono); }
+  .nb-toc__foot { margin-top: var(--space-6); padding-top: var(--space-4); border-top: 1px solid var(--border-subtle); font: var(--text-small); color: var(--text-muted); }
+  .nb-toc__foot p { margin: 0 0 var(--space-2); }
+  .nb-feedback { display: flex; gap: var(--space-2); }
+
+  @media (max-width: 1279px) { .nb-toc { display: none; } }
+  @media (min-width: 1280px) { .nb-tocbar { display: none; } }
+
+  /* ---------- article#nd-page ---------- */
+  .nb-page { padding: var(--space-12) var(--nb-gutter) var(--space-24); }
+  @media (max-width: 1279px) { .nb-page { padding-top: var(--space-8); } }
+  .nb-head { padding-bottom: var(--space-6); margin-bottom: var(--space-8); border-bottom: 1px solid var(--border-subtle); }
+  .nb-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); margin: 0 0 var(--space-4); padding: 0; list-style: none; font: var(--text-small); color: var(--text-muted); }
+  .nb-crumbs a { color: var(--text-muted); text-decoration: none; }
+  .nb-crumbs a:hover { color: var(--text-primary); }
+  .nb-title { margin: 0; font-family: var(--font-display); font-size: 44px; line-height: 48px; font-weight: 700; letter-spacing: -0.015em; }
+  .nb-title code { padding: .02em .16em .06em; border-radius: var(--radius-md); background: var(--bg-surface); font: 500 .8em/1 var(--font-mono); letter-spacing: -0.01em; }
+  .nb-desc { margin: var(--space-3) 0 0; font: var(--text-body-lg); color: var(--text-muted); max-width: 64ch; }
+  .nb-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-6); }
+  html[data-t-actions="hidden"] .nb-actions { display: none; }
+  .nb-actions__edit { margin-left: auto; }
+  .nb-actions .vc-btn--ghost { color: var(--text-muted); }
+  .nb-actions .vc-btn--ghost:hover { color: var(--text-primary); }
+  @media (max-width: 767px) {
+    .nb-title { font-size: 34px; line-height: 40px; }
+    .nb-actions__edit { margin-left: 0; }
+  }
+
+  /* ---------- prose: DocsBody ---------- */
+  .nb-prose { font: var(--text-body); overflow-wrap: break-word; }
+  .nb-prose > :first-child { margin-top: 0; }
+  /* :where() keeps these at element specificity, so components inside the prose set their own spacing. */
+  :where(.nb-prose) :is(p, ul, ol) { margin: 0 0 var(--space-4); }
+  :where(.nb-prose) :is(ul, ol) { padding-left: var(--space-6); }
+  :where(.nb-prose) li + li { margin-top: var(--space-1); }
+  .nb-prose li::marker { color: var(--text-muted); }
+  .nb-prose strong { font-weight: 600; }
+  .nb-prose a:not([class]) { color: var(--text-cyan); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  .nb-prose a:not([class]):hover { text-decoration-thickness: 2px; }
+  .nb-prose h2, .nb-prose h3 { position: relative; scroll-margin-top: calc(var(--nb-header-h) + var(--nb-tocbar-h) + var(--space-6)); }
+  .nb-prose h2 { margin: var(--space-12) 0 var(--space-4); font-family: var(--font-display); font-size: 30px; line-height: 36px; font-weight: 700; letter-spacing: -0.01em; }
+  .nb-prose h3 { margin: var(--space-8) 0 var(--space-2); font-family: var(--font-display); font-size: 21px; line-height: 28px; font-weight: 600; }
+  .nb-prose h2 code, .nb-prose h3 code { font-size: .82em; font-weight: 500; }
+  .nb-prose h2:focus, .nb-prose h3:focus { outline: none; }
+  .nb-anchor { display: inline-grid; place-items: center; width: 24px; height: 24px; margin-left: var(--space-1); vertical-align: middle; border-radius: var(--radius-sm); color: var(--text-muted); opacity: 0; transition: opacity var(--duration-fade) var(--ease-out); }
+  :is(h2, h3):hover .nb-anchor, .nb-anchor:focus-visible { opacity: 1; }
+  .nb-prose .vc-inline-code { overflow-wrap: anywhere; }
+  .nb-prose .vc-callout { margin: var(--space-6) 0; }
+  .nb-prose .vc-callout p + p { margin-top: var(--space-2); }
+  .nb-lead { font: var(--text-body-lg); }
+
+  /* Code blocks: vc-code with a title bar and copy button (Fumadocs CodeBlock / CodeBlockTabs) */
+  .nb-code { margin: var(--space-6) 0; max-width: 100%; }
+  .nb-code .vc-code__bar { gap: var(--space-3); min-height: 40px; }
+  .nb-code__title { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nb-code pre code { font: inherit; }
+  .nb-code .vc-code__copy { display: inline-flex; align-items: center; gap: var(--space-1); flex: none; }
+  .nb-code .vc-code__copy:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
+  .nb-code .m { color: var(--code-magenta); }
+  .nb-pm .vc-code__bar { padding-block: 0; }
+  .nb-pm__tabs { display: flex; align-self: stretch; gap: var(--space-1); }
+  .nb-pm__tab {
+    position: relative;
+    padding: 0 var(--space-2);
+    border: 0;
+    background: none;
+    color: var(--code-muted);
+    font: var(--text-label);
+    letter-spacing: .02em;
+    cursor: pointer;
+    transition: color var(--duration-fade) var(--ease-out);
+  }
+  .nb-pm__tab:hover { color: var(--code-fg); }
+  .nb-pm__tab[aria-selected="true"] { color: var(--code-fg); }
+  .nb-pm__tab[aria-selected="true"]::after { content: ""; position: absolute; left: var(--space-2); right: var(--space-2); bottom: 0; height: 2px; border-radius: 1px; background: var(--code-cyan); }
+  .nb-pm__tab:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+
+  /* Tables */
+  .nb-table { margin: var(--space-6) 0; overflow-x: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); }
+  .nb-table table { width: 100%; border-collapse: collapse; font: var(--text-small); }
+  .nb-table th { padding: var(--space-2) var(--space-3); background: var(--bg-surface); font-weight: 600; text-align: left; vertical-align: bottom; border-bottom: 1px solid var(--border-subtle); }
+  .nb-table td { padding: var(--space-2) var(--space-3); vertical-align: top; border-top: 1px solid var(--border-subtle); }
+  .nb-table tr:first-child td { border-top: 0; }
+  .nb-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .nb-table td.num { white-space: nowrap; }
+  .nb-table tr.is-default td { background: var(--bg-surface); font-weight: 600; }
+  .nb-table caption { caption-side: bottom; padding: var(--space-2) var(--space-3); text-align: left; font: var(--text-small); color: var(--text-muted); border-top: 1px solid var(--border-subtle); }
+  .nb-tag { font: var(--text-label); color: var(--text-muted); font-weight: 500; }
+  .nb-table--prompts td:first-child .vc-inline-code { padding: 0; border: 0; background: none; font: 400 13px/20px var(--font-mono); color: var(--text-primary); }
+
+  /* Steps (fd-steps) */
+  .nb-steps { position: relative; margin: var(--space-6) 0; padding-left: 44px; counter-reset: nb-step; }
+  .nb-steps::before { content: ""; position: absolute; left: 13.5px; top: 14px; bottom: var(--space-4); width: 1px; background: var(--border-subtle); }
+  .nb-step { counter-increment: nb-step; }
+  .nb-step + .nb-step { margin-top: var(--space-8); }
+  .nb-steps .nb-step > h3 { margin-top: 0; }
+  .nb-steps .nb-step > h3::before {
+    content: counter(nb-step);
+    position: absolute;
+    left: -44px;
+    top: 0;
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-pill);
+    background: var(--bg-page);
+    color: var(--text-primary);
+    font: 600 13px/1 var(--font-mono);
+  }
+
+  /* Files */
+  .nb-files { margin: var(--space-6) 0; padding: var(--space-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-raised); }
+  .nb-files ul { list-style: none; margin: 0; padding: 0; }
+  .nb-files li + li { margin-top: 0; }
+  .nb-files ul ul { margin-left: 15px; padding-left: var(--space-2); border-left: 1px solid var(--border-subtle); }
+  .nb-files__row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); padding: 6px var(--space-2); }
+  .nb-files__row > .vc-icon { color: var(--text-muted); }
+  .nb-files__name { font: 400 14px/20px var(--font-mono); }
+  .nb-files__note { margin-left: auto; font: var(--text-small); color: var(--text-muted); }
+
+  /* Cards */
+  .nb-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); margin: var(--space-6) 0; }
+  .nb-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-4);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--bg-raised);
+    color: var(--text-primary);
+    text-decoration: none;
+    transition: border-color var(--duration-fade) var(--ease-out);
+  }
+  .nb-card:hover { border-color: var(--border-strong); }
+  .nb-card .nb-chip-icon { margin-bottom: var(--space-2); }
+  .nb-card__title { display: flex; align-items: center; gap: var(--space-1); font: var(--text-ui); }
+  .nb-card__title .vc-icon { color: var(--text-muted); transition: transform var(--duration-spring) var(--ease-spring); }
+  .nb-card:hover .nb-card__title .vc-icon { transform: translateX(3px); color: var(--text-primary); }
+  .nb-card__desc { font: var(--text-small); color: var(--text-muted); }
+  .nb-card code { font: 400 .9em/1 var(--font-mono); }
+  @media (max-width: 600px) { .nb-cards { grid-template-columns: minmax(0, 1fr); } }
+
+  /* TypeTable */
+  .nb-typetable { margin: var(--space-6) 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-raised); }
+  .nb-typetable__row { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: var(--space-4); padding: var(--space-4); }
+  .nb-typetable__row + .nb-typetable__row { border-top: 1px solid var(--border-subtle); }
+  .nb-typetable__key { font: 600 15px/26px var(--font-mono); }
+  .nb-typetable__q { margin: 0; font: var(--text-body-strong); }
+  .nb-typetable__d { margin: var(--space-1) 0 0; font: var(--text-small); color: var(--text-muted); }
+  .nb-typetable__meta { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); margin: var(--space-2) 0 0; font: var(--text-small); color: var(--text-muted); }
+  .nb-typetable__meta b { font-weight: 600; color: var(--text-primary); }
+  @media (max-width: 600px) { .nb-typetable__row { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); } }
+
+  /* Worked example: custom MDX component <PixelRow> inside Fumadocs <Tabs> */
+  .nb-px { margin: var(--space-6) 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-surface); overflow: hidden; }
+  .nb-px__tabs { display: flex; gap: var(--space-1); padding: 0 var(--space-3); border-bottom: 1px solid var(--border-subtle); }
+  .nb-px__tab { position: relative; height: 44px; padding: 0 var(--space-3); border: 0; background: none; color: var(--text-muted); font: 500 13px/16px var(--font-mono); cursor: pointer; transition: color var(--duration-fade) var(--ease-out); }
+  .nb-px__tab:hover, .nb-px__tab[aria-selected="true"] { color: var(--text-primary); }
+  .nb-px__tab[aria-selected="true"]::after { content: ""; position: absolute; left: var(--space-3); right: var(--space-3); bottom: -1px; height: 2px; border-radius: 1px; background: var(--text-cyan); }
+  .nb-px__tab:focus-visible { outline-offset: -2px; }
+  .nb-px__panel { padding: var(--space-6) var(--space-4) var(--space-4); background: var(--bg-page); }
+  .nb-px__grid { display: grid; grid-template-columns: 88px repeat(10, minmax(0, 1fr)); gap: 4px; align-items: center; }
+  .nb-px__label { font: var(--text-label); color: var(--text-muted); }
+  .nb-px__n { text-align: center; font: var(--text-label); color: var(--text-muted); }
+  .nb-px__cell { aspect-ratio: 1; max-height: 48px; border-radius: 2px; outline: 1px solid var(--border-subtle); }
+  .nb-px__shift { text-align: center; font: 500 13px/20px var(--font-mono); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .nb-px__shift.is-counted { color: var(--text-magenta); font-weight: 700; }
+  .nb-px__gap { grid-column: 1 / -1; height: var(--space-2); }
+  .nb-px__result { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin-top: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--border-subtle); }
+  .nb-px__result p { margin: 0; flex: 1 1 260px; font: var(--text-small); color: var(--text-muted); }
+  .nb-px__legend { margin: var(--space-3) 0 0; font: var(--text-small); color: var(--text-muted); }
+  @media (max-width: 600px) {
+    .nb-px__panel { padding-inline: var(--space-3); }
+    .nb-px__grid { grid-template-columns: 64px repeat(10, minmax(0, 1fr)); gap: 2px; }
+    .nb-px__shift { font-size: 11px; }
+  }
+
+  /* ---------- footer: last updated + prev/next ---------- */
+  .nb-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1px solid var(--border-subtle); font: var(--text-small); color: var(--text-muted); }
+  .nb-meta a { color: var(--text-muted); display: inline-flex; align-items: center; gap: var(--space-1); text-decoration: none; }
+  .nb-meta a:hover { color: var(--text-primary); text-decoration: underline; text-underline-offset: 3px; }
+  html[data-t-actions="shown"] .nb-meta__edit { display: none; }
+  .nb-pager { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); margin-top: var(--space-6); }
+  .nb-pager a {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;
+    padding: var(--space-4);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    color: var(--text-primary);
+    text-decoration: none;
+    transition: border-color var(--duration-fade) var(--ease-out), background-color var(--duration-fade) var(--ease-out);
+  }
+  .nb-pager a:hover { border-color: var(--border-strong); background: var(--bg-surface); }
+  .nb-pager__dir { display: flex; align-items: center; gap: var(--space-1); font: var(--text-label); color: var(--text-muted); }
+  .nb-pager__title { font: var(--text-ui); }
+  .nb-pager__title code { font: 400 .9em/1 var(--font-mono); }
+  .nb-pager__next { grid-column: 2; align-items: flex-end; text-align: right; }
+  .nb-pager .vc-icon { transition: transform var(--duration-spring) var(--ease-spring); }
+  .nb-pager__prev:hover .vc-icon { transform: translateX(-3px); }
+  .nb-pager__next:hover .vc-icon { transform: translateX(3px); }
+
+  /* ---------- docs home: a `full` page ---------- */
+  .nb-hub__eyebrow { margin: 0 0 var(--space-3); color: var(--text-magenta); }
+  .nb-hub__title { margin: 0; max-width: 18ch; }
+  .nb-hub__lead { margin: var(--space-6) 0 0; max-width: 62ch; font: var(--text-body-lg); color: var(--text-muted); }
+  .nb-hub__cta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); margin-top: var(--space-8); }
+  .nb-chipwrap { display: grid; gap: var(--space-2); }
+  .nb-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-3);
+    height: 48px;
+    padding: 0 var(--space-2) 0 var(--space-4);
+    border: 1px solid var(--code-bg);
+    border-radius: var(--radius-md);
+    background: var(--code-bg);
+    color: var(--code-fg);
+    box-shadow: var(--shadow-register);
+    font: var(--text-code);
+    max-width: 100%;
+  }
+  [data-theme="dark"] .nb-chip { border-color: var(--border-subtle); }
+  .nb-chip .p { color: var(--code-cyan); user-select: none; }
+  .nb-chip__cmd { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .nb-chip__copy {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--code-muted);
+    cursor: pointer;
+    transition: color var(--duration-fade) var(--ease-out), background-color var(--duration-fade) var(--ease-out);
+  }
+  .nb-chip__copy:hover { color: var(--code-fg); background: color-mix(in srgb, var(--code-fg) 10%, transparent); }
+  .nb-chip__copy:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
+  .nb-pmswitch { display: flex; gap: var(--space-1); }
+  .nb-pmswitch button {
+    padding: 2px var(--space-2);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--text-muted);
+    font: var(--text-label);
+    cursor: pointer;
+    transition: color var(--duration-fade) var(--ease-out), border-color var(--duration-fade) var(--ease-out);
+  }
+  .nb-pmswitch button:hover { color: var(--text-primary); }
+  .nb-pmswitch button[aria-pressed="true"] { color: var(--text-primary); border-color: var(--border-strong); }
+
+  .nb-flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: var(--space-12) 0 0; padding: 0; list-style: none; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-raised); }
+  .nb-flow__step { position: relative; padding: var(--space-6); }
+  .nb-flow__step + .nb-flow__step { border-left: 1px solid var(--border-subtle); }
+  .nb-flow__arrow {
+    position: absolute;
+    left: -12px;
+    top: calc(var(--space-6) + 26px);
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-pill);
+    background: var(--bg-raised);
+    color: var(--border-strong);
+  }
+  .nb-flow__arrow .vc-icon { width: 14px; height: 14px; }
+  .nb-flow__n { margin: 0; font: var(--text-label); color: var(--text-muted); }
+  .nb-flow__cmd { margin: var(--space-3) 0 var(--space-2); font: 600 17px/24px var(--font-mono); }
+  .nb-flow__cmd span { color: var(--text-muted); font-weight: 400; }
+  .nb-flow__desc { margin: 0; font: var(--text-small); color: var(--text-muted); }
+
+  .nb-support { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) 0; margin-top: var(--space-4); padding: var(--space-3) 0; font: var(--text-small); color: var(--text-muted); }
+  .nb-support__label { margin-right: var(--space-4); font: var(--text-label); color: var(--text-muted); }
+  .nb-support__item { display: inline-flex; align-items: baseline; gap: var(--space-2); padding: 0 var(--space-4); border-left: 1px solid var(--border-subtle); color: var(--text-muted); text-decoration: none; }
+  .nb-support__item:first-of-type { padding-left: 0; border-left: 0; }
+  .nb-support__item b { font-weight: 600; color: var(--text-primary); }
+  a.nb-support__item:hover b { color: var(--text-cyan); text-decoration: underline; text-underline-offset: 3px; }
+
+  .nb-hub__section { margin-top: var(--space-12); }
+  .nb-hub__h2 { margin: 0 0 var(--space-4); font-family: var(--font-display); font-size: 21px; line-height: 28px; font-weight: 600; }
+  .nb-tasks { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--space-4); }
+  .nb-task {
+    grid-column: span 2;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-6);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--bg-raised);
+    transition: border-color var(--duration-fade) var(--ease-out);
+  }
+  .nb-task:nth-child(n+4) { grid-column: span 3; }
+  .nb-task:hover { border-color: var(--border-strong); }
+  .nb-task__head { display: flex; align-items: center; gap: var(--space-3); }
+  .nb-task__head .nb-chip-icon { width: 40px; height: 40px; }
+  .nb-task__title { margin: 0; font-family: var(--font-display); font-size: 21px; line-height: 28px; font-weight: 600; }
+  .nb-task__desc { margin: 0; font: var(--text-small); color: var(--text-muted); }
+  .nb-task__links { list-style: none; margin: auto 0 0; padding: var(--space-2) 0 0; border-top: 1px solid var(--border-subtle); }
+  .nb-task__links a {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: 6px 0;
+    color: var(--text-primary);
+    font: var(--text-small);
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .nb-task__links a .vc-icon { color: var(--text-muted); transition: transform var(--duration-spring) var(--ease-spring), color var(--duration-fade) var(--ease-out); }
+  .nb-task__links a:hover { color: var(--text-cyan); }
+  .nb-task__links a:hover .vc-icon { transform: translateX(3px); color: var(--text-cyan); }
+  .nb-task__links code, .nb-browse code { font: 400 13px/20px var(--font-mono); }
+
+  .nb-browse { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--space-6) var(--space-4); padding-top: var(--space-6); border-top: 1px solid var(--border-subtle); }
+  .nb-browse__tab { margin: 0; display: flex; align-items: center; gap: var(--space-1); font: var(--text-label); color: var(--text-muted); }
+  .nb-browse__group { margin: var(--space-1) 0 var(--space-3); font: var(--text-body-strong); }
+  .nb-browse ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
+  .nb-browse a { color: var(--text-muted); font: var(--text-small); text-decoration: none; }
+  .nb-browse a:hover { color: var(--text-primary); text-decoration: underline; text-underline-offset: 3px; }
+
+  @media (max-width: 1100px) {
+    .nb-tasks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .nb-task, .nb-task:nth-child(n+4) { grid-column: auto; }
+    .nb-task:first-child { grid-column: 1 / -1; }
+    .nb-browse { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
+  @media (max-width: 767px) {
+    .nb-flow { grid-template-columns: minmax(0, 1fr); }
+    .nb-flow__step + .nb-flow__step { border-left: 0; border-top: 1px solid var(--border-subtle); }
+    .nb-flow__arrow { left: var(--space-6); top: -12px; transform: rotate(90deg); }
+    .nb-tasks { grid-template-columns: minmax(0, 1fr); }
+    .nb-browse { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .nb-support__item { padding: 0; border-left: 0; flex: 1 1 45%; }
+    .nb-support__label { flex-basis: 100%; }
+    .nb-chip { box-shadow: none; }
+  }
+
+  /* ---------- search dialog (Fumadocs SearchDialog) ---------- */
+  .nb-search {
+    width: min(640px, calc(100% - 16px));
+    max-width: none;
+    max-height: min(560px, calc(100dvh - 32px));
+    margin: 12vh auto auto;
+    padding: 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--bg-raised);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-raised);
+    overflow: hidden;
+  }
+  .nb-search[open] { display: flex; flex-direction: column; }
+  .nb-search:modal, .nb-drawer:modal { overscroll-behavior: contain; }
+  .nb-search::backdrop, .nb-drawer::backdrop { background: var(--nb-overlay); overflow: hidden; overscroll-behavior: contain; }
+  @media (max-width: 767px) { .nb-search { margin-top: var(--space-4); } }
+  .nb-search__head { display: flex; align-items: center; gap: var(--space-3); height: 56px; padding: 0 var(--space-3) 0 var(--space-4); border-bottom: 1px solid var(--border-subtle); color: var(--text-muted); }
+  .nb-search__head:has(input:focus-visible) { box-shadow: inset 0 -2px 0 var(--focus); }
+  .nb-search__input { flex: 1; min-width: 0; height: 100%; border: 0; background: none; color: var(--text-primary); font: var(--text-body-lg); }
+  .nb-search__input:focus-visible { outline: none; }
+  .nb-search__input::placeholder { color: var(--text-muted); }
+  .nb-search__close { cursor: pointer; }
+  .nb-search__label { margin: 0; padding: var(--space-3) var(--space-4) 0; font: var(--text-label); color: var(--text-muted); }
+  .nb-search__list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; list-style: none; margin: 0; padding: var(--space-2); }
+  .nb-search__opt { display: flex; align-items: flex-start; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); cursor: pointer; }
+  .nb-search__opt > .vc-icon { margin-top: 2px; color: var(--text-muted); }
+  .nb-search__opt[aria-selected="true"] { background: var(--bg-surface); box-shadow: inset 0 0 0 1px var(--border-subtle); }
+  .nb-search__opt[aria-selected="true"] .nb-search__t { color: var(--text-cyan); }
+  .nb-search__body { display: grid; min-width: 0; }
+  .nb-search__t { font: var(--text-ui); font-size: 15px; }
+  .nb-search__s { font: var(--text-small); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nb-search__t code, .nb-search__s code { font: 400 .9em/1 var(--font-mono); }
+  .nb-search mark { background: none; color: inherit; text-decoration: underline; text-decoration-color: var(--text-cyan); text-decoration-thickness: 2px; text-underline-offset: 3px; }
+  .nb-search__empty { padding: var(--space-8) var(--space-4); text-align: center; font: var(--text-small); color: var(--text-muted); }
+  .nb-search__foot { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); padding: var(--space-2) var(--space-4); border-top: 1px solid var(--border-subtle); font: var(--text-small); color: var(--text-muted); }
+  .nb-search__foot span { display: inline-flex; align-items: center; gap: var(--space-1); }
+  @media (max-width: 767px) { .nb-search__foot { display: none; } }
+
+  /* ---------- drawer (mobile sidebar) ---------- */
+  .nb-drawer {
+    width: min(85vw, 380px);
+    max-width: none;
+    height: 100dvh;
+    max-height: none;
+    margin: 0 0 0 auto;
+    padding: 0;
+    border: 0;
+    border-left: 1px solid var(--border-subtle);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    transform: translateX(100%);
+    transition: transform var(--duration-spring) var(--ease-out), overlay var(--duration-spring) allow-discrete, display var(--duration-spring) allow-discrete;
+  }
+  .nb-drawer[open] { display: flex; flex-direction: column; transform: none; }
+  @starting-style { .nb-drawer[open] { transform: translateX(100%); } }
+  .nb-drawer__head { display: flex; align-items: center; justify-content: space-between; height: 64px; padding: 0 var(--space-2) 0 var(--space-4); border-bottom: 1px solid var(--border-subtle); flex: none; }
+  .nb-drawer__head img { height: 22px; width: auto; }
+  .nb-drawer__body { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-4); }
+  .nb-drawer .nb-side-link, .nb-drawer .nb-folder__btn { padding-block: 10px; }
+  .nb-roots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); margin-bottom: var(--space-6); }
+  .nb-roots a {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    color: var(--text-muted);
+    font: var(--text-ui);
+    font-size: 14px;
+    text-decoration: none;
+  }
+  .nb-roots a[aria-current="true"] { background: var(--bg-raised); color: var(--text-cyan); border-color: var(--border-strong); }
+  .nb-drawer__site { display: grid; gap: var(--space-1); margin-top: var(--space-6); padding-top: var(--space-4); border-top: 1px solid var(--border-subtle); }
+  .nb-drawer__site a:not(.vc-btn) { padding: var(--space-2); color: var(--text-primary); font: 600 16px/24px var(--font-display); text-decoration: none; }
+  .nb-drawer__site .vc-btn { margin-top: var(--space-3); }
+
+  /* ---------- tablet and phone ---------- */
+  @media (max-width: 767px) {
+    .nb-tabs { display: none; }
+    .nb-layout { grid-template-columns: minmax(0, 1fr); }
+    .nb-sidebar { display: none; }
+    .nb-pager { grid-template-columns: minmax(0, 1fr); }
+    .nb-pager__next { grid-column: auto; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .nb-tab::after, .nb-folder__chev, .nb-tocbar__chev, .nb-toc__thumb, .nb-card__title .vc-icon, .nb-pager .vc-icon, .nb-task__links a .vc-icon, .nb-drawer { transition: none; }
+    .nb-card:hover .nb-card__title .vc-icon, .nb-pager a:hover .vc-icon, .nb-task__links a:hover .vc-icon { transform: none; }
+  }
+</style>
+<script>
+  window.VC_PAGE = {
+    set: 'docs',
+    key: '2',
+    /* Idea toggles: each becomes a bar button and sets html[data-t-<id>="<option>"]. */
+    toggles: [
+      { id: 'tabs', label: 'Tabs', options: ['navbar', 'sidebar'] },
+      { id: 'actions', label: 'Page actions', options: ['shown', 'hidden'] },
+      { id: 'width', label: 'Width', options: ['default', 'wide'] }
+    ]
+  };
+</script>
+<script src="../shared/proto-kit.js"></script>
+</head>
+<body>
+<a class="nb-skip" href="#nb-main">Skip to content</a>
+
+<!-- Fumadocs: `layouts/notebook` header with nav.mode 'top'. Row 1 is the design system's SiteHeader, built from the same
+     baseOptions() the landing page's HomeLayout uses (nav title, links, githubUrl, searchToggle, themeSwitch), so it is the
+     same header on both. Row 2 is tabMode 'navbar': the root folders (meta.json "root": true) as header tabs. -->
+<header class="vc-header nb-header" id="nd-nav">
+  <div class="vc-header__inner">
+    <div class="nb-brand">
+      <a class="vc-header__logo" href="../landing/a.html" aria-label="visual-check home">
+        <img class="vc-only-light" src="../shared/logo/logo-horizontal.svg" alt="visual-check">
+        <img class="vc-only-dark" src="../shared/logo/logo-horizontal-dark.svg" alt="visual-check">
+      </a>
+      <span class="nb-brand__slash" aria-hidden="true">/</span>
+      <a class="nb-brand__docs" href="#home">Docs</a>
+    </div>
+    <nav class="vc-header__nav" aria-label="Main">
+      <a href="#home" data-nav="docs">Docs</a>
+      <a href="#storybook-addon" data-nav="storybook-addon">Storybook addon</a>
+      <a href="#agent-skill" data-nav="agent-skill">Agent skill</a>
+      <a href="https://github.com/visual-check/visual-check/releases" target="_blank" rel="noopener">Changelog</a>
+    </nav>
+    <div class="vc-header__actions">
+      <button class="vc-search" type="button" data-search-open>
+        <svg class="vc-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>
+        <span class="vc-search__label">Search docs</span><kbd class="vc-kbd" data-kbd>⌘K</kbd>
+      </button>
+      <button class="vc-icon-btn vc-header__search-icon" type="button" aria-label="Search docs" data-search-open>
+        <svg class="vc-icon vc-icon--20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5"/><path d="M13 13l4 4"/></svg>
+      </button>
+      <a class="vc-icon-btn vc-header__wide" href="https://github.com/visual-check/visual-check" target="_blank" rel="noopener" aria-label="visual-check on GitHub">
+        <svg class="vc-icon vc-icon--20" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 15.5c-3 1-3-1.5-4.5-2M12.5 17.5v-2.6a2.3 2.3 0 0 0-.6-1.7c2.1-.2 4.3-1 4.3-4.7a3.6 3.6 0 0 0-1-2.5 3.4 3.4 0 0 0 0-2.5s-.8-.2-2.6 1a9 9 0 0 0-4.7 0C6.1 3.3 5.3 3.5 5.3 3.5a3.4 3.4 0 0 0 0 2.5 3.6 3.6 0 0 0-1 2.5c0 3.7 2.2 4.5 4.3 4.7a2.3 2.3 0 0 0-.6 1.7v2.6"/></svg>
+      </a>
+      <button class="vc-icon-btn" type="button" aria-label="Toggle theme" data-kit-theme-toggle>
+        <svg class="vc-icon vc-icon--20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="M10 3.5a6.5 6.5 0 0 0 0 13z" fill="currentColor"/></svg>
+      </button>
+      <a class="vc-btn vc-btn--primary vc-btn--sm vc-header__wide" href="#getting-started">Get started</a>
+      <button class="vc-icon-btn vc-header__menu" type="button" aria-label="Open the docs menu" aria-expanded="false" aria-controls="nb-drawer" data-drawer-open>
+        <svg class="vc-icon vc-icon--20" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14"/></svg>
+      </button>
+    </div>
+  </div>
+  <nav class="nb-tabs" id="nb-tabs" aria-label="Docs sections"></nav>
+</header>
+
+<!-- Fumadocs: div#nd-notebook-layout. Sidebar (aside#nd-sidebar) under the header, then the page column. -->
+<div class="nb-layout" id="nd-notebook-layout">
+  <!-- Fumadocs: aside#nd-sidebar. Head: SidebarTabsDropdown (only when tabMode isn't 'navbar'). Viewport: the current root
+       folder's page tree, with "---Start---" style separators. Footer: sidebar.footer slot. -->
+  <aside class="nb-sidebar" id="nd-sidebar" aria-label="Docs pages">
+    <div class="nb-sidebar__head" id="nb-sidebar-head"></div>
+    <nav class="nb-sidebar__scroll" id="nb-sidebar-tree" aria-label="Pages in this section"></nav>
+    <div class="nb-sidebar__foot">
+      <span>v0.1.0</span>
+      <span class="nb-sidebar__links">
+        <a href="https://visual-check.vercel.app/llms.txt" target="_blank" rel="noopener">llms.txt</a>
+        <a href="https://github.com/visual-check/visual-check" target="_blank" rel="noopener">GitHub</a>
+      </span>
+    </div>
+  </aside>
+
+  <div class="nb-body">
+    <!-- Fumadocs: toc-popover. Below 1280px the TOC becomes this sticky "On this page" disclosure under the header. -->
+    <div class="nb-tocbar" id="nd-toc-popover">
+      <button class="nb-tocbar__btn" type="button" aria-expanded="false" aria-controls="nb-tocbar-panel" id="nb-tocbar-btn">
+        <svg class="vc-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h7"/></svg>
+        <span>On this page</span>
+        <span class="nb-tocbar__current" id="nb-tocbar-current"></span>
+        <svg class="vc-icon nb-tocbar__chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 6 8 10.5 12.5 6"/></svg>
+      </button>
+      <div class="nb-tocbar__panel" id="nb-tocbar-panel" hidden></div>
+    </div>
+
+    <div class="nb-columns">
+      <main class="nb-main" id="nb-main" tabindex="-1">
+        <!-- Fumadocs: article#nd-page (DocsPage). Breadcrumb · DocsTitle · DocsDescription · page actions row
+             (MarkdownCopyButton, ViewOptionsPopover, EditOnGitHub) · DocsBody (.prose) · PageLastUpdate · footer prev/next. -->
+        <article class="nb-page" id="nd-page"></article>
+      </main>
+      <!-- Fumadocs: div#nd-toc, TOC style 'normal' (a track with a thumb over the headings in view);
+           tableOfContent.footer slot holds the Feedback integration. -->
+      <aside class="nb-toc" id="nd-toc" aria-label="On this page"></aside>
+    </div>
+  </div>
+</div>
+
+<!-- Fumadocs: ViewOptionsPopover ("Open ▾"). A popover of links, so no menu roles: Tab moves through it, Esc closes. -->
+<div class="nb-menu" id="nb-open-menu" popover aria-label="Open this page in"></div>
+<!-- Fumadocs: SidebarTabsDropdown's list of root folders. -->
+<div class="nb-menu nb-menu--roots" id="nb-root-menu" popover aria-label="Docs sections"></div>
+
+<!-- Fumadocs: SearchDialog (static index, `useStaticSearch` style). ⌘K / Ctrl K. -->
+<dialog class="nb-search" id="nb-search" aria-label="Search the docs" closedby="any">
+  <div class="nb-search__head">
+    <svg class="vc-icon vc-icon--20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5"/><path d="M13 13l4 4"/></svg>
+    <input class="nb-search__input" id="nb-search-input" type="text" role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="nb-search-list" placeholder="Search the docs" autocomplete="off" spellcheck="false">
+    <button class="vc-kbd nb-search__close" type="button" data-search-close aria-label="Close search">Esc</button>
+  </div>
+  <p class="nb-search__label" id="nb-search-label">Suggested</p>
+  <ul class="nb-search__list" id="nb-search-list" role="listbox" aria-labelledby="nb-search-label"></ul>
+  <div class="nb-search__foot" aria-hidden="true">
+    <span><kbd class="vc-kbd">↑</kbd><kbd class="vc-kbd">↓</kbd> to move</span>
+    <span><kbd class="vc-kbd">↵</kbd> to open</span>
+    <span><kbd class="vc-kbd">Esc</kbd> to close</span>
+  </div>
+</dialog>
+
+<!-- Fumadocs: the sidebar on mobile, a drawer from the end edge (w-[85%] max-w-[380px]). -->
+<dialog class="nb-drawer" id="nb-drawer" aria-label="Docs menu" closedby="any">
+  <div class="nb-drawer__head">
+    <a href="#home" class="vc-header__logo" aria-label="Docs home">
+      <img class="vc-only-light" src="../shared/logo/logo-horizontal.svg" alt="visual-check">
+      <img class="vc-only-dark" src="../shared/logo/logo-horizontal-dark.svg" alt="visual-check">
+    </a>
+    <button class="vc-icon-btn" type="button" aria-label="Close the docs menu" data-drawer-close autofocus>
+      <svg class="vc-icon vc-icon--20" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15"/></svg>
+    </button>
+  </div>
+  <div class="nb-drawer__body" id="nb-drawer-body"></div>
+</dialog>
+
+<!-- ======================================================================================
+     PAGE BODIES. Each <template> is one MDX page's DocsBody. Chrome (title, actions, TOC, footer) comes from the script.
+     ====================================================================================== -->
+
+<!-- Docs home: content/docs/index.mdx, `full` page. Custom MDX components: <CommandChip>, <CommandFlow>, <SupportStrip>,
+     <TaskCards> (Fumadocs Cards with a link list), and a generated section index from the page tree. -->
+<template id="tpl-home">
+  <section class="nb-hub" aria-labelledby="hub-title">
+    <p class="nb-hub__eyebrow label">Docs · visual-check 0.1</p>
+    <h1 class="h1 nb-hub__title" id="hub-title">Set up, tune and run visual-check</h1>
+    <p class="nb-hub__lead">visual-check captures a snapshot of each Storybook story and compares it with a baseline you commit next to your code. The browser runs in a pinned container, so your machine and CI render the same pixels, with no service and no account.</p>
+
+    <div class="nb-hub__cta">
+      <div class="nb-chipwrap">
+        <div class="nb-chip" data-pm-chip>
+          <span class="nb-chip__cmd"><span class="p">$ </span><span data-pm-chip-cmd>npx @visual-check/cli init</span></span>
+          <button class="nb-chip__copy" type="button" aria-label="Copy the install command" data-copy-chip>
+            <svg class="vc-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V4A1.5 1.5 0 0 0 9 2.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/></svg>
+          </button>
+        </div>
+        <div class="nb-pmswitch" role="group" aria-label="Package manager" data-pm-switch></div>
+      </div>
+      <a class="vc-btn vc-btn--secondary" href="#getting-started">Read Getting started <svg class="vc-icon vc-btn__arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></a>
+    </div>
+
+    <ol class="nb-flow" aria-label="The three commands">
+      <li class="nb-flow__step">
+        <p class="nb-flow__n">Once</p>
+        <p class="nb-flow__cmd"><span>visual-check </span>init</p>
+        <p class="nb-flow__desc">Set up visual-check in this project</p>
+      </li>
+      <li class="nb-flow__step">
+        <span class="nb-flow__arrow" aria-hidden="true"><svg class="vc-icon" viewBox="0 0 16 16"><path d="M6.5 4.5 10 8l-3.5 3.5"/></svg></span>
+        <p class="nb-flow__n">When a story should change</p>
+        <p class="nb-flow__cmd"><span>visual-check </span>update</p>
+        <p class="nb-flow__desc">Write missing and failing baselines and delete orphans (local only)</p>
+      </li>
+      <li class="nb-flow__step">
+        <span class="nb-flow__arrow" aria-hidden="true"><svg class="vc-icon" viewBox="0 0 16 16"><path d="M6.5 4.5 10 8l-3.5 3.5"/></svg></span>
+        <p class="nb-flow__n">On every change, and in CI</p>
+        <p class="nb-flow__cmd"><span>visual-check </span>test</p>
+        <p class="nb-flow__desc">Capture snapshots and compare them with baselines</p>
+      </li>
+    </ol>
+
+    <div class="nb-support" aria-label="Supported">
+      <span class="nb-support__label">Supported</span>
+      <a class="nb-support__item" href="#supported-storybooks"><b>Storybook</b> 9.1, 10 and 11</a>
+      <span class="nb-support__item"><b>Node</b> 22.17 or later</span>
+      <a class="nb-support__item" href="#ci"><b>CI</b> GitHub Actions</a>
+      <a class="nb-support__item" href="#platforms-and-docker"><b>Browser</b> Docker or the host</a>
+    </div>
+  </section>
+
+  <section class="nb-hub__section" aria-labelledby="hub-tasks">
+    <h2 class="nb-hub__h2" id="hub-tasks">Start from a task</h2>
+    <div class="nb-tasks" data-tasks></div>
+  </section>
+
+  <section class="nb-hub__section" aria-labelledby="hub-browse">
+    <h2 class="nb-hub__h2" id="hub-browse">Every page</h2>
+    <div class="nb-browse" data-browse></div>
+  </section>
+</template>
+
+<!-- Getting started: content/docs/(guides)/getting-started.mdx. Fumadocs: Callout, Steps (`### Run init [step]`),
+     ```npm fences (package-manager tabs with `persist`), Files, code blocks with `title`, Cards. -->
+<template id="tpl-getting-started">
+  <p class="nb-lead">visual-check captures a snapshot of every story and compares it with a baseline you commit. Setting it up takes three commands: <code>init</code> writes the setup, <code>update</code> writes the first baselines, and <code>test</code> checks the stories against them.</p>
+
+  <div class="vc-callout" role="note">
+    <span class="vc-callout__glyph" aria-hidden="true">i</span>
+    <div>
+      <strong class="vc-callout__title">Readiness never waits for the network</strong>
+      <p>visual-check captures a story once it has finished and its images and fonts have loaded. It doesn't wait for requests that come later. So when a story fails on your first <code>test</code>, the story needs tuning: a <code>wait</code> hook, a mask, or a look at its animations. <a href="#getting-started/first-test-fails">What to do when it fails</a>.</p>
+    </div>
+  </div>
+
+  <h2 id="before-you-start">Before you start</h2>
+  <ul>
+    <li>Node 22.17 or later.</li>
+    <li>Storybook 9.1, 10 or 11, with a script that starts it.</li>
+    <li>Docker, running. The browser runs in visual-check's container, so your machine and CI render the same pixels. To run without Docker, see <a href="#platforms-and-docker">Platforms and Docker</a>.</li>
+    <li>npm, pnpm, Yarn 1, Yarn 4.17.1 or later, or Bun.</li>
+  </ul>
+
+  <h2 id="set-it-up">Set it up</h2>
+  <div class="nb-steps">
+    <div class="nb-step">
+      <h3 id="run-init">Run <code>init</code></h3>
+      <p>Run it at the root of your repository. <code>init</code> installs visual-check's packages itself, so there's nothing to install first.</p>
+      <figure class="vc-code nb-code nb-pm" data-pm="dlx" data-arg="@visual-check/cli init"></figure>
+      <p>It finds your workspace and package manager, every Storybook with the script that starts it and its port, Docker, and each Storybook's version. Then it asks a few questions, writes the setup, and installs the packages. It never pulls the browser, starts Storybook or captures anything.</p>
+      <p>Yarn 4 refuses a version published less than a day ago. On a release day, wait a day, or list <code>@visual-check/*</code> under <code>npmPreapprovedPackages</code> in <code>.yarnrc.yml</code>.</p>
+      <p>It ends with the next steps, which are the rest of this page:</p>
+      <figure class="vc-code nb-code">
+        <figcaption class="vc-code__bar">
+          <span class="nb-code__title">Terminal</span>
+          <button class="vc-code__copy" type="button" data-copy-code>Copy</button>
+        </figcaption>
+        <pre data-closing></pre>
+      </figure>
+    </div>
+
+    <div class="nb-step">
+      <h3 id="start-storybook">Start Storybook</h3>
+      <p>visual-check connects to a Storybook that's already running, and never starts or builds one. Start it with its usual script and leave it running.</p>
+      <figure class="vc-code nb-code nb-pm" data-pm="run" data-arg="storybook"></figure>
+      <p>visual-check opens it at the URL in <code>visual-check.config.ts</code>. <code>init</code> writes it as <code>http://127.0.0.1:6006</code>, never <code>localhost</code>.</p>
+    </div>
+
+    <div class="nb-step">
+      <h3 id="write-baselines">Write the first baselines</h3>
+      <figure class="vc-code nb-code nb-pm" data-pm="run" data-arg="visual:update"></figure>
+      <p><code>update</code> captures each story, checks that it renders the same way twice, and writes its baseline to <code>.visual-check/baselines/</code>. A new baseline takes about a second: two loads and three captures. <code>test</code> and CI never pay this.</p>
+      <figure class="vc-code nb-code">
+        <figcaption class="vc-code__bar">
+          <span class="nb-code__title">Terminal</span>
+          <button class="vc-code__copy" type="button" data-copy-code>Copy</button>
+        </figcaption>
+<pre><span class="c">visual-check 0.1.0 · update · 24 snapshots · 7 workers</span>
+<span class="s">✓</span> web  components-button--primary  written: missing
+<span class="s">✓</span> web  components-button--secondary  written: missing
+<span class="s">✓</span> web  components-card--default  written: missing
+<span class="c">…</span>
+24 written
+<span class="c">written .visual-check/baselines/components-button--primary.png</span>
+<span class="c">…</span></pre>
+      </figure>
+      <p>If it ends with a warning about remote content or real network requests, those stories can render differently on another machine. Read <a href="#remote-content">Remote content</a> before you commit. <code>update</code> runs only on your machine: with <code>CI</code> set, it stops with exit code 2.</p>
+    </div>
+
+    <div class="nb-step">
+      <h3 id="check-stories">Check the stories</h3>
+      <figure class="vc-code nb-code nb-pm" data-pm="run" data-arg="visual:check"></figure>
+      <p>Run locally, <code>test</code> covers the affected stories: the ones your changes since the base branch reach. Until you commit, the new config file counts as a change, so this first run covers every story. In a terminal, passing snapshots print nothing; only failures and a progress line do.</p>
+      <figure class="vc-code nb-code">
+        <figcaption class="vc-code__bar">
+          <span class="nb-code__title">Terminal</span>
+          <button class="vc-code__copy" type="button" data-copy-code>Copy</button>
+        </figcaption>
+<pre><span class="c">visual-check 0.1.0 · test · 24 snapshots · 7 workers</span>
+24 passed · 6.2s
+<span class="c">Report: .visual-check/report/report.json</span></pre>
+      </figure>
+      <p>It exits with 0 when every snapshot matches its baseline, 1 when something in your stories needs a look, and 2 when visual-check couldn't run, for example because Storybook doesn't answer.</p>
+    </div>
+
+    <div class="nb-step">
+      <h3 id="commit">Commit the baselines</h3>
+      <figure class="vc-code nb-code">
+        <figcaption class="vc-code__bar">
+          <span class="nb-code__title">Terminal</span>
+          <button class="vc-code__copy" type="button" data-copy-code>Copy</button>
+        </figcaption>
+<pre><span class="p">$ </span>git add .
+<span class="p">$ </span>git commit -m <span class="s">"Set up visual-check"</span></pre>
+      </figure>
+      <p>Commit <code>.visual-check/baselines/</code> with the rest of the setup. The <code>.gitignore</code> files <code>init</code> wrote keep the report out of git. From now on only <code>update</code>, run by a person, writes baselines. CI only checks them.</p>
+    </div>
+  </div>
+
+  <h2 id="what-init-asks">What <code>init</code> asks</h2>
+  <p>Each question shows a hint and a default. Arrows choose and Enter accepts. <code>init --yes</code> takes every default.</p>
+  <figure class="vc-code nb-code">
+    <figcaption class="vc-code__bar"><span class="nb-code__title">Terminal</span></figcaption>
+<pre><span class="s">✓</span><span class="m">✓</span> visual-check init <span class="c">· v0.1.0</span>
+<span class="s">━━━━━━━━━━━━━━━</span><span class="c">─────</span> <span class="c">Step 5 of 6</span>
+
+<span class="s">✓</span> Name of the Storybook in <span class="s">acme</span>  web
+<span class="s">✓</span> URL of <span class="s">web</span>  http://127.0.0.1:6006
+<span class="s">✓</span> Name of the script that runs visual-check test  visual:check
+<span class="s">✓</span> Name of the script that runs visual-check update  visual:update
+<span class="m">?</span> Install the agent skill?
+  <span class="c">Teaches a coding agent to run visual-check and report what changed.</span>
+<span class="s">›</span> ● Yes  ○ No</pre>
+  </figure>
+  <div class="nb-table nb-table--prompts">
+    <table>
+      <thead><tr><th scope="col">Question</th><th scope="col">Asked</th><th scope="col">Default</th></tr></thead>
+      <tbody>
+        <tr><td><code>Package manager</code></td><td>When no lockfile or <code>packageManager</code> field names one</td><td>npm</td></tr>
+        <tr><td><code>Storybooks to set up</code></td><td>When there's more than one</td><td>All ticked</td></tr>
+        <tr><td><code>Name of the Storybook in apps/web</code></td><td>For each Storybook</td><td>The package's name</td></tr>
+        <tr><td><code>URL of web</code></td><td>For each Storybook</td><td><code>http://127.0.0.1:</code> and the port its script sets</td></tr>
+        <tr><td><code>Command that starts web</code></td><td>When no script starts it</td><td>None</td></tr>
+        <tr><td><code>Name of the script that runs visual-check test</code></td><td>Always</td><td><code>visual:check</code></td></tr>
+        <tr><td><code>Name of the script that runs visual-check update</code></td><td>Always</td><td><code>visual:update</code></td></tr>
+        <tr><td><code>Install the agent skill?</code></td><td>Always</td><td>Yes</td></tr>
+        <tr><td><code>Add the Storybook addon to web?</code></td><td>For Storybook 10 only</td><td>Yes</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>It never asks about the platform, tolerance or workers. Their defaults suit most projects, and <a href="#config">Config</a> lists every one.</p>
+
+  <h2 id="what-init-writes">What <code>init</code> writes</h2>
+  <p>For a Storybook at the root of the repository:</p>
+  <div class="nb-files">
+    <ul>
+      <li><div class="nb-files__row"><svg class="vc-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.5h5l3.5 3.5v9.5H4z"/><path d="M9 1.5V5h3.5"/></svg><span class="nb-files__name">visual-check.config.ts</span><span class="nb-files__note">The config: each Storybook and its URL</span></div></li>
+      <li><div class="nb-files__row"><svg class="vc-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.5h5l3.5 3.5v9.5H4z"/><path d="M9 1.5V5h3.5"/></svg><span class="nb-files__name">package.json</span><span class="nb-files__note">Scripts <code>visual:check</code> and <code>visual:update</code></span></div></li>
+      <li><div class="nb-files__row"><svg class="vc-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 4a1 1 0 0 1 1-1h3.5l1.5 1.5h6a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/></svg><span class="nb-files__name">.storybook/</span></div>
+        <ul><li><div class="nb-files__row"><svg class="vc-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.5h5l3.5 3.5v9.5H4z"/><path d="M9 1.5V5h3.5"/></svg><span class="nb-files__name">visual-check.ts</span><span class="nb-files__note">Modes, and options for every story</span></div></li></ul>
+      </li>
+      <li><div class="nb-files__row"><svg class="vc-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 4a1 1 0 0 1 1-1h3.5l1.5 1.5h6a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/></svg><span class="nb-files__name">.visual-check/</span></div>
+        <ul><li><div class="nb-files__row"><svg class="vc-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.5h5l3.5 3.5v9.5H4z"/><path d="M9 1.5V5h3.5"/></svg><span class="nb-files__name">.gitignore</span><span class="nb-files__note">Keeps only <code>baselines/</code> in git</span></div></li></ul>
+      </li>
+      <li><div class="nb-files__row"><svg class="vc-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 4a1 1 0 0 1 1-1h3.5l1.5 1.5h6a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/></svg><span class="nb-files__name">.agents/skills/visual-check/</span><span class="nb-files__note">The agent skill</span></div>
+        <ul>
+          <li><div class="nb-files__row"><svg class="vc-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.5h5l3.5 3.5v9.5H4z"/><path d="M9 1.5V5h3.5"/></svg><span class="nb-files__name">SKILL.md</span></div></li>
+          <li><div class="nb-files__row"><svg class="vc-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.5h5l3.5 3.5v9.5H4z"/><path d="M9 1.5V5h3.5"/></svg><span class="nb-files__name">scripts/run.mjs</span></div></li>
+          <li><div class="nb-files__row"><svg class="vc-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.5h5l3.5 3.5v9.5H4z"/><path d="M9 1.5V5h3.5"/></svg><span class="nb-files__name">setup.json</span></div></li>
+        </ul>
+      </li>
+      <li><div class="nb-files__row"><svg class="vc-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 9.5a3 3 0 0 0 4.2 0l2-2a3 3 0 0 0-4.2-4.2l-.8.8M9.5 6.5a3 3 0 0 0-4.2 0l-2 2a3 3 0 0 0 4.2 4.2l.8-.8"/></svg><span class="nb-files__name">.claude/skills/visual-check</span><span class="nb-files__note">A link to the skill (a copy on Windows)</span></div></li>
+    </ul>
+  </div>
+  <p>The config holds only what differs from the defaults:</p>
+  <figure class="vc-code nb-code">
+    <figcaption class="vc-code__bar">
+      <span class="nb-code__title">visual-check.config.ts</span>
+      <button class="vc-code__copy" type="button" data-copy-code>Copy</button>
+    </figcaption>
+<pre><span class="k">import</span> { defineConfig } <span class="k">from</span> <span class="s">'@visual-check/cli'</span>
+
+<span class="k">export default</span> defineConfig({
+  storybooks: {
+    web: { url: <span class="s">'http://127.0.0.1:6006'</span> },
+  },
+})</pre>
+  </figure>
+  <p>And <code>.storybook/visual-check.ts</code> is where you declare modes and set options for every story:</p>
+  <figure class="vc-code nb-code">
+    <figcaption class="vc-code__bar">
+      <span class="nb-code__title">.storybook/visual-check.ts</span>
+      <button class="vc-code__copy" type="button" data-copy-code>Copy</button>
+    </figcaption>
+<pre><span class="k">import</span> { defineVisualCheck } <span class="k">from</span> <span class="s">'@visual-check/storybook'</span>
+
+<span class="c">// To set options for every story, spread visualCheck into the parameters in your preview file:</span>
+<span class="c">//   import { visualCheck } from './visual-check'</span>
+<span class="c">//   parameters: { ...visualCheck({}) },</span>
+<span class="k">export const</span> visualCheck = defineVisualCheck({
+  modes: {
+    <span class="c">// Each mode a story lists adds one snapshot besides its default capture. For example:</span>
+    <span class="c">// mobile: { viewport: { width: 375, height: 667, deviceScaleFactor: 2, touch: true } },</span>
+  },
+})</pre>
+  </figure>
+  <p>It never edits your <code>preview</code> file, your other scripts or the root <code>.gitignore</code>, and it touches <code>main</code> only through <code>storybook add</code> when you add the addon. It writes no CI workflow: <a href="#ci">CI</a> shows the one to add.</p>
+  <p>In a monorepo, the config goes at the workspace root, and each Storybook's package gets its own <code>visual-check.ts</code>, <code>.gitignore</code> and a pair of scripts that check only that Storybook.</p>
+
+  <h2 id="first-test-fails">If the first <code>test</code> fails</h2>
+  <p>A failure on the first run almost always means a story doesn't render the same way twice. visual-check runs each story as plain Storybook does and doesn't wait for the network, so the snapshot shows exactly what a fresh load looks like.</p>
+  <div class="nb-table">
+    <table>
+      <thead><tr><th scope="col">What you see</th><th scope="col">Fix</th></tr></thead>
+      <tbody>
+        <tr><td>Content that arrives late: data, icons, a chart</td><td>A <a href="#wait-hook"><code>wait</code> hook</a> that waits for it</td></tr>
+        <tr><td>Something different on every load: a clock, random data</td><td>A mask over it</td></tr>
+        <tr><td>An animation that isn't at its end state</td><td>A mask or a <code>wait</code> hook. See <a href="#animations">Animations</a></td></tr>
+        <tr><td>An image from a CDN that differs by machine</td><td>See <a href="#remote-content">Remote content</a></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Set both on the story with the <code>visualCheck</code> helper:</p>
+  <figure class="vc-code nb-code">
+    <figcaption class="vc-code__bar">
+      <span class="nb-code__title">src/card.stories.tsx</span>
+      <button class="vc-code__copy" type="button" data-copy-code>Copy</button>
+    </figcaption>
+<pre><span class="k">import type</span> { Meta, StoryObj } <span class="k">from</span> <span class="s">'@storybook/react-vite'</span>
+<span class="k">import</span> { visualCheck } <span class="k">from</span> <span class="s">'../.storybook/visual-check'</span>
+
+<span class="k">const</span> meta = { title: <span class="s">'Components/Card'</span> } <span class="k">satisfies</span> Meta
+<span class="k">export default</span> meta
+<span class="k">type</span> Story = StoryObj&lt;<span class="k">typeof</span> meta&gt;
+
+<span class="k">export const</span> Default: Story = {
+  parameters: {
+    ...visualCheck({
+      masks: { clock: { selector: <span class="s">'[data-clock]'</span> } },
+      wait: <span class="k">async</span> ({ canvas }) =&gt; {
+        <span class="k">await</span> canvas.findByText(<span class="s">'Late content'</span>)
+      },
+    }),
+  },
+}</pre>
+  </figure>
+  <p>Then run <code>update</code> and <code>test</code> again.</p>
+  <div class="vc-callout vc-callout--warning" role="note">
+    <span class="vc-callout__glyph" aria-hidden="true">!</span>
+    <div>
+      <strong class="vc-callout__title">Fix the story, not the tolerance</strong>
+      <p>Raising tolerance hides real changes along with the noise. A story that differs between loads is a flaky snapshot. See <a href="#flaky-snapshots">Flaky snapshots</a>.</p>
+    </div>
+  </div>
+
+  <h2 id="next">Next</h2>
+  <div class="nb-cards">
+    <a class="nb-card" href="#ci"><span class="nb-chip-icon" data-icon="branch"></span><span class="nb-card__title">Run it in CI</span><span class="nb-card__desc">Check every pull request with the GitHub Action.</span></a>
+    <a class="nb-card" href="#modes"><span class="nb-chip-icon" data-icon="layers"></span><span class="nb-card__title">Modes</span><span class="nb-card__desc">Capture a story in dark mode or at phone size too.</span></a>
+    <a class="nb-card" href="#config"><span class="nb-chip-icon" data-icon="file"></span><span class="nb-card__title">Config</span><span class="nb-card__desc">Every key of <code>visual-check.config.ts</code> and its default.</span></a>
+    <a class="nb-card" href="#color-and-pixels"><span class="nb-chip-icon" data-icon="sliders"></span><span class="nb-card__title"><span><code>color</code> and <code>pixels</code></span></span><span class="nb-card__desc">How much a snapshot may differ, and why.</span></a>
+  </div>
+</template>
+
+<!-- `color` and `pixels`: content/docs/(guides)/color-and-pixels.mdx. Fumadocs: TypeTable, Tabs + custom <PixelRow>,
+     tables, Callout, code blocks, Cards. Content from docs/prd/09-visual-diff.md, ADR 0006 and issues #23 and #43. -->
+<template id="tpl-color-and-pixels">
+  <p class="nb-lead">A snapshot passes when it differs from its baseline by no more than the story's tolerance. The default is <code>{ color: 0.01, pixels: 20 }</code> on every platform.</p>
+
+  <div class="nb-typetable">
+    <div class="nb-typetable__row">
+      <div class="nb-typetable__key">color</div>
+      <div>
+        <p class="nb-typetable__q">Did this pixel change?</p>
+        <p class="nb-typetable__d">How far a pixel's colour may move and still count as unchanged. At <code>0.01</code>, a grey shift of up to about 2 of 255 doesn't count.</p>
+        <p class="nb-typetable__meta"><span>Type <b>a number from 0 to 1</b></span><span>Default <b>0.01</b></span></p>
+      </div>
+    </div>
+    <div class="nb-typetable__row">
+      <div class="nb-typetable__key">pixels</div>
+      <div>
+        <p class="nb-typetable__q">How many changed pixels are allowed?</p>
+        <p class="nb-typetable__d">A count of CSS pixels, or a share of the image written as a percent string.</p>
+        <p class="nb-typetable__meta"><span>Type <b>a whole number, or <code>'0%'</code> to <code>'100%'</code></b></span><span>Default <b>20</b></span></p>
+      </div>
+    </div>
+  </div>
+
+  <h2 id="how-it-compares">How a snapshot is compared</h2>
+  <ol>
+    <li>Identical bytes pass at once, with nothing decoded. On unchanged snapshots that happens 98–99% of the time.</li>
+    <li>A different width or height fails, whatever the tolerance says.</li>
+    <li>Otherwise each pixel is compared with its baseline pixel, and <code>color</code> decides whether it counts as changed.</li>
+    <li>If more pixels changed than <code>pixels</code> allows, the snapshot fails, and visual-check draws its visual diff.</li>
+  </ol>
+
+  <h2 id="worked-example">A worked example with ten pixels</h2>
+  <p>Take one row of ten grey pixels from a button. The snapshot was captured on another machine, so three pixels moved by a level or two. The button's label also moved, which changed two pixels a lot. Scaled down to this row, say the budget is <code>pixels: 1</code>.</p>
+  <div class="nb-px" data-pixel-example></div>
+  <p>At <code>0.01</code> the noise doesn't count and the change does, so the change is caught. At <code>0</code> the noise counts too. A snapshot of the same story with no change at all would then have 3 changed pixels and fail. To let it pass, the budget would have to rise to 3, and a real change of up to 3 pixels would pass unnoticed. The table below is the same trade, measured on real stories.</p>
+
+  <h2 id="measured-table">The measured table behind the defaults</h2>
+  <p>The defaults come from 606 stories of a real Storybook, captured in Chromium on amd64 runners and on arm64. Each deliberate change was made on arm64 and compared with an amd64 baseline. For each <code>color</code>, the budget is the smallest that lets every arm64 snapshot pass. The other columns count how many changes that budget still catches.</p>
+  <div class="nb-table">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col"><code>color</code></th>
+          <th scope="col" class="num">Budget that absorbs arm64</th>
+          <th scope="col" class="num">1 px shift (606)</th>
+          <th scope="col" class="num">One character (533)</th>
+          <th scope="col" class="num">Hidden icon (286)</th>
+          <th scope="col" class="num">Background ±4 (517)</th>
+          <th scope="col" class="num">±8 (517)</th>
+          <th scope="col" class="num">±16 (518)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><code>0</code></td><td class="num">18,859 px</td><td class="num">45</td><td class="num">1</td><td class="num">1</td><td class="num">50</td><td class="num">50</td><td class="num">50</td></tr>
+        <tr><td><code>0.005</code></td><td class="num">3,054 px</td><td class="num">305</td><td class="num">15</td><td class="num">1</td><td class="num">310</td><td class="num">312</td><td class="num">312</td></tr>
+        <tr class="is-default"><td><code>0.01</code> <span class="nb-tag">default</span></td><td class="num">19 px</td><td class="num">606</td><td class="num">527</td><td class="num">285</td><td class="num">462</td><td class="num">481</td><td class="num">505</td></tr>
+        <tr><td><code>0.02</code></td><td class="num">0</td><td class="num">606</td><td class="num">533</td><td class="num">286</td><td class="num">3</td><td class="num">453</td><td class="num">492</td></tr>
+        <tr><td><code>0.05</code></td><td class="num">0</td><td class="num">604</td><td class="num">533</td><td class="num">286</td><td class="num">1</td><td class="num">0</td><td class="num">444</td></tr>
+        <tr><td><code>0.1</code></td><td class="num">0</td><td class="num">601</td><td class="num">533</td><td class="num">286</td><td class="num">0</td><td class="num">0</td><td class="num">0</td></tr>
+      </tbody>
+      <caption>Chromium, scale 1, every pixel counted. Numbers in brackets are the stories where the change was visible.</caption>
+    </table>
+  </div>
+  <ul>
+    <li>At <code>0.01</code>, a 19 px budget absorbs every arm64 difference and still catches every 1 px shift, 99% of one-character changes and hidden icons, and 89% of 4-level background changes. The default rounds the budget up to 20.</li>
+    <li>On the default platform, <code>linux/amd64</code>, runners and Rosetta differ by at most 2 px at <code>0.01</code>, so the default has room to spare.</li>
+    <li><code>0.1</code> is the comparison library's own default. At <code>0.1</code>, no background change of up to 16 levels per channel was caught.</li>
+  </ul>
+
+  <h2 id="set-tolerance">Set tolerance</h2>
+  <p>Tolerance is the same object at every level: the config for the whole project, <code>preview</code> for a Storybook, a stories file's meta, and a story. Levels merge, so a level can set only <code>color</code> or only <code>pixels</code>.</p>
+  <figure class="vc-code nb-code">
+    <figcaption class="vc-code__bar">
+      <span class="nb-code__title">src/dashboard.stories.tsx</span>
+      <button class="vc-code__copy" type="button" data-copy-code>Copy</button>
+    </figcaption>
+<pre><span class="k">export const</span> Dashboard: Story = {
+  parameters: {
+    ...visualCheck({ tolerance: { pixels: <span class="s">'0.05%'</span> } }),
+  },
+}</pre>
+  </figure>
+
+  <h2 id="percent-strings">Percent strings</h2>
+  <p>The type of <code>pixels</code> sets its unit:</p>
+  <div class="nb-table">
+    <table>
+      <thead><tr><th scope="col">Value</th><th scope="col">Means</th></tr></thead>
+      <tbody>
+        <tr><td>A whole number, 0 or more, such as <code>20</code></td><td>A count of changed CSS pixels</td></tr>
+        <tr><td>A string from <code>'0%'</code> to <code>'100%'</code>, such as <code>'0.1%'</code></td><td>A share of the image's own pixels</td></tr>
+        <tr><td>Anything else, such as <code>1.5</code>, <code>-1</code> or <code>'0.1'</code></td><td>visual-check stops with exit code 2, naming the story</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <ul>
+    <li>A share is counted against the image's own pixels and rounded down. On a 1280×720 snapshot, <code>'0.1%'</code> allows 921 pixels.</li>
+    <li>A share isn't scaled by the device scale factor, because it's already relative to the image.</li>
+    <li>A level sets a count or a share, never both. Each level replaces the budget it inherits.</li>
+  </ul>
+
+  <h2 id="css-pixels">CSS pixels at scale 2</h2>
+  <p>A count is in CSS pixels. At device scale factor <em>s</em>, a snapshot may have ⌊<code>pixels</code> × <em>s</em>²⌋ changed image pixels.</p>
+  <div class="nb-table">
+    <table>
+      <thead><tr><th scope="col">Scale</th><th scope="col" class="num"><code>pixels: 20</code> allows</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td class="num">20 image pixels</td></tr>
+        <tr><td>1.5</td><td class="num">45 image pixels</td></tr>
+        <tr><td>2</td><td class="num">80 image pixels</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>A failure shows image pixels against the scaled budget:</p>
+  <figure class="vc-code nb-code">
+    <figcaption class="vc-code__bar">
+      <span class="nb-code__title">Terminal</span>
+      <button class="vc-code__copy" type="button" data-copy-code>Copy</button>
+    </figcaption>
+<pre><span class="m">✗</span> web  components-modal--default  mobile  differs: <span class="m">84 differ</span>, 80 allowed (20 at scale 2)</pre>
+  </figure>
+  <p>The defaults were measured at scale 1, and phone modes are recommended at scale 2. At scale 2 a deliberate change covers 3 to 4 times as many image pixels, and arm64's noise needs 69 px where it needed 19. An unscaled 20 would fail arm64 there. 80 absorbs it and catches nearly as much as 20 does at scale 1:</p>
+  <div class="nb-table">
+    <table>
+      <thead><tr><th scope="col"></th><th scope="col" class="num">Scale 1, 20 allowed</th><th scope="col" class="num">Scale 2, 80 allowed</th></tr></thead>
+      <tbody>
+        <tr><td>Budget that absorbs arm64</td><td class="num">19 px</td><td class="num">69 px</td></tr>
+        <tr><td>1 px shift caught (606)</td><td class="num">606</td><td class="num">606</td></tr>
+        <tr><td>One character caught (533)</td><td class="num">527</td><td class="num">516</td></tr>
+        <tr><td>Hidden icon caught (286)</td><td class="num">285</td><td class="num">269</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2 id="anti-aliasing">Why anti-aliased pixels count</h2>
+  <p>Every pixel counts, the anti-aliased edges of text and icons included. There's no option to change this in v1.</p>
+  <p>Some tools skip a changed pixel when it looks like an anti-aliased edge. Text and icons are mostly edges, so that skip hides real changes. Measured on the same stories at the default tolerance:</p>
+  <div class="nb-table">
+    <table>
+      <thead><tr><th scope="col"></th><th scope="col" class="num">Every pixel counts</th><th scope="col" class="num">Edges skipped</th></tr></thead>
+      <tbody>
+        <tr><td>Budget that absorbs runner noise</td><td class="num">2 px</td><td class="num">0 px</td></tr>
+        <tr><td>1 px shift caught</td><td class="num">606 of 606</td><td class="num">596 of 606</td></tr>
+        <tr><td>One character caught</td><td class="num">488 of 494</td><td class="num">476 of 494</td></tr>
+        <tr><td>Hidden icon caught</td><td class="num">259 of 260</td><td class="num">118 of 260</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>The container leaves almost no noise on the default platform, so skipping edges has little to absorb. With the default budget it would miss more than half of hidden icons.</p>
+
+  <h2 id="lower-color">Why a lower <code>color</code> isn't stricter</h2>
+  <p>Lowering <code>color</code> looks like a way to catch smaller changes. It catches fewer. Below <code>0.01</code>, noise starts to count as change, so the budget has to grow to absorb it, and a bigger budget lets real changes through. At <code>0</code>, the budget that absorbs arm64 is 18,859 px, and it catches 45 of 606 one-pixel shifts.</p>
+  <p>To be stricter, lower <code>pixels</code> instead, and keep every machine on the default platform.</p>
+  <div class="vc-callout vc-callout--warning" role="note">
+    <span class="vc-callout__glyph" aria-hidden="true">!</span>
+    <div>
+      <strong class="vc-callout__title">Don't raise tolerance to make a snapshot pass</strong>
+      <p>If a story renders differently between loads, it's a flaky snapshot, and the fix is in the story: a mask or a <code>wait</code> hook. See <a href="#flaky-snapshots">Flaky snapshots</a>.</p>
+    </div>
+  </div>
+
+  <h2 id="size-differences">Size differences</h2>
+  <p>A snapshot whose width or height differs from its baseline always fails, whatever <code>pixels</code> and the masks say. Noise moves colours, not layout, so a size change is never noise. The message names both sizes, as in <code>size changed: 1280×2400 → 1280×2432</code>. The visual diff pads the smaller image to the larger size, and every padded pixel counts.</p>
+  <p>In the visual diff, changed pixels are magenta over a faded copy of the baseline, and padding is cyan.</p>
+
+  <h2 id="related">Related</h2>
+  <div class="nb-cards">
+    <a class="nb-card" href="#flaky-snapshots"><span class="nb-chip-icon" data-icon="plates"></span><span class="nb-card__title">Flaky snapshots</span><span class="nb-card__desc">Snapshots that pass only on a retry.</span></a>
+    <a class="nb-card" href="#modes"><span class="nb-chip-icon" data-icon="layers"></span><span class="nb-card__title">Modes</span><span class="nb-card__desc">Phone modes at scale 2.</span></a>
+  </div>
+</template>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ======================================================================
+     Data: the page tree. In Fumadocs this is content/docs/** with one
+     meta.json per root folder ("root": true) and "---Start---" separators.
+     ====================================================================== */
+  var SITE = 'https://visual-check.vercel.app/docs/';
+  var REPO = 'https://github.com/visual-check/visual-check';
+
+  var ICONS = {
+    book: '<path d="M3 4.5c2.5-1 4.8-1 7 .5v11c-2.2-1.5-4.5-1.5-7-.5z"/><path d="M17 4.5c-2.5-1-4.8-1-7 .5v11c2.2-1.5 4.5-1.5 7-.5z"/>',
+    terminal: '<rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M6 8l2.5 2L6 12M10.5 12.5H14"/>',
+    plug: '<path d="M7 2.5v4M13 2.5v4M5 6.5h10v3a5 5 0 0 1-10 0z"/><path d="M10 14.5v3"/>',
+    braces: '<path d="M7.5 3.5c-1.5 0-2 .7-2 2v2c0 1-.5 2-1.5 2.5 1 .5 1.5 1.5 1.5 2.5v2c0 1.3.5 2 2 2M12.5 3.5c1.5 0 2 .7 2 2v2c0 1 .5 2 1.5 2.5-1 .5-1.5 1.5-1.5 2.5v2c0 1.3-.5 2-2 2"/>',
+    sliders: '<path d="M3.5 5.5h7M15.5 5.5h1M3.5 14.5h1M8.5 14.5h8"/><circle cx="13" cy="5.5" r="2"/><circle cx="6.5" cy="14.5" r="2"/>',
+    branch: '<circle cx="6" cy="4.5" r="2"/><circle cx="6" cy="15.5" r="2"/><circle cx="14" cy="6.5" r="2"/><path d="M6 6.5v7M14 8.5c0 3-3 3.5-6.5 5.5"/>',
+    plates: '<rect x="3" y="3" width="10" height="10" rx="1.5"/><rect x="7" y="7" width="10" height="10" rx="1.5"/>',
+    agent: '<path d="M4 4.5h12a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5H9l-4 3v-3H4A1.5 1.5 0 0 1 2.5 13V6A1.5 1.5 0 0 1 4 4.5z"/><path d="M6.5 8l2 1.5-2 1.5M10.5 11.5h3"/>',
+    layers: '<path d="M10 3 2.5 7 10 11l7.5-4z"/><path d="M2.5 10.5 10 14.5l7.5-4M2.5 14 10 18l7.5-4"/>',
+    file: '<path d="M5 2.5h6.5L15 6v11.5H5z"/><path d="M11.5 2.5V6H15"/>'
+  };
+  var SMALL = {
+    chevRight: '<path d="M6 3.5 10.5 8 6 12.5"/>',
+    chevDown: '<path d="M3.5 6 8 10.5 12.5 6"/>',
+    upDown: '<path d="M5 6l3-3 3 3M5 10l3 3 3-3"/>',
+    copy: '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V4A1.5 1.5 0 0 0 9 2.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/>',
+    check: '<path d="M3 8.5 6.5 12 13 4.5"/>',
+    external: '<path d="M9.5 2.5h4v4M13.5 2.5l-6 6M12 9.5v3a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3"/>',
+    link: '<path d="M6.5 9.5a3 3 0 0 0 4.2 0l2-2a3 3 0 0 0-4.2-4.2l-.8.8M9.5 6.5a3 3 0 0 0-4.2 0l-2 2a3 3 0 0 0 4.2 4.2l.8-.8"/>',
+    list: '<path d="M2.5 4h11M2.5 8h11M2.5 12h7"/>',
+    arrowLeft: '<path d="M13 8H3M7 4 3 8l4 4"/>',
+    arrowRight: '<path d="M3 8h10M9 4l4 4-4 4"/>',
+    page: '<path d="M4 1.5h5l3.5 3.5v9.5H4z"/><path d="M9 1.5V5h3.5"/>',
+    hash: '<path d="M6 2.5 4.5 13.5M11.5 2.5 10 13.5M2.5 5.5h11M2 10.5h11"/>',
+    markdown: '<rect x="1.5" y="3.5" width="13" height="9" rx="1.5"/><path d="M4 10.5v-5l2 2.5 2-2.5v5M11.5 5.5v5M10 9l1.5 1.5L13 9"/>',
+    chat: '<path d="M3 3h10a1.5 1.5 0 0 1 1.5 1.5v5A1.5 1.5 0 0 1 13 11H7l-3 2.5V11H3a1.5 1.5 0 0 1-1.5-1.5v-5A1.5 1.5 0 0 1 3 3z"/>',
+    cursor: '<path d="M3.5 2.5 12.5 7l-4 1.5-1.5 4z"/>',
+    pencil: '<path d="M10.5 2.5l3 3L6 13H3v-3z"/>',
+    home: '<path d="M2.5 7.5 8 3l5.5 4.5M4 6.5v7h8v-7"/>'
+  };
+
+  /* Root folders, in header-tab order. Each group is a "---Label---" separator and its pages. */
+  var TABS = [
+    { id: 'guides', title: 'Guides', desc: 'Set up, capture and compare', icon: 'book', groups: [
+      { label: 'Start', pages: ['getting-started', 'config', 'modes'] },
+      { label: 'Capture', pages: ['full-page-and-element', 'grid-stories', 'animations', 'wait-hook', 'remote-content'] },
+      { label: 'Compare', pages: ['color-and-pixels', 'baselines', 'flaky-snapshots', 'stories-that-break'] }
+    ] },
+    { id: 'run', title: 'Run', desc: 'Browser, platforms, CI and security', icon: 'terminal', groups: [
+      { label: null, pages: ['browser', 'platforms-and-docker', 'ci', 'security'] }
+    ] },
+    { id: 'integrations', title: 'Integrations', desc: 'Storybook addon and agent skill', icon: 'plug', groups: [
+      { label: null, pages: ['storybook-addon', 'agent-skill', 'supported-storybooks'] }
+    ] },
+    { id: 'reference', title: 'Reference', desc: 'The report, field by field', icon: 'braces', groups: [
+      { label: null, pages: ['json-reference'] }
+    ] }
+  ];
+
+  /* Every page: title (backticks become code), description, last update, and for pages not drafted, the bullets from
+     docs/prd/20-docs-site.md. */
+  var PAGES = {
+    'home': { title: 'Docs home', desc: 'Set up, tune and run visual-check.', updated: '23 November 2026', full: true, template: 'tpl-home' },
+    'getting-started': { title: 'Getting started', desc: 'Install visual-check with `init`, write the first baselines with `update`, and check your stories with `test`.', updated: '21 November 2026', template: 'tpl-getting-started' },
+    'config': { title: 'Config', desc: 'Every key of `visual-check.config.ts` and its default.', bullets: ['Every key and its default.', 'tsconfig `paths` don\'t work in the config.', '`init` under Rush.', '`timezone`, `locale` and `colorScheme`.', '`url` takes no user name or password, because visual-check sends no login.'] },
+    'modes': { title: 'Modes', desc: 'Capture a story more than once, for example in dark mode or at phone size.', bullets: ['Declaring modes in code and picking them by exact list. `modes: []`.', 'Moving from a list of breakpoint widths.', 'Phone modes are recommended at scale 2.'] },
+    'full-page-and-element': { title: 'Full page and `element`', desc: 'What a snapshot captures: the whole page by default, or one element.', bullets: ['What each captures, and what happens to portaled content.'] },
+    'grid-stories': { title: 'Grid stories', desc: 'Lay out a component\'s combinations in one story and capture them as one snapshot.', bullets: ['An example for each port.', 'The caption rules.', 'Forced states, and what they can\'t force.', 'Running beside Storybook\'s pseudo-states addon.', 'Fixes for a grid that\'s too wide or too tall.'] },
+    'animations': { title: 'Animations', desc: 'Why a snapshot shows each animation at its end state, and what\'s left to you.', bullets: ['What a snapshot shows: the end state.', 'What\'s left to the project, with a mask or a `wait` hook for it.', '`play` runs as in Storybook.', 'Capture reports no preference for reduced motion.'] },
+    'wait-hook': { title: 'The `wait` hook', desc: 'Wait for late content before visual-check captures a story.', bullets: ['For every story, for one file, for one story, and turning it off.'] },
+    'remote-content': { title: 'Remote content', desc: 'Images from a CDN can differ by machine. Three ways to keep them out of the visual diff.', bullets: ['Linked from the hint and from `update`\'s warning.', 'Why a CDN\'s bytes differ by machine.', 'Three fixes, in order: serve the image from Storybook through `staticDirs` or an import, mock it with MSW, mask it by host.', 'For MSW: use `mswLoader`, so the worker controls the page before images load. CDN URLs with no file extension warn as unhandled.'] },
+    'color-and-pixels': { title: '`color` and `pixels`', desc: 'Tolerance has two parts. `color` decides whether one pixel changed, and `pixels` decides how many changed pixels a snapshot may have.', updated: '18 November 2026', template: 'tpl-color-and-pixels' },
+    'baselines': { title: 'Baselines', desc: 'Who writes baselines, how to review them, and how they live in git.', bullets: ['Who writes them and how to review them.', 'Bot PRs: pushing baselines to a bot\'s PR stops Dependabot rebasing it, and Renovate marks it as edited. `@dependabot recreate`, or Renovate\'s rebase checkbox, regenerates the branch and drops those commits.', 'Long file names are shortened with a hash.'] },
+    'flaky-snapshots': { title: 'Flaky snapshots', desc: 'Snapshots that pass only on a retry, where they\'re listed, and the `retries` setting.', bullets: ['What makes a snapshot flaky, where flaky snapshots are listed, and the `retries` setting.'] },
+    'stories-that-break': { title: 'Stories that break', desc: 'Each reason a story can\'t be captured, and its fix.', bullets: ['Each reason and its fix.', 'A stories file that fails to load.', 'A story that navigates away: await the new page before clicking, or render `MemoryRouter` with `useTransitions={false}`.'] },
+    'browser': { title: 'Browser', desc: 'The pinned Chromium build, how it\'s bumped, and running it on the host.', bullets: ['A browser bump is a Renovate PR plus `update`.', 'Building a custom image from the browser package\'s image.', '`host`: its cache folder, the proxy and mirror variables, and the Linux libraries and font package it needs. `host` baselines only match on the same OS.'] },
+    'platforms-and-docker': { title: 'Platforms and Docker', desc: 'Render the same pixels on every machine, and what each platform costs.', bullets: ['The two ways to get parity: stay on `linux/amd64`, or use `linux/arm64` with the default tolerance.', '`host` gives no parity across machines. It suits a project with no CI, or one where no machine can run Docker.', 'macOS: runtimes that use Rosetta, Docker Desktop\'s default memory and the worker count.', 'Windows: Docker Desktop, running inside WSL with Docker Engine, and when Docker Desktop needs a paid licence.', 'Setups that are untested and may work.'] },
+    'ci': { title: 'CI', desc: 'Check every pull request with the GitHub Action, sharded or not.', bullets: ['The Action and the reusable workflow: build, serve, wait, run.', 'Why Linux runners only.', 'Sharding: both workflow shapes, `fail-fast: false`, and shard jobs waiting for the consistency job.', 'Each shard building its own Storybook, building once and passing the build along, or pointing at a deployed Storybook.', 'A deployed Storybook behind a login: visual-check sends none, so the run fails, saying the Storybook asks for a login or redirected to a login page. Serve Storybook in the job instead, or let the runner reach the deployment without one.', 'From a failed check to the report artifact.', 'A job container on visual-check\'s image, a job container on another image, and devcontainers that use the host\'s Docker.', 'In a job container, that container is the only boundary, with the checkout and any stored token inside it.'] },
+    'security': { title: 'Security', desc: 'What visual-check trusts, and where the browser runs.', bullets: ['What visual-check trusts: the stories\' code. What it doesn\'t: remote content, and a pinned browser that gets old, so take browser package bumps.', 'Where the browser runs and what the boundary is in each case.', 'There are no setup steps and no flags.'] },
+    'storybook-addon': { title: 'Storybook addon', desc: 'Check and update the open story from inside Storybook 10.', bullets: ['Installing it, Check and Update, that Update\'s baselines come from the dev server, the panel in a static build, and that it needs Storybook 10.'] },
+    'agent-skill': { title: 'Agent skill', desc: 'Let a coding agent run visual-check and report what changed.', bullets: ['What `init` writes, how the skill refreshes after an upgrade, and allowing the command in the agent\'s own settings.'] },
+    'supported-storybooks': { title: 'Supported Storybooks', desc: 'Storybook 9.1, 10 and 11, and when a major is dropped.', bullets: ['9.1, 10 and 11, and when a major is dropped.', 'The test-path warning.', '`.test()` entries aren\'t captured. An end screen worth a baseline is written as a story with `play`.'] },
+    'json-reference': { title: 'JSON reference', desc: 'Every field of `report.json`, its values and its versioning rules.', bullets: ['Every field of the report, the `status`, `reason` and `kind` values, what each path is relative to, and the versioning rules.'] }
+  };
+
+  /* Linear order for prev/next, across root folders. */
+  var ORDER = ['home'];
+  TABS.forEach(function (tab) {
+    tab.groups.forEach(function (group) {
+      group.pages.forEach(function (slug) {
+        PAGES[slug].tab = tab.id;
+        PAGES[slug].group = group.label;
+        ORDER.push(slug);
+      });
+    });
+  });
+  var DEFAULT_PAGE = 'getting-started';
+
+  /* Task paths on the docs home. */
+  var TASKS = [
+    { title: 'Set it up', icon: 'terminal', desc: 'Run `init`, write the first baselines with `update`, and check your stories with `test`.', pages: ['getting-started', 'config', 'modes'] },
+    { title: 'Tune a story', icon: 'sliders', desc: 'Make a story capture the same way on every load.', pages: ['wait-hook', 'animations', 'remote-content', 'color-and-pixels'] },
+    { title: 'Run it in CI', icon: 'branch', desc: 'Check every pull request on GitHub Actions, in the same container your machine uses.', pages: ['ci', 'platforms-and-docker', 'browser'] },
+    { title: 'Review changes', icon: 'plates', desc: 'Read a failure and its visual diff, then fix the story or accept the change with `update`.', pages: ['baselines', 'flaky-snapshots', 'stories-that-break'] },
+    { title: 'Use it from an agent', icon: 'agent', desc: 'Let a coding agent run the check after a UI change and report what changed, with the paths to each visual diff.', pages: ['agent-skill', 'json-reference'] }
+  ];
+
+  /* ======================================================================
+     Helpers
+     ====================================================================== */
+  var root = document.documentElement;
+  var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  /**
+   * Escapes text for HTML.
+   */
+  function escapeHtml(text) {
+    return String(text).replace(/[&<>"']/g, function (character) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character];
+    });
+  }
+
+  /**
+   * Turns `code` spans in a plain string into <code> elements.
+   */
+  function md(text) {
+    return escapeHtml(text).replace(/`([^`]+)`/g, '<code>$1</code>');
+  }
+
+  /**
+   * Strips the backticks from a title, for document titles and search.
+   */
+  function plain(text) {
+    return String(text).replace(/`/g, '');
+  }
+
+  /**
+   * Returns an inline SVG icon: 20px from ICONS, 16px from SMALL.
+   */
+  function icon(name, extraClass) {
+    if (ICONS[name]) {
+      return '<svg class="vc-icon vc-icon--20' + (extraClass ? ' ' + extraClass : '') + '" viewBox="0 0 20 20" aria-hidden="true">' + ICONS[name] + '</svg>';
+    }
+    return '<svg class="vc-icon' + (extraClass ? ' ' + extraClass : '') + '" viewBox="0 0 16 16" aria-hidden="true">' + (SMALL[name] || '') + '</svg>';
+  }
+
+  /**
+   * Reads and writes this prototype's own settings; storage may be blocked.
+   */
+  var store = {
+    get: function (key) {
+      try {
+        return localStorage.getItem('vc-docs2:' + key);
+      } catch (error) {
+        return null;
+      }
+    },
+    set: function (key, value) {
+      try {
+        localStorage.setItem('vc-docs2:' + key, value);
+      } catch (error) {
+        /* storage blocked: the choice lasts for this page view only */
+      }
+    }
+  };
+
+  /**
+   * Copies text to the clipboard, with a fallback for browsers that refuse the async API.
+   */
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text).catch(function () {
+        return legacyCopy(text);
+      });
+    }
+    return Promise.resolve(legacyCopy(text));
+  }
+
+  /**
+   * Copies through a temporary textarea.
+   */
+  function legacyCopy(text) {
+    var area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    try {
+      document.execCommand('copy');
+    } catch (error) {
+      /* nothing else to try */
+    }
+    area.remove();
+  }
+
+  /**
+   * Shows "Copied" on a button for a moment, then restores its content.
+   */
+  function flashCopied(button) {
+    var original = button.innerHTML;
+    if (button.dataset.copying) {
+      return;
+    }
+    button.dataset.copying = '1';
+    if (button.classList.contains('nb-chip__copy')) {
+      button.innerHTML = icon('check');
+    } else {
+      button.innerHTML = icon('check') + '<span>Copied</span>';
+    }
+    setTimeout(function () {
+      button.innerHTML = original;
+      delete button.dataset.copying;
+    }, 1600);
+  }
+
+  /* ======================================================================
+     Package managers (Fumadocs ```npm fences with `persist`)
+     ====================================================================== */
+  var MANAGERS = ['npm', 'pnpm', 'yarn', 'bun'];
+  var manager = MANAGERS.indexOf(store.get('pm')) >= 0 ? store.get('pm') : 'npm';
+
+  /**
+   * Builds a command for a package manager: `dlx` runs a package's binary, `run` runs a script.
+   */
+  function pmCommand(kind, arg, name) {
+    var dlx = { npm: 'npx', pnpm: 'pnpm dlx', yarn: 'yarn dlx', bun: 'bunx' };
+    var run = { npm: 'npm run', pnpm: 'pnpm', yarn: 'yarn', bun: 'bun run' };
+    return (kind === 'dlx' ? dlx[name] : run[name]) + ' ' + arg;
+  }
+
+  /**
+   * Draws every package-manager block, chip and closing message for the current choice.
+   */
+  function paintManagers(scope) {
+    var area = scope || document;
+    area.querySelectorAll('figure[data-pm]').forEach(function (figure) {
+      var kind = figure.getAttribute('data-pm');
+      var arg = figure.getAttribute('data-arg');
+      if (!figure.querySelector('.nb-pm__tabs')) {
+        var id = 'pm-' + Math.random().toString(36).slice(2, 8);
+        figure.innerHTML =
+          '<div class="vc-code__bar">' +
+            '<div class="nb-pm__tabs" role="tablist" aria-label="Package manager">' +
+              MANAGERS.map(function (name) {
+                return '<button class="nb-pm__tab" type="button" role="tab" data-manager="' + name + '" aria-controls="' + id + '">' + name + '</button>';
+              }).join('') +
+            '</div>' +
+            '<button class="vc-code__copy" type="button" data-copy-code>Copy</button>' +
+          '</div>' +
+          '<pre id="' + id + '" role="tabpanel"><span class="p">$ </span><span class="cmd"></span></pre>';
+      }
+      figure.querySelectorAll('.nb-pm__tab').forEach(function (tab) {
+        var selected = tab.getAttribute('data-manager') === manager;
+        tab.setAttribute('aria-selected', String(selected));
+        tab.tabIndex = selected ? 0 : -1;
+      });
+      figure.querySelector('.cmd').textContent = pmCommand(kind, arg, manager);
+    });
+    area.querySelectorAll('[data-pm-chip-cmd]').forEach(function (element) {
+      element.textContent = pmCommand('dlx', '@visual-check/cli init', manager);
+    });
+    area.querySelectorAll('[data-pm-switch]').forEach(function (group) {
+      group.innerHTML = MANAGERS.map(function (name) {
+        return '<button type="button" data-manager="' + name + '" aria-pressed="' + String(name === manager) + '">' + name + '</button>';
+      }).join('');
+    });
+    area.querySelectorAll('[data-closing]').forEach(function (pre) {
+      pre.innerHTML = closingMessage(manager);
+    });
+  }
+
+  /**
+   * The closing message `init` prints, as its summary test shows it, for one package manager.
+   */
+  function closingMessage(name) {
+    var rows = [
+      [pmCommand('run', 'storybook', name), 'Start Storybook, and keep it running'],
+      [pmCommand('run', 'visual:update', name), 'Write the first baselines'],
+      [pmCommand('run', 'visual:check', name), 'Check the stories against the baselines']
+    ];
+    var width = rows.reduce(function (max, row) {
+      return Math.max(max, row[0].length);
+    }, 0);
+    var lines = ['<span class="s">✓</span> visual-check is set up', '', 'Next'];
+    rows.forEach(function (row, index) {
+      var pad = new Array(width - row[0].length + 4).join(' ');
+      lines.push('  ' + (index + 1) + '  <span class="s">' + escapeHtml(row[0]) + '</span>' + pad + row[1]);
+    });
+    lines.push('  4  Commit the changes, baselines included');
+    lines.push('');
+    lines.push('<span class="c">To set options for every story, see </span><span class="s">.storybook/visual-check.ts</span><span class="c">.</span>');
+    lines.push('<span class="c">To run visual-check in CI, see </span><span class="s">https://visual-check.vercel.app/docs/ci</span><span class="c">.</span>');
+    return lines.join('\n');
+  }
+
+  /**
+   * Switches the package manager everywhere and remembers it.
+   */
+  function setManager(name) {
+    var focused = document.activeElement;
+    var refocus = focused && focused.closest && focused.closest('[data-pm-switch]');
+    manager = name;
+    store.set('pm', name);
+    paintManagers();
+    if (refocus) {
+      refocus.querySelector('[data-manager="' + name + '"]').focus();
+    }
+  }
+
+  /* ======================================================================
+     Worked example: ten pixels (custom MDX component inside Fumadocs <Tabs>)
+     ====================================================================== */
+  var PIXELS = {
+    baseline: [245, 245, 230, 200, 160, 160, 120, 80, 40, 40],
+    snapshot: [245, 244, 230, 202, 160, 122, 119, 80, 40, 155]
+  };
+  var PIXEL_CASES = [
+    { id: 'c001', label: 'color: 0.01', limit: 2, result: '2 differ, 1 allowed', note: 'Pixels 6 and 10 count. The three that moved by 1 or 2 levels don\'t, so the change is caught and the noise isn\'t.' },
+    { id: 'c0', label: 'color: 0', limit: 0, result: '5 differ, 1 allowed', note: 'Every pixel that moved counts: 2, 4, 6, 7 and 10. The noise now fails the snapshot as surely as the change does.' }
+  ];
+
+  /**
+   * Draws the worked example into its container, with one tab per `color` value.
+   */
+  function buildPixelExample(container) {
+    var tabsId = 'px-' + Math.random().toString(36).slice(2, 8);
+    container.innerHTML =
+      '<div class="nb-px__tabs" role="tablist" aria-label="Value of color">' +
+        PIXEL_CASES.map(function (item, index) {
+          return '<button class="nb-px__tab" type="button" role="tab" id="' + tabsId + '-' + item.id + '" aria-controls="' + tabsId + '-panel" aria-selected="' + String(index === 0) + '" tabindex="' + (index === 0 ? 0 : -1) + '" data-case="' + index + '">' + item.label + '</button>';
+        }).join('') +
+      '</div>' +
+      '<div class="nb-px__panel" role="tabpanel" id="' + tabsId + '-panel" tabindex="0"></div>';
+    paintPixelCase(container, 0);
+  }
+
+  /**
+   * Draws one `color` case of the worked example.
+   */
+  function paintPixelCase(container, caseIndex) {
+    var item = PIXEL_CASES[caseIndex];
+    var panel = container.querySelector('.nb-px__panel');
+    var tab = container.querySelectorAll('.nb-px__tab')[caseIndex];
+    panel.setAttribute('aria-labelledby', tab.id);
+    var shifts = PIXELS.baseline.map(function (value, index) {
+      return Math.abs(PIXELS.snapshot[index] - value);
+    });
+    function grey(value) {
+      return 'rgb(' + value + ',' + value + ',' + value + ')';
+    }
+    var html = '<div class="nb-px__grid" role="img" aria-label="' + escapeHtml(describePixels(item, shifts)) + '">';
+    html += '<span></span>';
+    shifts.forEach(function (shift, index) {
+      html += '<span class="nb-px__n">' + (index + 1) + '</span>';
+    });
+    html += '<span class="nb-px__label">Baseline</span>';
+    PIXELS.baseline.forEach(function (value) {
+      html += '<span class="nb-px__cell" style="background:' + grey(value) + '"></span>';
+    });
+    html += '<span class="nb-px__label">Snapshot</span>';
+    PIXELS.snapshot.forEach(function (value) {
+      html += '<span class="nb-px__cell" style="background:' + grey(value) + '"></span>';
+    });
+    html += '<span class="nb-px__label">Shift</span>';
+    shifts.forEach(function (shift) {
+      html += '<span class="nb-px__shift' + (shift > item.limit ? ' is-counted' : '') + '">' + shift + '</span>';
+    });
+    html += '<span class="nb-px__gap"></span>';
+    html += '<span class="nb-px__label">Visual diff</span>';
+    shifts.forEach(function (shift, index) {
+      var background = shift > item.limit ? 'var(--brand-magenta)' : 'color-mix(in srgb, ' + grey(PIXELS.baseline[index]) + ' 22%, #ffffff)';
+      html += '<span class="nb-px__cell" style="background:' + background + '"></span>';
+    });
+    html += '</div>';
+    html += '<p class="nb-px__legend">Shift is in levels of 255. In the visual diff, counted pixels are magenta over a faded baseline.</p>';
+    html += '<div class="nb-px__result"><span class="vc-badge vc-badge--changed"><span class="vc-badge__glyph" aria-hidden="true">✗</span>differs</span><code class="vc-inline-code">' + item.result + '</code><p>' + escapeHtml(item.note) + '</p></div>';
+    panel.innerHTML = html;
+    container.querySelectorAll('.nb-px__tab').forEach(function (button, index) {
+      button.setAttribute('aria-selected', String(index === caseIndex));
+      button.tabIndex = index === caseIndex ? 0 : -1;
+    });
+  }
+
+  /**
+   * A text equivalent of the pixel grid for screen readers.
+   */
+  function describePixels(item, shifts) {
+    var counted = [];
+    shifts.forEach(function (shift, index) {
+      if (shift > item.limit) {
+        counted.push(index + 1);
+      }
+    });
+    return 'Ten pixels. Shifts in levels: ' + shifts.join(', ') + '. At ' + item.label + ', pixels ' + counted.join(', ') + ' count as changed.';
+  }
+
+  /* ======================================================================
+     Chrome: header nav, tabs, sidebar, root switcher, drawer
+     ====================================================================== */
+  var tabsNav = document.getElementById('nb-tabs');
+  var sidebarHead = document.getElementById('nb-sidebar-head');
+  var sidebarTree = document.getElementById('nb-sidebar-tree');
+  var drawerBody = document.getElementById('nb-drawer-body');
+  var drawer = document.getElementById('nb-drawer');
+  var article = document.getElementById('nd-page');
+  var tocAside = document.getElementById('nd-toc');
+  var tocbarButton = document.getElementById('nb-tocbar-btn');
+  var tocbarPanel = document.getElementById('nb-tocbar-panel');
+  var tocbarCurrent = document.getElementById('nb-tocbar-current');
+  var openMenu = document.getElementById('nb-open-menu');
+  var rootMenu = document.getElementById('nb-root-menu');
+  var openFolders = { guides: true };
+  var currentSlug = null;
+
+  /**
+   * Finds a root folder by id.
+   */
+  function tabById(id) {
+    return TABS.filter(function (tab) {
+      return tab.id === id;
+    })[0];
+  }
+
+  /**
+   * Marks the shared header's nav: Storybook addon and Agent skill have their own links, the rest is Docs.
+   */
+  function paintHeaderNav(slug) {
+    var key = slug === 'storybook-addon' || slug === 'agent-skill' ? slug : 'docs';
+    document.querySelectorAll('.vc-header__nav a[data-nav]').forEach(function (link) {
+      if (link.getAttribute('data-nav') === key) {
+        link.setAttribute('aria-current', 'page');
+      } else {
+        link.removeAttribute('aria-current');
+      }
+    });
+  }
+
+  /**
+   * Header tabs: one per root folder, linking to its first page.
+   */
+  function paintTabs(tabId) {
+    tabsNav.innerHTML = TABS.map(function (tab) {
+      var first = tab.groups[0].pages[0];
+      return '<a class="nb-tab" href="#' + first + '"' + (tab.id === tabId ? ' aria-current="page"' : '') + '>' + icon(tab.icon) + tab.title + '</a>';
+    }).join('');
+  }
+
+  /**
+   * One sidebar link.
+   */
+  function itemHTML(slug, current) {
+    return '<li><a class="nb-side-link" href="#' + slug + '"' + (slug === current ? ' aria-current="page"' : '') + '>' + md(PAGES[slug].title) + '</a></li>';
+  }
+
+  /**
+   * The groups of one root folder: separator label, then its pages.
+   */
+  function groupsHTML(tab, current, idPrefix) {
+    return tab.groups.map(function (group, index) {
+      var labelId = idPrefix + '-' + tab.id + '-' + index;
+      var label = group.label ? '<p class="nb-side-sep" id="' + labelId + '">' + group.label + '</p>' : '';
+      var list = '<ul class="nb-side-list"' + (group.label ? ' aria-labelledby="' + labelId + '"' : '') + '>' + group.pages.map(function (slug) {
+        return itemHTML(slug, current);
+      }).join('') + '</ul>';
+      return '<div class="nb-side-group">' + label + list + '</div>';
+    }).join('');
+  }
+
+  /**
+   * The page tree for the sidebar or the drawer. Inside a root folder it lists that folder; on the docs home, which sits
+   * outside every root folder, it lists the root folders as collapsible folders.
+   */
+  function treeHTML(slug, idPrefix) {
+    var page = PAGES[slug];
+    if (page.tab) {
+      return groupsHTML(tabById(page.tab), slug, idPrefix);
+    }
+    return TABS.map(function (tab) {
+      var open = !!openFolders[tab.id];
+      var bodyId = idPrefix + '-folder-' + tab.id;
+      return '<div class="nb-folder">' +
+        '<button class="nb-folder__btn" type="button" aria-expanded="' + String(open) + '" aria-controls="' + bodyId + '" data-folder="' + tab.id + '">' +
+          icon(tab.icon) + tab.title + icon('chevRight', 'nb-folder__chev') +
+        '</button>' +
+        '<div class="nb-folder__body" id="' + bodyId + '"' + (open ? '' : ' hidden') + '>' + groupsHTML(tab, slug, idPrefix) + '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  /**
+   * The root-folder switcher button (SidebarTabsDropdown).
+   */
+  function switcherHTML(tabId) {
+    var tab = tabById(tabId);
+    if (!tab) {
+      return '';
+    }
+    return '<button class="nb-root" type="button" popovertarget="nb-root-menu" aria-label="Docs section: ' + tab.title + '. Change section">' +
+      '<span class="nb-root__icon">' + icon(tab.icon) + '</span>' +
+      '<span class="nb-root__text"><span class="nb-root__title">' + tab.title + '</span><span class="nb-root__desc">' + tab.desc + '</span></span>' +
+      icon('upDown') +
+    '</button>';
+  }
+
+  /**
+   * The root-folder list inside the switcher popover.
+   */
+  function paintRootMenu(tabId) {
+    rootMenu.innerHTML = TABS.map(function (tab) {
+      var current = tab.id === tabId;
+      return '<a class="nb-menu__item" href="#' + tab.groups[0].pages[0] + '"' + (current ? ' aria-current="true"' : '') + '>' +
+        '<span class="nb-root__icon">' + icon(tab.icon) + '</span>' +
+        '<span class="nb-root__text"><span class="nb-root__title">' + tab.title + '</span><span class="nb-root__desc">' + tab.desc + '</span></span>' +
+        (current ? '<span class="nb-menu__end">' + icon('check') + '</span>' : '') +
+      '</a>';
+    }).join('');
+  }
+
+  /**
+   * Sidebar, root switcher and drawer for the current page.
+   */
+  function paintNavigation(slug) {
+    var page = PAGES[slug];
+    sidebarHead.innerHTML = switcherHTML(page.tab);
+    paintRootMenu(page.tab);
+    sidebarTree.innerHTML = treeHTML(slug, 'side');
+    var drawerRoots = '<nav class="nb-roots" aria-label="Docs sections">' + TABS.map(function (tab) {
+      return '<a href="#' + tab.groups[0].pages[0] + '"' + (tab.id === page.tab ? ' aria-current="true"' : '') + '>' + icon(tab.icon) + tab.title + '</a>';
+    }).join('') + '</nav>';
+    drawerBody.innerHTML = drawerRoots +
+      '<nav aria-label="Pages in this section">' + treeHTML(slug, 'drawer') + '</nav>' +
+      '<nav class="nb-drawer__site" aria-label="Site">' +
+        '<a href="#home">Docs home</a>' +
+        '<a href="https://github.com/visual-check/visual-check/releases" target="_blank" rel="noopener">Changelog</a>' +
+        '<a href="' + REPO + '" target="_blank" rel="noopener">GitHub</a>' +
+        '<a class="vc-btn vc-btn--primary" href="#getting-started">Get started</a>' +
+      '</nav>';
+    var active = sidebarTree.querySelector('[aria-current="page"]');
+    if (active) {
+      var top = active.offsetTop - sidebarTree.offsetTop;
+      if (top < sidebarTree.scrollTop || top > sidebarTree.scrollTop + sidebarTree.clientHeight - 40) {
+        sidebarTree.scrollTop = Math.max(0, top - sidebarTree.clientHeight / 3);
+      }
+    }
+  }
+
+  /* ======================================================================
+     Article
+     ====================================================================== */
+
+  /**
+   * Breadcrumb: root folder › separator group. Hidden outside root folders, as Fumadocs does.
+   */
+  function crumbsHTML(page) {
+    if (!page.tab) {
+      return '';
+    }
+    var tab = tabById(page.tab);
+    var parts = ['<li><a href="#' + tab.groups[0].pages[0] + '">' + tab.title + '</a></li>'];
+    if (page.group) {
+      parts.push('<li aria-hidden="true">' + icon('chevRight') + '</li><li>' + page.group + '</li>');
+    }
+    return '<nav aria-label="Breadcrumb"><ol class="nb-crumbs">' + parts.join('') + '</ol></nav>';
+  }
+
+  /**
+   * The page actions row: Copy Markdown, Open ▾ and Edit on GitHub.
+   */
+  function actionsHTML(slug) {
+    return '<div class="nb-actions">' +
+      '<button class="vc-btn vc-btn--secondary vc-btn--sm" type="button" data-copy-md>' + icon('copy') + '<span>Copy Markdown</span></button>' +
+      '<button class="vc-btn vc-btn--secondary vc-btn--sm" type="button" popovertarget="nb-open-menu">Open' + icon('chevDown') + '</button>' +
+      '<a class="vc-btn vc-btn--ghost vc-btn--sm nb-actions__edit" href="' + editUrl(slug) + '" target="_blank" rel="noopener">' + icon('pencil') + 'Edit on GitHub</a>' +
+    '</div>';
+  }
+
+  /**
+   * The page's source on GitHub.
+   */
+  function editUrl(slug) {
+    return REPO + '/blob/main/site/content/docs/' + (slug === 'home' ? 'index' : slug) + '.mdx';
+  }
+
+  /**
+   * The links in the "Open ▾" popover, for the current page.
+   */
+  function paintOpenMenu(slug) {
+    var mdUrl = SITE + (slug === 'home' ? 'index' : slug) + '.md';
+    var prompt = encodeURIComponent('Read ' + mdUrl + ', I want to ask questions about it.');
+    var items = [
+      ['markdown', 'View as Markdown', mdUrl],
+      ['chat', 'Open in ChatGPT', 'https://chatgpt.com/?hints=search&q=' + prompt],
+      ['chat', 'Open in Claude', 'https://claude.ai/new?q=' + prompt],
+      ['cursor', 'Open in Cursor', 'https://cursor.com/link/prompt?text=' + prompt]
+    ];
+    openMenu.innerHTML = items.map(function (item) {
+      return '<a class="nb-menu__item" href="' + item[2] + '" target="_blank" rel="noopener">' + icon(item[0]) + item[1] + '<span class="nb-menu__end">' + icon('external') + '</span></a>';
+    }).join('');
+  }
+
+  /**
+   * Footer: last updated (plus Edit on GitHub when the actions row is hidden), then prev/next.
+   */
+  function footHTML(slug) {
+    var page = PAGES[slug];
+    var index = ORDER.indexOf(slug);
+    var prev = index > 0 ? ORDER[index - 1] : null;
+    var next = index < ORDER.length - 1 ? ORDER[index + 1] : null;
+    var meta = '<div class="nb-meta">' +
+      '<span>' + (page.updated ? 'Last updated on ' + page.updated : 'Not drafted in this prototype') + '</span>' +
+      '<a class="nb-meta__edit" href="' + editUrl(slug) + '" target="_blank" rel="noopener">' + icon('pencil') + 'Edit on GitHub</a>' +
+    '</div>';
+    var pager = '<nav class="nb-pager" aria-label="Previous and next page">' +
+      (prev ? '<a class="nb-pager__prev" href="#' + prev + '"><span class="nb-pager__dir">' + icon('arrowLeft') + 'Previous</span><span class="nb-pager__title">' + md(PAGES[prev].title) + '</span></a>' : '') +
+      (next ? '<a class="nb-pager__next" href="#' + next + '"><span class="nb-pager__dir">Next' + icon('arrowRight') + '</span><span class="nb-pager__title">' + md(PAGES[next].title) + '</span></a>' : '') +
+    '</nav>';
+    return '<footer>' + meta + pager + '</footer>';
+  }
+
+  /**
+   * The body of a page that isn't drafted: its real title and the bullets the PRD lists for it.
+   */
+  function stubHTML(page) {
+    return '<div class="vc-callout" role="note"><span class="vc-callout__glyph" aria-hidden="true">i</span><div>' +
+        '<strong class="vc-callout__title">Not drafted in this prototype</strong>' +
+        '<p>This page shows where it sits in the docs. Its content comes from <code>docs/prd/20-docs-site.md</code>, listed below.</p>' +
+      '</div></div>' +
+      '<h2 id="covers">What this page covers</h2>' +
+      '<ul>' + page.bullets.map(function (bullet) {
+        return '<li>' + md(bullet) + '</li>';
+      }).join('') + '</ul>';
+  }
+
+  /**
+   * Renders one page into the article.
+   */
+  function renderPage(slug) {
+    var page = PAGES[slug];
+    currentSlug = slug;
+    document.title = (slug === 'home' ? 'Docs' : plain(page.title)) + ' · visual-check';
+    root.classList.toggle('nb-is-full', !!page.full);
+    paintHeaderNav(slug);
+    paintTabs(page.tab);
+    paintNavigation(slug);
+    paintOpenMenu(slug);
+
+    var html = '';
+    if (!page.full) {
+      html += '<div class="nb-head">' + crumbsHTML(page) +
+        '<h1 class="nb-title" id="page-title">' + md(page.title) + '</h1>' +
+        '<p class="nb-desc">' + md(page.desc) + '</p>' +
+        actionsHTML(slug) +
+      '</div>';
+    }
+    html += '<div class="' + (page.full ? 'nb-hubbody' : 'nb-prose') + '" id="nb-prose"></div>';
+    html += footHTML(slug);
+    article.innerHTML = html;
+    article.setAttribute('aria-labelledby', page.full ? 'hub-title' : 'page-title');
+
+    var prose = document.getElementById('nb-prose');
+    if (page.template) {
+      prose.appendChild(document.getElementById(page.template).content.cloneNode(true));
+    } else {
+      prose.innerHTML = stubHTML(page);
+    }
+    enhanceProse(prose, slug);
+    buildToc(prose, slug);
+    measure();
+  }
+
+  /**
+   * Inline code, heading anchors, icons in cards, code blocks, the worked example and the hub's generated parts.
+   */
+  function enhanceProse(prose, slug) {
+    prose.querySelectorAll('code').forEach(function (code) {
+      if (!code.closest('pre')) {
+        code.classList.add('vc-inline-code');
+      }
+    });
+    prose.querySelectorAll('h2[id], h3[id]').forEach(function (heading) {
+      if (heading.closest('.nb-hub')) {
+        return;
+      }
+      heading.tabIndex = -1;
+      heading.insertAdjacentHTML('beforeend', '<a class="nb-anchor" href="#' + slug + '/' + heading.id + '" aria-label="Link to this section">' + icon('link') + '</a>');
+    });
+    prose.querySelectorAll('[data-icon]').forEach(function (element) {
+      element.innerHTML = icon(element.getAttribute('data-icon'));
+      element.setAttribute('aria-hidden', 'true');
+    });
+    prose.querySelectorAll('.nb-card__title').forEach(function (title) {
+      title.insertAdjacentHTML('beforeend', icon('arrowRight'));
+    });
+    prose.querySelectorAll('[data-pixel-example]').forEach(buildPixelExample);
+    var tasks = prose.querySelector('[data-tasks]');
+    if (tasks) {
+      tasks.innerHTML = TASKS.map(function (task, index) {
+        return '<article class="nb-task" aria-labelledby="task-' + index + '">' +
+          '<div class="nb-task__head"><span class="nb-chip-icon" aria-hidden="true">' + icon(task.icon) + '</span><h3 class="nb-task__title" id="task-' + index + '">' + task.title + '</h3></div>' +
+          '<p class="nb-task__desc">' + md(task.desc) + '</p>' +
+          '<ul class="nb-task__links">' + task.pages.map(function (page) {
+            return '<li><a href="#' + page + '"><span>' + md(PAGES[page].title) + '</span>' + icon('arrowRight') + '</a></li>';
+          }).join('') + '</ul>' +
+        '</article>';
+      }).join('');
+    }
+    var browse = prose.querySelector('[data-browse]');
+    if (browse) {
+      var columns = [];
+      TABS.forEach(function (tab) {
+        tab.groups.forEach(function (group) {
+          columns.push('<div>' +
+            '<p class="nb-browse__tab"' + (group.label ? '' : ' aria-hidden="true" style="visibility:hidden"') + '>' + icon(tab.icon) + tab.title + '</p>' +
+            '<p class="nb-browse__group">' + (group.label || tab.title) + '</p>' +
+            '<ul>' + group.pages.map(function (page) {
+              return '<li><a href="#' + page + '">' + md(PAGES[page].title) + '</a></li>';
+            }).join('') + '</ul>' +
+          '</div>');
+        });
+      });
+      browse.innerHTML = columns.join('');
+    }
+    paintManagers(prose);
+  }
+
+  /* ======================================================================
+     TOC with scrollspy (Fumadocs TOC 'normal': a track, and a thumb over every heading in view)
+     ====================================================================== */
+  var tocTargets = [];
+  var tocLinks = [];
+  var tocbarLinks = [];
+
+  /**
+   * Builds the TOC and the "On this page" panel from the page's h2 and h3 headings.
+   */
+  function buildToc(prose, slug) {
+    tocTargets = Array.prototype.slice.call(prose.querySelectorAll('h2[id], h3[id]')).filter(function (heading) {
+      return !heading.closest('.nb-hub');
+    });
+    var items = tocTargets.map(function (heading) {
+      var clone = heading.cloneNode(true);
+      clone.querySelectorAll('.nb-anchor').forEach(function (anchor) {
+        anchor.remove();
+      });
+      return '<li><a class="nb-toc__link" data-depth="' + heading.tagName.charAt(1) + '" href="#' + slug + '/' + heading.id + '">' + clone.innerHTML + '</a></li>';
+    }).join('');
+    if (PAGES[slug].full || !tocTargets.length) {
+      tocAside.innerHTML = '';
+      tocbarPanel.innerHTML = '';
+    } else {
+      tocAside.innerHTML =
+        '<p class="nb-toc__title">' + icon('list') + 'On this page</p>' +
+        '<ul class="nb-toc__list"><span class="nb-toc__thumb" aria-hidden="true"></span>' + items + '</ul>' +
+        '<div class="nb-toc__foot">' +
+          '<p>Was this page helpful?</p>' +
+          '<div class="nb-feedback" data-feedback>' +
+            '<button class="vc-btn vc-btn--secondary vc-btn--sm" type="button" data-answer="yes">Yes</button>' +
+            '<button class="vc-btn vc-btn--secondary vc-btn--sm" type="button" data-answer="no">No</button>' +
+          '</div>' +
+        '</div>';
+      tocbarPanel.innerHTML = '<nav aria-label="On this page"><ul class="nb-toc__list">' + items + '</ul></nav>';
+    }
+    tocLinks = Array.prototype.slice.call(tocAside.querySelectorAll('.nb-toc__link'));
+    tocbarLinks = Array.prototype.slice.call(tocbarPanel.querySelectorAll('.nb-toc__link'));
+    setTocbar(false);
+    requestAnimationFrame(updateScrollspy);
+  }
+
+  /**
+   * Height of the sticky chrome above the content: header plus the "On this page" bar when it shows.
+   */
+  function stickyOffset() {
+    var header = document.getElementById('nd-nav').getBoundingClientRect().height;
+    var bar = document.getElementById('nd-toc-popover');
+    var barHeight = bar.offsetParent !== null ? bar.getBoundingClientRect().height : 0;
+    return header + barHeight;
+  }
+
+  /**
+   * Marks every TOC item whose section overlaps the viewport, and moves the thumb over them.
+   */
+  function updateScrollspy() {
+    if (!tocTargets.length) {
+      tocbarCurrent.textContent = '';
+      return;
+    }
+    var top = stickyOffset();
+    var bottom = window.innerHeight;
+    var proseEnd = document.getElementById('nb-prose').getBoundingClientRect().bottom;
+    var active = [];
+    tocTargets.forEach(function (heading, index) {
+      var start = heading.getBoundingClientRect().top;
+      var end = index < tocTargets.length - 1 ? tocTargets[index + 1].getBoundingClientRect().top : proseEnd;
+      /* 32px: a heading reached through its link sits 24px under the sticky chrome, and the section above it
+         shouldn't stay marked for that gap. */
+      if (end > top + 32 && start < bottom - 8) {
+        active.push(index);
+      }
+    });
+    if (!active.length) {
+      var passed = -1;
+      tocTargets.forEach(function (heading, index) {
+        if (heading.getBoundingClientRect().top < top + 8) {
+          passed = index;
+        }
+      });
+      active = [Math.max(0, passed)];
+    }
+    [tocLinks, tocbarLinks].forEach(function (links) {
+      links.forEach(function (link, index) {
+        var on = active.indexOf(index) >= 0;
+        link.classList.toggle('is-active', on);
+        if (index === active[0]) {
+          link.setAttribute('aria-current', 'location');
+        } else {
+          link.removeAttribute('aria-current');
+        }
+      });
+    });
+    var thumb = tocAside.querySelector('.nb-toc__thumb');
+    if (thumb && tocLinks.length) {
+      var first = tocLinks[active[0]];
+      var last = tocLinks[active[active.length - 1]];
+      thumb.style.top = first.parentElement.offsetTop + 'px';
+      thumb.style.height = (last.parentElement.offsetTop + last.parentElement.offsetHeight - first.parentElement.offsetTop) + 'px';
+    }
+    var label = tocTargets[active[0]].cloneNode(true);
+    label.querySelectorAll('.nb-anchor').forEach(function (anchor) {
+      anchor.remove();
+    });
+    tocbarCurrent.textContent = label.textContent.trim();
+  }
+
+  var scrollQueued = false;
+  window.addEventListener('scroll', function () {
+    if (scrollQueued) {
+      return;
+    }
+    scrollQueued = true;
+    requestAnimationFrame(function () {
+      scrollQueued = false;
+      updateScrollspy();
+    });
+  }, { passive: true });
+  window.addEventListener('resize', updateScrollspy);
+
+  /**
+   * Opens or closes the "On this page" disclosure.
+   */
+  function setTocbar(open) {
+    tocbarButton.setAttribute('aria-expanded', String(open));
+    tocbarPanel.hidden = !open;
+  }
+  tocbarButton.addEventListener('click', function () {
+    setTocbar(tocbarButton.getAttribute('aria-expanded') !== 'true');
+  });
+
+  /* ======================================================================
+     Routing: #<page> or #<page>/<heading>
+     ====================================================================== */
+
+  /**
+   * Reads the page and heading from the hash.
+   */
+  function parseHash() {
+    var raw = decodeURIComponent(location.hash.replace(/^#/, ''));
+    var parts = raw.split('/');
+    var slug = PAGES[parts[0]] ? parts[0] : DEFAULT_PAGE;
+    return { slug: slug, anchor: parts[1] || null };
+  }
+
+  /**
+   * Scrolls to a heading of the current page and moves focus to it.
+   */
+  function goToHeading(anchor, smooth) {
+    var heading = anchor ? document.getElementById(anchor) : null;
+    if (!heading || !article.contains(heading)) {
+      return;
+    }
+    heading.scrollIntoView({ behavior: smooth && !reducedMotion.matches ? 'smooth' : 'instant', block: 'start' });
+    heading.focus({ preventScroll: true });
+  }
+
+  /**
+   * Renders the page named in the hash, then scrolls to its heading or to the top.
+   */
+  function route(event) {
+    var target = parseHash();
+    var changed = target.slug !== currentSlug;
+    if (changed) {
+      renderPage(target.slug);
+    }
+    if (drawer.open) {
+      closeDrawer();
+    }
+    if (target.anchor) {
+      goToHeading(target.anchor, !changed);
+    } else if (changed) {
+      window.scrollTo({ top: 0, behavior: 'instant' });
+      if (event) {
+        document.getElementById('nb-main').focus({ preventScroll: true });
+      }
+    } else if (event) {
+      window.scrollTo({ top: 0, behavior: reducedMotion.matches ? 'instant' : 'smooth' });
+    }
+  }
+  window.addEventListener('hashchange', route);
+
+  /* Same-page heading links: scroll even when the hash doesn't change. */
+  document.addEventListener('click', function (event) {
+    var link = event.target.closest('a[href^="#"]');
+    if (!link || event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey) {
+      return;
+    }
+    var parts = link.getAttribute('href').slice(1).split('/');
+    if (parts[0] === currentSlug && parts[1]) {
+      event.preventDefault();
+      history.replaceState(null, '', location.pathname + location.search + '#' + parts.join('/'));
+      setTocbar(false);
+      goToHeading(parts[1], true);
+    } else if (parts[0] === currentSlug && !parts[1] && link.closest('.nb-sidebar, .nb-drawer, .nb-tabs')) {
+      event.preventDefault();
+      if (drawer.open) {
+        closeDrawer();
+      }
+      window.scrollTo({ top: 0, behavior: reducedMotion.matches ? 'auto' : 'smooth' });
+    }
+  });
+
+  /* ======================================================================
+     Interactions: copy, tabs, folders, feedback, popovers, drawer
+     ====================================================================== */
+  document.addEventListener('click', function (event) {
+    var target = event.target;
+    var managerButton = target.closest('[data-manager]');
+    if (managerButton) {
+      setManager(managerButton.getAttribute('data-manager'));
+      return;
+    }
+    var copyCode = target.closest('[data-copy-code]');
+    if (copyCode) {
+      var figure = copyCode.closest('figure');
+      var text;
+      if (figure.hasAttribute('data-pm')) {
+        text = figure.querySelector('.cmd').textContent;
+      } else {
+        var clone = figure.querySelector('pre').cloneNode(true);
+        clone.querySelectorAll('.p').forEach(function (prompt) {
+          prompt.remove();
+        });
+        text = clone.textContent;
+      }
+      copyText(text).then(function () {
+        flashCopied(copyCode);
+      });
+      return;
+    }
+    var copyChip = target.closest('[data-copy-chip]');
+    if (copyChip) {
+      copyText(pmCommand('dlx', '@visual-check/cli init', manager)).then(function () {
+        flashCopied(copyChip);
+      });
+      return;
+    }
+    var copyMd = target.closest('[data-copy-md]');
+    if (copyMd) {
+      copyText(pageMarkdown()).then(function () {
+        flashCopied(copyMd);
+      });
+      return;
+    }
+    var pixelTab = target.closest('.nb-px__tab');
+    if (pixelTab) {
+      paintPixelCase(pixelTab.closest('.nb-px'), Number(pixelTab.getAttribute('data-case')));
+      return;
+    }
+    var folder = target.closest('[data-folder]');
+    if (folder) {
+      var open = folder.getAttribute('aria-expanded') !== 'true';
+      openFolders[folder.getAttribute('data-folder')] = open;
+      folder.setAttribute('aria-expanded', String(open));
+      document.getElementById(folder.getAttribute('aria-controls')).hidden = !open;
+      return;
+    }
+    var answer = target.closest('[data-answer]');
+    if (answer) {
+      var box = answer.closest('[data-feedback]');
+      box.outerHTML = '<p role="status">' + (answer.getAttribute('data-answer') === 'yes' ? 'Thanks for telling us.' : 'Thanks. <a class="vc-link" href="' + REPO + '/issues/new" target="_blank" rel="noopener">Open an issue</a> to say what was missing.') + '</p>';
+      return;
+    }
+    var menuLink = target.closest('.nb-menu a');
+    if (menuLink) {
+      menuLink.closest('[popover]').hidePopover();
+    }
+  });
+
+  /**
+   * Arrow keys inside a tablist move between tabs and select them. preventDefault keeps the prototype bar's
+   * ← / → variant switch from firing.
+   */
+  document.addEventListener('keydown', function (event) {
+    var tab = event.target.closest && event.target.closest('[role="tab"]');
+    if (!tab) {
+      return;
+    }
+    var keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+    if (keys.indexOf(event.key) < 0) {
+      return;
+    }
+    event.preventDefault();
+    var tabs = Array.prototype.slice.call(tab.closest('[role="tablist"]').querySelectorAll('[role="tab"]'));
+    var index = tabs.indexOf(tab);
+    if (event.key === 'ArrowLeft') {
+      index = (index - 1 + tabs.length) % tabs.length;
+    } else if (event.key === 'ArrowRight') {
+      index = (index + 1) % tabs.length;
+    } else if (event.key === 'Home') {
+      index = 0;
+    } else {
+      index = tabs.length - 1;
+    }
+    tabs[index].click();
+    var group = tab.closest('figure, .nb-px');
+    var fresh = group ? group.querySelectorAll('[role="tab"]')[index] : tabs[index];
+    fresh.focus();
+  });
+
+  /* Popovers: place under their trigger, enter with the keyboard, move with ↑ / ↓. */
+  var lastPopoverTrigger = null;
+  var lastPointer = false;
+  document.addEventListener('pointerdown', function () {
+    lastPointer = true;
+  }, true);
+  document.addEventListener('keydown', function () {
+    lastPointer = false;
+  }, true);
+  document.addEventListener('click', function (event) {
+    var trigger = event.target.closest('[popovertarget]');
+    if (trigger) {
+      lastPopoverTrigger = trigger;
+    }
+  }, true);
+  [openMenu, rootMenu].forEach(function (popover) {
+    popover.addEventListener('toggle', function (event) {
+      var trigger = lastPopoverTrigger;
+      if (trigger) {
+        trigger.setAttribute('aria-expanded', String(event.newState === 'open'));
+      }
+      if (event.newState !== 'open' || !trigger) {
+        return;
+      }
+      var rect = trigger.getBoundingClientRect();
+      var width = popover.offsetWidth;
+      var left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+      popover.style.left = left + 'px';
+      popover.style.top = (rect.bottom + 6) + 'px';
+      if (!lastPointer) {
+        var first = popover.querySelector('a');
+        if (first) {
+          first.focus();
+        }
+      }
+    });
+    popover.addEventListener('keydown', function (event) {
+      if (['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'].indexOf(event.key) < 0) {
+        return;
+      }
+      event.preventDefault();
+      var links = Array.prototype.slice.call(popover.querySelectorAll('a'));
+      var index = links.indexOf(document.activeElement);
+      if (event.key === 'ArrowDown') {
+        links[(index + 1) % links.length].focus();
+      } else if (event.key === 'ArrowUp') {
+        links[(index - 1 + links.length) % links.length].focus();
+      }
+    });
+  });
+  window.addEventListener('scroll', function () {
+    [openMenu, rootMenu].forEach(function (popover) {
+      if (popover.matches(':popover-open')) {
+        popover.hidePopover();
+      }
+    });
+  }, { passive: true });
+
+  /* Drawer (mobile sidebar) */
+  var drawerTrigger = document.querySelector('[data-drawer-open]');
+
+  /**
+   * Closes the drawer and resets its trigger.
+   */
+  function closeDrawer() {
+    if (drawer.open) {
+      drawer.close();
+    }
+    drawerTrigger.setAttribute('aria-expanded', 'false');
+  }
+  drawerTrigger.addEventListener('click', function () {
+    drawer.showModal();
+    drawerTrigger.setAttribute('aria-expanded', 'true');
+  });
+  ['close', 'cancel'].forEach(function (type) {
+    drawer.addEventListener(type, function () {
+      drawerTrigger.setAttribute('aria-expanded', 'false');
+    });
+  });
+  drawer.addEventListener('click', function (event) {
+    if (event.target === drawer || event.target.closest('[data-drawer-close]')) {
+      closeDrawer();
+    }
+  });
+  window.matchMedia('(min-width: 768px)').addEventListener('change', function (query) {
+    if (query.matches) {
+      closeDrawer();
+    }
+  });
+
+  /* ======================================================================
+     Copy Markdown: the page as Markdown (Fumadocs serves <page>.md; here it is rebuilt from the DOM)
+     ====================================================================== */
+
+  /**
+   * Inline Markdown for a node: code, links, emphasis.
+   */
+  function inlineMarkdown(node) {
+    var out = '';
+    node.childNodes.forEach(function (child) {
+      if (child.nodeType === 3) {
+        out += child.textContent;
+      } else if (child.nodeType === 1) {
+        if (child.classList.contains('nb-anchor') || child.tagName === 'svg') {
+          return;
+        }
+        if (child.tagName === 'CODE') {
+          out += '`' + child.textContent + '`';
+        } else if (child.tagName === 'A') {
+          var href = child.getAttribute('href') || '';
+          var url = href.charAt(0) === '#' ? SITE + href.slice(1).replace('/', '#') : href;
+          out += '[' + inlineMarkdown(child) + '](' + url + ')';
+        } else if (child.tagName === 'STRONG' || child.tagName === 'B') {
+          out += '**' + inlineMarkdown(child) + '**';
+        } else if (child.tagName === 'EM') {
+          out += '*' + inlineMarkdown(child) + '*';
+        } else {
+          out += inlineMarkdown(child);
+        }
+      }
+    });
+    return out.replace(/\s+/g, ' ');
+  }
+
+  /**
+   * Block Markdown for the prose of the current page.
+   */
+  function blockMarkdown(container, out) {
+    Array.prototype.forEach.call(container.children, function (element) {
+      var tag = element.tagName;
+      if (tag === 'H2' || tag === 'H3') {
+        out.push((tag === 'H2' ? '## ' : '### ') + inlineMarkdown(element).trim(), '');
+      } else if (tag === 'P') {
+        out.push(inlineMarkdown(element).trim(), '');
+      } else if (tag === 'UL' || tag === 'OL') {
+        Array.prototype.forEach.call(element.children, function (item, index) {
+          out.push((tag === 'OL' ? (index + 1) + '. ' : '- ') + inlineMarkdown(item).trim());
+        });
+        out.push('');
+      } else if (tag === 'FIGURE' && element.querySelector('pre')) {
+        var title = element.querySelector('.nb-code__title');
+        var pre = element.hasAttribute('data-pm') ? element.querySelector('.cmd').textContent : element.querySelector('pre').textContent;
+        out.push('```' + (title ? ' title="' + title.textContent.trim() + '"' : ''), pre, '```', '');
+      } else if (element.classList.contains('vc-callout')) {
+        var calloutTitle = element.querySelector('.vc-callout__title');
+        out.push('> **' + (calloutTitle ? calloutTitle.textContent : 'Note') + '**');
+        element.querySelectorAll('p').forEach(function (paragraph) {
+          out.push('> ' + inlineMarkdown(paragraph).trim());
+        });
+        out.push('');
+      } else if (element.classList.contains('nb-table')) {
+        var rows = element.querySelectorAll('tr');
+        rows.forEach(function (row, index) {
+          out.push('| ' + Array.prototype.map.call(row.children, function (cell) {
+            return inlineMarkdown(cell).trim();
+          }).join(' | ') + ' |');
+          if (index === 0) {
+            out.push('|' + Array.prototype.map.call(row.children, function () {
+              return ' --- ';
+            }).join('|') + '|');
+          }
+        });
+        out.push('');
+      } else if (element.classList.contains('nb-typetable')) {
+        element.querySelectorAll('.nb-typetable__row').forEach(function (row) {
+          out.push('- `' + row.querySelector('.nb-typetable__key').textContent + '`: ' + Array.prototype.map.call(row.querySelectorAll('p'), function (paragraph) {
+            return inlineMarkdown(paragraph).trim();
+          }).join(' '));
+        });
+        out.push('');
+      } else if (element.classList.contains('nb-px')) {
+        out.push('<PixelRow> (interactive in the docs)', '');
+      } else if (element.classList.contains('nb-steps') || element.classList.contains('nb-step')) {
+        blockMarkdown(element, out);
+      } else if (element.textContent.trim()) {
+        out.push(element.textContent.replace(/\s+/g, ' ').trim(), '');
+      }
+    });
+  }
+
+  /**
+   * The whole current page as Markdown.
+   */
+  function pageMarkdown() {
+    var page = PAGES[currentSlug];
+    var out = ['# ' + page.title, '', page.desc, ''];
+    blockMarkdown(document.getElementById('nb-prose'), out);
+    return out.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
+  }
+
+  /* ======================================================================
+     Search (⌘K): a static index of titles, descriptions, headings and the planned contents of undrafted pages
+     ====================================================================== */
+  var INDEX = [];
+  Object.keys(PAGES).forEach(function (slug) {
+    var page = PAGES[slug];
+    var tab = page.tab ? tabById(page.tab).title : 'Docs';
+    INDEX.push({ slug: slug, anchor: null, title: page.title, heading: '', text: plain(page.desc) + ' ' + plain((page.bullets || []).join(' ')), tab: tab });
+    if (page.template && slug !== 'home') {
+      document.getElementById(page.template).content.querySelectorAll('h2[id], h3[id]').forEach(function (heading) {
+        var section = [];
+        var next = heading.nextElementSibling;
+        while (next && !/^H[23]$/.test(next.tagName) && section.join(' ').length < 400) {
+          section.push(next.textContent);
+          next = next.nextElementSibling;
+        }
+        INDEX.push({ slug: slug, anchor: heading.id, title: page.title, heading: heading.innerHTML.replace(/<code>([^<]*)<\/code>/g, '`$1`').replace(/<[^>]+>/g, ''), text: section.join(' ').replace(/\s+/g, ' '), tab: tab });
+      });
+    }
+  });
+  var SUGGESTED = ['getting-started', 'color-and-pixels', 'wait-hook', 'ci', 'agent-skill'];
+
+  var searchDialog = document.getElementById('nb-search');
+  var searchInput = document.getElementById('nb-search-input');
+  var searchList = document.getElementById('nb-search-list');
+  var searchLabel = document.getElementById('nb-search-label');
+  var results = [];
+  var activeResult = 0;
+
+  /**
+   * Highlights each query word in a title (backticks become code first).
+   */
+  function highlight(text, words) {
+    var html = md(text);
+    words.forEach(function (word) {
+      if (word.length < 2) {
+        return;
+      }
+      var pattern = new RegExp('(' + word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')(?![^<]*>)', 'gi');
+      html = html.replace(pattern, '<mark>$1</mark>');
+    });
+    return html;
+  }
+
+  /**
+   * Finds matches: every word must appear; headings and titles weigh more than body text.
+   */
+  function runSearch(query) {
+    var words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) {
+      return SUGGESTED.map(function (slug) {
+        return INDEX.filter(function (entry) {
+          return entry.slug === slug && !entry.anchor;
+        })[0];
+      });
+    }
+    return INDEX.map(function (entry) {
+      var title = plain(entry.title).toLowerCase();
+      var heading = plain(entry.heading).toLowerCase();
+      var haystack = title + ' ' + heading + ' ' + entry.text.toLowerCase();
+      var matches = words.every(function (word) {
+        return haystack.indexOf(word) >= 0;
+      });
+      if (!matches) {
+        return null;
+      }
+      var score = entry.anchor ? 0 : 1;
+      words.forEach(function (word) {
+        if (heading.indexOf(word) >= 0) {
+          score += 4;
+        }
+        if (title.indexOf(word) >= 0) {
+          score += entry.anchor ? 1 : 6;
+        }
+        if (title.indexOf(word) === 0 || heading.indexOf(word) === 0) {
+          score += 2;
+        }
+      });
+      return { entry: entry, score: score };
+    }).filter(Boolean).sort(function (a, b) {
+      return b.score - a.score;
+    }).slice(0, 10).map(function (item) {
+      return item.entry;
+    });
+  }
+
+  /**
+   * Draws the result list.
+   */
+  function paintResults() {
+    var query = searchInput.value.trim();
+    var words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    results = runSearch(query);
+    activeResult = 0;
+    searchLabel.textContent = query ? (results.length ? 'Results' : 'No results') : 'Suggested';
+    if (!results.length) {
+      searchList.innerHTML = '<li class="nb-search__empty" role="presentation">No page matches “' + escapeHtml(query) + '”. Try a command, a key such as <code>tolerance</code>, or a page name.</li>';
+      searchInput.removeAttribute('aria-activedescendant');
+      return;
+    }
+    searchList.innerHTML = results.map(function (entry, index) {
+      var title = entry.anchor ? highlight(entry.heading, words) : highlight(entry.title, words);
+      var sub = entry.anchor ? entry.tab + ' › ' + md(entry.title) : entry.tab + ' · ' + md(entry.text.split('. ')[0]);
+      return '<li class="nb-search__opt" role="option" id="nb-result-' + index + '" data-index="' + index + '" aria-selected="' + String(index === 0) + '">' +
+        icon(entry.anchor ? 'hash' : 'page') +
+        '<span class="nb-search__body"><span class="nb-search__t">' + title + '</span><span class="nb-search__s">' + sub + '</span></span>' +
+      '</li>';
+    }).join('');
+    searchInput.setAttribute('aria-activedescendant', 'nb-result-0');
+  }
+
+  /**
+   * Moves the active result.
+   */
+  function setActiveResult(index) {
+    if (!results.length) {
+      return;
+    }
+    activeResult = (index + results.length) % results.length;
+    searchList.querySelectorAll('.nb-search__opt').forEach(function (option, optionIndex) {
+      option.setAttribute('aria-selected', String(optionIndex === activeResult));
+    });
+    var active = document.getElementById('nb-result-' + activeResult);
+    searchInput.setAttribute('aria-activedescendant', active.id);
+    active.scrollIntoView({ block: 'nearest' });
+  }
+
+  /**
+   * Opens a result and closes the dialog.
+   */
+  function openResult(index) {
+    var entry = results[index];
+    if (!entry) {
+      return;
+    }
+    searchDialog.close();
+    var hash = '#' + entry.slug + (entry.anchor ? '/' + entry.anchor : '');
+    if (location.hash === hash) {
+      route();
+    } else {
+      location.hash = hash;
+    }
+  }
+
+  /**
+   * Opens the search dialog with an empty query.
+   */
+  function openSearch() {
+    if (searchDialog.open) {
+      return;
+    }
+    if (drawer.open) {
+      closeDrawer();
+    }
+    searchInput.value = '';
+    paintResults();
+    searchDialog.showModal();
+    searchInput.focus();
+  }
+
+  searchInput.addEventListener('input', paintResults);
+  searchInput.addEventListener('keydown', function (event) {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActiveResult(activeResult + 1);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveResult(activeResult - 1);
+    } else if (event.key === 'Enter' && !event.isComposing) {
+      event.preventDefault();
+      openResult(activeResult);
+    }
+  });
+  searchList.addEventListener('click', function (event) {
+    var option = event.target.closest('.nb-search__opt');
+    if (option) {
+      openResult(Number(option.getAttribute('data-index')));
+    }
+  });
+  searchList.addEventListener('pointermove', function (event) {
+    var option = event.target.closest('.nb-search__opt');
+    if (option && Number(option.getAttribute('data-index')) !== activeResult) {
+      setActiveResult(Number(option.getAttribute('data-index')));
+    }
+  });
+  searchDialog.addEventListener('click', function (event) {
+    if (event.target === searchDialog || event.target.closest('[data-search-close]')) {
+      searchDialog.close();
+    }
+  });
+  document.querySelectorAll('[data-search-open]').forEach(function (button) {
+    button.addEventListener('click', openSearch);
+  });
+  document.addEventListener('keydown', function (event) {
+    if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k') {
+      event.preventDefault();
+      if (searchDialog.open) {
+        searchDialog.close();
+      } else {
+        openSearch();
+      }
+    }
+  });
+  var isMac = /Mac|iPhone|iPad/.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '');
+  document.querySelectorAll('[data-kbd]').forEach(function (kbd) {
+    kbd.textContent = isMac ? '⌘K' : 'Ctrl K';
+  });
+
+  /* ======================================================================
+     Sticky offsets: the header's real height (64px, or 109px with the tabs row) and the "On this page" bar's
+     ====================================================================== */
+  /**
+   * Publishes the sticky header and TOC bar heights as CSS variables.
+   */
+  function measure() {
+    var header = document.getElementById('nd-nav').getBoundingClientRect().height;
+    var bar = document.getElementById('nd-toc-popover');
+    root.style.setProperty('--nb-header-h', header + 'px');
+    root.style.setProperty('--nb-tocbar-h', (bar.offsetParent !== null ? 44 : 0) + 'px');
+  }
+  if ('ResizeObserver' in window) {
+    new ResizeObserver(measure).observe(document.getElementById('nd-nav'));
+  }
+  window.addEventListener('resize', measure);
+  document.addEventListener('vc-proto:toggle', function () {
+    measure();
+    requestAnimationFrame(updateScrollspy);
+  });
+
+  /* ======================================================================
+     Boot
+     ====================================================================== */
+  measure();
+  route();
+})();
+</script>
+</body>
+</html>

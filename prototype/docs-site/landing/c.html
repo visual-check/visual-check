@@ -1,0 +1,1729 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>visual-check · Landing C</title>
+<!-- PROTOTYPE — throwaway. Landing variant C: "Page under test". The page is its own Storybook: every section is a
+     story with an ID and a status badge. In the hero the visitor changes this page (button padding, heading
+     letter-spacing, the accent colour, the code block radius), runs a simulated `visual-check test`, sees which
+     stories the change reached, the visual diff on the element and the CLI's report, then updates or reverts. -->
+<link rel="icon" href="../shared/logo/favicon.svg">
+<link rel="stylesheet" href="../shared/tokens.css">
+<link rel="stylesheet" href="../shared/bundle.css">
+<link rel="stylesheet" href="../shared/proto-base.css">
+<style>
+  /* Values the design system doesn't have yet (become tokens before the real build):
+     - container max width 1200px; story frame max width 1264px (the container plus 32px canvas padding a side)
+     - hero display size on smaller screens: clamp(34px, 20px + 4vw, 64px), line height 0.9em + 4px
+     - section heading on phones: 32px/36px (the h1 token is 44px/48px from 768px up)
+     - statement size 24px/34px (Bricolage, 600) for a lead set larger than body-lg
+     - figure size 30px/34px (Bricolage, 700) for measured numbers beside their source
+     - story tab: 36px tall; gap between story canvases 24px (16px on phones)
+     - canvas padding 72px × 48px (40px × 16px on phones)
+     - try-it panel width 380px
+     - demo terminal minimum height: 15 lines (15 × 22px + 32px)
+     - plate overlay: cyan baseline and magenta snapshot clones, mix-blend-mode multiply (screen in dark),
+       so where both agree they print as one colour (--c-agree); the hole colour --c-hole
+     - pixel count tag: 8px above its element
+  */
+  :root { --c-hole: #ffffff; --c-agree: #002072; }
+  [data-theme="dark"] { --c-hole: #000000; --c-agree: #ffc1ed; }
+
+  /* ---------- story frame (shared by every section) ---------- */
+  .c-sec { background: var(--bg-surface); padding: 12px 24px; scroll-margin-top: 64px; }
+  .c-sec--first { padding-top: 24px; }
+  .c-sec--last { padding-bottom: 24px; }
+  .c-frame { max-width: 1264px; margin-inline: auto; }
+  .c-tab {
+    display: inline-flex; align-items: center; gap: 12px;
+    height: 36px; padding: 0 10px 0 16px;
+    background: var(--bg-page); border-radius: var(--radius-md) var(--radius-md) 0 0;
+    vertical-align: bottom;
+  }
+  .c-tab__id { font: var(--text-label); letter-spacing: .02em; color: var(--text-muted); }
+  .c-canvas {
+    position: relative;
+    background: var(--bg-page);
+    border-radius: 0 var(--radius-lg) var(--radius-lg) var(--radius-lg);
+    padding: 72px 48px;
+    transition: box-shadow var(--duration-fade) var(--ease-out);
+  }
+  .c-wrap { max-width: 1200px; margin-inline: auto; }
+  .is-capturing .c-canvas { box-shadow: inset 0 0 0 2px var(--brand-cyan); }
+  .c-canvas--inverse { background: var(--bg-inverse); color: var(--text-inverse); }
+  .c-tab--inverse { background: var(--bg-inverse); }
+  .c-tab--inverse .c-tab__id { color: var(--text-inverse); }
+
+  html[data-t-labels="hidden"] .c-sec { background: var(--bg-page); padding: 0; }
+  html[data-t-labels="hidden"] .c-sec--alt { background: var(--bg-surface); }
+  html[data-t-labels="hidden"] .c-frame { max-width: none; }
+  html[data-t-labels="hidden"] .c-tab { display: none; }
+  html[data-t-labels="hidden"] .c-canvas { border-radius: 0; padding: 96px 32px; background: transparent; }
+  html[data-t-labels="hidden"] .c-canvas--inverse { background: var(--bg-inverse); }
+
+  /* ---------- type ---------- */
+  .c-h2 { margin: 0; font: var(--text-h1); letter-spacing: -0.015em; max-width: 18em; }
+  .c-h3 { margin: 0; font: var(--text-h3); }
+  .c-lead { margin: 20px 0 0; font: var(--text-body-lg); max-width: 36em; }
+  .c-statement { margin: 0; font: 600 24px/34px var(--font-display); letter-spacing: -0.005em; max-width: 26em; }
+  .c-p { margin: 12px 0 0; font: var(--text-body); }
+  .c-small { margin: 0; font: var(--text-small); color: var(--text-muted); }
+  .c-link { color: var(--text-cyan); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; font-weight: 600; }
+  .c-link:hover { text-decoration-thickness: 2px; }
+  .c-canvas--inverse .c-link { color: var(--text-inverse); }
+  .c-ic { font: 400 .875em/1 var(--font-mono); padding: 2px 5px; background: var(--bg-surface); border-radius: var(--radius-sm); white-space: nowrap; }
+  .c-canvas--inverse .c-ic { background: rgba(127, 120, 200, .28); }
+  .c-visually-hidden { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  /* ---------- the parts a change can reach ---------- */
+  .c-btn { padding: calc(10px + var(--c-pad, 0px)) calc(16px + var(--c-pad, 0px)); }
+  .c-btn.vc-btn--lg { padding: calc(12px + var(--c-pad, 0px)) calc(22px + var(--c-pad, 0px)); }
+  .c-btn--accent { background: var(--c-accent, var(--action-accent)); }
+  .c-display { margin: 0; max-width: 11em; text-wrap: balance; letter-spacing: var(--c-track, -0.02em); font-size: clamp(34px, calc(20px + 4vw), 64px); line-height: calc(.9em + 4px); }
+  .c-code { border-radius: var(--c-radius, var(--radius-lg)); }
+
+  /* ---------- the visual diff, drawn on the page ---------- */
+  .c-target { position: relative; }
+  .c-target--block { display: block; }
+  .c-target--inline { display: inline-flex; vertical-align: middle; }
+  .c-target.is-diffed > :first-child { visibility: hidden; }
+  .c-plates { position: absolute; inset: 0; isolation: isolate; pointer-events: none; }
+  .c-plate { position: absolute !important; top: 0; left: 0; margin: 0 !important; mix-blend-mode: multiply; transition: none !important; box-shadow: none !important; }
+  [data-theme="dark"] .c-plate { mix-blend-mode: screen; }
+  .c-target--block > .c-plates > .c-plate { width: 100%; }
+  .c-plate--base { --plate: var(--brand-cyan); }
+  .c-plate--snap { --plate: var(--brand-magenta); }
+  .c-plate.c-display { color: var(--plate); }
+  .c-plate.vc-btn { background: var(--plate) !important; color: var(--c-hole) !important; border-color: transparent !important; }
+  .c-plate.vc-code { background: var(--plate) !important; border-color: var(--plate) !important; }
+  .c-plate.vc-code *, .c-plate.vc-code .vc-code__bar { color: var(--c-hole) !important; border-color: transparent !important; background: transparent !important; }
+  .c-plate--wipe { mix-blend-mode: normal !important; }
+  .c-plate--wipe.vc-btn { background: var(--c-accent, var(--action-accent)) !important; color: var(--on-action-accent) !important; }
+  .c-plate--wipe-snap { clip-path: inset(0 0 0 50%); }
+  .c-seam { position: absolute; top: -6px; bottom: -6px; left: 50%; width: 2px; margin-left: -1px; background: var(--text-primary); }
+  .c-ring { position: absolute; width: 24px; height: 24px; border: 2px solid var(--brand-magenta); border-radius: 50%; }
+  .c-ring--tl { left: -10px; top: -10px; }
+  .c-ring--tr { right: -10px; top: -10px; }
+  .c-ring--bl { left: -10px; bottom: -10px; }
+  .c-ring--br { right: -10px; bottom: -10px; }
+  .c-tag {
+    position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 3;
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 2px 8px; border-radius: var(--radius-sm);
+    background: var(--bg-inverse); color: var(--text-inverse);
+    font: var(--text-label); white-space: nowrap; pointer-events: none;
+  }
+  .c-canvas--inverse .c-tag { background: var(--bg-page); color: var(--text-primary); }
+  .c-tag i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+  html[data-t-diff="side"] .c-target.is-diffed > .c-plates { display: none; }
+  html[data-t-diff="side"] .c-target.is-diffed > :first-child { visibility: visible; }
+  html[data-t-diff="side"] .c-target.is-diffed { outline: 2px solid var(--brand-magenta); outline-offset: 6px; border-radius: 2px; }
+
+  .c-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0; font: var(--text-small); color: var(--text-muted); }
+  .c-legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .c-sw { display: inline-block; width: 12px; height: 12px; border-radius: 2px; }
+  .c-sw--base { background: var(--brand-cyan); }
+  .c-sw--snap { background: var(--brand-magenta); }
+  .c-sw--both { background: var(--c-agree); }
+  html[data-t-diff="side"] .c-legend--overlay { display: none; }
+  html:not([data-t-diff="side"]) .c-legend--side { display: none; }
+
+  /* ---------- hero ---------- */
+  .c-hero__grid { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 24px; align-items: stretch; }
+  .c-hero__canvas { display: flex; flex-direction: column; justify-content: center; padding: 72px 56px; }
+  .c-hero__sub { margin: 24px 0 0; font: var(--text-body-lg); max-width: 35em; }
+  .c-install { margin-top: 32px; max-width: 560px; }
+  .c-install .vc-code__copy:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .c-install__note { margin: 12px 0 0; font: var(--text-small); color: var(--text-muted); }
+  .c-row { margin-top: 36px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; }
+
+  .c-panel { display: flex; flex-direction: column; gap: 16px; padding: 4px 4px 0; }
+  .c-panel__title { margin: 0; font: var(--text-h3); }
+  .c-panel__lead { margin: -8px 0 0; font: var(--text-small); color: var(--text-muted); }
+  .c-edits { margin: 0; padding: 0; border: 0; min-width: 0; display: grid; gap: 4px; }
+  .c-edits__legend { padding: 0; margin-bottom: 6px; font: var(--text-ui); }
+  .c-edit {
+    display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; column-gap: 10px; row-gap: 2px; align-items: baseline;
+    padding: 10px 12px; border-radius: var(--radius-md); cursor: pointer;
+    transition: background-color var(--duration-fade) var(--ease-out);
+  }
+  .c-edit:hover { background: color-mix(in srgb, var(--bg-page) 55%, transparent); }
+  .c-edit:has(input:checked) { background: var(--bg-page); }
+  .c-edit:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .c-edit input { grid-row: 1 / span 2; align-self: start; width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--text-primary); }
+  .c-edit input:focus-visible { outline: none; }
+  .c-edit__name { font: var(--text-ui); }
+  .c-edit__file { font: var(--text-small); color: var(--text-muted); }
+  .c-edit__diff { grid-column: 2 / -1; font: 400 13px/18px var(--font-mono); color: var(--text-muted); overflow-wrap: anywhere; }
+  .c-edits:disabled .c-edit { cursor: default; }
+  .c-edits:disabled .c-edit:not(:has(input:checked)) { opacity: .55; }
+  .c-size { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 6px 12px 0; }
+  .c-size[hidden] { display: none; }
+  .c-size label { font: var(--text-small); color: var(--text-muted); }
+  .c-size input { width: 100%; accent-color: var(--text-primary); }
+  .c-size output { min-width: 7.5ch; text-align: right; font: 500 13px/20px var(--font-mono); }
+  .c-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .c-actions [hidden] { display: none; }
+  .c-run-step { display: none; }
+  html[data-t-run="step"] .c-run-one { display: none; }
+  html[data-t-run="step"] .c-run-step { display: inline; }
+  .c-status { margin: 0; font: var(--text-body); min-height: 26px; }
+  .c-status code { font: 400 .875em/1 var(--font-mono); }
+  .c-steps { display: none; gap: 10px; padding: 14px 16px; background: var(--bg-page); border-radius: var(--radius-md); }
+  html[data-t-run="step"] .c-steps { display: grid; }
+  .c-rail { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 0; padding: 0; list-style: none; font: 600 13px/20px var(--font-sans); color: var(--text-muted); }
+  .c-rail li + li::before { content: "›"; margin-right: 8px; color: var(--border-strong); font-weight: 400; }
+  .c-rail li.is-done { color: var(--info-fg); }
+  .c-rail li[aria-current] { color: var(--text-primary); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
+  .c-steps__text { margin: 0; font: var(--text-small); }
+  .c-steps__text strong { font-weight: 700; }
+  .c-steps .vc-btn { justify-self: start; }
+  .c-steps [hidden] { display: none; }
+  .c-panel__note { margin: 0; font: var(--text-small); color: var(--text-muted); }
+
+  .c-strip { margin-top: 24px; }
+  .c-strip__head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 16px; margin: 0 4px 10px; }
+  .c-strip__title { margin: 0; font: var(--text-ui); }
+  .c-strip__list { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .c-cell { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; padding: 6px 8px 6px 14px; background: var(--bg-page); border-radius: var(--radius-md); transition: opacity var(--duration-fade) var(--ease-out); }
+  .c-cell__id { font: var(--text-label); color: var(--text-primary); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  a.c-cell__id:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .c-strip.is-stale .c-cell { opacity: .55; }
+  html[data-t-labels="hidden"] .c-panel, html[data-t-labels="hidden"] .c-strip { background: var(--bg-surface); border-radius: var(--radius-lg); padding: 24px; }
+  html[data-t-labels="hidden"] .c-hero__canvas { padding: 72px 32px 48px 0; }
+  html[data-t-labels="hidden"] .c-hero .c-frame { max-width: 1264px; padding: 32px 32px 64px; }
+
+  .c-drawer { margin-top: 24px; display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 24px; align-items: start; animation: c-rise .32s var(--ease-out) both; }
+  .c-drawer[hidden] { display: none; }
+  @keyframes c-rise { from { opacity: 0; transform: translateY(12px); } }
+  .c-drawer__term pre { min-height: 302px; max-height: 560px; overflow: auto; }
+  .c-drawer__term pre:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  .c-ln { display: block; }
+  .c-ln--gap { height: 22px; }
+  .c-fig { margin: 0; display: flex; flex-direction: column; gap: 14px; padding: 20px; background: var(--bg-page); border-radius: var(--radius-lg); min-width: 0; }
+  .c-fig__cap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; font: var(--text-ui); }
+  .c-fig__path { font: 400 13px/20px var(--font-mono); color: var(--text-muted); overflow-wrap: anywhere; }
+  .c-fig__stage { min-height: 120px; display: grid; place-items: center; padding: 28px 12px 12px; background: var(--bg-surface); border-radius: var(--radius-md); overflow: hidden; }
+  .c-fig__ov, .c-fig__sbs { max-width: 100%; }
+  .c-fig__sbs { display: grid; gap: 12px; justify-items: start; width: 100%; }
+  .c-fig__cell { display: grid; gap: 6px; justify-items: start; }
+  .c-fig__label { font: var(--text-small); color: var(--text-muted); }
+  html[data-t-diff="side"] .c-fig__ov { display: none; }
+  html:not([data-t-diff="side"]) .c-fig__sbs { display: none; }
+  .c-fig__empty { font: var(--text-small); color: var(--text-muted); }
+
+  /* ---------- problem ---------- */
+  .c-problem__head { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 24px 48px; align-items: end; }
+  .c-problem__head .c-p { margin: 0; font: var(--text-body-lg); }
+  .c-problem__show { margin-top: 56px; display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 9fr); gap: 32px 48px; align-items: start; }
+  .c-pr__title, .c-wall__title { margin: 0 0 14px; font: var(--text-h3); }
+  .c-wall__title strong { color: var(--change-fg); font-weight: 700; }
+  .c-pr .c-small, .c-wall .c-small { margin-top: 12px; }
+  .c-del { color: var(--code-cyan); }
+  .c-add { color: var(--code-magenta); }
+  .c-wall__list { margin: 0; padding: 0; list-style: none; columns: 3 250px; column-gap: 24px; }
+  .c-wall__list li { display: flex; gap: 8px; align-items: baseline; break-inside: avoid; font: 400 13px/24px var(--font-mono); color: var(--text-primary); white-space: nowrap; }
+  .c-wall__list li::before { content: "≠"; color: var(--change-fg); font-weight: 700; }
+  .c-wall__more { display: none; }
+  .c-table-wrap { margin-top: 64px; }
+  .c-table { width: 100%; border-collapse: collapse; font: var(--text-body); }
+  .c-table__title { margin-bottom: 14px; }
+  .c-table th, .c-table td { text-align: left; vertical-align: top; padding: 14px 16px; border-bottom: 1px solid var(--border-subtle); }
+  .c-table thead th { font: var(--text-body-strong); background: var(--bg-surface); border-bottom: 0; }
+  .c-table thead th:first-child { border-radius: var(--radius-md) 0 0 var(--radius-md); }
+  .c-table thead th:last-child { border-radius: 0 var(--radius-md) var(--radius-md) 0; }
+  .c-table tbody th { font: var(--text-body-strong); width: 24%; }
+  .c-table td.c-table__us { color: var(--text-primary); }
+  .c-table td:not(.c-table__us) { color: var(--text-muted); }
+
+  /* ---------- demo ---------- */
+  .c-demo__grid { margin-top: 48px; display: grid; grid-template-columns: minmax(0, 8fr) minmax(0, 4fr); gap: 32px; align-items: start; }
+  .c-term pre { min-height: 362px; }
+  .vc-code .c-ok { color: var(--code-cyan); }
+  .vc-code .c-no { color: var(--code-magenta); }
+  .vc-code .c-p1 { color: var(--brand-cyan); }
+  .vc-code .c-p2 { color: var(--brand-magenta); }
+  .c-demo__controls { margin-top: 12px; }
+  .c-demo__note { margin-top: 12px; }
+  .c-dfig { margin: 0; display: grid; gap: 14px; }
+  .c-dfig__head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+  .c-dfig__id { font: 400 13px/20px var(--font-mono); }
+  .c-dfig__stage { display: grid; place-items: center; min-height: 188px; padding: 24px; background: var(--bg-surface); border-radius: var(--radius-md); }
+  .c-dfig__sbs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .c-dfig__sbs .c-dfig__stage { min-height: 150px; padding: 16px; }
+  .c-dfig__sbs figcaption, .c-dfig__lbl { font: var(--text-small); color: var(--text-muted); margin-bottom: 6px; display: block; }
+  html[data-t-diff="side"] .c-dfig__ov { display: none; }
+  html:not([data-t-diff="side"]) .c-dfig__sbs { display: none; }
+  .c-mini { display: inline-flex; align-items: center; padding: 10px 16px; border-radius: 6px; background: var(--brand-ink); color: var(--brand-paper); font: 600 15px/20px var(--font-sans); white-space: nowrap; }
+  [data-theme="dark"] .c-mini { background: var(--brand-paper); color: var(--brand-ink); }
+  .c-mini--grown { padding: 11px 17px; }
+  .c-mini-plates { position: relative; isolation: isolate; width: 84px; height: 42px; zoom: 2; }
+  .c-mini-plates .c-mini { position: absolute; top: 0; left: 0; mix-blend-mode: multiply; color: var(--c-hole); }
+  [data-theme="dark"] .c-mini-plates .c-mini { mix-blend-mode: screen; }
+  .c-mini-plates .c-mini--base { background: var(--brand-cyan); }
+  .c-mini-plates .c-mini--snap { background: var(--brand-magenta); padding: 11px 17px; }
+  .c-zoom { zoom: 1.5; }
+  .c-path { font: 400 13px/20px var(--font-mono); color: var(--text-muted); overflow-wrap: anywhere; margin: 0; }
+
+  /* ---------- commands ---------- */
+  .c-cmds { margin: 48px 0 0; padding: 0; display: grid; gap: 40px; }
+  .c-cmd { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 16px 48px; align-items: start; }
+  .c-cmd dt { margin: 0; }
+  .c-cmd dd { margin: 0; }
+  .c-cmd .c-p { margin-top: 8px; font: var(--text-body-lg); }
+  .c-writes { margin: 16px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+  .c-writes li { display: grid; grid-template-columns: minmax(0, auto) 1fr; gap: 4px 16px; font: var(--text-body); }
+  .c-writes code { font: 400 14px/26px var(--font-mono); }
+  .c-writes span { color: var(--text-muted); }
+  .c-flags { margin-top: 48px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; font: var(--text-body); }
+  .c-flags code { font: 400 14px/22px var(--font-mono); padding: 3px 8px; background: var(--bg-surface); border-radius: var(--radius-sm); }
+  .c-cmds__foot { margin-top: 40px; }
+
+  /* ---------- features ---------- */
+  .c-feat__lead { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 32px 56px; align-items: start; }
+  .c-runs { width: 100%; border-collapse: collapse; }
+  .c-runs caption { text-align: left; font: var(--text-small); color: var(--text-muted); padding-bottom: 10px; }
+  .c-runs th, .c-runs td { text-align: left; vertical-align: baseline; padding: 16px 0; border-bottom: 1px solid var(--border-subtle); }
+  .c-runs th { font: var(--text-body); padding-right: 24px; }
+  .c-runs td { white-space: nowrap; }
+  .c-runs code { font: 500 21px/28px var(--font-mono); }
+  .c-runs .c-pass { color: var(--info-fg); }
+  .c-feat__mac { margin-top: 20px; }
+  .c-feat__grid { margin-top: 80px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 64px 56px; }
+  .c-feat .c-p { font: var(--text-body-lg); }
+  .c-figs { margin: 24px 0 0; padding: 0; display: grid; gap: 16px; }
+  .c-figs div { display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: 4px 16px; align-items: baseline; }
+  .c-figs dt { font: 700 30px/34px var(--font-display); letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+  .c-figs dd { margin: 0; font: var(--text-body); color: var(--text-muted); }
+  .c-feat .c-target { margin-top: 24px; }
+  .c-addon[data-ui] { margin-top: 24px; background: var(--bg-raised); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); overflow: hidden; font: var(--text-small); }
+  [data-ui] .c-addon__bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--border-subtle); }
+  .c-addon__title { font-weight: 700; }
+  .c-addon__btns { display: flex; gap: 6px; }
+  [data-ui] .c-addon__btn { padding: 3px 10px; border: 1px solid var(--border-strong); border-radius: 4px; font-weight: 600; }
+  .c-addon__body { display: grid; grid-template-columns: minmax(0, 11em) minmax(0, 1fr); }
+  [data-ui] .c-addon__rows { margin: 0; padding: 8px; list-style: none; border-right: 1px solid var(--border-subtle); display: grid; align-content: start; gap: 2px; }
+  .c-addon__rows li { display: grid; gap: 4px; padding: 6px 8px; border-radius: 4px; }
+  .c-addon__rows li.is-sel { background: var(--bg-surface); }
+  .c-addon__rows .vc-badge { justify-self: start; }
+  .c-addon__status { margin: 0 0 4px; padding: 0 8px; color: var(--text-muted); }
+  .c-addon__view { padding: 10px 12px 12px; display: grid; gap: 8px; }
+  .c-addon__toggle { display: inline-flex; gap: 2px; padding: 2px; background: var(--bg-surface); border-radius: 4px; justify-self: start; }
+  .c-addon__toggle span { padding: 2px 8px; border-radius: 3px; }
+  .c-addon__toggle span:first-child { background: var(--bg-raised); font-weight: 600; }
+  .c-wipe { position: relative; height: 96px; border-radius: 4px; overflow: hidden; background: #ffffff; }
+  [data-theme="dark"] .c-wipe { background: #ffffff; }
+  .c-wipe__layer { position: absolute; inset: 0; display: grid; place-items: center; }
+  .c-wipe__layer--snap { clip-path: inset(0 0 0 var(--wipe, 50%)); }
+  .c-wipe__layer .c-mini { background: #15133c; color: #f4f2ff; }
+  .c-wipe__layer--snap .c-mini { padding: 11px 17px; background: #15133c; }
+  .c-wipe__line { position: absolute; top: 0; bottom: 0; left: var(--wipe, 50%); width: 2px; margin-left: -1px; background: var(--brand-magenta); }
+  .c-wipe-input { width: 100%; accent-color: var(--text-primary); margin: 0; }
+  .c-addon__cap { color: var(--text-muted); white-space: pre; font-size: 13px; }
+
+  /* ---------- agent ---------- */
+  .c-agent__grid { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 48px 64px; align-items: start; }
+  .c-agent__text .c-lead { color: var(--text-inverse); }
+  .c-rules { margin: 28px 0 0; padding: 0; list-style: none; display: grid; gap: 14px; }
+  .c-rules li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 10px; font: var(--text-body); }
+  .c-rules li::before { content: "✓"; display: grid; place-items: center; width: 22px; height: 22px; margin-top: 2px; border-radius: 50%; background: var(--brand-cyan); color: var(--brand-ink); font: 700 13px/1 var(--font-sans); }
+  .c-session { background: var(--bg-raised); color: var(--text-primary); border-radius: var(--radius-lg); overflow: hidden; }
+  .c-session__bar { display: flex; justify-content: space-between; gap: 12px; padding: 10px 16px; background: var(--bg-surface); font: var(--text-small); color: var(--text-muted); }
+  .c-session__bar strong { color: var(--text-primary); font-weight: 600; }
+  .c-session__body { display: grid; gap: 18px; padding: 20px; }
+  .c-msg { display: grid; gap: 4px; font: var(--text-body); }
+  .c-msg p { margin: 0; }
+  .c-msg ul { margin: 6px 0; padding-left: 20px; display: grid; gap: 6px; }
+  .c-msg code { font: 400 .875em/1.5 var(--font-mono); overflow-wrap: anywhere; }
+  .c-msg__who { font: 700 14px/20px var(--font-sans); color: var(--text-muted); }
+  .c-msg--you { justify-self: start; padding: 10px 14px; background: var(--bg-surface); border-radius: var(--radius-md); }
+  .c-session pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .c-agent__label { margin-top: 12px; color: rgba(244, 242, 255, .78); }
+  [data-theme="dark"] .c-agent__label { color: #4a4770; }
+
+  /* ---------- faq ---------- */
+  .c-faq__grid { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 40px 64px; align-items: start; }
+  .c-faq__side .c-p { font: var(--text-body-lg); margin-top: 20px; }
+  .c-faq__list { display: grid; gap: 6px; }
+  .c-q { background: var(--bg-surface); border-radius: var(--radius-md); }
+  .c-q summary { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 20px; cursor: pointer; list-style: none; font: 600 18px/26px var(--font-sans); border-radius: var(--radius-md); }
+  .c-q summary::-webkit-details-marker { display: none; }
+  .c-q summary::after { content: "+"; flex: none; font: 400 22px/1 var(--font-sans); color: var(--text-muted); transition: transform var(--duration-spring) var(--ease-spring); }
+  .c-q[open] summary::after { transform: rotate(45deg); }
+  .c-q summary:hover { background: color-mix(in srgb, var(--bg-surface) 60%, var(--border-subtle)); }
+  .c-q p { margin: 0; padding: 0 20px 18px; font: var(--text-body); max-width: 44em; }
+
+  /* ---------- cta ---------- */
+  .c-cta__grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 40px 64px; align-items: center; }
+  .c-cta__facts { margin-top: 28px; }
+  .c-next pre { font-size: 13px; }
+
+  /* ---------- tablet ---------- */
+  @media (max-width: 1023px) {
+    .c-hero__grid { grid-template-columns: minmax(0, 1fr); }
+    .c-panel { padding: 8px 8px 0; }
+    .c-edits { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 8px; }
+    .c-edits__legend { grid-column: 1 / -1; }
+    .c-size { grid-column: 1 / -1; }
+    .c-strip__list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .c-drawer { grid-template-columns: minmax(0, 1fr); }
+    .c-problem__head { grid-template-columns: minmax(0, 1fr); }
+    .c-problem__show { grid-template-columns: minmax(0, 1fr); }
+    .c-demo__grid { grid-template-columns: minmax(0, 1fr); }
+    .c-dfig { max-width: 520px; }
+    .c-cmd { grid-template-columns: minmax(0, 1fr); }
+    .c-feat__lead { grid-template-columns: minmax(0, 1fr); }
+    .c-agent__grid { grid-template-columns: minmax(0, 1fr); }
+    .c-agent__text { order: -1; }
+    .c-faq__grid { grid-template-columns: minmax(0, 1fr); }
+    .c-cta__grid { grid-template-columns: minmax(0, 1fr); }
+    html[data-t-labels="hidden"] .c-hero__canvas { padding: 56px 0 32px; }
+  }
+
+  /* ---------- phone ---------- */
+  @media (max-width: 767px) {
+    .c-sec { padding: 8px; }
+    .c-sec--first { padding-top: 16px; }
+    .c-sec--last { padding-bottom: 16px; }
+    .c-canvas, .c-hero__canvas { padding: 40px 16px; }
+    html[data-t-labels="hidden"] .c-canvas { padding: 56px 16px; }
+    html[data-t-labels="hidden"] .c-hero .c-frame { padding: 16px 16px 40px; }
+    html[data-t-labels="hidden"] .c-panel, html[data-t-labels="hidden"] .c-strip { padding: 16px; }
+    .c-h2 { font-size: 32px; line-height: 36px; }
+    .c-statement { font-size: 21px; line-height: 30px; }
+    .c-edits { grid-template-columns: minmax(0, 1fr); }
+    .c-strip__list { grid-template-columns: minmax(0, 1fr); }
+    .c-wall__list { columns: 1; }
+    .c-wall__list li:nth-child(n+13) { display: none; }
+    .c-wall__more { display: block; margin-top: 4px; }
+    .c-table thead { display: none; }
+    .c-table, .c-table tbody, .c-table tr, .c-table th, .c-table td { display: block; width: auto; }
+    .c-table tr { padding: 16px 0; border-bottom: 1px solid var(--border-subtle); }
+    .c-table th, .c-table td { padding: 4px 0; border: 0; }
+    .c-table tbody th { width: auto; }
+    .c-table td::before { content: attr(data-label) ": "; font-weight: 700; color: var(--text-primary); }
+    .c-figs div { grid-template-columns: minmax(0, 1fr); }
+    .c-feat__grid { grid-template-columns: minmax(0, 1fr); gap: 56px; margin-top: 64px; }
+    .c-runs th, .c-runs td { display: block; padding: 0; border: 0; }
+    .c-runs tr { display: block; padding: 14px 0; border-bottom: 1px solid var(--border-subtle); }
+    .c-runs code { font-size: 18px; line-height: 26px; }
+    .c-addon__body { grid-template-columns: minmax(0, 1fr); }
+    [data-ui] .c-addon__rows { border-right: 0; border-bottom: 1px solid var(--border-subtle); }
+    .c-writes li { grid-template-columns: minmax(0, 1fr); gap: 0; }
+    .c-dfig__sbs { grid-template-columns: minmax(0, 1fr); }
+    .c-q summary { padding: 14px 16px; font-size: 17px; }
+    .c-q p { padding: 0 16px 16px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .c-drawer { animation: none; }
+    .c-q summary::after, .c-canvas, .c-edit, .c-cell { transition: none; }
+  }
+</style>
+<script>
+  window.VC_PAGE = {
+    set: 'landing',
+    key: 'C',
+    toggles: [
+      { id: 'labels', label: 'Story labels', options: ['shown', 'hidden'] },
+      { id: 'diff', label: 'Diff', options: ['overlay', 'side'] },
+      { id: 'run', label: 'Run', options: ['one', 'step'] }
+    ]
+  };
+</script>
+<script src="../shared/proto-kit.js"></script>
+<script>
+/* Page-level helpers for the story frames. Every section mounts itself with CVC.mount and only ever touches its
+   own DOM; the hero's run talks to the others through one document event ('c:vc'), so a section that isn't on
+   the page (the mixer) is simply never reached. */
+window.CVC = (function () {
+  'use strict';
+  var BADGES = {
+    passed: { tone: 'passed', glyph: '✓', word: 'passed' },
+    queued: { tone: 'orphan', glyph: '○', word: 'queued' },
+    capturing: { tone: 'orphan', glyph: '◌', word: 'capturing' },
+    captured: { tone: 'orphan', glyph: '●', word: 'captured' },
+    changed: { tone: 'changed', glyph: '≠', word: 'changed' },
+    written: { tone: 'passed', glyph: '✓', word: 'written' }
+  };
+  /**
+   * The baseline value of each custom property a change can set.
+   */
+  var BASE = {
+    pad: { '--c-pad': '0px' },
+    track: { '--c-track': '-0.02em' },
+    accent: { '--c-accent': '#ff2d87' },
+    radius: { '--c-radius': '10px' }
+  };
+
+  /**
+   * Paints a status badge: glyph, word and an optional pixel count.
+   */
+  function setBadge(badge, state, count) {
+    if (!badge) {
+      return;
+    }
+    var b = BADGES[state] || BADGES.passed;
+    badge.className = 'vc-badge vc-badge--' + b.tone;
+    badge.innerHTML = '<span class="vc-badge__glyph" aria-hidden="true">' + b.glyph + '</span>' + b.word +
+      (state === 'changed' && count ? ' <span class="vc-badge__count">' + count + '</span>' : '');
+  }
+
+  function emit(detail) {
+    document.dispatchEvent(new CustomEvent('c:vc', { detail: detail }));
+  }
+
+  function setVars(el, vars) {
+    Object.keys(vars).forEach(function (name) { el.style.setProperty(name, vars[name]); });
+  }
+
+  /**
+   * A copy of an element for a plate or a figure: headings become divs and controls become spans, so a copy
+   * never adds a heading or a focusable control to the page.
+   */
+  function cloneFor(el) {
+    var tag = el.tagName;
+    var clone;
+    if (tag === 'H1' || tag === 'H2' || tag === 'A' || tag === 'BUTTON') {
+      clone = document.createElement(tag === 'A' || tag === 'BUTTON' ? 'span' : 'div');
+      clone.className = el.className;
+      clone.innerHTML = el.innerHTML;
+    } else {
+      clone = el.cloneNode(true);
+    }
+    clone.removeAttribute('id');
+    Array.prototype.forEach.call(clone.querySelectorAll('[id]'), function (node) { node.removeAttribute('id'); });
+    Array.prototype.forEach.call(clone.querySelectorAll('button, a'), function (node) {
+      var span = document.createElement('span');
+      span.className = node.className;
+      span.innerHTML = node.innerHTML;
+      node.replaceWith(span);
+    });
+    clone.setAttribute('aria-hidden', 'true');
+    return clone;
+  }
+
+  /**
+   * Draws the visual diff over one element: the baseline as a cyan plate, the snapshot as a magenta plate,
+   * overprinted, so where they agree they print as one colour.
+   */
+  function drawPlates(target, edit, count, withTag, tagExtra) {
+    var el = target.firstElementChild;
+    var wrap = document.createElement('div');
+    wrap.className = 'c-plates';
+    wrap.setAttribute('aria-hidden', 'true');
+    if (edit === 'accent') {
+      // A colour change has no geometry to split: show it as the addon's wipe, baseline left, snapshot right.
+      var left = cloneFor(el);
+      setVars(left, BASE[edit]);
+      left.classList.add('c-plate', 'c-plate--wipe');
+      var right = cloneFor(el);
+      right.classList.add('c-plate', 'c-plate--wipe', 'c-plate--wipe-snap');
+      var seam = document.createElement('span');
+      seam.className = 'c-seam';
+      wrap.appendChild(left);
+      wrap.appendChild(right);
+      wrap.appendChild(seam);
+    } else {
+      var base = cloneFor(el);
+      setVars(base, BASE[edit]);
+      base.classList.add('c-plate', 'c-plate--base');
+      var snap = cloneFor(el);
+      snap.classList.add('c-plate', 'c-plate--snap');
+      wrap.appendChild(base);
+      wrap.appendChild(snap);
+      if (edit === 'radius') {
+        ['tl', 'tr', 'bl', 'br'].forEach(function (corner) {
+          var ring = document.createElement('span');
+          ring.className = 'c-ring c-ring--' + corner;
+          wrap.appendChild(ring);
+        });
+      }
+    }
+    target.appendChild(wrap);
+    target.classList.add('is-diffed');
+    if (withTag) {
+      var tag = document.createElement('span');
+      tag.className = 'c-tag';
+      tag.setAttribute('aria-hidden', 'true');
+      tag.innerHTML = count + ' pixels differ' + (tagExtra || '');
+      target.appendChild(tag);
+    }
+  }
+
+  function clearPlates(scope) {
+    Array.prototype.forEach.call(scope.querySelectorAll('.c-target.is-diffed'), function (target) {
+      Array.prototype.forEach.call(target.querySelectorAll(':scope > .c-plates, :scope > .c-tag'), function (node) { node.remove(); });
+      target.classList.remove('is-diffed');
+    });
+  }
+
+  /**
+   * A section mounts its own story frame: its tab badge follows the run, and its own parts get the plates.
+   */
+  function mount(frame) {
+    var id = frame.getAttribute('data-c-story');
+    var badge = frame.querySelector('.c-tab [data-c-badge]');
+    document.addEventListener('c:vc', function (event) {
+      var detail = event.detail || {};
+      if (detail.kind === 'state' && (detail.id === id || detail.id === '*')) {
+        setBadge(badge, detail.state, detail.counts ? detail.counts[id] : detail.count);
+        frame.classList.toggle('is-capturing', detail.state === 'capturing');
+      }
+      if (detail.kind === 'overlay') {
+        clearPlates(frame.querySelector('.c-canvas') || frame);
+        var count = detail.counts ? detail.counts[id] || 0 : 0;
+        if (!detail.edit || count <= 20) {
+          return;
+        }
+        var targets = frame.querySelectorAll('.c-canvas [data-c-target~="' + detail.edit + '"]');
+        Array.prototype.forEach.call(targets, function (target, index) {
+          drawPlates(target, detail.edit, count, index === 0, detail.tagExtra);
+        });
+      }
+    });
+  }
+
+  return { BASE: BASE, setBadge: setBadge, emit: emit, setVars: setVars, cloneFor: cloneFor, drawPlates: drawPlates, clearPlates: clearPlates, mount: mount };
+})();
+</script>
+</head>
+<body id="top">
+<div data-kit="header"></div>
+<main>
+
+  <!-- ===================== HERO: landing--hero ===================== -->
+  <section data-slot="hero" class="c-sec c-sec--first c-hero" id="c-hero" aria-labelledby="c-hero-title">
+    <div class="c-frame" data-c-story="landing--hero">
+      <div class="c-tab"><span class="c-tab__id">landing--hero</span><span class="vc-badge vc-badge--passed" data-c-badge><span class="vc-badge__glyph" aria-hidden="true">✓</span>passed</span></div>
+      <div class="c-hero__grid">
+        <div class="c-canvas c-hero__canvas">
+          <div class="c-target c-target--block" data-c-target="track">
+            <h1 id="c-hero-title" class="display c-display" data-copy>
+              <span data-copy-alt>Change this page. Then check it.</span>
+              <span data-copy-alt>Know which stories your change moved.</span>
+              <span data-copy-alt>Same pixels on every machine.</span>
+            </h1>
+          </div>
+          <p class="c-hero__sub">visual-check snapshots every story in your Storybook and compares it with the baseline you approved. It shows which stories moved, by how many pixels, with a visual diff.</p>
+          <div class="c-install">
+            <div class="c-target c-target--block" data-c-target="radius">
+              <div class="vc-code vc-code--register c-code">
+                <div class="vc-code__bar"><span>Install</span><button type="button" class="vc-code__copy" data-c-copy="npx @visual-check/cli init" aria-label="Copy the install command">Copy</button></div>
+                <pre><span class="p">$ </span>npx @visual-check/cli init</pre>
+              </div>
+            </div>
+            <p class="c-install__note">Or <code class="c-ic">pnpm dlx</code>, <code class="c-ic">yarn dlx</code> and <code class="c-ic">bunx</code>. It finds your Storybooks and writes one config file.</p>
+          </div>
+          <div class="c-row">
+            <span class="c-target c-target--inline" data-c-target="pad accent"><a class="vc-btn vc-btn--accent c-btn c-btn--accent" href="../docs/1.html#getting-started">Get started<svg class="vc-icon vc-btn__arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></a></span>
+            <a class="c-link" href="https://github.com/visual-check/test-apps/actions" target="_blank" rel="noopener">See a real CI run</a>
+          </div>
+        </div>
+
+        <aside class="c-panel" aria-labelledby="c-try-title">
+          <h2 id="c-try-title" class="c-panel__title">Try it on this page</h2>
+          <p class="c-panel__lead">Each section of this page is a story with an approved baseline. Change one thing, then check which stories it moved.</p>
+          <fieldset class="c-edits" id="c-edits">
+            <legend class="c-edits__legend">Make a change</legend>
+            <label class="c-edit"><input type="radio" name="c-edit" value="pad"><span class="c-edit__name">Button padding</span><span class="c-edit__file">Button.css</span><code class="c-edit__diff" data-c-diff="pad">padding: 10px 16px → 12px 18px</code></label>
+            <label class="c-edit"><input type="radio" name="c-edit" value="track"><span class="c-edit__name">Heading letter-spacing</span><span class="c-edit__file">Heading.css</span><code class="c-edit__diff" data-c-diff="track">letter-spacing: -0.02em → -0.03em</code></label>
+            <label class="c-edit"><input type="radio" name="c-edit" value="accent"><span class="c-edit__name">Accent colour</span><span class="c-edit__file">tokens.css</span><code class="c-edit__diff" data-c-diff="accent">--action-accent: #ff2d87 → #ff4191</code></label>
+            <label class="c-edit"><input type="radio" name="c-edit" value="radius"><span class="c-edit__name">Code block radius</span><span class="c-edit__file">CodeBlock.css</span><code class="c-edit__diff" data-c-diff="radius">border-radius: 10px → 12px</code></label>
+            <div class="c-size" id="c-size" hidden>
+              <label for="c-size-input">Size of the change</label>
+              <input id="c-size-input" type="range" min="0" max="4" step="1" value="2">
+              <output id="c-size-out" for="c-size-input">+2px</output>
+            </div>
+          </fieldset>
+          <div class="c-actions">
+            <button type="button" class="vc-btn vc-btn--primary" id="c-run"><span class="c-run-one">Run visual-check</span><span class="c-run-step">Run step by step</span></button>
+            <button type="button" class="vc-btn vc-btn--primary" id="c-update" hidden>Update baselines</button>
+            <button type="button" class="vc-btn vc-btn--secondary" id="c-revert" hidden>Revert the change</button>
+            <button type="button" class="vc-btn vc-btn--secondary" id="c-again" hidden>Start again</button>
+          </div>
+          <p class="c-status" id="c-status" role="status" aria-live="polite">Every story matches its baseline. Pick a change, or run the check as it is.</p>
+          <div class="c-steps" id="c-steps">
+            <ol class="c-rail" aria-label="Phases of a run">
+              <li data-phase="select">Select</li>
+              <li data-phase="capture">Capture</li>
+              <li data-phase="compare">Compare</li>
+              <li data-phase="report">Report</li>
+            </ol>
+            <p class="c-steps__text" id="c-steps-text">The run stops after each phase and says what just happened.</p>
+            <button type="button" class="vc-btn vc-btn--secondary vc-btn--sm" id="c-next" hidden>Next</button>
+          </div>
+          <p class="c-panel__note">Simulated in your browser. The real run snapshots each story in Chromium, pinned inside visual-check's own Docker image, so the counts match on every machine.</p>
+        </aside>
+      </div>
+
+      <div class="c-strip" id="c-strip">
+        <div class="c-strip__head">
+          <h3 class="c-strip__title">This page as a Storybook: 8 stories</h3>
+          <p class="c-small">Snapshots at 1280 × 720. The tolerance allows 20 pixels.</p>
+        </div>
+        <ul class="c-strip__list" id="c-strip-list">
+          <li class="c-cell" data-id="landing--hero"><a class="c-cell__id" href="#c-hero">landing--hero</a><span class="vc-badge vc-badge--passed"><span class="vc-badge__glyph" aria-hidden="true">✓</span>passed</span></li>
+          <li class="c-cell" data-id="landing--problem"><a class="c-cell__id" href="#c-problem">landing--problem</a><span class="vc-badge vc-badge--passed"><span class="vc-badge__glyph" aria-hidden="true">✓</span>passed</span></li>
+          <li class="c-cell" data-id="landing--demo"><a class="c-cell__id" href="#c-demo">landing--demo</a><span class="vc-badge vc-badge--passed"><span class="vc-badge__glyph" aria-hidden="true">✓</span>passed</span></li>
+          <li class="c-cell" data-id="landing--commands"><a class="c-cell__id" href="#c-commands">landing--commands</a><span class="vc-badge vc-badge--passed"><span class="vc-badge__glyph" aria-hidden="true">✓</span>passed</span></li>
+          <li class="c-cell" data-id="landing--features"><a class="c-cell__id" href="#c-features">landing--features</a><span class="vc-badge vc-badge--passed"><span class="vc-badge__glyph" aria-hidden="true">✓</span>passed</span></li>
+          <li class="c-cell" data-id="landing--agent"><a class="c-cell__id" href="#c-agent">landing--agent</a><span class="vc-badge vc-badge--passed"><span class="vc-badge__glyph" aria-hidden="true">✓</span>passed</span></li>
+          <li class="c-cell" data-id="landing--faq"><a class="c-cell__id" href="#c-faq">landing--faq</a><span class="vc-badge vc-badge--passed"><span class="vc-badge__glyph" aria-hidden="true">✓</span>passed</span></li>
+          <li class="c-cell" data-id="landing--cta"><a class="c-cell__id" href="#c-cta">landing--cta</a><span class="vc-badge vc-badge--passed"><span class="vc-badge__glyph" aria-hidden="true">✓</span>passed</span></li>
+        </ul>
+      </div>
+
+      <div class="c-drawer" id="c-drawer" data-ui hidden role="region" aria-label="Report of the simulated run">
+        <div class="vc-code c-drawer__term">
+          <div class="vc-code__bar"><span>Terminal · simulated</span><span id="c-exit"></span></div>
+          <pre id="c-log" tabindex="0" aria-label="visual-check output"></pre>
+        </div>
+        <figure class="c-fig" id="c-fig">
+          <figcaption class="c-fig__cap"><span id="c-fig-title">Visual diff</span></figcaption>
+          <div class="c-fig__stage" id="c-fig-stage"><p class="c-fig__empty">No visual diffs.</p></div>
+          <p class="c-legend c-legend--overlay" id="c-fig-legend"><span><i class="c-sw c-sw--base"></i>Baseline</span><span><i class="c-sw c-sw--snap"></i>Snapshot</span><span><i class="c-sw c-sw--both"></i>Both agree</span></p>
+          <p class="c-legend c-legend--side">The baseline you approved, and the snapshot this run took.</p>
+          <p class="c-fig__path" id="c-fig-path"></p>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== PROBLEM: landing--problem ===================== -->
+  <section data-slot="problem" class="c-sec c-sec--alt" id="c-problem" aria-labelledby="c-problem-title">
+    <div class="c-frame" data-c-story="landing--problem">
+      <div class="c-tab"><span class="c-tab__id">landing--problem</span><span class="vc-badge vc-badge--passed" data-c-badge><span class="vc-badge__glyph" aria-hidden="true">✓</span>passed</span></div>
+      <div class="c-canvas"><div class="c-wrap">
+        <div class="c-problem__head">
+          <div>
+            <h2 id="c-problem-title" class="c-h2" data-copy>
+              <span data-copy-alt>One line of CSS moved forty stories.</span>
+              <span data-copy-alt>Nobody reads pixels in review.</span>
+              <span data-copy-alt>Your Mac and CI draw text differently.</span>
+            </h2>
+            <p class="c-statement" style="margin-top:24px">Code review shows what changed in the code. visual-check shows what changed on screen.</p>
+          </div>
+          <p class="c-p">A change to a shared token or component reaches dozens of stories, and review only shows the lines. Coding agents make more of these changes, in larger diffs, and an agent can't see what it changed.</p>
+        </div>
+
+        <div class="c-problem__show">
+          <div class="c-pr">
+            <h3 class="c-pr__title">In review: 1 line</h3>
+            <div class="c-target c-target--block" data-c-target="radius">
+              <div class="vc-code c-code">
+                <div class="vc-code__bar"><span>src/button/Button.css</span><span>+1 −1</span></div>
+                <pre><span class="c">@@ -4,3 +4,3 @@</span>
+ .button {
+<span class="c-del">-  padding: 10px 16px;</span>
+<span class="c-add">+  padding: 12px 18px;</span>
+ }</pre>
+              </div>
+            </div>
+            <p class="c-small">The pull request a reviewer approves.</p>
+          </div>
+          <div class="c-wall">
+            <h3 class="c-wall__title">On screen: <strong>40 stories</strong> differ</h3>
+            <ul class="c-wall__list" aria-label="Stories that render the button">
+              <li>components-button--primary</li><li>components-button--secondary</li><li>components-button--danger</li><li>components-button--small</li><li>components-button--with-icon</li><li>components-button--loading</li><li>components-icon-button--default</li><li>components-button-group--default</li><li>components-dialog--default</li><li>components-dialog--destructive</li><li>components-dialog--with-form</li><li>components-drawer--default</li><li>components-card--with-actions</li><li>components-banner--with-action</li><li>components-toast--with-action</li><li>components-empty-state--default</li><li>components-pagination--default</li><li>components-toolbar--default</li><li>components-menu--with-footer</li><li>components-popover--confirm</li><li>components-table--row-actions</li><li>components-table--bulk-actions</li><li>components-file-upload--default</li><li>components-stepper--default</li><li>forms-login--default</li><li>forms-login--error</li><li>forms-signup--default</li><li>forms-reset-password--default</li><li>forms-search--default</li><li>forms-settings--profile</li><li>forms-settings--billing</li><li>forms-address--default</li><li>pages-checkout--default</li><li>pages-checkout--payment</li><li>pages-cart--default</li><li>pages-cart--empty</li><li>pages-onboarding--welcome</li><li>pages-pricing--default</li><li>pages-dashboard--default</li><li>pages-error--not-found</li>
+            </ul>
+            <p class="c-small c-wall__more">And 28 more.</p>
+            <p class="c-small">An example design system: every story that renders a button.</p>
+          </div>
+        </div>
+
+        <div class="c-table-wrap">
+          <h3 class="c-h3 c-table__title" id="c-table-title">What teams use today</h3>
+          <table class="c-table" aria-labelledby="c-table-title">
+            <thead><tr><th scope="col">Today</th><th scope="col">Where it hurts</th><th scope="col">With visual-check</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">A hosted review service</th><td data-label="Where it hurts">Bills per snapshot, and keeps your images on its servers.</td><td class="c-table__us" data-label="With visual-check">Runs on your machine and in your CI. Baselines are PNG files in your repo.</td></tr>
+              <tr><th scope="row">Visual tests in Playwright</th><td data-label="Where it hurts">Fail on another OS, because fonts and anti-aliasing render differently.</td><td class="c-table__us" data-label="With visual-check">The browser runs in its own image, pinned by digest, on every machine.</td></tr>
+              <tr><th scope="row">A harness you build</th><td data-label="Where it hurts">Grows to 2,000 lines per project, and someone has to keep it alive.</td><td class="c-table__us" data-label="With visual-check">One config file and three commands.</td></tr>
+              <tr><th scope="row">An open-source tool that stopped</th><td data-label="Where it hurts">No longer maintained, so it falls behind each Storybook release.</td><td class="c-table__us" data-label="With visual-check">Tested on Storybook 9.1, 10 and 11 in public test apps. MIT.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- ===================== DEMO: landing--demo ===================== -->
+  <section data-slot="demo" class="c-sec" id="c-demo" aria-labelledby="c-demo-title">
+    <div class="c-frame" data-c-story="landing--demo">
+      <div class="c-tab"><span class="c-tab__id">landing--demo</span><span class="vc-badge vc-badge--passed" data-c-badge><span class="vc-badge__glyph" aria-hidden="true">✓</span>passed</span></div>
+      <div class="c-canvas"><div class="c-wrap">
+        <h2 id="c-demo-title" class="c-h2">The real run, in your terminal</h2>
+        <p class="c-lead">In your project, <code class="c-ic">init</code> sets visual-check up, <code class="c-ic">update</code> writes the first baselines and <code class="c-ic">test</code> checks every story against them. This is what each one prints.</p>
+        <div class="c-demo__grid">
+          <div>
+            <div id="c-demo-stage" data-ui>
+              <div class="c-target c-target--block" data-c-target="radius">
+                <div class="vc-code c-code c-term">
+                  <div class="vc-code__bar"><span>Terminal · apps/web</span><span class="c-term__chapter"></span></div>
+                  <pre class="c-term__out"></pre>
+                </div>
+              </div>
+            </div>
+            <div class="c-demo__controls" id="c-demo-controls"></div>
+            <p class="c-small c-demo__note">Replayed in your browser from the CLI's own output. A test app's real CI run: <code class="c-ic">108 passed · 10.8s</code>.</p>
+          </div>
+          <figure class="c-dfig" data-ui aria-labelledby="c-dfig-cap">
+            <div class="c-dfig__head"><span class="c-dfig__id">components-button--default</span><span class="vc-badge vc-badge--changed"><span class="vc-badge__glyph" aria-hidden="true">≠</span>changed <span class="vc-badge__count">312</span></span></div>
+            <div class="c-dfig__ov">
+              <div class="c-dfig__stage" aria-hidden="true"><div class="c-mini-plates"><span class="c-mini c-mini--base">Button</span><span class="c-mini c-mini--snap">Button</span></div></div>
+            </div>
+            <div class="c-dfig__sbs">
+              <div><span class="c-dfig__lbl">Baseline</span><div class="c-dfig__stage" aria-hidden="true"><span class="c-mini c-zoom">Button</span></div></div>
+              <div><span class="c-dfig__lbl">Snapshot</span><div class="c-dfig__stage" aria-hidden="true"><span class="c-mini c-mini--grown c-zoom">Button</span></div></div>
+            </div>
+            <p class="c-legend c-legend--overlay"><span><i class="c-sw c-sw--base"></i>Baseline</span><span><i class="c-sw c-sw--snap"></i>Snapshot</span><span><i class="c-sw c-sw--both"></i>Both agree</span></p>
+            <figcaption id="c-dfig-cap" class="c-small">The button gained 1px of padding, so its right and bottom edges moved: <strong>312 pixels differ</strong>, and the tolerance allows 20. <code class="c-path">.visual-check/report/images/web/components-button--default.diff.png</code></figcaption>
+          </figure>
+        </div>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- ===================== COMMANDS: landing--commands ===================== -->
+  <section data-slot="commands" class="c-sec c-sec--alt" id="c-commands" aria-labelledby="c-commands-title">
+    <div class="c-frame" data-c-story="landing--commands">
+      <div class="c-tab"><span class="c-tab__id">landing--commands</span><span class="vc-badge vc-badge--passed" data-c-badge><span class="vc-badge__glyph" aria-hidden="true">✓</span>passed</span></div>
+      <div class="c-canvas"><div class="c-wrap">
+        <h2 id="c-commands-title" class="c-h2">Three commands and one config file</h2>
+        <p class="c-lead">A first <code class="c-ic">update</code> then <code class="c-ic">test</code> passes without editing a story. Nothing leaves your machine: there's no service and no account.</p>
+        <dl class="c-cmds">
+          <div class="c-cmd">
+            <dt><div class="c-target c-target--block" data-c-target="radius"><div class="vc-code c-code"><pre><span class="p">$ </span>npx @visual-check/cli init</pre></div></div></dt>
+            <dd>
+              <h3 class="c-h3">Set it up</h3>
+              <p class="c-p">Finds your Storybooks, asks a few questions, installs what it needs and writes one config file. It never edits your preview or your stories.</p>
+              <ul class="c-writes" aria-label="What init writes">
+                <li><code>.storybook/visual-check.ts</code><span>Options for every story</span></li>
+                <li><code>package.json</code><span>The scripts <code>visual:check</code> and <code>visual:update</code></span></li>
+                <li><code>.agents/skills/visual-check/</code><span>The agent skill, if you want it</span></li>
+                <li><code>.visual-check/</code><span>Baselines and the report</span></li>
+              </ul>
+            </dd>
+          </div>
+          <div class="c-cmd">
+            <dt><div class="c-target c-target--block" data-c-target="radius"><div class="vc-code c-code"><pre><span class="p">$ </span>pnpm visual:update</pre></div></div></dt>
+            <dd>
+              <h3 class="c-h3">Write the baselines</h3>
+              <p class="c-p">Snapshots every story and writes the PNGs to <code class="c-ic">.visual-check/baselines/</code> beside each Storybook. You commit them, and they're reviewed in the pull request like code. Only a person runs it: with <code class="c-ic">CI</code> set, <code class="c-ic">update</code> exits 2.</p>
+            </dd>
+          </div>
+          <div class="c-cmd">
+            <dt><div class="c-target c-target--block" data-c-target="radius"><div class="vc-code c-code"><pre><span class="p">$ </span>pnpm visual:check</pre></div></div></dt>
+            <dd>
+              <h3 class="c-h3">Check every story</h3>
+              <p class="c-p">Snapshots the stories and compares each with its baseline. It exits 0 when they match; 1 for a visual diff, a broken story, a missing baseline or an orphan; 2 for a tool or config problem.</p>
+            </dd>
+          </div>
+        </dl>
+        <p class="c-flags"><span>Flags you'll reach for:</span><code>--affected</code><code>--filter &lt;regex&gt;</code><code>--storybook &lt;name&gt;</code><code>--shard 2/3</code><code>--reporter json</code></p>
+        <div class="c-cmds__foot"><span class="c-target c-target--inline" data-c-target="pad"><a class="vc-btn vc-btn--primary c-btn" href="../docs/1.html#commands">Read the command reference</a></span></div>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- ===================== FEATURES: landing--features ===================== -->
+  <section data-slot="features" class="c-sec" id="c-features" aria-labelledby="c-features-title">
+    <div class="c-frame" data-c-story="landing--features">
+      <div class="c-tab"><span class="c-tab__id">landing--features</span><span class="vc-badge vc-badge--passed" data-c-badge><span class="vc-badge__glyph" aria-hidden="true">✓</span>passed</span></div>
+      <div class="c-canvas"><div class="c-wrap">
+        <div class="c-feat__lead">
+          <div>
+            <h2 id="c-features-title" class="c-h2">A baseline from your Mac passes in CI</h2>
+            <p class="c-lead">The browser runs in visual-check's own image, pinned by digest, as <code class="c-ic">linux/amd64</code> by default. A baseline written on a Mac passes in Linux CI and on Windows. That's why the snapshots don't turn flaky between machines.</p>
+            <p class="c-small c-feat__mac">On an M-series Mac, <code class="c-ic">linux/amd64</code> runs emulated, so it's slower. <code class="c-ic">linux/arm64</code> is faster, and the default tolerance absorbs the small difference.</p>
+          </div>
+          <div>
+            <table class="c-runs">
+              <caption>Public CI runs of the visual-check test apps. <a class="c-link" href="https://github.com/visual-check/test-apps/actions" target="_blank" rel="noopener">See the runs</a></caption>
+              <tbody>
+                <tr><th scope="row">The sb11 test app on a GitHub-hosted Linux runner, 4 workers</th><td><code><span class="c-pass">108 passed</span> · 10.8s</code></td></tr>
+                <tr><th scope="row">The same kind of run on Windows, with Docker Desktop</th><td><code><span class="c-pass">108 passed</span> · 16.9s</code></td></tr>
+                <tr><th scope="row">Five Storybooks in one repo: React, vanilla, Vue, Solid and Svelte</th><td><code><span class="c-pass">110 passed</span> · 19.1s</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="c-feat__grid">
+          <div class="c-feat">
+            <h3 class="c-h3">Only the stories a change can reach</h3>
+            <p class="c-p">With <code class="c-ic">--affected</code>, it snapshots only the stories your changed files reach. It drives the browser itself, with no Playwright, and shards across runners with a consistency check.</p>
+            <dl class="c-figs">
+              <div><dt>3.30/s</dt><dd>captures, against 2.71 for Playwright's <code class="c-ic">run-server</code>: 2 workers on 2 vCPUs, 300 real stories.</dd></div>
+              <div><dt>80 ms</dt><dd>until a story is ready, instead of 170 ms, through Storybook's test path.</dd></div>
+            </dl>
+          </div>
+          <div class="c-feat">
+            <h3 class="c-h3">Honest with real stories</h3>
+            <p class="c-p">Animations are captured at their end state. It waits for fonts and images, and a <code class="c-ic">wait</code> hook covers the rest. Masks hide what changes on every load. A flaky snapshot is retried, listed and never fails the run.</p>
+            <div class="c-target c-target--block" data-c-target="radius">
+              <div class="vc-code c-code">
+                <div class="vc-code__bar"><span>card.stories.tsx</span></div>
+                <pre><span class="k">export const</span> Default = {
+  parameters: {
+    ...visualCheck({
+      modes: [<span class="s">'dark'</span>, <span class="s">'mobile'</span>],
+      masks: { clock: { selector: <span class="s">'[data-clock]'</span> } },
+      wait: <span class="k">async</span> ({ canvas }) =&gt; {
+        <span class="k">await</span> canvas.findByText(<span class="s">'Late content'</span>)
+      },
+    }),
+  },
+}</pre>
+              </div>
+            </div>
+          </div>
+          <div class="c-feat">
+            <h3 class="c-h3">A tolerance that still sees small changes</h3>
+            <p class="c-p">The default, <code class="c-ic">{ color: 0.01, pixels: 20 }</code>, absorbs rendering noise and keeps the changes someone made on purpose.</p>
+            <dl class="c-figs">
+              <div><dt>89–100%</dt><dd>of small deliberate changes still caught at the default tolerance, in the measured set.</dd></div>
+              <div><dt>259 of 260</dt><dd>hidden icons caught by counting anti-aliased pixels, against 118 when they're ignored.</dd></div>
+              <div><dt>98–99%</dt><dd>of unchanged snapshots pass on identical bytes, without decoding the images.</dd></div>
+            </dl>
+          </div>
+          <div class="c-feat">
+            <h3 class="c-h3">Review where you already are</h3>
+            <p class="c-p">In the terminal. In Storybook 10, where the addon checks and updates the open story. In GitHub Actions, as a step summary and a report artifact. And in <code class="c-ic">report.json</code>, for scripts and agents.</p>
+            <div class="c-addon" data-ui>
+              <div class="c-addon__bar"><span class="c-addon__title">Visual check</span><span class="c-addon__btns" aria-hidden="true"><span class="c-addon__btn">Check</span><span class="c-addon__btn">Update</span></span></div>
+              <div class="c-addon__body">
+                <div>
+                  <ul class="c-addon__rows">
+                    <li><span>Default</span><span class="vc-badge vc-badge--passed"><span class="vc-badge__glyph" aria-hidden="true">✓</span>Passed</span></li>
+                    <li class="is-sel"><span>dark</span><span class="vc-badge vc-badge--changed"><span class="vc-badge__glyph" aria-hidden="true">≠</span>Visual diff</span></li>
+                    <li><span>mobile</span><span class="vc-badge vc-badge--changed"><span class="vc-badge__glyph" aria-hidden="true">≠</span>Visual diff</span></li>
+                  </ul>
+                  <p class="c-addon__status">2 visual diffs</p>
+                </div>
+                <div class="c-addon__view">
+                  <span class="c-addon__toggle" aria-hidden="true"><span>Slider</span><span>Visual diff</span></span>
+                  <div class="c-wipe" id="c-wipe" aria-hidden="true">
+                    <div class="c-wipe__layer"><span class="c-mini">Button</span></div>
+                    <div class="c-wipe__layer c-wipe__layer--snap"><span class="c-mini">Button</span></div>
+                    <span class="c-wipe__line"></span>
+                  </div>
+                  <input class="c-wipe-input" id="c-wipe-input" type="range" min="0" max="100" value="50" aria-label="Wipe between the baseline and the snapshot">
+                  <span class="c-addon__cap">Left: baseline  Right: snapshot</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- ===================== AGENT: landing--agent ===================== -->
+  <section data-slot="agent" class="c-sec c-sec--alt" id="c-agent" aria-labelledby="c-agent-title">
+    <div class="c-frame" data-c-story="landing--agent">
+      <div class="c-tab c-tab--inverse"><span class="c-tab__id">landing--agent</span><span class="vc-badge vc-badge--passed" data-c-badge><span class="vc-badge__glyph" aria-hidden="true">✓</span>passed</span></div>
+      <div class="c-canvas c-canvas--inverse"><div class="c-wrap">
+        <div class="c-agent__grid">
+          <div>
+            <div class="c-session" data-ui>
+              <div class="c-session__bar"><span><strong>Agent session</strong> · apps/web</span><span>example</span></div>
+              <div class="c-session__body">
+                <div class="c-msg c-msg--you"><span class="c-msg__who">You</span><p>Give the primary button a little more room.</p></div>
+                <div class="c-msg"><span class="c-msg__who">Agent</span><p>I changed the padding in <code>src/button/Button.css</code> from <code>10px 16px</code> to <code>11px 17px</code>. Checking whether the stories look different.</p></div>
+                <div class="c-target c-target--block" data-c-target="radius">
+                  <div class="vc-code c-code"><pre><span class="p">$ </span>node .agents/skills/visual-check/scripts/run.mjs test
+<span class="c">Reused Storybook web, which was already running at http://127.0.0.1:6006.</span></pre></div>
+                </div>
+                <div class="c-msg"><span class="c-msg__who">Agent</span>
+                  <p>visual-check ran on 14 affected snapshots: 12 passed and 2 differ.</p>
+                  <ul>
+                    <li><code>components-button--default</code> (default capture): 312 pixels differ. Diff: <code>.visual-check/report/images/web/components-button--default.diff.png</code></li>
+                    <li><code>components-modal--default</code> (mobile): 1904 pixels differ. Diff: <code>…/components-modal--default.mobile.diff.png</code></li>
+                  </ul>
+                  <p>Both come from my padding change in <code>Button.css</code>. If they're intended, run <code>pnpm visual:update</code>; I won't run it without your OK.</p>
+                </div>
+              </div>
+            </div>
+            <p class="c-small c-agent__label">An example in the shape the skill asks for. The command and its output line are the skill's own.</p>
+          </div>
+          <div class="c-agent__text">
+            <h2 id="c-agent-title" class="c-h2">Your agent can't see what it changed</h2>
+            <p class="c-lead"><code class="c-ic">init</code> writes an agent skill: a Markdown file and a small Node script. Your agent runs it after UI changes, before it says the work is done, and reports which stories moved, by how many pixels, with the paths to the visual diffs.</p>
+            <ul class="c-rules">
+              <li><span>It never accepts its own changes. No <code class="c-ic">update</code>, no raised tolerance and no disabled story without your OK.</span></li>
+              <li><span>It never opens a snapshot or a visual diff. It gives you their paths.</span></li>
+              <li><span>It proposes each fix with its snippet, and applies it once you agree.</span></li>
+              <li><span>It's a CLI and a skill file, so there's no MCP server to run.</span></li>
+            </ul>
+          </div>
+        </div>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- ===================== FAQ: landing--faq ===================== -->
+  <section data-slot="faq" class="c-sec" id="c-faq" aria-labelledby="c-faq-title">
+    <div class="c-frame" data-c-story="landing--faq">
+      <div class="c-tab"><span class="c-tab__id">landing--faq</span><span class="vc-badge vc-badge--passed" data-c-badge><span class="vc-badge__glyph" aria-hidden="true">✓</span>passed</span></div>
+      <div class="c-canvas"><div class="c-wrap">
+        <div class="c-faq__grid">
+          <div class="c-faq__side">
+            <h2 id="c-faq-title" class="c-h2">Before you run init</h2>
+            <p class="c-p">Coming from Loki, Lost Pixel or the Storybook test-runner? Run <code class="c-ic">init</code> beside it; the docs have a page for moving over.</p>
+            <p class="c-p"><a class="c-link" href="../docs/1.html#moving-over">Moving over to visual-check</a></p>
+          </div>
+          <div class="c-faq__list">
+            <details class="c-q"><summary>Do I need Docker?</summary><p>By default, yes: that's how the pixels match everywhere. Without Docker, <code class="c-ic">platform: 'host'</code> uses a local browser, and baselines then only match on the same OS.</p></details>
+            <details class="c-q"><summary>I'm on Apple silicon. Is it slow?</summary><p>It runs <code class="c-ic">linux/amd64</code> through Rosetta by default, emulated, so it's slower than native. <code class="c-ic">platform: 'linux/arm64'</code> is faster, and the default tolerance absorbs the small rendering difference.</p></details>
+            <details class="c-q"><summary>Will it be flaky?</summary><p>Animations are captured at their end state, and readiness waits for fonts and images. A failing snapshot is retried once, and a flaky one is listed but never fails the run.</p></details>
+            <details class="c-q"><summary>Where do baselines live, and who writes them?</summary><p>In <code class="c-ic">.visual-check/baselines/</code> beside each Storybook, committed with your code. Only a person running <code class="c-ic">update</code> writes them. CI never does: <code class="c-ic">update</code> with <code class="c-ic">CI</code> set exits 2.</p></details>
+            <details class="c-q"><summary>How is it different from a hosted visual-testing service?</summary><p>It runs in your CI and on your machine. There's no per-snapshot pricing, no upload and no hosted review: you review in the pull request, the Storybook addon and the report.</p></details>
+            <details class="c-q"><summary>Which Storybooks and CIs does it support?</summary><p>Storybook 9.1, 10 and 11; the addon needs 10. GitHub Actions has an Action and a reusable workflow, and the CLI runs anywhere Docker does.</p></details>
+            <details class="c-q"><summary>What does it change in my repo?</summary><p><code class="c-ic">visual-check.config.ts</code>, <code class="c-ic">.storybook/visual-check.ts</code> for modes, two npm scripts, the agent skill and <code class="c-ic">.visual-check/</code> folders. It never edits your preview or your stories.</p></details>
+            <details class="c-q"><summary>Which frameworks and package managers?</summary><p>React, Vue, Svelte, Solid and vanilla run in the test apps. It needs Node 22.17 or later, with npm, pnpm, Yarn or Bun.</p></details>
+            <details class="c-q"><summary>What does it cost?</summary><p>Nothing. It's open source under the MIT licence.</p></details>
+          </div>
+        </div>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- ===================== CTA: landing--cta ===================== -->
+  <section data-slot="cta" class="c-sec c-sec--last c-sec--alt" id="c-cta" aria-labelledby="c-cta-title">
+    <div class="c-frame" data-c-story="landing--cta">
+      <div class="c-tab"><span class="c-tab__id">landing--cta</span><span class="vc-badge vc-badge--passed" data-c-badge><span class="vc-badge__glyph" aria-hidden="true">✓</span>passed</span></div>
+      <div class="c-canvas"><div class="c-wrap">
+        <div class="c-cta__grid">
+          <div>
+            <h2 id="c-cta-title" class="c-h2" data-copy>
+              <span data-copy-alt>Check the Storybook you have open.</span>
+              <span data-copy-alt>Find out what your last change moved.</span>
+              <span data-copy-alt>Write a baseline here. Pass it in CI.</span>
+            </h2>
+            <p class="c-lead">It asks a few questions and writes one config file. A first <code class="c-ic">update</code> then <code class="c-ic">test</code> passes without editing a story.</p>
+            <div class="c-install">
+              <div class="c-target c-target--block" data-c-target="radius">
+                <div class="vc-code vc-code--register c-code">
+                  <div class="vc-code__bar"><span>Install</span><button type="button" class="vc-code__copy" data-c-copy="npx @visual-check/cli init" aria-label="Copy the install command">Copy</button></div>
+                  <pre><span class="p">$ </span>npx @visual-check/cli init</pre>
+                </div>
+              </div>
+            </div>
+            <div class="c-row">
+              <span class="c-target c-target--inline" data-c-target="pad accent"><a class="vc-btn vc-btn--accent vc-btn--lg c-btn c-btn--accent" href="../docs/1.html#getting-started">Get started<svg class="vc-icon vc-btn__arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></a></span>
+              <a class="c-link" href="https://github.com/visual-check/visual-check" target="_blank" rel="noopener">Read the source</a>
+            </div>
+            <p class="c-small c-cta__facts">MIT licence · Storybook 9.1, 10 and 11 · Node 22.17+ · npm, pnpm, Yarn and Bun</p>
+          </div>
+          <div class="c-next" data-ui>
+            <div class="c-target c-target--block" data-c-target="radius">
+              <div class="vc-code c-code">
+                <div class="vc-code__bar"><span>What init prints at the end</span></div>
+                <pre><span class="c-ok">✓</span> visual-check is set up
+
+Next
+  1  pnpm storybook       <span class="c">Start Storybook, and keep it running</span>
+  2  pnpm visual:update   <span class="c">Write the first baselines</span>
+  3  pnpm visual:check    <span class="c">Check the stories against the baselines</span>
+  4  <span class="c">Commit the changes, baselines included</span></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+  </section>
+
+</main>
+<div data-kit="footer"></div>
+
+<script>
+/* ---------- every story frame mounts itself ---------- */
+(function () {
+  'use strict';
+  Array.prototype.forEach.call(document.querySelectorAll('[data-c-story]'), function (frame) { window.CVC.mount(frame); });
+
+  /* Copy buttons in install blocks. */
+  document.addEventListener('click', function (event) {
+    var button = event.target.closest('[data-c-copy]');
+    if (!button) {
+      return;
+    }
+    var text = button.getAttribute('data-c-copy');
+    var done = function () {
+      button.textContent = 'Copied';
+      setTimeout(function () { button.textContent = 'Copy'; }, 1600);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, done);
+    } else {
+      done();
+    }
+  });
+})();
+</script>
+
+<script>
+/* ---------- hero: the page under test ----------
+   Applies a real change to this page through custom properties on <html>, then plays a `visual-check test` with
+   the CLI's grammar. Pixel counts come from a model of each story at 1280 × 720 (the default viewport), so they
+   don't depend on the visitor's window. Everything it needs lives inside the hero; other sections only hear the
+   'c:vc' event. */
+(function () {
+  'use strict';
+  var hero = document.getElementById('c-hero');
+  if (!hero) {
+    return;
+  }
+  var html = document.documentElement;
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var $ = function (id) { return document.getElementById(id); };
+  var edits = $('c-edits');
+  var size = $('c-size');
+  var sizeInput = $('c-size-input');
+  var sizeOut = $('c-size-out');
+  var runButton = $('c-run');
+  var updateButton = $('c-update');
+  var revertButton = $('c-revert');
+  var againButton = $('c-again');
+  var status = $('c-status');
+  var stepsText = $('c-steps-text');
+  var nextButton = $('c-next');
+  var strip = $('c-strip');
+  var drawer = $('c-drawer');
+  var logEl = $('c-log');
+  var exitEl = $('c-exit');
+  var figStage = $('c-fig-stage');
+  var figTitle = $('c-fig-title');
+  var figPath = $('c-fig-path');
+  var figLegend = $('c-fig-legend');
+  var canvas = hero.querySelector('.c-hero__canvas');
+
+  /**
+   * Each story of this page at 1280 × 720: its shared buttons (size and label width in px), accent buttons,
+   * whether it has the display heading, and its code block corners (a register shadow adds two more shapes).
+   */
+  var STORIES = [
+    { id: 'landing--hero', ms: 821, buttons: [{ w: 136, h: 42, label: 102 }], accents: [{ w: 136, h: 42, label: 102 }], display: true, corners: 3 },
+    { id: 'landing--problem', ms: 233, corners: 1 },
+    { id: 'landing--demo', ms: 268, corners: 1 },
+    { id: 'landing--commands', ms: 245, buttons: [{ w: 236, h: 42, label: 202 }], corners: 3 },
+    { id: 'landing--features', ms: 219, corners: 1 },
+    { id: 'landing--agent', ms: 261, corners: 1 },
+    { id: 'landing--faq', ms: 204, corners: 0 },
+    { id: 'landing--cta', ms: 297, buttons: [{ w: 159, h: 50, label: 113 }], accents: [{ w: 159, h: 50, label: 113 }], corners: 4 }
+  ];
+
+  function accentHex(v) {
+    var g = (0x2d + 10 * v).toString(16);
+    var b = (0x87 + 5 * v).toString(16);
+    return '#ff' + g + b;
+  }
+  function trackEm(v) {
+    return (-0.02 - 0.005 * v).toFixed(3).replace(/0+$/, '').replace(/\.$/, '') + 'em';
+  }
+  function headlineText() {
+    var alt = hero.querySelector('.c-display [data-copy-alt]:not(.kit-hidden)');
+    return alt ? alt.textContent.trim() : '';
+  }
+  function wrapLines(text, max) {
+    var lines = [];
+    var line = '';
+    text.split(' ').forEach(function (word) {
+      if (line && (line + ' ' + word).length > max) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = line ? line + ' ' + word : word;
+      }
+    });
+    if (line) {
+      lines.push(line);
+    }
+    return lines;
+  }
+
+  /**
+   * The four changes. `count` gives the pixels that differ in one story for a change of size v.
+   */
+  var EDITS = {
+    pad: {
+      min: 0, max: 4, def: 2, file: 'Button.css',
+      vars: function (v) { return { '--c-pad': v + 'px' }; },
+      diff: function (v) { return 'padding: 10px 16px → ' + (10 + v) + 'px ' + (16 + v) + 'px'; },
+      out: function (v) { return '+' + v + 'px'; },
+      what: function (v) { return 'the button padding grew ' + v + 'px'; },
+      count: function (story, v) {
+        return (story.buttons || []).reduce(function (sum, b) {
+          return sum + (v ? 2 * v * (b.w + b.h) + 4 * v * v + Math.round(b.label * 1.2 * v) : 0);
+        }, 0);
+      }
+    },
+    track: {
+      min: 0, max: 4, def: 2, file: 'Heading.css',
+      vars: function (v) { return { '--c-track': trackEm(v) }; },
+      diff: function (v) { return 'letter-spacing: -0.02em → ' + trackEm(v); },
+      out: function (v) { return trackEm(v); },
+      what: function (v) { return 'the heading letter-spacing went to ' + trackEm(v); },
+      count: function (story, v) {
+        if (!story.display || !v) {
+          return 0;
+        }
+        var step = 0.005 * v * 64;
+        var total = 0;
+        wrapLines(headlineText(), 23).forEach(function (line) {
+          for (var index = 0; index < line.length; index++) {
+            if (line[index] !== ' ') {
+              total += Math.min(step * index, 6) * 46 * 1.2;
+            }
+          }
+        });
+        return Math.round(total);
+      }
+    },
+    accent: {
+      min: 0, max: 4, def: 2, file: 'tokens.css',
+      vars: function (v) { return { '--c-accent': accentHex(v) }; },
+      diff: function (v) { return '--action-accent: #ff2d87 → ' + accentHex(v); },
+      out: function (v) { return accentHex(v); },
+      what: function (v) { return 'the accent colour went to ' + accentHex(v); },
+      count: function (story, v) {
+        return (story.accents || []).reduce(function (sum, b) {
+          return sum + (v ? b.w * b.h - Math.round(b.label * b.h * 0.22) : 0);
+        }, 0);
+      }
+    },
+    radius: {
+      min: 10, max: 18, def: 12, file: 'CodeBlock.css',
+      vars: function (v) { return { '--c-radius': v + 'px' }; },
+      diff: function (v) { return 'border-radius: 10px → ' + v + 'px'; },
+      out: function (v) { return v + 'px'; },
+      what: function (v) { return 'the code block radius went to ' + v + 'px'; },
+      count: function (story, v) {
+        if (v === 10) {
+          return 0;
+        }
+        var corner = Math.abs(v * v - 100) * 0.2146 + (v + 10) * 0.785 * 0.8;
+        return Math.round(corner * 4 * story.corners);
+      }
+    }
+  };
+  var ALL_VARS = ['--c-pad', '--c-track', '--c-accent', '--c-radius'];
+
+  var state = { edit: null, v: 0, busy: false, phase: null, result: null };
+  var pending = null;
+
+  function isStep() { return html.getAttribute('data-t-run') === 'step'; }
+  function quick() { return reduce || (window.VCProto && VCProto.motion === 'still'); }
+  function sleep(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
+  function esc(text) { return String(text).replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
+
+  /* ---------- the change ---------- */
+  function clearVars() {
+    ALL_VARS.forEach(function (name) { html.style.removeProperty(name); });
+  }
+  function applyChange() {
+    clearVars();
+    if (state.edit) {
+      window.CVC.setVars(html, EDITS[state.edit].vars(state.v));
+    }
+  }
+  function describe() {
+    return state.edit ? EDITS[state.edit].file + ': ' + EDITS[state.edit].what(state.v) : '';
+  }
+  function syncSize() {
+    if (!state.edit) {
+      size.hidden = true;
+      return;
+    }
+    var e = EDITS[state.edit];
+    size.hidden = false;
+    sizeInput.min = String(e.min);
+    sizeInput.max = String(e.max);
+    sizeInput.value = String(state.v);
+    sizeOut.textContent = e.out(state.v);
+    var diff = hero.querySelector('[data-c-diff="' + state.edit + '"]');
+    diff.textContent = e.diff(state.v);
+  }
+
+  edits.addEventListener('change', function (event) {
+    if (event.target.name === 'c-edit') {
+      state.edit = event.target.value;
+      state.v = EDITS[state.edit].def;
+      changed();
+    }
+  });
+  sizeInput.addEventListener('input', function () {
+    state.v = parseInt(sizeInput.value, 10) || 0;
+    changed();
+  });
+  function changed() {
+    applyChange();
+    syncSize();
+    var hadResult = !!state.result;
+    clearOverlays();
+    if (hadResult) {
+      strip.classList.add('is-stale');
+      say('Stale: something changed since this check. Check or update again.');
+    } else {
+      say(state.edit ? 'Applied to this page. ' + capital(describe()) + '. The badges still show the last check.' : '');
+    }
+    showDecision(false);
+  }
+  function capital(text) { return text.charAt(0).toUpperCase() + text.slice(1); }
+
+  /* ---------- status, steps, strip ---------- */
+  function say(text) { status.innerHTML = text; }
+  function setRail(phase, done) {
+    Array.prototype.forEach.call(hero.querySelectorAll('.c-rail li'), function (li) {
+      var p = li.getAttribute('data-phase');
+      if (p === phase) {
+        li.setAttribute('aria-current', 'step');
+      } else {
+        li.removeAttribute('aria-current');
+      }
+      li.classList.toggle('is-done', done.indexOf(p) >= 0);
+    });
+  }
+  function cellBadge(id) { return strip.querySelector('[data-id="' + id + '"] .vc-badge'); }
+  function setState(id, st, count) {
+    window.CVC.setBadge(cellBadge(id), st, count);
+    window.CVC.emit({ kind: 'state', id: id, state: st, count: count });
+  }
+  function setAll(st) {
+    STORIES.forEach(function (s) { setState(s.id, st); });
+  }
+
+  /* ---------- the log ---------- */
+  function log(htmlLine, cls) {
+    var span = document.createElement('span');
+    span.className = 'c-ln' + (cls ? ' ' + cls : '');
+    span.innerHTML = htmlLine;
+    logEl.appendChild(span);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  function gap() { log('', 'c-ln--gap'); }
+  var HEADER = function (cmd) { return 'visual-check 0.1.0 · ' + cmd + ' · 8 snapshots · 4 workers'; };
+  function okLine(id, ms) { return '<span class="s">✓</span> web  ' + id + '  <span class="c">' + ms + ' ms</span>'; }
+  function noLine(id, count) { return '<span class="k">✗</span> web  ' + id + '  <span class="k">differs: ' + count + ' differ, 20 allowed</span>'; }
+  function duration(extra) {
+    var sum = STORIES.reduce(function (acc, s) { return acc + s.ms; }, 0);
+    return ((sum / 4 + 900 + extra * 60) / 1000).toFixed(1) + 's';
+  }
+
+  /* ---------- the run ---------- */
+  var STEP_TEXT = {
+    select: '<strong>Select.</strong> visual-check asked Storybook for its index: 8 stories, one snapshot each. With <code>--affected</code>, it would take only the stories your changed file reaches.',
+    capture: '<strong>Capture.</strong> Each story opened in Chromium, waited for its fonts and images, ran its animations to their end state and was snapshotted in a 1280 × 720 viewport. Four workers ran side by side.',
+    compare: '<strong>Compare.</strong> Each snapshot met its baseline. Identical bytes passed without decoding. The others were compared pixel by pixel, and the tolerance allows 20 pixels.'
+  };
+  var NEXT_LABEL = { select: 'Next: capture', capture: 'Next: compare', compare: 'Next: report' };
+
+  function gate(phase, ms) {
+    if (!isStep()) {
+      return sleep(quick() ? 0 : ms);
+    }
+    stepsText.innerHTML = STEP_TEXT[phase];
+    say('Paused after ' + phase + '. ' + NEXT_LABEL[phase].replace('Next: ', 'Next is ') + '.');
+    nextButton.textContent = NEXT_LABEL[phase];
+    nextButton.hidden = false;
+    nextButton.focus({ preventScroll: true });
+    return new Promise(function (resolve) { pending = resolve; });
+  }
+  function release() {
+    if (pending) {
+      var resolve = pending;
+      pending = null;
+      nextButton.hidden = true;
+      resolve();
+    }
+  }
+  nextButton.addEventListener('click', release);
+  document.addEventListener('vc-proto:toggle', function (event) {
+    if (event.detail && event.detail.id === 'run' && event.detail.value !== 'step') {
+      release();
+    }
+  });
+
+  async function run() {
+    if (state.busy) {
+      return;
+    }
+    state.busy = true;
+    state.result = null;
+    strip.classList.remove('is-stale');
+    clearOverlays();
+    showDecision(false);
+    edits.disabled = true;
+    runButton.disabled = true;
+    drawer.hidden = false;
+    logEl.innerHTML = '';
+    exitEl.textContent = '';
+    resetFigure('Running…');
+
+    var results = STORIES.map(function (s) {
+      var count = state.edit ? EDITS[state.edit].count(s, state.v) : 0;
+      return { id: s.id, ms: s.ms, count: count, differs: count > 20 };
+    });
+    var counts = {};
+    results.forEach(function (r) { counts[r.id] = r.count; });
+
+    log('<span class="p">$ </span>npx visual-check test');
+    // Select
+    setRail('select', []);
+    say('Selecting stories…');
+    log(HEADER('test'));
+    setAll('queued');
+    await gate('select', 320);
+    // Capture, four workers at a time
+    setRail('capture', ['select']);
+    for (var wave = 0; wave < 2; wave++) {
+      var group = STORIES.slice(wave * 4, wave * 4 + 4);
+      group.forEach(function (s) { setState(s.id, 'capturing'); });
+      say('Capturing ' + (wave * 4 + 1) + '–' + (wave * 4 + 4) + ' of 8…');
+      await sleep(quick() ? 0 : 420);
+      group.forEach(function (s) { setState(s.id, 'captured'); });
+    }
+    await gate('capture', 160);
+    // Compare
+    setRail('compare', ['select', 'capture']);
+    say('Comparing each snapshot with its baseline…');
+    for (var index = 0; index < results.length; index++) {
+      var r = results[index];
+      setState(r.id, r.differs ? 'changed' : 'passed', r.count);
+      log(r.differs ? noLine(r.id, r.count) : okLine(r.id, r.ms));
+      await sleep(quick() ? 0 : 90);
+    }
+    await gate('compare', 120);
+    // Report
+    setRail('report', ['select', 'capture', 'compare']);
+    nextButton.hidden = true;
+    var failed = results.filter(function (x) { return x.differs; });
+    if (failed.length) {
+      log('<span class="c">── ' + failed.length + ' failure' + (failed.length > 1 ? 's' : '') + ' ──</span>');
+      failed.forEach(function (x) {
+        log('web  ' + x.id);
+        log('  <span class="k">differs: ' + x.count + ' differ, 20 allowed</span>');
+        log('  <span class="c">diff: .visual-check/report/images/web/' + x.id + '.diff.png</span>');
+      });
+      log((results.length - failed.length) + ' passed · <span class="k">' + failed.length + ' differs</span> · ' + duration(failed.length));
+    } else {
+      log(results.length + ' passed · ' + duration(0));
+    }
+    log('<span class="c">Report: .visual-check/report/report.json</span>');
+    exitEl.textContent = failed.length ? 'exit 1' : 'exit 0';
+
+    state.result = { results: results, counts: counts, failed: failed };
+    state.busy = false;
+    runButton.disabled = false;
+    edits.disabled = false;
+    if (failed.length) {
+      drawOverlays();
+      say(failed.length + ' of 8 stories differ: ' + failed.map(function (x) { return '<code>' + x.id + '</code>'; }).join(', ') + '. If the change is what you meant, update the baselines. Only a person runs <code>update</code>.');
+      stepsText.innerHTML = '<strong>Report.</strong> Each failure lists its pixel count and the path to its visual diff. The run exits 1, and the same data is in <code>report.json</code>.';
+      showDecision(true);
+    } else {
+      resetFigure('No visual diffs.');
+      say(state.edit ? '8 passed. The change stayed within the tolerance.' : '8 passed. With no change, every snapshot matches its baseline byte for byte.');
+      stepsText.innerHTML = '<strong>Report.</strong> Nothing differs, so the run exits 0.';
+    }
+  }
+
+  function showDecision(on) {
+    runButton.hidden = on;
+    updateButton.hidden = !on;
+    revertButton.hidden = !on;
+    againButton.hidden = true;
+  }
+
+  /* ---------- overlays and the figure ---------- */
+  function tagExtra() {
+    if (state.edit !== 'accent') {
+      return '';
+    }
+    return ' <i style="background:#ff2d87"></i>→<i style="background:' + accentHex(state.v) + '"></i>';
+  }
+  function drawOverlays() {
+    var r = state.result;
+    window.CVC.emit({ kind: 'overlay', edit: state.edit, counts: r.counts, tagExtra: tagExtra() });
+    buildFigure();
+  }
+  function clearOverlays() {
+    window.CVC.emit({ kind: 'overlay', edit: null });
+    resetFigure('No visual diffs.');
+  }
+  function resetFigure(text) {
+    figStage.innerHTML = '<p class="c-fig__empty">' + text + '</p>';
+    figTitle.textContent = 'Visual diff';
+    figPath.textContent = '';
+    figLegend.hidden = false;
+  }
+  function buildFigure() {
+    var edit = state.edit;
+    var target = canvas.querySelector('[data-c-target~="' + edit + '"]');
+    if (!target) {
+      return;
+    }
+    var el = target.firstElementChild;
+    var block = target.classList.contains('c-target--block');
+    var width = el.offsetWidth;
+    var avail = Math.max(160, figStage.clientWidth - 24);
+    var scale = Math.min(block ? 1 : 2, avail / (width + 12));
+    figStage.innerHTML = '';
+    figTitle.textContent = 'Visual diff · landing--hero';
+    figPath.textContent = '.visual-check/report/images/web/landing--hero.diff.png';
+
+    var ov = document.createElement('div');
+    ov.className = 'c-fig__ov';
+    var box = document.createElement('div');
+    box.className = 'c-target ' + (block ? 'c-target--block' : 'c-target--inline');
+    if (block) {
+      box.style.width = width + 'px';
+    }
+    box.appendChild(window.CVC.cloneFor(el));
+    ov.style.zoom = String(scale);
+    ov.appendChild(box);
+    figStage.appendChild(ov);
+    window.CVC.drawPlates(box, edit, 0, false);
+
+    var sbs = document.createElement('div');
+    sbs.className = 'c-fig__sbs';
+    [['Baseline', true], ['Snapshot', false]].forEach(function (pair) {
+      var cell = document.createElement('div');
+      cell.className = 'c-fig__cell';
+      var label = document.createElement('span');
+      label.className = 'c-fig__label';
+      label.textContent = pair[0];
+      var holder = document.createElement('div');
+      holder.style.zoom = String(scale);
+      if (block) {
+        holder.style.width = width + 'px';
+      }
+      var copy = window.CVC.cloneFor(el);
+      if (pair[1]) {
+        window.CVC.setVars(copy, window.CVC.BASE[edit]);
+      }
+      holder.appendChild(copy);
+      cell.appendChild(label);
+      cell.appendChild(holder);
+      sbs.appendChild(cell);
+    });
+    figStage.appendChild(sbs);
+    figLegend.innerHTML = edit === 'accent'
+      ? '<span>Left: baseline</span><span>Right: snapshot</span><span>Every pixel of the fill differs</span>'
+      : '<span><i class="c-sw c-sw--base"></i>Baseline</span><span><i class="c-sw c-sw--snap"></i>Snapshot</span><span><i class="c-sw c-sw--both"></i>Both agree</span>';
+  }
+
+  /* ---------- update, revert, start again ---------- */
+  updateButton.addEventListener('click', async function () {
+    var r = state.result;
+    if (!r) {
+      return;
+    }
+    gap();
+    log('<span class="p">$ </span>npx visual-check update');
+    log(HEADER('update'));
+    r.results.forEach(function (x) {
+      log(x.differs
+        ? '<span class="s">✓</span> web  ' + x.id + '  written: differs: ' + x.count + ' differ, 20 allowed'
+        : '<span class="s">✓</span> web  ' + x.id + '  <span class="c">kept</span>');
+    });
+    log(r.failed.length + ' written · ' + (8 - r.failed.length) + ' kept');
+    r.failed.forEach(function (x) { log('<span class="c">written .visual-check/baselines/' + x.id + '.png</span>'); });
+    exitEl.textContent = 'exit 0';
+    clearOverlays();
+    setAll('passed');
+    state.result = null;
+    showDecision(false);
+    runButton.hidden = true;
+    againButton.hidden = false;
+    againButton.focus({ preventScroll: true });
+    say('Baselines written for ' + r.failed.length + ' stor' + (r.failed.length > 1 ? 'ies' : 'y') + '. The change is now the approved look; in a project you commit the PNGs with it.');
+    stepsText.innerHTML = 'The run stops after each phase and says what just happened.';
+    setRail(null, []);
+  });
+
+  revertButton.addEventListener('click', async function () {
+    state.edit = null;
+    state.v = 0;
+    Array.prototype.forEach.call(edits.querySelectorAll('input[name="c-edit"]'), function (input) { input.checked = false; });
+    applyChange();
+    syncSize();
+    clearOverlays();
+    showDecision(false);
+    edits.disabled = false;
+    state.result = null;
+    gap();
+    log('<span class="p">$ </span>npx visual-check test');
+    log(HEADER('test'));
+    STORIES.forEach(function (s) {
+      setState(s.id, 'passed');
+      log(okLine(s.id, Math.round(s.ms * 0.8)));
+    });
+    log('8 passed · ' + duration(-4));
+    log('<span class="c">Report: .visual-check/report/report.json</span>');
+    exitEl.textContent = 'exit 0';
+    say('Reverted. 8 passed: each snapshot is byte for byte its baseline again.');
+    setRail(null, []);
+    stepsText.innerHTML = 'The run stops after each phase and says what just happened.';
+    runButton.focus({ preventScroll: true });
+  });
+
+  againButton.addEventListener('click', function () {
+    state.edit = null;
+    state.v = 0;
+    Array.prototype.forEach.call(edits.querySelectorAll('input[name="c-edit"]'), function (input) { input.checked = false; });
+    applyChange();
+    syncSize();
+    clearOverlays();
+    edits.disabled = false;
+    againButton.hidden = true;
+    runButton.hidden = false;
+    drawer.hidden = true;
+    setAll('passed');
+    say('Every story matches its baseline. Pick a change, or run the check as it is.');
+    runButton.focus({ preventScroll: true });
+  });
+
+  runButton.addEventListener('click', run);
+
+  /* Rows point at the sections they stand for, when those sections are on this page. */
+  Array.prototype.forEach.call(strip.querySelectorAll('a.c-cell__id'), function (link) {
+    var section = document.querySelector(link.getAttribute('href'));
+    if (window.VCProto && VCProto.embed || !section) {
+      var span = document.createElement('span');
+      span.className = link.className;
+      span.textContent = link.textContent;
+      link.replaceWith(span);
+    }
+  });
+
+  /* Redraw the figure when the window changes size, so its scale fits. */
+  var resizeTimer = 0;
+  window.addEventListener('resize', function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () {
+      if (state.result && state.result.failed.length) {
+        buildFigure();
+      }
+    }, 150);
+  });
+})();
+</script>
+
+<script>
+/* ---------- demo: the real run, replayed (VCProto.scene) ----------
+   Rebuilt terminal with real text, the CLI's own strings, one chapter per command. Each chapter clears the
+   screen, so the resting state (the end of `test`) fits the frame. */
+(function () {
+  'use strict';
+  if (!window.VCProto || !document.getElementById('c-demo-stage')) {
+    return;
+  }
+  var L = function (text, cls) { return '<span class="c-ln' + (cls ? ' ' + cls : '') + '">' + text + '</span>'; };
+  VCProto.scene('#c-demo-stage', async function (t) {
+    var out = '.c-term__out';
+    var chapterLabel = t.$('.c-term__chapter');
+
+    t.chapter(0);
+    t.$(out).innerHTML = '';
+    chapterLabel.textContent = 'init';
+    t.add(out, L('<span class="p">$ </span><span class="c-typed"></span>'));
+    await t.type('.c-typed', 'npx @visual-check/cli init');
+    await t.wait(400);
+    await t.lines(out, [
+      L('<span class="c-p1">✓</span><span class="c-p2">✓</span> <span class="c">visual-check init</span>'),
+      L('<span class="s">?</span> Name of the Storybook in apps/web  <span class="c">›</span> web'),
+      L('<span class="s">?</span> URL of web  <span class="c">›</span> http://127.0.0.1:6006'),
+      L('<span class="s">?</span> Install the agent skill?  <span class="c">›</span> ● Yes  <span class="c">○ No</span>'),
+      L('<span class="c-ok">✓</span> visual-check is set up'),
+      L('', 'c-ln--gap'),
+      L('Next'),
+      L('  1  pnpm storybook       <span class="c">Start Storybook, and keep it running</span>'),
+      L('  2  pnpm visual:update   <span class="c">Write the first baselines</span>'),
+      L('  3  pnpm visual:check    <span class="c">Check the stories against the baselines</span>'),
+      L('  4  <span class="c">Commit the changes, baselines included</span>')
+    ], 260);
+    await t.wait(1600);
+
+    t.chapter(1);
+    t.$(out).innerHTML = '';
+    chapterLabel.textContent = 'update';
+    t.add(out, L('<span class="p">$ </span><span class="c-typed"></span>'));
+    await t.type('.c-typed', 'pnpm visual:update');
+    await t.wait(400);
+    t.add(out, L('visual-check 0.1.0 · update · 108 snapshots · 4 workers'));
+    var spin = t.add(out, L('', 'c'));
+    var frames = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
+    for (var n = 4; n <= 108; n += 8) {
+      spin.textContent = frames[(n / 4) % frames.length] + ' ' + n + '/108 snapshots · 4 workers';
+      await t.wait(110);
+    }
+    spin.remove();
+    await t.lines(out, [
+      L('108 written'),
+      L('<span class="c">written .visual-check/baselines/components-alert--info.png</span>'),
+      L('<span class="c">written .visual-check/baselines/components-alert--success.png</span>'),
+      L('<span class="c">written .visual-check/baselines/components-button--default.png</span>'),
+      L('<span class="c">written .visual-check/baselines/components-modal--default.mobile.png</span>')
+    ], 140);
+    await t.wait(1600);
+
+    t.chapter(2);
+    t.$(out).innerHTML = '';
+    chapterLabel.textContent = 'test, after a change to Button.css';
+    t.add(out, L('<span class="p">$ </span><span class="c-typed"></span>'));
+    await t.type('.c-typed', 'pnpm visual:check');
+    await t.wait(400);
+    t.add(out, L('visual-check 0.1.0 · test · 108 snapshots · 4 workers'));
+    var spin2 = t.add(out, L('', 'c'));
+    var shown = 0;
+    for (var k = 6; k <= 108; k += 6) {
+      spin2.textContent = frames[(k / 6) % frames.length] + ' ' + k + '/108 snapshots · 4 workers · ' + (k / 10).toFixed(1) + 's';
+      if (k >= 30 && shown === 0) {
+        spin2.insertAdjacentHTML('beforebegin', L('<span class="c-no">✗</span> web  components-button--default  <span class="k">differs: 312 differ, 20 allowed</span>'));
+        shown = 1;
+      }
+      if (k >= 78 && shown === 1) {
+        spin2.insertAdjacentHTML('beforebegin', L('<span class="c-no">✗</span> web  components-modal--default  mobile  <span class="k">differs: 1904 differ, 80 allowed (20 at scale 2)</span>'));
+        shown = 2;
+      }
+      await t.wait(90);
+    }
+    if (shown < 2) {
+      spin2.insertAdjacentHTML('beforebegin', L('<span class="c-no">✗</span> web  components-button--default  <span class="k">differs: 312 differ, 20 allowed</span>'));
+      spin2.insertAdjacentHTML('beforebegin', L('<span class="c-no">✗</span> web  components-modal--default  mobile  <span class="k">differs: 1904 differ, 80 allowed (20 at scale 2)</span>'));
+    }
+    spin2.remove();
+    await t.lines(out, [
+      L('<span class="c">── 2 failures ──</span>'),
+      L('web  components-button--default'),
+      L('  <span class="k">differs: 312 differ, 20 allowed</span>'),
+      L('  <span class="c">diff: .visual-check/report/images/web/components-button--default.diff.png</span>'),
+      L('web  components-modal--default  mobile'),
+      L('  <span class="k">differs: 1904 differ, 80 allowed (20 at scale 2)</span>'),
+      L('  <span class="c">diff: .visual-check/report/images/web/components-modal--default.mobile.diff.png</span>'),
+      L('106 passed · <span class="k">2 differs</span> · 11.4s'),
+      L('<span class="c">Report: .visual-check/report/report.json</span>')
+    ], 150);
+  }, { controls: '#c-demo-controls', chapters: ['init', 'update', 'test'], label: 'visual-check init, update and test in a terminal' });
+})();
+</script>
+
+<script>
+/* ---------- features: the addon's wipe slider is real ---------- */
+(function () {
+  'use strict';
+  var input = document.getElementById('c-wipe-input');
+  var wipe = document.getElementById('c-wipe');
+  if (!input || !wipe) {
+    return;
+  }
+  input.addEventListener('input', function () { wipe.style.setProperty('--wipe', input.value + '%'); });
+})();
+</script>
+</body>
+</html>

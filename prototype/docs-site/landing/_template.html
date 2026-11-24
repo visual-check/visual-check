@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>visual-check · Landing X</title>
+<!-- PROTOTYPE — throwaway. Landing variant X: "<concept name>". <one line on the idea> -->
+<link rel="icon" href="../shared/logo/favicon.svg">
+<link rel="stylesheet" href="../shared/tokens.css">
+<link rel="stylesheet" href="../shared/bundle.css">
+<link rel="stylesheet" href="../shared/proto-base.css">
+<style>
+  /* Values the design system doesn't have yet (become tokens before the real build):
+     - container max width 1200px
+     - …
+  */
+  .x-wrap { max-width: 1200px; margin: 0 auto; padding-inline: max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px)); }
+  /* Every section sets its own background: the mixer shows each one on its own. */
+  [data-slot] { background: var(--bg-page); padding-block: var(--space-24); }
+</style>
+<script>
+  window.VC_PAGE = {
+    set: 'landing',
+    key: 'X',
+    /* Idea toggles: each becomes a bar button and sets html[data-t-<id>="<option>"]. */
+    toggles: [{ id: 'art', label: 'Hero art', options: ['plates', 'terminal'] }]
+  };
+</script>
+<script src="../shared/proto-kit.js"></script>
+</head>
+<body id="top">
+<div data-kit="header"></div>
+<main>
+  <section data-slot="hero" aria-labelledby="x-hero-title">
+    <div class="x-wrap">
+      <h1 id="x-hero-title" class="display" data-copy>
+        <span data-copy-alt>First headline</span>
+        <span data-copy-alt>Second headline</span>
+      </h1>
+      <div class="x-demo" id="x-demo"><div class="vc-code"><pre class="x-out"></pre></div></div>
+      <div id="x-demo-controls"></div>
+    </div>
+  </section>
+  <section data-slot="problem">…</section>
+  <section data-slot="demo">…</section>
+  <section data-slot="commands">…</section>
+  <section data-slot="features">…</section>
+  <section data-slot="agent">…</section>
+  <section data-slot="faq">…</section>
+  <section data-slot="cta">…</section>
+</main>
+<div data-kit="footer"></div>
+<script>
+  /* Each section initialises itself and never reaches into another section. */
+  VCProto.scene('#x-demo', async function (t) {
+    t.chapter(0);
+    t.add('.x-out', '<span class="p">$ </span><span class="cmd"></span>');
+    await t.type('.cmd', 'npx visual-check test');
+    await t.wait(400);
+    t.add('.x-out', '\n<span class="c">  412 passed · </span><span class="k">3 changed</span>');
+  }, { controls: '#x-demo-controls', chapters: ['test'], label: 'visual-check test in a terminal' });
+</script>
+</body>
+</html>

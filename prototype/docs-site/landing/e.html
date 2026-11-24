@@ -1,0 +1,1496 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>visual-check · Landing E</title>
+<!-- PROTOTYPE — throwaway. Landing variant E: "Agent speed".
+     Leads with why this matters now: coding agents change UI faster than anyone looks at it, and an agent can't see
+     what it changed. The hero is a coding-agent session (generic, unbranded) that runs visual-check through the skill
+     `init` installs, reports in the skill's shape, and leaves the baselines to a person. The visual diffs it names are
+     drawn in HTML/CSS: two copies of the same story, printed as the logo's plates (cyan baseline, magenta snapshot).
+     Demo technique: VCProto.scene for the session and the init transcript (real text revealed on a timeline, end state
+     at rest); the diff viewer is a real range input that sweeps once when seen, because the scene's markup reset would
+     undo the visitor's own story and view choice. -->
+<link rel="icon" href="../shared/logo/favicon.svg">
+<link rel="stylesheet" href="../shared/tokens.css">
+<link rel="stylesheet" href="../shared/bundle.css">
+<link rel="stylesheet" href="../shared/proto-base.css">
+<style>
+  /* Values the design system doesn't have yet (become tokens before the real build):
+     - container max width 1200px; page gutter 16px on phones, 32px from 768px
+     - hero heading below desktop: 52px/54px on tablets, 38px/42px on phones (display is 64/60)
+     - landing section heading on phones: 28px/32px (h1 is 44/48)
+     - hero top padding 56px (between space-12 and space-24)
+     - agent-session text: 13px/20px mono, 12px/19px on phones (code is 14/22); chat text 15px/24px
+     - agent-session frame min-height 520px
+     - snapshot canvas: #ffffff ground in both themes (a snapshot is a picture of the story, not themed UI);
+       canvas heights 230px (hero) and 380px (viewer), 200px / 300px on phones
+     - the drawn story's own colours (a fictional shop): ink #1f1d2b, soft #6b6878, fill #e7e2d8, rule #d9d4ca
+     - muted text, link and rule colours on bg-inverse (the agent band), per theme
+     - wipe handle: 2px line, 28px knob
+  */
+
+  /* ---------- page frame ---------- */
+  .e-wrap { max-width: 1200px; margin: 0 auto; padding-inline: max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px)); }
+  @media (min-width: 768px) { .e-wrap { padding-inline: 32px; } }
+  .e-sec { background: var(--bg-page); padding-block: var(--space-24); }
+  .e-h2 { margin: 0; font: var(--text-h1); letter-spacing: -0.015em; max-width: 22ch; }
+  .e-h3 { margin: 0; font: var(--text-h3); }
+  .e-p { margin: 0; font: var(--text-body-lg); }
+  .e-small { margin: 0; font: var(--text-small); color: var(--text-muted); }
+  .e-nb { white-space: nowrap; }
+  .e-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  .e-head { display: grid; gap: var(--space-4); margin-bottom: var(--space-12); }
+  @media (min-width: 1024px) {
+    .e-head--split { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); column-gap: var(--space-12); align-items: end; }
+  }
+  @media (max-width: 767px) {
+    .e-sec { padding-block: 72px; }
+    .e-h2 { font-size: 28px; line-height: 32px; }
+  }
+  :where(.e-sec) :where(code:not(pre code)) { font: 400 .875em/1 var(--font-mono); padding: 2px 5px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); overflow-wrap: anywhere; }
+
+  :where(.e-aside, .e-viewer, .e-faq details, .e-cta, .e-ledger-wrap) :where(code:not(pre code)) { background: var(--bg-raised); }
+
+  /* Lead toggle: agent-first vs human-first copy */
+  html:not([data-t-lead="human-first"]) [data-lead="human"],
+  html[data-t-lead="human-first"] [data-lead="agent"] { display: none !important; }
+
+  /* ---------- shared: install command and prompt ---------- */
+  .e-install pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; }
+  .e-install .vc-code__bar { gap: var(--space-2); }
+  .e-pm { display: inline-flex; flex-wrap: wrap; gap: 2px; }
+  .e-pm__btn {
+    min-height: 28px; padding: 2px 8px; border: 0; border-radius: var(--radius-sm);
+    background: transparent; color: var(--code-muted); font: inherit; cursor: pointer;
+    transition: color var(--duration-fade) var(--ease-out), background-color var(--duration-fade) var(--ease-out);
+  }
+  .e-pm__btn:hover { color: var(--code-fg); }
+  .e-pm__btn[aria-pressed="true"] { color: var(--code-fg); background: rgba(244, 242, 255, .12); }
+  .e-install .vc-code__copy { min-height: 28px; }
+  .e-prompt { display: grid; gap: var(--space-3); padding: var(--space-4); border-radius: var(--radius-lg); background: var(--bg-surface); }
+  .e-prompt__text { margin: 0; font: var(--text-body); }
+  .e-prompt__text code { background: var(--bg-raised); white-space: nowrap; }
+  .e-prompt .vc-btn { justify-self: start; }
+
+  /* ---------- hero ---------- */
+  .e-hero { padding-block: 56px var(--space-24); }
+  .e-hero__title { margin: 0; max-width: 1040px; }
+  .e-hero__grid { display: grid; gap: var(--space-8); margin-top: var(--space-8); }
+  .e-hero__copy { display: grid; gap: var(--space-6); align-content: start; }
+  .e-hero__lead { margin: 0; font: var(--text-body-lg); max-width: 62ch; }
+  .e-ctas { display: flex; flex-direction: column; gap: var(--space-4); }
+  html[data-t-lead="human-first"] .e-ctas .e-install { order: -1; }
+  .e-hero__show { display: grid; gap: var(--space-4); min-width: 0; }
+  .e-stage { display: grid; gap: var(--space-6); min-width: 0; }
+  .e-hero__col { display: grid; gap: var(--space-4); align-content: start; min-width: 0; }
+  .e-hero__meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); }
+  .e-hero__meta .e-small { flex: 1 1 280px; }
+  html:not([data-t-hero="split"]) .e-diffs { display: none; }
+  @media (min-width: 1024px) {
+    html:not([data-t-hero="split"]) .e-hero__grid { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--space-12); align-items: start; }
+    html:not([data-t-hero="split"]) .e-hero__copy { position: sticky; top: 96px; }
+    html[data-t-hero="split"] .e-hero__copy { grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); column-gap: var(--space-12); row-gap: var(--space-4); }
+    html[data-t-hero="split"] .e-hero__lead { grid-column: 1; grid-row: 1; }
+    html[data-t-hero="split"] .e-hero__fine { grid-column: 1; grid-row: 2; align-self: start; }
+    html[data-t-hero="split"] .e-ctas { grid-column: 2; grid-row: 1 / span 2; }
+    html[data-t-hero="split"] .e-stage { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: var(--space-8); align-items: start; }
+  }
+  @media (max-width: 1023px) {
+    .e-hero__title { font-size: 52px; line-height: 54px; }
+  }
+  @media (min-width: 640px) and (max-width: 1023px) {
+    .e-diffs { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .e-diffs__head, .e-diffs__key { grid-column: 1 / -1; }
+  }
+  @media (max-width: 767px) {
+    .e-hero { padding-top: var(--space-8); }
+    .e-hero__title { font-size: 38px; line-height: 42px; }
+  }
+
+  /* The agent session: terminal by default, chat with html[data-t-ui="chat"] */
+  .e-session {
+    display: flex; flex-direction: column; min-height: 520px; min-width: 0;
+    background: var(--code-bg); color: var(--code-fg);
+    border: 1px solid var(--code-bg); border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-register); overflow: hidden;
+  }
+  [data-theme="dark"] .e-session { border-color: var(--border-subtle); }
+  .e-session__bar, .e-session__foot {
+    display: flex; justify-content: space-between; align-items: center; gap: var(--space-4);
+    padding: var(--space-2) var(--space-4); font: var(--text-label); letter-spacing: .02em; color: var(--code-muted);
+  }
+  .e-session__bar { border-bottom: 1px solid rgba(244, 242, 255, .12); }
+  .e-session__foot { border-top: 1px solid rgba(244, 242, 255, .12); }
+  .e-session__title { color: var(--code-fg); }
+  .e-session__body { flex: 1; display: grid; gap: 14px; align-content: start; padding: var(--space-4); font: 400 13px/20px var(--font-mono); }
+  .e-session__body p, .e-session__body ul { margin: 0; }
+  .e-session code { font: inherit; color: var(--code-cyan); overflow-wrap: anywhere; padding: 0; background: none; border: 0; }
+  .e-you { display: flex; gap: var(--space-2); color: var(--code-fg); font-weight: 600; }
+  .e-you::before { content: "›"; color: var(--code-cyan); }
+  .e-who { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .e-tool, .e-reply { display: grid; grid-template-columns: 14px minmax(0, 1fr); column-gap: var(--space-2); }
+  .e-tool::before { content: "●"; color: var(--code-cyan); }
+  .e-reply::before { content: "●"; color: var(--code-fg); }
+  .e-tool__head { margin: 0; color: var(--code-muted); overflow-wrap: anywhere; }
+  .e-tool__head b { color: var(--code-fg); font-weight: 700; margin-right: 6px; }
+  .e-tool__head code { color: var(--code-muted); }
+  .e-tool__out {
+    grid-column: 2; margin: 4px 0 0; padding: 0;
+    font: inherit; color: var(--code-muted); white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  .e-tool__out .e-del { color: var(--code-muted); }
+  .e-tool__out .e-add { color: var(--code-fg); }
+  .e-tool__out .e-add b { color: var(--code-cyan); font-weight: 400; }
+  .e-tool__out--lines > span { display: block; }
+  .e-json { display: -webkit-box !important; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; color: var(--code-muted); }
+  @media (max-width: 767px) { .e-json { -webkit-line-clamp: 2; } }
+  .e-report { display: grid; gap: 8px; min-width: 0; }
+  .e-report ul { list-style: none; padding: 0; display: grid; gap: 6px; }
+  .e-report li { position: relative; padding-left: 16px; }
+  .e-report li::before { content: "-"; position: absolute; left: 0; color: var(--code-muted); }
+  .e-report b { font-weight: 700; color: var(--code-magenta); }
+
+  html[data-t-ui="chat"] .e-session { background: var(--bg-raised); color: var(--text-primary); border-color: var(--border-subtle); }
+  html[data-t-ui="chat"] .e-session__bar { border-bottom-color: var(--border-subtle); color: var(--text-muted); }
+  html[data-t-ui="chat"] .e-session__title { color: var(--text-primary); }
+  html[data-t-ui="chat"] .e-session__body { font: 400 15px/24px var(--font-sans); gap: var(--space-4); }
+  html[data-t-ui="chat"] .e-session code { font: 400 13px/1 var(--font-mono); color: var(--text-primary); padding: 2px 5px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); }
+  html[data-t-ui="chat"] .e-you { justify-self: end; max-width: 85%; padding: 8px 14px; border-radius: var(--radius-lg); background: var(--bg-surface); color: var(--text-primary); font-weight: 400; }
+  html[data-t-ui="chat"] .e-you::before { content: none; }
+  html[data-t-ui="chat"] .e-tool { grid-template-columns: 16px minmax(0, 1fr); }
+  html[data-t-ui="chat"] .e-tool::before { content: "✓"; color: var(--info-fg); font: 700 13px/22px var(--font-mono); }
+  html[data-t-ui="chat"] .e-tool__head { color: var(--text-muted); font: var(--text-small); padding-top: 1px; }
+  html[data-t-ui="chat"] .e-tool__head b { color: var(--text-primary); font-weight: 600; }
+  html[data-t-ui="chat"] .e-tool__head code { color: var(--text-primary); }
+  html[data-t-ui="chat"] .e-tool__out { margin-top: 6px; padding: 8px 12px; border-radius: var(--radius-md); background: var(--code-bg); font: 400 12px/18px var(--font-mono); }
+  html[data-t-ui="chat"] .e-reply { grid-template-columns: minmax(0, 1fr); }
+  html[data-t-ui="chat"] .e-reply::before { content: none; }
+  html[data-t-ui="chat"] .e-reply .e-who { position: static; width: auto; height: auto; clip: auto; font: var(--text-body-strong); font-size: 14px; color: var(--text-muted); margin-bottom: 2px; }
+  html[data-t-ui="chat"] .e-report li::before { content: "•"; color: var(--text-muted); }
+  html[data-t-ui="chat"] .e-report b { color: var(--change-fg); }
+  html[data-t-ui="chat"] .e-session__foot {
+    margin: 0 var(--space-4) var(--space-4); padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+    font: var(--text-small); color: var(--text-muted); letter-spacing: 0;
+  }
+  html[data-t-ui="chat"] .e-session .is-typing::after { color: var(--text-cyan); }
+  @media (max-width: 767px) {
+    .e-session { min-height: 0; }
+    .e-session__body { font-size: 12px; line-height: 19px; padding: 12px; }
+    html[data-t-ui="chat"] .e-session__body { font-size: 15px; line-height: 23px; }
+    .e-session__foot-skill { display: none; }
+  }
+
+  /* Scene reveal: lines keep their space, so nothing below moves while it plays */
+  .e-scene[data-scene] .e-l:not(.is-on) { visibility: hidden; }
+  .e-scene .e-l.is-anim { animation: e-in 240ms var(--ease-out) both; }
+  @keyframes e-in { from { opacity: 0; transform: translateY(4px); } }
+  .e-report li.e-hit { border-radius: var(--radius-sm); }
+
+  .e-approve pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 20px; }
+  .e-approve .vc-code__bar { gap: var(--space-4); }
+  @media (max-width: 767px) { .e-approve pre { font-size: 12px; line-height: 19px; } }
+
+  /* The diffs beside the session (split) */
+  .e-diffs { display: grid; gap: var(--space-4); align-content: start; min-width: 0; }
+  .e-diffs__head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--space-2) var(--space-4); }
+  .e-diffs__title { margin: 0; font: var(--text-body-strong); }
+  .e-diff { margin: 0; display: grid; gap: var(--space-2); }
+  .e-diff__meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font: var(--text-small); color: var(--text-muted); }
+  .e-diff__meta .vc-badge { margin-left: auto; }
+  .e-diffs__key { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+  .e-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -1px; margin-right: 6px; }
+  .e-swatch--c { background: var(--brand-cyan); }
+  .e-swatch--m { background: var(--brand-magenta); }
+  .e-swatch--k { background: #002072; }
+  .e-stage[data-scene] .e-diff:not(.is-on) .e-plate--magenta { opacity: 0; transform: translate(10px, 10px); }
+  .e-stage[data-scene] .e-diff:not(.is-on) .e-diff__badge { visibility: hidden; }
+  .e-plate--magenta { transition: transform 560ms var(--ease-spring), opacity 200ms var(--ease-out); }
+
+  /* ---------- snapshot canvases (drawn stories) ---------- */
+  .e-canvas {
+    --k: 1; --top: 16px;
+    position: relative; overflow: hidden; height: 230px;
+    background: #ffffff; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg);
+  }
+  .e-canvas--hero[data-story="card"] { --k: .82; }
+  .e-canvas--hero[data-story="pricing"] { --k: .9; --top: 0px; }
+  .e-canvas--viewer { height: 380px; }
+  .e-canvas--viewer[data-story="card"] { --k: 1.3; --top: 26px; }
+  .e-canvas--viewer[data-story="pricing"] { --k: 1.36; --top: 0px; }
+  .e-canvas--addon { height: 176px; --k: .66; --top: 10px; }
+  @media (max-width: 767px) {
+    .e-canvas--hero { height: 200px; }
+    .e-canvas--hero[data-story="card"] { --k: .72; --top: 12px; }
+    .e-canvas--hero[data-story="pricing"] { --k: .8; }
+    .e-canvas--viewer { height: 300px; }
+    .e-canvas--viewer[data-story="card"] { --k: 1; --top: 24px; }
+    .e-canvas--viewer[data-story="pricing"] { --k: .86; --top: 4px; }
+  }
+  .e-layer { position: absolute; inset: 0; }
+  .e-plate { position: absolute; inset: 0; display: flex; justify-content: center; align-items: flex-start; padding-top: var(--top); }
+  .e-plate--real { --s-ink: #1f1d2b; --s-soft: #6b6878; --s-fill: #e7e2d8; --s-line: #d9d4ca; --s-on: #ffffff; background: #ffffff; }
+  .e-plate--cyan { --s-ink: var(--brand-cyan); --s-soft: var(--brand-cyan); --s-fill: color-mix(in srgb, var(--brand-cyan) 26%, #fff); --s-line: var(--brand-cyan); --s-on: #ffffff; }
+  .e-plate--magenta { --s-ink: var(--brand-magenta); --s-soft: var(--brand-magenta); --s-fill: color-mix(in srgb, var(--brand-magenta) 26%, #fff); --s-line: var(--brand-magenta); --s-on: #ffffff; mix-blend-mode: multiply; }
+  .e-plate--black { --s-ink: #000; --s-soft: #000; --s-fill: #000; --s-line: #000; --s-on: #fff; background: #ffffff; }
+  .e-plate--differ { mix-blend-mode: difference; }
+  .e-plate--ghost { --s-ink: #1f1d2b; --s-soft: #6b6878; --s-fill: #e7e2d8; --s-line: #d9d4ca; --s-on: #ffffff; opacity: .22; mix-blend-mode: multiply; }
+  .e-layer--diff { isolation: isolate; background: #ffffff; }
+  .e-xor { position: absolute; inset: 0; filter: invert(1); }
+  .e-xor__tint { position: absolute; inset: 0; background: #ff2d87; mix-blend-mode: screen; }
+  .e-plate--wipe { clip-path: inset(0 0 0 var(--wipe, 50%)); }
+
+  .e-s { zoom: var(--k); color: var(--s-ink); font-family: var(--font-sans); text-align: left; }
+  .e-s p { margin: 0; }
+  .e-s--card { width: 248px; }
+  .e-s-card { border: 1.5px solid var(--s-line); border-radius: 12px; padding: var(--pad); }
+  .e-s-card__img { height: 96px; border-radius: 8px; background: var(--s-fill); }
+  .e-s-card__name { margin-top: 12px !important; font-size: 15px; line-height: 20px; font-weight: 700; }
+  .e-s-card__meta { font-size: 13px; line-height: 18px; color: var(--s-soft); }
+  .e-s-card__row { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; }
+  .e-s-card__price { font-size: 17px; line-height: 22px; font-weight: 700; }
+  .e-s-card__btn { padding: 7px 12px; border-radius: 6px; background: var(--s-ink); color: var(--s-on); font-size: 12px; line-height: 16px; font-weight: 700; }
+  .e-s--page { width: 188px; height: 334px; padding: 0 10px; }
+  .e-s-page__bar { display: flex; justify-content: space-between; align-items: center; height: 30px; }
+  .e-s-page__logo { font-size: 11px; font-weight: 700; }
+  .e-s-page__menu { display: grid; gap: 2.5px; }
+  .e-s-page__menu i { display: block; width: 12px; height: 1.5px; background: var(--s-ink); }
+  .e-s-page__title { margin: 6px 0 10px !important; font-size: 16px; line-height: 20px; font-weight: 700; }
+  .e-s-plan { margin-bottom: 8px; padding: var(--pad); border: 1px solid var(--s-line); border-radius: 8px; }
+  .e-s-plan__name { font-size: 9px; line-height: 12px; font-weight: 700; }
+  .e-s-plan__price { margin-top: 2px !important; font-size: 18px; line-height: 22px; font-weight: 700; }
+  .e-s-plan__line { font-size: 8.5px; line-height: 12px; color: var(--s-soft); }
+  .e-s-plan__btn { display: block; margin-top: 8px; padding: 5px 0; border-radius: 4px; background: var(--s-ink); color: var(--s-on); font-size: 8.5px; line-height: 11px; font-weight: 700; text-align: center; }
+
+  /* ---------- problem ---------- */
+  .e-problem__title { max-width: 26ch; margin-bottom: var(--space-12); }
+  .e-problem__grid { display: grid; gap: var(--space-12); }
+  .e-ledger .e-what { min-width: 15ch; }
+  .e-ledger th.e-num { width: 7.5em; }
+  .e-problem__copy { display: grid; gap: var(--space-6); align-content: start; }
+  .e-aside { margin: 0; padding: var(--space-4) var(--space-6); border-radius: var(--radius-lg); background: var(--bg-surface); font: var(--text-body); }
+  .e-aside a { color: var(--text-cyan); text-underline-offset: 3px; }
+  .e-ledger-wrap { margin: 0; padding: var(--space-6); border-radius: var(--radius-lg); background: var(--bg-surface); align-self: start; }
+  .e-ledger { width: 100%; border-collapse: collapse; font: var(--text-body); font-variant-numeric: tabular-nums; }
+  .e-ledger caption { caption-side: bottom; text-align: left; padding-top: var(--space-4); font: var(--text-small); color: var(--text-muted); }
+  .e-ledger th { padding: 0 var(--space-3) var(--space-3) 0; text-align: left; vertical-align: bottom; font: var(--text-small); font-weight: 600; color: var(--text-muted); }
+  .e-ledger td { padding: var(--space-3) var(--space-3) var(--space-3) 0; border-top: 1px solid var(--border-subtle); vertical-align: top; }
+  .e-ledger th:last-child, .e-ledger td:last-child { padding-right: 0; }
+  .e-ledger .e-num { text-align: right; white-space: nowrap; }
+  .e-ledger td.e-num { font-weight: 700; }
+  .e-ledger .e-time { color: var(--text-muted); white-space: nowrap; }
+  .e-ledger code { white-space: nowrap; }
+  .e-ledger tfoot td { font: var(--text-small); color: var(--text-muted); }
+  .e-ledger tbody tr:first-child td { background: var(--bg-raised); }
+  .e-ledger tbody tr:first-child td:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); padding-left: var(--space-2); }
+  .e-ledger tbody tr:first-child td:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; padding-right: var(--space-2); }
+  .e-ledger thead th:first-child { padding-left: var(--space-2); }
+  @media (min-width: 1024px) { .e-problem__grid { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); } }
+  @media (max-width: 639px) {
+    .e-ledger-wrap { padding: var(--space-4); }
+    .e-ledger thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    .e-ledger tbody tr { display: grid; grid-template-columns: auto 1fr; column-gap: var(--space-3); padding: var(--space-3) var(--space-2); border-top: 1px solid var(--border-subtle); }
+    .e-ledger tbody tr:first-child { background: var(--bg-raised); border-radius: var(--radius-sm); border-top: 0; }
+    .e-ledger tbody td { display: block; padding: 0; border: 0; background: none !important; }
+    .e-ledger tbody td.e-time { grid-row: 1 / span 4; padding: 0 !important; }
+    .e-ledger tbody td.e-what { font-weight: 600; }
+    .e-ledger tbody td.e-num { grid-column: 2; text-align: left; font-weight: 400; color: var(--text-muted); }
+    .e-ledger tbody td.e-num::before { content: attr(data-label) " "; }
+    .e-ledger tbody td.e-num b { color: var(--text-primary); }
+    .e-ledger tfoot td { display: block; padding: var(--space-3) var(--space-2) 0; }
+  }
+
+  /* ---------- demo: the diff viewer ---------- */
+  .e-viewer { display: grid; gap: var(--space-6); padding: var(--space-6); border-radius: var(--radius-lg); background: var(--bg-surface); }
+  .e-viewer__rail { display: grid; gap: var(--space-2); align-content: start; }
+  .e-viewer__run { margin: 0 0 var(--space-2); font: var(--text-label); color: var(--text-muted); overflow-wrap: anywhere; }
+  .e-row {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px var(--space-3); align-items: center;
+    width: 100%; padding: var(--space-3) var(--space-4); text-align: left;
+    border: 1px solid transparent; border-radius: var(--radius-md); background: transparent; color: var(--text-primary);
+    font: var(--text-small); cursor: pointer;
+    transition: background-color var(--duration-fade) var(--ease-out), border-color var(--duration-fade) var(--ease-out);
+  }
+  .e-row:hover { background: var(--bg-raised); }
+  .e-row[aria-pressed="true"] { background: var(--bg-raised); border-color: var(--border-strong); }
+  .e-row__id { font: 600 13px/18px var(--font-mono); overflow-wrap: anywhere; }
+  .e-row__mode { grid-column: 1; color: var(--text-muted); }
+  .e-row .vc-badge { grid-column: 2; grid-row: 1 / span 2; }
+  .e-row--static { cursor: default; color: var(--text-muted); grid-template-columns: 1fr; }
+  .e-row--static:hover { background: transparent; }
+  .e-viewer__main { display: grid; gap: var(--space-3); min-width: 0; }
+  .e-viewer__tools { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--space-2) var(--space-4); }
+  .e-seg { display: inline-flex; padding: 2px; border-radius: var(--radius-md); background: var(--bg-raised); border: 1px solid var(--border-subtle); }
+  .e-seg button {
+    min-height: 32px; padding: 0 12px; border: 0; border-radius: 4px; background: transparent;
+    color: var(--text-muted); font: var(--text-ui); font-size: 14px; cursor: pointer;
+    transition: background-color var(--duration-fade) var(--ease-out), color var(--duration-fade) var(--ease-out);
+  }
+  .e-seg button[aria-pressed="true"] { background: var(--action-primary); color: var(--on-action-primary); }
+  .e-viewer__caption { font: var(--text-small); color: var(--text-muted); white-space: pre; }
+  .e-viewer[data-view="diff"] .e-viewer__caption { visibility: hidden; }
+  .e-viewer .e-canvas { display: none; }
+  .e-viewer[data-story="card"] .e-canvas[data-story="card"],
+  .e-viewer[data-story="pricing"] .e-canvas[data-story="pricing"] { display: block; }
+  .e-viewer[data-view="slider"] .e-layer--diff,
+  .e-viewer[data-view="diff"] .e-layer--slider,
+  .e-viewer[data-view="diff"] .e-wipe-input,
+  .e-viewer[data-view="diff"] .e-wipe { display: none; }
+  .e-viewer [data-for] { display: none; }
+  .e-viewer[data-story="card"] [data-for="card"], .e-viewer[data-story="pricing"] [data-for="pricing"] { display: revert; }
+  .e-wipe-input { position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: ew-resize; touch-action: pan-y; }
+  .e-wipe { position: absolute; z-index: 1; top: 0; bottom: 0; left: var(--wipe, 50%); width: 2px; margin-left: -1px; background: var(--brand-ink); pointer-events: none; }
+  .e-wipe::after {
+    content: "‹ ›"; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-pill);
+    background: var(--brand-ink); color: var(--brand-paper); font: 700 12px/1 var(--font-sans); letter-spacing: -1px;
+  }
+  .e-wipe-input:focus-visible + .e-wipe::after { box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px var(--focus); }
+  .e-viewer__path { margin: 0; font: var(--text-small); color: var(--text-muted); }
+  .e-demo__term { margin-top: var(--space-6); }
+  .e-demo__term pre { font-size: 13px; line-height: 21px; }
+  @media (min-width: 1024px) { .e-viewer { grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: var(--space-8); } }
+  @media (max-width: 767px) {
+    .e-viewer { padding: var(--space-4); }
+    .e-demo__term pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 19px; }
+    .e-init pre { font-size: 12px; line-height: 19px; }
+  }
+
+  /* ---------- agent (an ink band) ---------- */
+  .e-band { --e-muted: var(--code-muted); --e-link: var(--code-cyan); --e-rule: rgba(244, 242, 255, .16); background: var(--bg-inverse); color: var(--text-inverse); }
+  [data-theme="dark"] .e-band { --e-muted: #55527a; --e-link: #00728a; --e-rule: rgba(21, 19, 60, .14); }
+  .e-band :focus-visible { outline-color: var(--e-link); }
+  .e-band a { color: var(--e-link); text-underline-offset: 3px; }
+  .e-band .e-p, .e-band .e-muted { color: var(--e-muted); }
+  .e-band .e-head .e-p { color: var(--text-inverse); }
+  .e-band .vc-code { border-color: var(--e-rule); }
+  [data-theme="dark"] .e-band .vc-code { border-color: var(--code-bg); }
+  .e-band :where(code:not(pre code)) { background: transparent; border-color: var(--e-rule); color: inherit; }
+  .e-agent__grid { display: grid; gap: var(--space-12); }
+  .e-rules { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-8); }
+  .e-rule { display: grid; gap: var(--space-2); }
+  .e-rule blockquote { margin: 0; font: 400 20px/30px var(--font-sans); color: var(--text-inverse); }
+  .e-rule .e-p { font-size: 16px; line-height: 26px; }
+  .e-rule cite { font: var(--text-small); font-style: normal; color: var(--e-muted); }
+  .e-agent__side { display: grid; gap: var(--space-6); align-content: start; min-width: 0; }
+  .e-agent__side .e-h3 { margin-bottom: calc(var(--space-2) * -1); }
+  .e-agent__side pre { font-size: 13px; line-height: 21px; }
+  .e-tree .c { white-space: pre; }
+  .e-runner pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  @media (min-width: 1024px) { .e-agent__grid { grid-template-columns: minmax(0, 6fr) minmax(0, 6fr); gap: var(--space-12) var(--space-24); } }
+
+  /* ---------- commands ---------- */
+  .e-cmds__grid { display: grid; gap: var(--space-8); }
+  .e-cmds__term { margin: 0; display: grid; gap: var(--space-3); min-width: 0; }
+  .e-init .e-skill { color: var(--code-fg); }
+  html:not([data-t-lead="human-first"]) .e-init .e-skill { background: rgba(95, 214, 238, .16); }
+  .e-writes { display: grid; gap: var(--space-4); align-content: start; }
+  .e-writes ul { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--space-3); }
+  .e-writes li { display: grid; gap: 4px; font: var(--text-body); }
+  .e-writes__note { color: var(--text-muted); font: var(--text-small); }
+  .e-cmd-table { width: 100%; margin-top: var(--space-12); border-collapse: collapse; font: var(--text-body); }
+  .e-cmd-table caption { text-align: left; padding-bottom: var(--space-4); font: var(--text-h3); }
+  .e-cmd-table th { padding: 0 var(--space-4) var(--space-3) 0; text-align: left; font: var(--text-small); font-weight: 600; color: var(--text-muted); }
+  .e-cmd-table td { padding: var(--space-4) var(--space-4) var(--space-4) 0; border-top: 1px solid var(--border-subtle); vertical-align: top; }
+  .e-cmd-table td:first-child code { white-space: nowrap; }
+  .e-cmd-table .e-alias { display: block; margin-top: 4px; font: var(--text-small); color: var(--text-muted); }
+  .e-cmd-table .e-who-runs { font-weight: 600; }
+  @media (min-width: 1024px) { .e-cmds__grid { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: var(--space-12); } }
+  @media (max-width: 767px) {
+    .e-cmd-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    .e-cmd-table tr { display: grid; gap: var(--space-1); padding: var(--space-4) 0; border-top: 1px solid var(--border-subtle); }
+    .e-cmd-table td { display: block; padding: 0; border: 0; }
+    .e-cmd-table td:first-child code { white-space: normal; }
+    .e-cmd-table td.e-who-runs::before { content: "Runs it: "; font-weight: 400; color: var(--text-muted); }
+  }
+
+  /* ---------- features ---------- */
+  .e-feat { display: grid; gap: var(--space-24); }
+  .e-feat__block { display: grid; gap: var(--space-8); }
+  .e-feat__copy { display: grid; gap: var(--space-4); align-content: start; }
+  .e-proof { width: 100%; border-collapse: collapse; font: var(--text-body); }
+  .e-proof caption { caption-side: bottom; text-align: left; padding-top: var(--space-3); font: var(--text-small); color: var(--text-muted); }
+  .e-proof caption a { color: var(--text-cyan); }
+  .e-proof th { padding: 0 var(--space-4) var(--space-3) 0; text-align: left; font: var(--text-small); font-weight: 600; color: var(--text-muted); }
+  .e-proof td { padding: var(--space-4) var(--space-4) var(--space-4) 0; border-top: 1px solid var(--border-subtle); vertical-align: top; }
+  .e-proof td:last-child, .e-proof th:last-child { padding-right: 0; text-align: right; }
+  .e-proof .e-result { font: 600 15px/22px var(--font-mono); white-space: nowrap; color: var(--info-fg); }
+  .e-proof .e-sub { display: block; font: var(--text-small); color: var(--text-muted); }
+  .e-surfaces { display: grid; gap: var(--space-8); }
+  .e-surface { display: grid; gap: var(--space-3); align-content: start; min-width: 0; }
+  .e-surface .e-p { font-size: 16px; line-height: 26px; color: var(--text-muted); max-width: 52ch; }
+  .e-surface__right { display: grid; gap: var(--space-8); align-content: start; min-width: 0; }
+  /* Product fragments (data-ui): their own panels and rules */
+  .e-addon { border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-raised); overflow: hidden; font: var(--text-small); }
+  .e-addon__tabs { display: flex; gap: var(--space-4); padding: 0 var(--space-4); border-bottom: 1px solid var(--border-subtle); color: var(--text-muted); white-space: nowrap; overflow: hidden; }
+  .e-addon__tabs span { padding: 10px 0; }
+  .e-addon__tabs [aria-current] { color: var(--text-primary); font-weight: 600; box-shadow: inset 0 -2px 0 var(--text-cyan); }
+  .e-addon__bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-4); }
+  .e-fake-btn { display: inline-flex; align-items: center; min-height: 28px; padding: 0 10px; border-radius: var(--radius-md); border: 1px solid var(--border-strong); font-weight: 600; }
+  .e-fake-btn--primary { background: var(--action-primary); color: var(--on-action-primary); border-color: var(--action-primary); }
+  .e-addon__status { margin-left: auto; color: var(--change-fg); font-weight: 600; }
+  .e-addon__rows { margin: 0; padding: 0 var(--space-2); list-style: none; }
+  .e-addon__rows li { display: flex; justify-content: space-between; gap: var(--space-4); padding: 8px var(--space-2); border-radius: var(--radius-sm); }
+  .e-addon__rows li[aria-current] { background: var(--bg-surface); }
+  .e-st--pass { color: var(--info-fg); font-weight: 600; }
+  .e-st--diff { color: var(--change-fg); font-weight: 600; }
+  .e-addon__viewer { display: grid; gap: var(--space-2); padding: var(--space-3) var(--space-4) var(--space-4); }
+  .e-addon__viewer-top { display: flex; justify-content: space-between; gap: var(--space-3); color: var(--text-muted); flex-wrap: wrap; }
+  .e-addon__toggle b { color: var(--text-primary); }
+  .e-ghsum { border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-raised); padding: var(--space-4); font: var(--text-small); overflow-x: auto; }
+  .e-ghsum h4 { margin: 0 0 var(--space-2); font: 700 16px/22px var(--font-sans); }
+  .e-ghsum p { margin: 0 0 var(--space-3); }
+  .e-ghsum table { border-collapse: collapse; width: 100%; min-width: 420px; }
+  .e-ghsum th, .e-ghsum td { padding: 6px 8px; border: 1px solid var(--border-subtle); text-align: left; vertical-align: top; }
+  .e-ghsum th { background: var(--bg-surface); font-weight: 600; }
+  .e-ghsum .e-ghsum__report { margin: var(--space-3) 0 0; }
+  .e-facts { display: grid; gap: var(--space-12); }
+  .e-facts__col { display: grid; gap: var(--space-4); align-content: start; min-width: 0; }
+  .e-facts ul { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--space-4); }
+  .e-facts li { font: var(--text-body); padding-left: var(--space-6); position: relative; }
+  .e-facts li::before { content: "✓"; position: absolute; left: 0; top: 0; color: var(--info-fg); font: 700 14px/26px var(--font-mono); }
+  .e-facts li b { font-weight: 600; }
+  .e-facts pre { font-size: 13px; line-height: 21px; }
+  @media (min-width: 1024px) {
+    .e-feat__block--pixels { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--space-12); }
+    .e-surfaces { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-12); }
+    .e-facts { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  }
+  @media (max-width: 639px) {
+    .e-ghsum { padding: var(--space-3); }
+    .e-ghsum table { min-width: 0; font-size: 12px; line-height: 16px; }
+    .e-ghsum th, .e-ghsum td { padding: 4px 5px; overflow-wrap: anywhere; }
+    .e-proof thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    .e-proof tr { display: grid; gap: 2px; padding: var(--space-3) 0; border-top: 1px solid var(--border-subtle); }
+    .e-proof td { display: block; padding: 0; border: 0; text-align: left !important; }
+  }
+
+  /* ---------- FAQ ---------- */
+  .e-faq__grid { display: grid; gap: var(--space-8); }
+  .e-faq__intro { display: grid; gap: var(--space-4); align-content: start; }
+  .e-faq__intro a { color: var(--text-cyan); }
+  .e-faq__list { display: flex; flex-direction: column; gap: var(--space-2); }
+  html[data-t-lead="human-first"] .e-faq__list [data-faq="agent"] { order: 1; }
+  .e-faq details { border-radius: var(--radius-md); background: var(--bg-surface); }
+  .e-faq summary {
+    display: flex; justify-content: space-between; align-items: start; gap: var(--space-4);
+    padding: var(--space-4) var(--space-6); list-style: none; cursor: pointer;
+    font: 600 17px/26px var(--font-sans); border-radius: var(--radius-md);
+  }
+  .e-faq summary::-webkit-details-marker { display: none; }
+  .e-faq summary::after { content: "+"; flex: none; width: 1ch; font: 400 22px/26px var(--font-sans); color: var(--text-muted); }
+  .e-faq details[open] summary::after { content: "−"; }
+  .e-faq summary:hover { background: color-mix(in srgb, var(--bg-surface) 70%, var(--border-subtle)); }
+  .e-faq details > p { margin: 0; padding: 0 var(--space-6) var(--space-6); font: var(--text-body); max-width: 68ch; }
+  .e-faq details > p a { color: var(--text-cyan); }
+  @media (min-width: 1024px) {
+    .e-faq__grid { grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: var(--space-12); }
+    .e-faq__intro { position: sticky; top: 96px; }
+  }
+  @media (max-width: 767px) { .e-faq summary { padding: var(--space-4); } .e-faq details > p { padding: 0 var(--space-4) var(--space-4); } }
+
+  /* ---------- last call ---------- */
+  .e-cta { background: var(--bg-surface); }
+  .e-cta__grid { display: grid; gap: var(--space-12); }
+  .e-cta__copy { display: grid; gap: var(--space-6); align-content: start; }
+  .e-cta__copy a { color: var(--text-cyan); }
+  .e-routes { display: flex; flex-direction: column; gap: var(--space-8); }
+  html[data-t-lead="human-first"] .e-routes .e-route--self { order: -1; }
+  .e-route { display: grid; gap: var(--space-3); }
+  .e-route .e-prompt { background: var(--bg-raised); }
+  .e-route .e-small { color: var(--text-muted); }
+  @media (min-width: 1024px) { .e-cta__grid { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: var(--space-24); } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .e-plate--magenta, .e-row, .e-seg button, .e-pm__btn { transition: none; }
+    .e-scene .e-l.is-anim { animation: none !important; }
+  }
+  html[data-motion="still"] .e-plate--magenta { transition: none; }
+</style>
+<script>
+  window.VC_PAGE = {
+    set: 'landing',
+    key: 'E',
+    toggles: [
+      { id: 'hero', label: 'Hero', options: ['session', 'split'] },
+      { id: 'ui', label: 'Agent UI', options: ['terminal', 'chat'] },
+      { id: 'lead', label: 'Lead', options: ['agent-first', 'human-first'] }
+    ]
+  };
+</script>
+<script src="../shared/proto-kit.js"></script>
+</head>
+<body id="top">
+<div data-kit="header"></div>
+<main>
+
+  <!-- ================= hero ================= -->
+  <section data-slot="hero" class="e-sec e-hero" aria-labelledby="e-hero-title">
+    <div class="e-wrap">
+      <h1 id="e-hero-title" class="display e-hero__title">
+        <span data-lead="agent" data-copy>
+          <span data-copy-alt>Your agent can't see the UI. <span class="e-nb">visual-check</span> can.</span>
+          <span data-copy-alt>Your agent edited Card.css. Which stories moved?</span>
+          <span data-copy-alt>Let your agent check its own UI work</span>
+        </span>
+        <span data-lead="human" data-copy>
+          <span data-copy-alt>See which stories moved before you merge</span>
+          <span data-copy-alt>Same pixels on your laptop and in CI</span>
+          <span data-copy-alt>Every story, checked against what you approved</span>
+        </span>
+      </h1>
+
+      <div class="e-hero__grid">
+        <div class="e-hero__copy">
+          <p class="e-hero__lead" data-lead="agent"><code>init</code> installs an agent skill. After a UI change, your agent runs visual-check, then tells you which stories moved, by how many pixels, and where each visual diff is. Baselines change only when you say so.</p>
+          <p class="e-hero__lead" data-lead="human">visual-check snapshots every story in a pinned browser, compares each with the baseline you approved and names the ones that moved, with a visual diff. Run it in your terminal, in CI or from your coding agent.</p>
+
+          <div class="e-ctas">
+            <div class="e-prompt">
+              <p class="e-prompt__text">“Set up visual-check in this repo with <code>npx @visual-check/cli init</code>, then run it after UI changes.”</p>
+              <button type="button" class="vc-btn vc-btn--primary vc-btn--lg" data-e-copy="prompt" data-lead="agent">Copy a prompt for your agent</button>
+              <button type="button" class="vc-btn vc-btn--secondary" data-e-copy="prompt" data-lead="human">Copy a prompt for your agent</button>
+            </div>
+            <div class="vc-code e-install">
+              <div class="vc-code__bar">
+                <span class="e-pm" role="group" aria-label="Package manager">
+                  <button type="button" class="e-pm__btn" aria-pressed="true" data-e-pm="npx">npm</button>
+                  <button type="button" class="e-pm__btn" aria-pressed="false" data-e-pm="pnpm dlx">pnpm</button>
+                  <button type="button" class="e-pm__btn" aria-pressed="false" data-e-pm="yarn dlx">yarn</button>
+                  <button type="button" class="e-pm__btn" aria-pressed="false" data-e-pm="bunx">bun</button>
+                </span>
+                <button type="button" class="vc-code__copy" data-e-copy="install">Copy</button>
+              </div>
+              <pre><span class="p">$ </span><span class="e-install__cmd">npx @visual-check/cli init</span></pre>
+            </div>
+          </div>
+          <p class="e-small e-hero__fine">Open source under the MIT licence. Runs on your machine and in your CI. Storybook 9.1, 10 and 11.</p>
+        </div>
+
+        <div class="e-hero__show">
+          <div class="e-stage e-scene" id="e-hero-stage">
+            <div class="e-hero__col">
+              <div class="e-session" data-ui role="group" aria-label="Coding-agent session, simulated">
+                <div class="e-session__bar">
+                  <span><span class="e-session__title">Coding agent</span> · ~/shop</span>
+                  <span>Simulated</span>
+                </div>
+                <div class="e-session__body">
+                  <p class="e-you e-l" data-s="ask"><span class="e-who">You: </span><span class="e-ask">Tighten the padding on cards</span></p>
+
+                  <div class="e-tool e-l" data-s="read">
+                    <p class="e-tool__head"><b>Read</b><code>.agents/skills/visual-check/SKILL.md</code></p>
+                  </div>
+
+                  <div class="e-tool e-l" data-s="edit">
+                    <p class="e-tool__head"><b>Edit</b><code>src/components/Card.css</code></p>
+<pre class="e-tool__out">12  .card {
+<span class="e-del">13 −   padding: 24px;</span>
+<span class="e-add">13 <b>+</b>   padding: 16px;</span></pre>
+                  </div>
+
+                  <div class="e-tool e-l" data-s="run">
+                    <p class="e-tool__head"><b>Run</b><code>node .agents/skills/visual-check/scripts/run.mjs test</code></p>
+                    <div class="e-tool__out e-tool__out--lines"><span class="e-l" data-s="reuse">Reused Storybook web, which was already running at http://127.0.0.1:6006.</span><span class="e-l e-json" data-s="json">{"version":1,"visualCheck":"0.1.0","command":"test",…,"exitCode":1,…,"selection":{"by":"affected",…,"changedFiles":1,…},…,"counts":{"passed":12,"flaky":0,"differs":2,"broken":0,"missing":0,"orphan":0},"snapshots":[…]}</span><span class="e-l" data-s="exit">Exit code 1</span></div>
+                  </div>
+
+                  <div class="e-reply e-l" data-s="r1">
+                    <span class="e-who">Agent</span>
+                    <div class="e-report">
+                      <p class="e-l" data-s="r1">visual-check ran on 14 affected snapshots: 12 passed, <b>2 differ</b>.</p>
+                      <ul>
+                        <li class="e-l" data-s="r2"><code>components-card--default</code> (default capture): 1186 pixels differ. Diff: <code>.visual-check/report/images/web/components-card--default.diff.png</code></li>
+                        <li class="e-l" data-s="r3"><code>pages-pricing--default</code> (mobile): 4212 pixels differ. Diff: <code>.visual-check/report/images/web/pages-pricing--default.mobile.diff.png</code></li>
+                      </ul>
+                      <p class="e-l" data-s="r4">Both come from my padding change in <code>Card.css</code>. If they're intended, run <code>pnpm visual:update</code>. I won't run <code>update</code> without your OK.</p>
+                      <p class="e-l" data-s="r5">There are no missing baselines, orphans or flaky snapshots. I reused Storybook web at http://127.0.0.1:6006.</p>
+                    </div>
+                  </div>
+                </div>
+                <div class="e-session__foot">
+                  <span class="e-status">Waiting for your reply</span>
+                  <span class="e-session__foot-skill">skill: visual-check</span>
+                </div>
+              </div>
+
+              <div class="vc-code e-approve" data-ui>
+                <div class="vc-code__bar"><span>Your terminal</span><span>Only you write baselines</span></div>
+<pre><span class="e-l" data-s="approve"><span class="p">$ </span><span class="e-approve-cmd">pnpm visual:update</span></span>
+<span class="e-l c" data-s="u1">visual-check 0.1.0 · update · 14 snapshots · 4 workers</span>
+<span class="e-l" data-s="u2"><span class="s">✓</span> web  components-card--default  written: differs: 1186 differ, 20 allowed</span>
+<span class="e-l" data-s="u3"><span class="s">✓</span> web  pages-pricing--default  mobile  written: differs: 4212 differ, 80 allowed (20 at scale 2)</span>
+<span class="e-l" data-s="u4">2 written · 12 kept</span></pre>
+              </div>
+            </div>
+
+            <div class="e-diffs" data-ui role="group" aria-label="The two visual diffs the agent named">
+              <div class="e-diffs__head">
+                <p class="e-diffs__title">What the agent could only count</p>
+                <span class="vc-badge-row">
+                  <span class="vc-badge vc-badge--passed"><span class="vc-badge__glyph">✓</span>passed<span class="vc-badge__count">12</span></span>
+                  <span class="vc-badge vc-badge--changed"><span class="vc-badge__glyph">≠</span>changed<span class="vc-badge__count">2</span></span>
+                </span>
+              </div>
+              <figure class="e-diff" data-s="diff-1">
+                <figcaption class="e-diff__meta">
+                  <code>components-card--default</code><span>Default</span>
+                  <span class="vc-badge vc-badge--changed e-diff__badge"><span class="vc-badge__glyph">≠</span>changed<span class="vc-badge__count">1186</span></span>
+                </figcaption>
+                <div class="e-canvas e-canvas--hero" data-story="card" data-modes="register" role="img" aria-label="The product card, baseline in cyan and snapshot in magenta printed over it. The card's content sits 8 pixels higher and further left in the snapshot."></div>
+              </figure>
+              <figure class="e-diff" data-s="diff-2">
+                <figcaption class="e-diff__meta">
+                  <code>pages-pricing--default</code><span>mobile</span>
+                  <span class="vc-badge vc-badge--changed e-diff__badge"><span class="vc-badge__glyph">≠</span>changed<span class="vc-badge__count">4212</span></span>
+                </figcaption>
+                <div class="e-canvas e-canvas--hero" data-story="pricing" data-modes="register" role="img" aria-label="The top of the pricing page at phone width, baseline in cyan and snapshot in magenta. Both plan cards are shorter and the second card sits higher."></div>
+              </figure>
+              <p class="e-small e-diffs__key"><span><span class="e-swatch e-swatch--c"></span>Baseline</span><span><span class="e-swatch e-swatch--m"></span>Snapshot</span><span><span class="e-swatch e-swatch--k"></span>Where they agree</span></p>
+            </div>
+          </div>
+
+          <div class="e-hero__meta">
+            <div id="e-hero-controls"></div>
+            <p class="e-small">Simulated session in a generic coding agent. The commands, file names and output follow visual-check's own formats.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= problem ================= -->
+  <section data-slot="problem" class="e-sec e-problem" aria-labelledby="e-problem-title">
+    <div class="e-wrap">
+      <h2 id="e-problem-title" class="e-h2 e-problem__title">
+        <span data-lead="agent" data-copy>
+          <span data-copy-alt>Agents change UI faster than anyone looks at it</span>
+          <span data-copy-alt>Every check passed, and the pricing page moved</span>
+        </span>
+        <span data-lead="human" data-copy>
+          <span data-copy-alt>A one-line change moves forty stories</span>
+          <span data-copy-alt>Nobody reads pixels in review</span>
+        </span>
+      </h2>
+      <div class="e-problem__grid">
+      <div class="e-problem__copy">
+        <p class="e-p" data-lead="agent">A coding agent reads code and runs what you give it: the type checker, the linter, the unit tests. On a padding change they all pass, because none of them looks at the screen. The agent can't see what it changed, and nobody opens every story it touched.</p>
+        <p class="e-p" data-lead="human">A shared token or component sits under dozens of stories. Change it and every one of them can move, while the pull request shows one line of CSS. Nobody reads pixels in review, so the change ships as it is.</p>
+        <p class="e-p">visual-check gives that change something to be checked against: every story it can reach, compared with the baseline you approved, with the moved ones named.</p>
+        <p class="e-aside" data-lead="agent">The Claude Code docs put it plainly: “Give Claude something it can run that comes back pass or fail.” visual-check exits 0 when every story matches, 1 when a story differs, broke or has no baseline, and 2 when it couldn't run. <a href="https://code.claude.com/docs/en/best-practices" target="_blank" rel="noopener">Read the guide</a></p>
+        <p class="e-aside" data-lead="human">In CI the same exit codes fail the job: 0 when every story matches, 1 when a story differs, broke or has no baseline, and 2 when visual-check couldn't run.</p>
+      </div>
+
+      <figure class="e-ledger-wrap">
+        <table class="e-ledger">
+          <caption>
+            <span data-lead="agent">One afternoon with a coding agent on a shop's front end. An illustration, not a measurement.</span>
+            <span data-lead="human">One afternoon of pull requests on a shop's front end. An illustration, not a measurement.</span>
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Time</th>
+              <th scope="col"><span data-lead="agent">What the agent was asked</span><span data-lead="human">What changed</span></th>
+              <th scope="col">File</th>
+              <th scope="col" class="e-num">Stories it reaches</th>
+              <th scope="col" class="e-num">Stories anyone opened</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td class="e-time">14:02</td><td class="e-what">Tighten the padding on cards</td><td><code>Card.css</code></td><td class="e-num" data-label="Reaches"><b>14</b></td><td class="e-num" data-label="Opened"><b>1</b></td></tr>
+            <tr><td class="e-time">14:20</td><td class="e-what">Darken the primary button</td><td><code>tokens.css</code></td><td class="e-num" data-label="Reaches"><b>62</b></td><td class="e-num" data-label="Opened"><b>0</b></td></tr>
+            <tr><td class="e-time">14:37</td><td class="e-what">Move the price under the title</td><td><code>PriceTag.tsx</code></td><td class="e-num" data-label="Reaches"><b>9</b></td><td class="e-num" data-label="Opened"><b>2</b></td></tr>
+            <tr><td class="e-time">15:05</td><td class="e-what">Shorten the empty-bag message</td><td><code>EmptyBag.tsx</code></td><td class="e-num" data-label="Reaches"><b>3</b></td><td class="e-num" data-label="Opened"><b>1</b></td></tr>
+          </tbody>
+          <tfoot><tr><td colspan="5">Each one passed type checks, lint and unit tests.</td></tr></tfoot>
+        </table>
+      </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= demo ================= -->
+  <section data-slot="demo" class="e-sec e-demo" aria-labelledby="e-demo-title">
+    <div class="e-wrap">
+      <div class="e-head e-head--split">
+        <h2 id="e-demo-title" class="e-h2">
+          <span data-lead="agent" data-copy>
+            <span data-copy-alt>The agent counts pixels. You see the card.</span>
+            <span data-copy-alt>What 1186 pixels look like</span>
+          </span>
+          <span data-lead="human" data-copy>
+            <span data-copy-alt>Every story that moved, with its visual diff</span>
+            <span data-copy-alt>See the change, not just the count</span>
+          </span>
+        </h2>
+        <p class="e-p" data-lead="agent">The agent's report says <code>1186 pixels differ</code> and gives a path. Drag across the snapshot to see what it counted: the card's content moved 8px up and to the left when its padding shrank.</p>
+        <p class="e-p" data-lead="human">The terminal names each story that moved and writes a visual diff beside its baseline and snapshot. Drag between the two, or switch to the visual diff.</p>
+      </div>
+
+      <div class="e-viewer" data-ui id="e-viewer" data-story="card" data-view="slider">
+        <div class="e-viewer__rail">
+          <p class="e-viewer__run">visual-check 0.1.0 · test · 14 snapshots</p>
+          <button type="button" class="e-row" data-e-story="card" aria-pressed="true">
+            <span class="e-row__id">components-card--default</span>
+            <span class="e-row__mode">Default</span>
+            <span class="vc-badge vc-badge--changed"><span class="vc-badge__glyph">≠</span>changed<span class="vc-badge__count">1186</span></span>
+          </button>
+          <button type="button" class="e-row" data-e-story="pricing" aria-pressed="false">
+            <span class="e-row__id">pages-pricing--default</span>
+            <span class="e-row__mode">mobile</span>
+            <span class="vc-badge vc-badge--changed"><span class="vc-badge__glyph">≠</span>changed<span class="vc-badge__count">4212</span></span>
+          </button>
+          <p class="e-row e-row--static"><span><span class="vc-badge vc-badge--passed"><span class="vc-badge__glyph">✓</span>passed<span class="vc-badge__count">12</span></span>&nbsp; other snapshots match their baselines</span></p>
+        </div>
+
+        <div class="e-viewer__main">
+          <div class="e-viewer__tools">
+            <span class="e-seg" role="group" aria-label="View">
+              <button type="button" data-e-view="slider" aria-pressed="true">Slider</button>
+              <button type="button" data-e-view="diff" aria-pressed="false">Visual diff</button>
+            </span>
+            <span class="e-viewer__caption">Left: baseline  Right: snapshot</span>
+          </div>
+          <div class="e-canvas e-canvas--viewer" data-story="card" data-modes="slider diff" role="img" aria-label="components-card--default: baseline and snapshot of the product card. The snapshot's content sits 8 pixels higher and further left, and its image is 16 pixels wider.">
+            <input class="e-wipe-input" type="range" min="0" max="100" value="50" aria-label="Wipe between the baseline and the snapshot">
+            <span class="e-wipe" aria-hidden="true"></span>
+          </div>
+          <div class="e-canvas e-canvas--viewer" data-story="pricing" data-modes="slider diff" role="img" aria-label="pages-pricing--default in the mobile mode: baseline and snapshot of the pricing page. Both plan cards are shorter in the snapshot and the second one sits higher.">
+            <input class="e-wipe-input" type="range" min="0" max="100" value="50" aria-label="Wipe between the baseline and the snapshot">
+            <span class="e-wipe" aria-hidden="true"></span>
+          </div>
+          <p class="e-viewer__path">
+            <span data-for="card">Visual diff: <code>.visual-check/report/images/web/components-card--default.diff.png</code></span>
+            <span data-for="pricing">Visual diff: <code>.visual-check/report/images/web/pages-pricing--default.mobile.diff.png</code></span>
+          </p>
+        </div>
+      </div>
+
+      <div class="vc-code e-demo__term" data-ui>
+        <div class="vc-code__bar"><span>The same run in your terminal: pnpm visual:check</span><span>Simulated</span></div>
+<pre><span class="p">$ </span>pnpm visual:check
+<span class="c">visual-check 0.1.0 · test · 14 snapshots · 4 workers</span>
+<span class="k">✗</span> web  components-card--default  differs: 1186 differ, 20 allowed
+<span class="k">✗</span> web  pages-pricing--default  mobile  differs: 4212 differ, 80 allowed (20 at scale 2)
+<span class="c">── 2 failures ──</span>
+web  components-card--default
+  differs: 1186 differ, 20 allowed
+  diff: .visual-check/report/images/web/components-card--default.diff.png
+web  pages-pricing--default  mobile
+  differs: 4212 differ, 80 allowed (20 at scale 2)
+  diff: .visual-check/report/images/web/pages-pricing--default.mobile.diff.png
+12 passed · <span class="k">2 differs</span> · 2.9s
+<span class="c">Report: .visual-check/report/report.json</span></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= agent ================= -->
+  <section data-slot="agent" class="e-sec e-band" aria-labelledby="e-agent-title">
+    <div class="e-wrap">
+      <div class="e-head e-head--split">
+        <h2 id="e-agent-title" class="e-h2">
+          <span data-lead="agent" data-copy>
+            <span data-copy-alt>What the skill tells your agent</span>
+            <span data-copy-alt>A skill with four rules and one script</span>
+          </span>
+          <span data-lead="human">Your coding agent can run the same check</span>
+        </h2>
+        <p class="e-p" data-lead="agent"><code>init</code> writes the skill into your repo: a Markdown file, a script with no dependencies and a small setup file. Your agent runs the same CLI you do, reads the JSON report and answers in a fixed shape.</p>
+        <p class="e-p" data-lead="human">If you work with a coding agent, <code>init</code> also writes a skill that tells it to run visual-check after UI changes and report what moved. It never accepts a change for you.</p>
+      </div>
+
+      <div class="e-agent__grid">
+        <ul class="e-rules">
+          <li class="e-rule">
+            <h3 class="e-h3">Run it after UI changes, before saying it's done</h3>
+            <blockquote>“Use after changing UI code, styles or stories, before saying the work is done, and whenever asked whether a change alters how stories look.”</blockquote>
+            <cite>The skill's description, which is how the agent knows when to load it</cite>
+          </li>
+          <li class="e-rule">
+            <h3 class="e-h3">Report paths, never open images</h3>
+            <blockquote>“Never open a snapshot, a baseline or a visual diff. Give their paths instead.”</blockquote>
+            <p class="e-p">You get the counts, then each story that differs or broke with its mode, its pixel count and its diff path. Missing baselines, orphans, flaky snapshots and a reused Storybook are reported too.</p>
+          </li>
+          <li class="e-rule">
+            <h3 class="e-h3">Never make a failure pass on its own</h3>
+            <blockquote>“Never raise tolerance, disable a story or run <code>update</code> to make a failure pass without the user's explicit OK.”</blockquote>
+            <p class="e-p">The agent runs <code>test</code>. Accepting a change is <code>update</code>, and that stays your call.</p>
+          </li>
+          <li class="e-rule">
+            <h3 class="e-h3">Propose fixes, apply them when you agree</h3>
+            <blockquote>“Propose each fix with its snippet, and apply it only once the user agrees.”</blockquote>
+            <p class="e-p">Fixes come in a set order: a run error first, then broken stories by reason, then remote content, then flaky snapshots with a mask or a <code>wait</code>.</p>
+          </li>
+        </ul>
+
+        <div class="e-agent__side">
+          <div class="vc-code e-tree">
+            <div class="vc-code__bar"><span>Written by init</span><span>Committed</span></div>
+<pre>.agents/skills/visual-check/
+  SKILL.md          <span class="c">when to run, how to report</span>
+  scripts/run.mjs   <span class="c">runs visual-check</span>
+  setup.json        <span class="c">how to start each Storybook</span>
+.claude/skills/visual-check
+                    <span class="c">a link to the folder above</span></pre>
+          </div>
+          <h3 class="e-h3">Which agents read it</h3>
+          <p class="e-p e-muted">The skill lives in <code>.agents/skills/visual-check/</code>, and <code>.claude/skills/visual-check</code> links to it (on Windows it's a copy). Claude Code picks it up from there, and so does any agent that reads Agent Skills.</p>
+          <h3 class="e-h3">If Storybook isn't running</h3>
+          <p class="e-p e-muted">The script starts it from <code>setup.json</code>, waits up to 180 s for it to answer, runs the check and stops what it started. If Storybook was already up, it says so.</p>
+          <div class="vc-code e-runner">
+            <div class="vc-code__bar"><span>scripts/run.mjs, on stderr</span></div>
+<pre><span class="c">Starting Storybook web in apps/web: pnpm run storybook --ci --exact-port</span>
+<span class="c">Storybook web answers at http://127.0.0.1:6006 after 7.4s.</span>
+<span class="c">Stopped Storybook web.</span></pre>
+          </div>
+          <h3 class="e-h3">Why a skill and not a server</h3>
+          <p class="e-p e-muted">A skill is a text file and a plain Node script. The agent calls the CLI you already have and loads no tool schemas, so there's nothing to host and nothing extra in its context.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= commands ================= -->
+  <section data-slot="commands" class="e-sec e-cmds" aria-labelledby="e-cmds-title">
+    <div class="e-wrap">
+      <div class="e-head e-head--split">
+        <h2 id="e-cmds-title" class="e-h2">
+          <span data-lead="agent" data-copy>
+            <span data-copy-alt>One command sets up you and your agent</span>
+            <span data-copy-alt>Three commands, and one of them is yours alone</span>
+          </span>
+          <span data-lead="human" data-copy>
+            <span data-copy-alt>One command to try it</span>
+            <span data-copy-alt>Three commands, one config file</span>
+          </span>
+        </h2>
+        <p class="e-p"><code>npx @visual-check/cli init</code> finds your Storybooks, asks a few questions, installs what it needs and writes one config file. A first <code>update</code> then <code>test</code> passes without editing a story.</p>
+      </div>
+
+      <div class="e-cmds__grid">
+        <figure class="e-cmds__term">
+          <div class="vc-code e-init e-scene" data-ui id="e-init-stage">
+            <div class="vc-code__bar"><span>Terminal · ~/shop</span><span>Real strings, simulated timing</span></div>
+<pre><span class="p">$ </span><span class="e-init-cmd">npx @visual-check/cli init</span>
+<span class="e-l" data-s="h"><span class="s">✓</span><span class="k">✓</span> <span class="c">visual-check init</span></span>
+<span class="e-l" data-s="q1">? Name of the Storybook in apps/web  <span class="c">›</span> web</span>
+<span class="e-l" data-s="q2">? URL of web  <span class="c">›</span> http://127.0.0.1:6006</span>
+<span class="e-l e-skill" data-s="q3">? Install the agent skill?  <span class="c">›</span> ● Yes  ○ No</span>
+<span class="e-l" data-s="ok"><span class="s">✓</span> visual-check is set up</span>
+<span class="e-l" data-s="n0">Next</span>
+<span class="e-l" data-s="n1">  1  pnpm storybook       <span class="c">Start Storybook, and keep it running</span></span>
+<span class="e-l" data-s="n2">  2  pnpm visual:update   <span class="c">Write the first baselines</span></span>
+<span class="e-l" data-s="n3">  3  pnpm visual:check    <span class="c">Check the stories against the baselines</span></span>
+<span class="e-l" data-s="n4">  4  <span class="c">Commit the changes, baselines included</span></span></pre>
+          </div>
+          <div id="e-init-controls"></div>
+        </figure>
+
+        <div class="e-writes">
+          <h3 class="e-h3">What it changes in your repo</h3>
+          <ul>
+            <li><span><code>visual-check.config.ts</code></span><span class="e-writes__note">The one config file: your Storybooks and their URLs.</span></li>
+            <li><span><code>.storybook/visual-check.ts</code></span><span class="e-writes__note">Modes and options for every story, through the <code>visualCheck(...)</code> helper.</span></li>
+            <li><span><code>visual:check</code> and <code>visual:update</code></span><span class="e-writes__note">Two scripts in <code>package.json</code>.</span></li>
+            <li><span><code>.agents/skills/visual-check/</code></span><span class="e-writes__note">The agent skill, linked from <code>.claude/skills/visual-check</code>. Answer No and it's left out.</span></li>
+            <li><span><code>.visual-check/</code></span><span class="e-writes__note">Baselines beside each Storybook, committed. The report stays out of git.</span></li>
+          </ul>
+          <p class="e-small">It never edits your preview file or your stories.</p>
+        </div>
+      </div>
+
+      <table class="e-cmd-table">
+        <caption>Who runs what</caption>
+        <thead><tr><th scope="col">Command</th><th scope="col">What it does</th><th scope="col">Who runs it</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>npx @visual-check/cli init</code></td>
+            <td>Sets up visual-check in this project, the agent skill included.</td>
+            <td class="e-who-runs">You, once</td>
+          </tr>
+          <tr>
+            <td><code>pnpm visual:check</code><span class="e-alias">visual-check test</span></td>
+            <td>Captures snapshots and compares them with baselines. Exits 1 when a story differs, broke or has no baseline.</td>
+            <td class="e-who-runs">You, your agent and CI</td>
+          </tr>
+          <tr>
+            <td><code>pnpm visual:update</code><span class="e-alias">visual-check update</span></td>
+            <td>Writes missing and failing baselines and deletes orphans. Local only: with <code>CI</code> set it exits 2.</td>
+            <td class="e-who-runs">You, or your agent when you ask</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= features ================= -->
+  <section data-slot="features" class="e-sec e-features" aria-labelledby="e-feat-title">
+    <div class="e-wrap">
+      <div class="e-head e-head--split">
+        <h2 id="e-feat-title" class="e-h2">The same check, wherever you review</h2>
+        <p class="e-p">The agent is one way to run it. Your terminal, the GitHub Action and the Storybook addon run the same check against the same baselines.</p>
+      </div>
+
+      <div class="e-feat">
+        <div class="e-feat__block e-feat__block--pixels">
+          <div class="e-feat__copy">
+            <h3 class="e-h3">Same pixels on every machine</h3>
+            <p class="e-p">The browser runs in visual-check's own image, pinned by digest, as <code>linux/amd64</code> by default. A baseline written on a Mac passes in Linux CI and on Windows, because each one renders in the same browser with the same fonts.</p>
+            <p class="e-p">On an M-series Mac the amd64 image runs emulated, so it's slower. <code>platform: 'linux/arm64'</code> is the faster option, and the default tolerance absorbs the small rendering difference.</p>
+          </div>
+          <table class="e-proof">
+            <caption>Real runs in the public CI of <a href="https://github.com/visual-check/test-apps" target="_blank" rel="noopener">visual-check/test-apps</a>, on GitHub-hosted runners with 4 workers.</caption>
+            <thead><tr><th scope="col">Storybook</th><th scope="col">Where it ran</th><th scope="col">Result</th></tr></thead>
+            <tbody>
+              <tr><td>sb11 test app<span class="e-sub">Storybook 11</span></td><td>Linux runner</td><td class="e-result">108 passed · 10.8s</td></tr>
+              <tr><td>freecodecamp-ui<span class="e-sub">The same 108 snapshots</span></td><td>Windows with Docker Desktop</td><td class="e-result">108 passed · 16.9s</td></tr>
+              <tr><td>dnd-kit<span class="e-sub">Five Storybooks: React, vanilla, Vue, Solid, Svelte</span></td><td>Linux runner, one run</td><td class="e-result">110 passed · 19.1s</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="e-surfaces">
+          <div class="e-surface">
+            <h3 class="e-h3">In Storybook, on the story you have open</h3>
+            <p class="e-p">The addon's Visual check panel runs Check and Update on the open story, every mode it lists, with a wipe slider. Storybook 10.</p>
+            <div class="e-addon" data-ui aria-label="The Storybook addon's Visual check panel" role="img">
+              <div class="e-addon__tabs"><span>Controls</span><span>Actions</span><span aria-current="true">Visual check</span></div>
+              <div class="e-addon__bar">
+                <span class="e-fake-btn e-fake-btn--primary">Check</span><span class="e-fake-btn">Update</span>
+                <span class="e-addon__status">2 visual diffs</span>
+              </div>
+              <ul class="e-addon__rows">
+                <li><span>Default</span><span class="e-st--pass">✓ Passed</span></li>
+                <li aria-current="true"><span>dark</span><span class="e-st--diff">≠ Visual diff</span></li>
+                <li><span>mobile</span><span class="e-st--diff">≠ Visual diff</span></li>
+              </ul>
+              <div class="e-addon__viewer">
+                <div class="e-addon__viewer-top"><span class="e-addon__toggle"><b>Slider</b> | Visual diff</span><span>Left: baseline  Right: snapshot</span></div>
+                <div class="e-canvas e-canvas--addon" data-story="card" data-modes="slider"><span class="e-wipe" aria-hidden="true"></span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="e-surface__right">
+            <div class="e-surface">
+              <h3 class="e-h3">In the pull request</h3>
+              <p class="e-p"><code>uses: visual-check/action@v1</code> writes a step summary and uploads the report as an artifact. It needs only <code>contents: read</code>, so it runs on pull requests from forks.</p>
+              <div class="e-ghsum" data-ui aria-label="The step summary the Action writes">
+                <h4>visual-check 0.1.0 · test</h4>
+                <p>12 passed · 2 differs</p>
+                <p><b>Failures</b></p>
+                <table>
+                  <thead><tr><th>Storybook</th><th>Story</th><th>Mode</th><th>Status</th><th>Message</th></tr></thead>
+                  <tbody>
+                    <tr><td>web</td><td>components-card--default</td><td></td><td>differs</td><td>1186 differ, 20 allowed</td></tr>
+                    <tr><td>web</td><td>pages-pricing--default</td><td>mobile</td><td>differs</td><td>4212 differ, 80 allowed (20 at scale 2)</td></tr>
+                  </tbody>
+                </table>
+                <p class="e-ghsum__report"><b>Report:</b> <span class="vc-link">visual-check-report</span> (zipped <code>report.json</code> and images)</p>
+              </div>
+            </div>
+            <div class="e-surface">
+              <h3 class="e-h3">In a JSON report, for scripts and agents</h3>
+              <p class="e-p"><code>.visual-check/report/report.json</code> holds every count, story, mode, pixel count and image path. It's what the agent reads.</p>
+              <div class="vc-code">
+                <div class="vc-code__bar"><span>report.json, one entry</span></div>
+<pre>"counts": { "passed": 12, "differs": 2, … },
+"snapshots": [{
+  "id": "components-card--default",
+  "mode": null,
+  "status": "differs",
+  "pixels": { "differ": 1186, "allowed": 20, … },
+  "images": {
+    "diff": "images/web/components-card--default.diff.png", …
+  }
+}, …]</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="e-facts">
+          <div class="e-facts__col">
+            <h3 class="e-h3">Fast because it's narrow</h3>
+            <ul>
+              <li><b>Affected stories.</b> A run covers only the stories your changed files can reach; <code>--all</code> covers every one.</li>
+              <li><b>Its own browser driver, no Playwright.</b> 3.30 captures/s against 2.71 for Playwright's <code>run-server</code>, 2 workers on 2 vCPUs over 300 real stories.</li>
+              <li><b>A story ready in 80 ms instead of 170 ms,</b> through Storybook's test path.</li>
+              <li><b>Identical bytes pass without decoding images,</b> 98–99% of the time on unchanged snapshots.</li>
+              <li><b>Shards</b> split a run across CI jobs, with a consistency check for missing baselines and orphans.</li>
+            </ul>
+            <h3 class="e-h3">Nothing leaves your machine</h3>
+            <ul>
+              <li>No service and no account, and no per-snapshot bill.</li>
+              <li>Baselines are PNG files in your repo, reviewed in the pull request like code.</li>
+              <li>MIT licence.</li>
+            </ul>
+          </div>
+          <div class="e-facts__col">
+            <h3 class="e-h3">Honest with real stories</h3>
+            <ul>
+              <li>Animations are captured at their end state.</li>
+              <li>Readiness waits for fonts and images, and a <code>wait</code> hook covers the rest.</li>
+              <li>Masks hide a clock by selector, or remote content by host.</li>
+              <li>A failing snapshot is retried once. A flaky one is listed and never fails the run.</li>
+              <li>The default tolerance <code>{ color: 0.01, pixels: 20 }</code> still catches 89–100% of small deliberate changes in the measured set. Counting anti-aliased pixels caught 259 of 260 hidden icons, against 118 when they're ignored.</li>
+            </ul>
+            <div class="vc-code">
+              <div class="vc-code__bar"><span>Card.stories.tsx</span></div>
+<pre><span class="k">export const</span> Default: StoryObj&lt;<span class="k">typeof</span> meta&gt; = {
+  parameters: {
+    ...visualCheck({
+      modes: [<span class="s">'dark'</span>, <span class="s">'mobile'</span>],
+      masks: { clock: { selector: <span class="s">'[data-clock]'</span> } },
+      wait: <span class="k">async</span> ({ canvas }) =&gt; {
+        <span class="k">await</span> canvas.findByText(<span class="s">'Late content'</span>)
+      },
+    }),
+  },
+}</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= faq ================= -->
+  <section data-slot="faq" class="e-sec e-faq" aria-labelledby="e-faq-title">
+    <div class="e-wrap e-faq__grid">
+      <div class="e-faq__intro">
+        <h2 id="e-faq-title" class="e-h2">Questions before you run it</h2>
+        <p class="e-p">Something missing? <a href="https://github.com/visual-check/visual-check/issues" target="_blank" rel="noopener">Open an issue on GitHub</a>.</p>
+      </div>
+      <div class="e-faq__list">
+        <details data-faq="agent" open>
+          <summary>Does the agent approve its own changes?</summary>
+          <p>No. The skill runs <code>test</code> and reports. It tells the agent never to raise tolerance, disable a story or run <code>update</code> to make a failure pass without your OK. Baselines change only through <code>update</code>, run by you or at your request, and never in CI: <code>update</code> with <code>CI</code> set exits 2.</p>
+        </details>
+        <details data-faq="agent">
+          <summary>Which coding agents can use the skill?</summary>
+          <p><code>init</code> writes it to <code>.agents/skills/visual-check/</code> and commits a link at <code>.claude/skills/visual-check</code>, so Claude Code and agents that read Agent Skills pick it up. Answer No to <code>Install the agent skill?</code> and <code>init</code> leaves it out.</p>
+        </details>
+        <details data-faq="agent">
+          <summary>Does the agent look at the images?</summary>
+          <p>No. It gives you each story, mode, pixel count and diff path instead of opening a snapshot, a baseline or a visual diff. You open the visual diff in <code>.visual-check/report/</code>, in the Storybook addon, or see the changed baselines in the pull request.</p>
+        </details>
+        <details>
+          <summary>Do I need Docker?</summary>
+          <p>By default, yes: that's how the pixels match everywhere. Without Docker, <code>platform: 'host'</code> uses a local browser, and baselines then only match on the same OS.</p>
+        </details>
+        <details>
+          <summary>I'm on Apple silicon. Is the amd64 default slow?</summary>
+          <p>It runs <code>linux/amd64</code> through Rosetta by default, emulated, so slower than native. <code>platform: 'linux/arm64'</code> is faster, and the default tolerance absorbs the small rendering difference.</p>
+        </details>
+        <details>
+          <summary>Will it be flaky?</summary>
+          <p>Animations are captured at their end state, readiness waits for fonts and images, a failing snapshot is retried once, and a flaky one is listed but never fails the run.</p>
+        </details>
+        <details>
+          <summary>Where do baselines live, and who writes them?</summary>
+          <p>In <code>.visual-check/baselines/</code> beside each Storybook, committed. Only <code>update</code> writes them, run by you or by your agent when you ask. CI never does: <code>update</code> with <code>CI</code> set exits 2.</p>
+        </details>
+        <details>
+          <summary>How is it different from a hosted visual-testing service?</summary>
+          <p>It runs in your CI and on your machine. There's no per-snapshot pricing, no upload and no hosted review: you review in the pull request, the Storybook addon and the report.</p>
+        </details>
+        <details>
+          <summary>Which Storybooks and CIs does it support?</summary>
+          <p>Storybook 9.1, 10 and 11; the addon needs 10. GitHub Actions has an Action and a reusable workflow, and the CLI runs anywhere Docker does. Node 22.17 or later, with npm, pnpm, Yarn or Bun.</p>
+        </details>
+        <details>
+          <summary>What does it change in my repo?</summary>
+          <p><code>visual-check.config.ts</code>, <code>.storybook/visual-check.ts</code> for modes, two npm scripts, the agent skill and <code>.visual-check/</code> folders. It never edits your preview or your stories.</p>
+        </details>
+        <details>
+          <summary>What does it cost?</summary>
+          <p>Nothing. It's MIT licensed.</p>
+        </details>
+        <details>
+          <summary>Coming from Loki, Lost Pixel or the Storybook test-runner?</summary>
+          <p>Run <code>init</code> beside it. The docs have <a href="../docs/1.html#migrating">a page for moving over</a>.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= last call ================= -->
+  <section data-slot="cta" class="e-sec e-cta" aria-labelledby="e-cta-title">
+    <div class="e-wrap e-cta__grid">
+      <div class="e-cta__copy">
+        <h2 id="e-cta-title" class="e-h2">
+          <span data-lead="agent" data-copy>
+            <span data-copy-alt>Give your agent something to check</span>
+            <span data-copy-alt>Try it on your agent's next change</span>
+          </span>
+          <span data-lead="human" data-copy>
+            <span data-copy-alt>Run it on the Storybook you have open</span>
+            <span data-copy-alt>Try it before your next pull request</span>
+          </span>
+        </h2>
+        <p class="e-p"><code>init</code> asks a few questions and writes one config file. Then <code>pnpm visual:update</code> writes the first baselines, and <code>pnpm visual:check</code> passes without editing a story.</p>
+        <p class="e-small"><a href="../docs/1.html#getting-started">Read the getting-started guide</a> · <a href="../docs/1.html#agent-skill">How the agent skill works</a></p>
+      </div>
+      <div class="e-routes">
+        <div class="e-route e-route--agent">
+          <h3 class="e-h3">Hand it to your agent</h3>
+          <div class="e-prompt">
+            <p class="e-prompt__text">“Set up visual-check in this repo with <code>npx @visual-check/cli init</code>, then run it after UI changes.”</p>
+            <button type="button" class="vc-btn vc-btn--accent vc-btn--lg" data-e-copy="prompt">Copy a prompt for your agent</button>
+          </div>
+        </div>
+        <div class="e-route e-route--self">
+          <h3 class="e-h3">Or run it yourself</h3>
+          <div class="vc-code e-install">
+            <div class="vc-code__bar">
+              <span class="e-pm" role="group" aria-label="Package manager">
+                <button type="button" class="e-pm__btn" aria-pressed="true" data-e-pm="npx">npm</button>
+                <button type="button" class="e-pm__btn" aria-pressed="false" data-e-pm="pnpm dlx">pnpm</button>
+                <button type="button" class="e-pm__btn" aria-pressed="false" data-e-pm="yarn dlx">yarn</button>
+                <button type="button" class="e-pm__btn" aria-pressed="false" data-e-pm="bunx">bun</button>
+              </span>
+              <button type="button" class="vc-code__copy" data-e-copy="install">Copy</button>
+            </div>
+            <pre><span class="p">$ </span><span class="e-install__cmd">npx @visual-check/cli init</span></pre>
+          </div>
+          <p class="e-small">Needs Node 22.17 or later and Docker. Storybook 9.1, 10 or 11.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<div data-kit="footer"></div>
+<div class="e-sr" aria-live="polite" id="e-live" data-kit-keep></div>
+
+<script>
+/* Page-level helpers. No section depends on another being present. */
+(function () {
+  'use strict';
+
+  var PROMPT = 'Set up visual-check in this repo with `npx @visual-check/cli init`, then run it after UI changes.';
+  var live = document.getElementById('e-live');
+
+  /**
+   * Copies text, falling back to a hidden textarea where the Clipboard API is blocked (the mixer's iframes).
+   */
+  function copyText(text) {
+    function fallback() {
+      var area = document.createElement('textarea');
+      area.value = text;
+      area.setAttribute('readonly', '');
+      area.style.position = 'fixed';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.select();
+      try { document.execCommand('copy'); } catch (error) { /* nothing more to try */ }
+      area.remove();
+      return Promise.resolve();
+    }
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text).catch(fallback);
+    }
+    return fallback();
+  }
+
+  document.addEventListener('click', function (event) {
+    var copyButton = event.target.closest('[data-e-copy]');
+    if (copyButton) {
+      var kind = copyButton.getAttribute('data-e-copy');
+      var text = kind === 'prompt' ? PROMPT : copyButton.closest('.e-install').querySelector('.e-install__cmd').textContent;
+      copyText(text).then(function () {
+        var label = copyButton.getAttribute('data-label') || copyButton.textContent;
+        copyButton.setAttribute('data-label', label);
+        copyButton.textContent = kind === 'prompt' ? 'Copied. Paste it into your agent' : 'Copied';
+        live.textContent = kind === 'prompt' ? 'Prompt copied.' : 'Command copied.';
+        clearTimeout(copyButton._eTimer);
+        copyButton._eTimer = setTimeout(function () { copyButton.textContent = label; }, 1800);
+      });
+      return;
+    }
+    var pmButton = event.target.closest('[data-e-pm]');
+    if (pmButton) {
+      var runner = pmButton.getAttribute('data-e-pm');
+      document.querySelectorAll('.e-install').forEach(function (block) {
+        block.querySelector('.e-install__cmd').textContent = runner + ' @visual-check/cli init';
+        block.querySelectorAll('[data-e-pm]').forEach(function (button) {
+          button.setAttribute('aria-pressed', String(button.getAttribute('data-e-pm') === runner));
+        });
+      });
+    }
+  });
+
+  /* ---------- drawn stories: the fictional shop's card and pricing page ---------- */
+  function cardStory(pad) {
+    return '<div class="e-s e-s--card" style="--pad:' + pad + 'px"><div class="e-s-card">' +
+      '<div class="e-s-card__img"></div>' +
+      '<p class="e-s-card__name">Linen apron</p>' +
+      '<p class="e-s-card__meta">Natural, one size</p>' +
+      '<div class="e-s-card__row"><span class="e-s-card__price">£38</span><span class="e-s-card__btn">Add to bag</span></div>' +
+      '</div></div>';
+  }
+  function plan(name, price, line, button) {
+    return '<div class="e-s-plan"><p class="e-s-plan__name">' + name + '</p><p class="e-s-plan__price">' + price + '</p>' +
+      '<p class="e-s-plan__line">' + line + '</p><span class="e-s-plan__btn">' + button + '</span></div>';
+  }
+  function pricingStory(pad) {
+    return '<div class="e-s e-s--page" style="--pad:' + pad + 'px">' +
+      '<div class="e-s-page__bar"><span class="e-s-page__logo">Shop</span><span class="e-s-page__menu"><i></i><i></i><i></i></span></div>' +
+      '<p class="e-s-page__title">Pick a plan</p>' +
+      plan('Starter', '£0', 'One shop, 50 products', 'Start free') +
+      plan('Team', '£24', 'Per seat, every month', 'Choose Team') +
+      '</div>';
+  }
+  /* Baseline padding and snapshot padding: Card.css went from 24px to 16px (12 and 8 at the page's half scale). */
+  var STORIES = {
+    card: { draw: cardStory, baseline: 24, snapshot: 16 },
+    pricing: { draw: pricingStory, baseline: 12, snapshot: 8 }
+  };
+  function plate(story, pad, className) {
+    return '<div class="e-plate ' + className + '" aria-hidden="true">' + story.draw(pad) + '</div>';
+  }
+  /**
+   * Fills a snapshot canvas with the layers its data-modes ask for:
+   * register (cyan baseline + magenta snapshot overprinted), slider (baseline + wiped snapshot),
+   * diff (a real pixel XOR of the two, drawn by the browser: difference blend, inverted, tinted magenta).
+   */
+  function fillCanvas(canvas) {
+    var story = STORIES[canvas.getAttribute('data-story')];
+    var modes = (canvas.getAttribute('data-modes') || 'register').split(' ');
+    var html = '';
+    if (modes.indexOf('register') >= 0) {
+      html += '<div class="e-layer e-layer--register">' + plate(story, story.baseline, 'e-plate--cyan') + plate(story, story.snapshot, 'e-plate--magenta') + '</div>';
+    }
+    if (modes.indexOf('slider') >= 0) {
+      html += '<div class="e-layer e-layer--slider">' + plate(story, story.baseline, 'e-plate--real') + plate(story, story.snapshot, 'e-plate--real e-plate--wipe') + '</div>';
+    }
+    if (modes.indexOf('diff') >= 0) {
+      html += '<div class="e-layer e-layer--diff"><div class="e-xor">' + plate(story, story.baseline, 'e-plate--black') +
+        plate(story, story.snapshot, 'e-plate--black e-plate--differ') + '</div><div class="e-xor__tint"></div>' +
+        plate(story, story.snapshot, 'e-plate--ghost') + '</div>';
+    }
+    canvas.insertAdjacentHTML('afterbegin', html);
+  }
+  window.EPage = { fillCanvas: fillCanvas };
+})();
+</script>
+
+<script>
+/* Hero: the agent session. VCProto.scene restores the start markup before each play; the end state is the
+   script run instantly, so the page is complete at rest. Lines keep their space while hidden. */
+(function () {
+  'use strict';
+  var stage = document.getElementById('e-hero-stage');
+  if (!stage) {
+    return;
+  }
+  stage.querySelectorAll('.e-canvas').forEach(window.EPage.fillCanvas);
+
+  VCProto.scene(stage, async function (t) {
+    var status = t.$('.e-status');
+    function on(step) {
+      t.$$('[data-s="' + step + '"]').forEach(function (element) {
+        element.classList.add('is-on');
+        if (!t.instant) {
+          element.classList.add('is-anim');
+        }
+      });
+    }
+    function say(text) {
+      status.textContent = text;
+    }
+
+    t.chapter(0);
+    var ask = t.$('.e-ask');
+    var askText = ask.textContent;
+    ask.textContent = '';
+    say('Waiting for your message');
+    on('ask');
+    await t.type(ask, askText, { cps: 30 });
+    await t.wait(400);
+
+    t.chapter(1);
+    say('Reading the visual-check skill');
+    on('read');
+    await t.wait(650);
+    say('Editing Card.css');
+    on('edit');
+    await t.wait(800);
+
+    t.chapter(2);
+    say('Running visual-check');
+    on('run');
+    await t.wait(700);
+    on('reuse');
+    await t.wait(900);
+    on('json');
+    await t.wait(350);
+    on('exit');
+    await t.wait(500);
+
+    t.chapter(3);
+    say('Writing the report');
+    on('r1');
+    await t.wait(350);
+    on('r2');
+    on('diff-1');
+    await t.wait(700);
+    on('r3');
+    on('diff-2');
+    await t.wait(700);
+    on('r4');
+    await t.wait(300);
+    on('r5');
+    say('Waiting for your reply');
+    await t.wait(700);
+
+    t.chapter(4);
+    var command = t.$('.e-approve-cmd');
+    var commandText = command.textContent;
+    command.textContent = '';
+    on('approve');
+    await t.type(command, commandText, { cps: 26 });
+    await t.wait(350);
+    on('u1');
+    await t.wait(550);
+    on('u2');
+    await t.wait(180);
+    on('u3');
+    await t.wait(300);
+    on('u4');
+  }, {
+    controls: '#e-hero-controls',
+    chapters: ['Ask', 'Edit', 'Check', 'Report', 'Approve'],
+    label: 'A simulated coding-agent session: the agent edits Card.css, runs visual-check through its skill, reports two visual diffs, and you write the baselines yourself.'
+  });
+})();
+</script>
+
+<script>
+/* Demo: the diff viewer. A real range input; it sweeps once when seen (motion: plays when seen). */
+(function () {
+  'use strict';
+  var viewer = document.getElementById('e-viewer');
+  if (!viewer) {
+    return;
+  }
+  viewer.querySelectorAll('.e-canvas').forEach(window.EPage.fillCanvas);
+  var sweepFrame = 0;
+
+  function activeCanvas() {
+    return viewer.querySelector('.e-canvas[data-story="' + viewer.getAttribute('data-story') + '"]');
+  }
+  function setWipe(canvas, value) {
+    canvas.style.setProperty('--wipe', value + '%');
+    canvas.querySelector('.e-wipe-input').value = String(value);
+  }
+  function stopSweep() {
+    cancelAnimationFrame(sweepFrame);
+    sweepFrame = 0;
+  }
+  function sweep() {
+    var canvas = activeCanvas();
+    var keys = [50, 14, 86, 50];
+    var duration = 2100;
+    var start = performance.now();
+    function ease(x) {
+      return x < .5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
+    }
+    function frame(now) {
+      var progress = Math.min(1, (now - start) / duration);
+      var scaled = progress * (keys.length - 1);
+      var index = Math.min(keys.length - 2, Math.floor(scaled));
+      var local = ease(scaled - index);
+      setWipe(canvas, Math.round(keys[index] + (keys[index + 1] - keys[index]) * local));
+      sweepFrame = progress < 1 ? requestAnimationFrame(frame) : 0;
+    }
+    sweepFrame = requestAnimationFrame(frame);
+  }
+
+  viewer.addEventListener('click', function (event) {
+    var storyButton = event.target.closest('[data-e-story]');
+    if (storyButton) {
+      stopSweep();
+      viewer.setAttribute('data-story', storyButton.getAttribute('data-e-story'));
+      viewer.querySelectorAll('[data-e-story]').forEach(function (button) {
+        button.setAttribute('aria-pressed', String(button === storyButton));
+      });
+      return;
+    }
+    var viewButton = event.target.closest('[data-e-view]');
+    if (viewButton) {
+      stopSweep();
+      viewer.setAttribute('data-view', viewButton.getAttribute('data-e-view'));
+      viewer.querySelectorAll('[data-e-view]').forEach(function (button) {
+        button.setAttribute('aria-pressed', String(button === viewButton));
+      });
+    }
+  });
+  viewer.addEventListener('input', function (event) {
+    if (event.target.matches('.e-wipe-input')) {
+      stopSweep();
+      event.target.closest('.e-canvas').style.setProperty('--wipe', event.target.value + '%');
+    }
+  });
+
+  var swept = false;
+  VCProto.onView(viewer, function (visible) {
+    if (visible && !swept && VCProto.motion === 'auto' && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      swept = true;
+      sweep();
+    }
+  }, { threshold: 0.5 });
+})();
+</script>
+
+<script>
+/* Commands: the init transcript, revealed on a timeline. */
+(function () {
+  'use strict';
+  var stage = document.getElementById('e-init-stage');
+  if (!stage) {
+    return;
+  }
+  VCProto.scene(stage, async function (t) {
+    function on(step) {
+      t.$$('[data-s="' + step + '"]').forEach(function (element) {
+        element.classList.add('is-on');
+        if (!t.instant) {
+          element.classList.add('is-anim');
+        }
+      });
+    }
+    t.chapter(0);
+    var command = t.$('.e-init-cmd');
+    var text = command.textContent;
+    command.textContent = '';
+    await t.type(command, text, { cps: 30 });
+    await t.wait(450);
+    on('h');
+    await t.wait(500);
+    on('q1');
+    await t.wait(650);
+    on('q2');
+    await t.wait(650);
+    on('q3');
+    await t.wait(900);
+    on('ok');
+    await t.wait(400);
+    var steps = ['n0', 'n1', 'n2', 'n3', 'n4'];
+    for (var index = 0; index < steps.length; index++) {
+      on(steps[index]);
+      await t.wait(140);
+    }
+  }, { controls: '#e-init-controls', label: 'npx @visual-check/cli init in a terminal: three questions, then the next steps.' });
+})();
+</script>
+<script>
+/* Features: the addon fragment's still canvas. */
+(function () {
+  'use strict';
+  document.querySelectorAll('.e-features .e-canvas').forEach(window.EPage.fillCanvas);
+})();
+</script>
+</body>
+</html>
