@@ -1,55 +1,35 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { forceStates } from '@visual-check/storybook'
 import { Combinations } from '@visual-check/storybook/react'
-import { type CSSProperties, createContext, createElement, useContext } from 'react'
+import { createContext, createElement, useContext } from 'react'
 import { expect, waitFor } from 'storybook/test'
 import { visualCheck } from '../.storybook/visual-check.ts'
+import {
+  accentColor,
+  type ChipProps,
+  chipStyleOf,
+  colors,
+  forcedStatesPlay,
+  type LateChipProps,
+  lateBaseRule,
+  lateChipClassOf,
+  lateChipLabels,
+  lateChipStyle,
+  lateStylesPlay,
+  longTitle,
+  type StateChipProps,
+  sheetOf,
+  stateChipClassOf,
+  stateChipStyles,
+  styleElementOf,
+  stylesOf,
+} from './grid-parts.ts'
 
 /**
- * The colour of an accent chip. The meta's decorator provides green, so a red chip in a snapshot means context didn't
- * reach the grid's cells.
+ * The colour of an accent chip. The meta's decorator provides `accentColor`, green, so a red chip in a snapshot means
+ * context didn't reach the grid's cells.
  */
 const Accent = createContext('#dc2626')
-
-/**
- * What a chip shows and how.
- */
-interface ChipProps {
-  /**
-   * The chip's text.
-   */
-  label: string
-  /**
-   * Its colours: grey, or the accent from context with white text.
-   */
-  tone: 'neutral' | 'accent'
-  /**
-   * Its padding and font size: small or large.
-   */
-  size: 'sm' | 'lg'
-  /**
-   * The tooltip, which the snapshot doesn't show.
-   */
-  title?: string | undefined
-}
-
-/**
- * Each size's padding and font size.
- */
-const sizeStyles = {
-  sm: { padding: '2px 8px', fontSize: 12 },
-  lg: { padding: '6px 14px', fontSize: 16 },
-} satisfies Record<ChipProps['size'], CSSProperties>
-
-/**
- * Each tone's text colour.
- */
-const toneColors = { neutral: '#18181b', accent: '#ffffff' } satisfies Record<ChipProps['tone'], string>
-
-/**
- * A neutral chip's background.
- */
-const neutralBackground = '#e4e4e7'
 
 /**
  * A rounded chip, whose accent colour comes from context.
@@ -58,27 +38,11 @@ function Chip({ label, tone, size, title }: ChipProps) {
   const accent = useContext(Accent)
 
   return (
-    <span
-      title={title}
-      style={{
-        ...sizeStyles[size],
-        display: 'inline-block',
-        borderRadius: 999,
-        background: tone === 'accent' ? accent : neutralBackground,
-        color: toneColors[tone],
-        fontFamily: 'sans-serif',
-        lineHeight: '20px',
-      }}
-    >
+    <span title={title} style={chipStyleOf({ tone, size }, accent)}>
       {label}
     </span>
   )
 }
-
-/**
- * A title long enough that its row's caption wraps at the column's width, rather than widening the column.
- */
-const longTitle = 'A title only the tooltip shows, long enough that its caption wraps at the row width'
 
 /**
  * The meta's decorator provides the green accent around every story, so it reaches the grid's cells only through
@@ -88,7 +52,7 @@ const meta = {
   title: 'Grid',
   decorators: [
     (Story) => (
-      <Accent.Provider value="#16a34a">
+      <Accent.Provider value={accentColor}>
         <Story />
       </Accent.Provider>
     ),
@@ -132,61 +96,10 @@ export const TooWide: Story = {
 }
 
 /**
- * The styles of `ForcedStates`. The theme's hover colour comes from an ancestor outside the grid, and the quiet tone's
- * background, declared after the hover rule at the same specificity, wins over it.
- */
-const stateChipStyles = `
-.state-chip { display: inline-block; padding: 6px 14px; border: 1px solid #a1a1aa; border-radius: 999px; background: #ffffff; color: #18181b; font: 16px/20px sans-serif }
-.state-chip:hover { background: #bfdbfe }
-.forced-states-theme .state-chip:hover { color: #1d4ed8 }
-.state-chip:focus-visible { outline: 3px solid #7c3aed; outline-offset: 2px }
-.state-chip.state-chip--quiet { background: #e4e4e7 }
-`
-
-/**
- * What a state chip shows and how.
- */
-interface StateChipProps {
-  /**
-   * The chip's text.
-   */
-  label: string
-  /**
-   * Its background: white, or grey whatever its state.
-   */
-  tone: 'default' | 'quiet'
-}
-
-/**
  * A chip styled only by `stateChipStyles`, so its states come from the page's stylesheet.
  */
 function StateChip({ label, tone }: StateChipProps) {
-  return <span className={tone === 'quiet' ? 'state-chip state-chip--quiet' : 'state-chip'}>{label}</span>
-}
-
-/**
- * The values of the computed properties of each element, in document order: one row per element.
- */
-function stylesOf(elements: Element[], properties: string[]): string[][] {
-  return elements.map((element) => {
-    const style = getComputedStyle(element)
-
-    return properties.map((property) => style.getPropertyValue(property))
-  })
-}
-
-/**
- * The chips' colours, as computed styles give them.
- */
-const colors = {
-  white: 'rgb(255, 255, 255)',
-  grey: 'rgb(228, 228, 231)',
-  ink: 'rgb(24, 24, 27)',
-  blue: 'rgb(191, 219, 254)',
-  blueInk: 'rgb(29, 78, 216)',
-  purple: 'rgb(124, 58, 237)',
-  green: 'rgb(187, 247, 208)',
-  yellow: 'rgb(253, 230, 138)',
+  return <span className={stateChipClassOf(tone)}>{label}</span>
 }
 
 /**
@@ -207,62 +120,7 @@ export const ForcedStates: Story = {
       />
     </div>
   ),
-  play: async ({ canvas }) => {
-    const cells = stylesOf(canvas.getAllByText('Save'), ['background-color', 'color', 'outline-style', 'outline-color'])
-
-    for (const header of ['default', ':hover', ':focus-visible']) {
-      await expect(canvas.getByText(header)).toBeVisible()
-    }
-
-    // Rows of the default tone, then the quiet one; columns default, hover, focus-visible. An outline that is `none`
-    // takes the text's colour.
-    await expect(cells).toEqual([
-      [colors.white, colors.ink, 'none', colors.ink],
-      [colors.blue, colors.blueInk, 'none', colors.blueInk],
-      [colors.white, colors.ink, 'solid', colors.purple],
-      [colors.grey, colors.ink, 'none', colors.ink],
-      [colors.grey, colors.blueInk, 'none', colors.blueInk],
-      [colors.grey, colors.ink, 'solid', colors.purple],
-    ])
-  },
-}
-
-/**
- * The story's `<style>` the selector matches.
- *
- * @throws When the story renders none.
- */
-function styleElementOf(canvasElement: HTMLElement, selector: string): HTMLStyleElement {
-  const element = canvasElement.querySelector<HTMLStyleElement>(selector)
-
-  if (element === null) {
-    throw new Error(`No <style> matches ${selector}`)
-  }
-
-  return element
-}
-
-/**
- * The sheet of a `<style>` in the document.
- *
- * @throws When it has none.
- */
-function sheetOf(element: HTMLStyleElement): CSSStyleSheet {
-  if (element.sheet === null) {
-    throw new Error('The <style> has no sheet')
-  }
-
-  return element.sheet
-}
-
-/**
- * What a late chip shows.
- */
-interface LateChipProps {
-  /**
-   * How its hover rule arrives: inserted with `insertRule`, or appended as text to a `<style>`.
-   */
-  variant: 'inserted' | 'appended'
+  play: forcedStatesPlay,
 }
 
 /**
@@ -270,11 +128,8 @@ interface LateChipProps {
  */
 function LateChip({ variant }: LateChipProps) {
   return (
-    <span
-      className={`late-chip--${variant}`}
-      style={{ display: 'inline-block', padding: '6px 14px', borderRadius: 999, font: '16px/20px sans-serif' }}
-    >
-      {variant === 'inserted' ? 'Inserted' : 'Appended'}
+    <span className={lateChipClassOf(variant)} style={lateChipStyle}>
+      {lateChipLabels[variant]}
     </span>
   )
 }
@@ -288,24 +143,12 @@ function LateChip({ variant }: LateChipProps) {
 export const LateStyles: Story = {
   render: () => (
     <>
-      <style data-late-insert>{'[class^="late-chip--"] { background: #e4e4e7 }'}</style>
+      <style data-late-insert>{lateBaseRule}</style>
       <style data-late-append />
       <Combinations component={LateChip} props={{ variant: ['inserted', 'appended'] }} states={['hover']} />
     </>
   ),
-  play: async ({ canvas, canvasElement }) => {
-    const insertSheet = sheetOf(styleElementOf(canvasElement, 'style[data-late-insert]'))
-    const appendElement = styleElementOf(canvasElement, 'style[data-late-append]')
-
-    insertSheet.insertRule('.late-chip--inserted:hover { background: #bbf7d0 }', insertSheet.cssRules.length)
-    appendElement.append(document.createTextNode('.late-chip--appended:hover { background: #fde68a }'))
-
-    await waitFor(() =>
-      expect(
-        stylesOf([...canvas.getAllByText('Inserted'), ...canvas.getAllByText('Appended')], ['background-color']),
-      ).toEqual([[colors.grey], [colors.green], [colors.grey], [colors.yellow]]),
-    )
-  },
+  play: lateStylesPlay,
 }
 
 /**

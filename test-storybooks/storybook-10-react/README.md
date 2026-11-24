@@ -174,7 +174,7 @@ Viewed on `localhost`, the remote origin is the page's own, so none of them is l
 
 ## The grid stories
 
-`stories/grid.stories.tsx` renders a `Chip`, a rounded label, through `<Combinations>` from `@visual-check/storybook/react`. An accent chip takes its colour from a React context whose default is red; the meta's decorator provides green around every story, so a red chip in a snapshot means the context didn't reach the grid's cells.
+`stories/grid.stories.tsx` renders a `Chip`, a rounded label, through `<Combinations>` from `@visual-check/storybook/react`. An accent chip takes its colour from a React context whose default is red; the meta's decorator provides green around every story, so a red chip in a snapshot means the context didn't reach the grid's cells. The stories' chips, styles and `play` checks live in `stories/grid-parts.ts`, with no framework, which other ports' grid stories read.
 
 - `EveryCombination` lists two tones, two sizes and two titles, one of them `undefined`, and passes `label` in `args`: 8 captioned rows, such as `tone: accent, size: lg, title: undefined`, 16 px apart, every accent chip green. The long title's captions wrap at the column's width rather than widening it.
 - `ForcedStates` forces `hover` and `focus-visible` on a chip styled by a `<style>`: a header row, `default`, `:hover` and `:focus-visible`, above 2 captioned rows of 3 columns. The default tone's hover cell is blue, with the blue text a theme class outside the grid gives it; the quiet tone's stays grey, since its own rule, declared after the hover rule at the same specificity, still wins; both focus-visible cells have a purple outline. `play` checks the headers and each cell's computed style.
