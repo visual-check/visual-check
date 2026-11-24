@@ -1,4 +1,4 @@
-// The checks of the plain-DOM end-to-end check, as pure functions of what it reads: the expected outcomes, the CLI's
+// The checks of each other port's end-to-end check, as pure functions of what it reads: the expected outcomes, the CLI's
 // JSON reports and the baselines' bytes. `e2e.ts` reads those and prints what these give.
 import type { TestReport, UpdateReport } from '@visual-check/cli'
 
@@ -18,6 +18,23 @@ export function expectedKeysOf(outcomes: Record<string, string>): string[] {
   }
 
   return Object.keys(outcomes)
+}
+
+/**
+ * The name a test Storybook's config gives its Storybook, from the folder it is in: its renderer, `vue` for
+ * `storybook-10-vue`.
+ *
+ * @public
+ * @throws {Error} When the folder's name isn't `storybook-<major>-<renderer>`.
+ */
+export function storybookNameOf(folderName: string): string {
+  const renderer = /^storybook-\d+-([a-z0-9]+)$/.exec(folderName)?.[1]
+
+  if (renderer === undefined) {
+    throw new Error(`${folderName} is not a test Storybook folder: storybook-<major>-<renderer>`)
+  }
+
+  return renderer
 }
 
 /**

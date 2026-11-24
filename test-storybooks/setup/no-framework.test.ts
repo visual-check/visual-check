@@ -11,6 +11,7 @@ function errorWithCode(code: string): Error {
 describe('importProblemsOf', () => {
   const root: PackageEntry = { specifier: '@visual-check/storybook' }
   const react: PackageEntry = { specifier: '@visual-check/storybook/react', framework: 'react' }
+  const vue: PackageEntry = { specifier: '@visual-check/storybook/vue', framework: 'vue' }
 
   it('finds no problem when the root entry imports', () => {
     expect(importProblemsOf(root, { status: 0, stderr: '' })).toEqual([])
@@ -58,6 +59,21 @@ describe('importProblemsOf', () => {
 
     expect(importProblemsOf(react, { status: 1, stderr })).toEqual([
       `@visual-check/storybook/react failed for another reason than a missing react: ${stderr}`,
+    ])
+  })
+
+  it('finds no problem when the Vue entry fails because vue is missing', () => {
+    const stderr =
+      "Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'vue' imported from /tmp/project/node_modules/x.js"
+
+    expect(importProblemsOf(vue, { status: 1, stderr })).toEqual([])
+  })
+
+  it("takes a missing @vue/runtime-dom for another reason than a missing vue, though its name holds 'vue'", () => {
+    const stderr = "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@vue/runtime-dom' imported from /tmp/x.js"
+
+    expect(importProblemsOf(vue, { status: 1, stderr })).toEqual([
+      `@visual-check/storybook/vue failed for another reason than a missing vue: ${stderr}`,
     ])
   })
 })

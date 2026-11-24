@@ -1,10 +1,10 @@
-// The end-to-end check of a plain-DOM test Storybook: it serves the static build, runs the built CLI against it, and
-// checks that the grid stories, drawn with `combinations()`, give the React port's images byte for byte. Its three
+// The end-to-end check of each other port's test Storybook: it serves the static build, runs the built CLI against it,
+// and checks that the grid stories, drawn with the port, give the React port's images byte for byte. Its three
 // cases: `test --all` passes every grid story against the committed baselines; the committed baselines are
 // `storybook-10-react`'s; and `update` into an empty folder writes `storybook-10-react`'s baselines.
 //
-// It works in the folder it starts in, so each plain-DOM test Storybook runs this same file from its own folder, as
-// `node ../storybook-10-html/e2e.ts` from `storybook-9-html` and `storybook-11-html`. Run it with
+// It works in the folder it starts in, so each other port's test Storybook runs this same file from its own folder, as
+// `node ../storybook-10-html/e2e.ts` from `storybook-9-html` or `storybook-10-vue`. Run it with
 // `pnpm turbo run e2e --filter <package name>`, which builds the CLI and the Storybook first, with TEST_STORYBOOK_IMAGE
 // naming the browser image. It prints one line per case, then each of its problems, and exits 1 when any case fails.
 // Every run of the CLI is without `CI` in its environment.
@@ -12,7 +12,7 @@ import { spawn } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import type { TestReport, UpdateReport } from '@visual-check/cli'
 import {
   answerWithStaticFile,
@@ -25,7 +25,13 @@ import {
   runCases,
   withTemporaryFolder,
 } from '../storybook-10-react/e2e-support.ts'
-import { expectedKeysOf, sameImagesProblems, testReportProblems, updateReportProblems } from './e2e-checks.ts'
+import {
+  expectedKeysOf,
+  sameImagesProblems,
+  storybookNameOf,
+  testReportProblems,
+  updateReportProblems,
+} from './e2e-checks.ts'
 
 /**
  * The static Storybook build that `pnpm build-storybook` writes.
@@ -33,7 +39,7 @@ import { expectedKeysOf, sameImagesProblems, testReportProblems, updateReportPro
 const staticDir = join(packageDir, 'storybook-static')
 
 /**
- * The React Storybook's committed baselines, the images every plain-DOM grid story must give.
+ * The React Storybook's committed baselines, the images each other port's grid stories must give.
  */
 const reactBaselines = resolve(packageDir, '..', 'storybook-10-react', '.visual-check', 'baselines')
 
@@ -163,12 +169,16 @@ function reportProblemsOf<Report>(command: string, run: CliRun, check: (report: 
 }
 
 /**
- * Writes a config for this Storybook, served at the URL, with its baselines in the given folder, that captures in the
- * browser image with 2 workers. Gives its path.
+ * Writes a config for this Storybook, named after its folder, served at the URL, with its baselines in the given
+ * folder, that captures in the browser image with 2 workers. Gives its path.
  */
 function writeConfig(folder: string, url: string, baselines: string): string {
   const path = join(folder, 'visual-check.config.mjs')
-  const config = { storybooks: { html: { url, dir: packageDir, baselines } }, image, workers }
+  const config = {
+    storybooks: { [storybookNameOf(basename(packageDir))]: { url, dir: packageDir, baselines } },
+    image,
+    workers,
+  }
 
   writeFileSync(path, `export default ${JSON.stringify(config, null, 2)}\n`)
 

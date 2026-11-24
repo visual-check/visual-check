@@ -2,6 +2,7 @@ import { createRequire } from 'node:module'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { StorybookConfig } from '@storybook/html-vite'
+import { dedupedViteConfig } from './deduped-vite-config.ts'
 
 /**
  * The config of each plain-DOM test Storybook, given the URL of its `.storybook/main.ts`: the stories in
@@ -24,12 +25,6 @@ export function testStorybookConfig(mainUrl: string): StorybookConfig {
     framework: dirname(require.resolve('@storybook/html-vite/package.json')),
     stories: [{ directory: fileURLToPath(new URL('../stories', import.meta.url)), files: '*.stories.ts' }],
     core: { disableTelemetry: true },
-    viteFinal: (viteConfig) => ({
-      ...viteConfig,
-      resolve: {
-        ...viteConfig.resolve,
-        dedupe: [...(viteConfig.resolve?.dedupe ?? []), 'storybook'],
-      },
-    }),
+    viteFinal: (viteConfig) => dedupedViteConfig(viteConfig, ['storybook']),
   }
 }

@@ -1,6 +1,12 @@
 import type { TestReport, UpdateReport } from '@visual-check/cli'
 import { describe, expect, it } from 'vitest'
-import { expectedKeysOf, sameImagesProblems, testReportProblems, updateReportProblems } from './e2e-checks.ts'
+import {
+  expectedKeysOf,
+  sameImagesProblems,
+  storybookNameOf,
+  testReportProblems,
+  updateReportProblems,
+} from './e2e-checks.ts'
 
 /**
  * The keys of two snapshots.
@@ -48,6 +54,20 @@ describe('expectedKeysOf', () => {
     expect(() => expectedKeysOf({ 'grid--a': 'passed', 'grid--b': 'broken' })).toThrow(
       'Every expected outcome must be passed, but grid--b is broken',
     )
+  })
+})
+
+describe('storybookNameOf', () => {
+  it("gives a test Storybook's renderer, after its major version", () => {
+    expect(storybookNameOf('storybook-10-vue')).toBe('vue')
+    expect(storybookNameOf('storybook-9-html')).toBe('html')
+  })
+
+  it('throws naming a folder of any other shape', () => {
+    expect(() => storybookNameOf('storybook-vue')).toThrow(
+      'storybook-vue is not a test Storybook folder: storybook-<major>-<renderer>',
+    )
+    expect(() => storybookNameOf('storybook-10-vue-extra')).toThrow('storybook-10-vue-extra is not')
   })
 })
 

@@ -27,8 +27,9 @@ const frameworks = ['react', 'react-dom', 'vue', '@angular/core']
  */
 export const packageEntries: PackageEntry[] = [
   { specifier: '@visual-check/storybook' },
-  // The Vue and Angular ports add their entries here.
   { specifier: '@visual-check/storybook/react', framework: 'react' },
+  { specifier: '@visual-check/storybook/vue', framework: 'vue' },
+  // The Angular port adds its entry here.
 ]
 
 /**

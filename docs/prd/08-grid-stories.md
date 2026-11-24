@@ -143,6 +143,17 @@ Capture finds every grid by its `data-visual-check-grid` attribute in the top do
   - the plain-DOM port forces its states from the call, before any cell is rendered, until the grid, once in the page, leaves it. A grid that never enters the page keeps them forced. If `render` throws, or watching the page fails, forcing stops;
   - the test Storybooks use Storybook's html renderer (`test-storybooks/storybook-<major>-html/`). The web-components renderer mounts a returned node the same way and has no test Storybook here;
   - the plain-DOM Storybooks hold `EveryCombination`, `ForcedStates` and `LateStyles`, and their `update` must write the React Storybook's baselines byte for byte.
+- Decided while building the Vue port (#92):
+  - `Combinations` is a Vue component that takes the inputs as props. `component` is any Vue component, rendered once per cell with its own copy of the row's props;
+  - cells are children in Vue's own tree, with no second app and no Teleport, so a parent's `provide` and the app's reach them;
+  - no attribute passed besides the inputs reaches the grid's element;
+  - styles go to Vue unchanged, which sets each property in the layout's order;
+  - an invalid layout throws from the grid's render function, so in Storybook the story is a broken story;
+  - the Vue port forces its states from just before the grid mounts until it unmounts, and restarts when they change. Nothing is forced on the server, or while the layout is invalid: a grid whose inputs turn invalid stops forcing and draws nothing;
+  - `CombinationsProps<C>` is typed by the component, so templates and TSX check `props`, `args`, `caption` and `states`. `h()` can't infer the component, so it doesn't check the prop names or values in `props` and `args`; it still checks the rest of the inputs;
+  - it uses render functions and Vue 3.0 APIs only, so it works with Vue's runtime-only build, and the `vue` peer stays `^3.0.0`. Its unit tests run only Vue 3.5, through server rendering and a custom renderer;
+  - the test Storybooks use `@storybook/vue3-vite` (`test-storybooks/storybook-<major>-vue/`), with `.ts` stories written as render functions. Docgen is off, as there's no `.vue` file to read, and `vue` is deduped, so Storybook, the port and the stories share one Vue;
+  - the Vue Storybooks hold `EveryCombination`, `ForcedStates` and `LateStyles`. Their decorator provides a green accent over the chip's red default, so a red chip means `provide` missed the cells, and `EveryCombination`'s `play` checks for it. Their `update` must write the React Storybook's baselines byte for byte.
 
 [47]: https://github.com/visual-check/visual-check/issues/47
 [48]: https://github.com/visual-check/visual-check/issues/48
