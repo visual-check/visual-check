@@ -8,8 +8,13 @@
   "ignorePatterns": ["test-storybooks/storybook-10-react/static/**", "test-storybooks/setup/fixtures/**"],
   "workspaces": {
     "settings": {
-      "test-storybooks/storybook-9-react": { "ignoreDependencies": ["@visual-check/storybook"] },
-      "test-storybooks/storybook-11-react": { "ignoreDependencies": ["@visual-check/storybook"] },
+      "test-storybooks/storybook-9-react": {
+        "ignoreDependencies": ["@visual-check/storybook", "storybook-addon-pseudo-states"]
+      },
+      "test-storybooks/storybook-10-react": { "ignoreDependencies": ["storybook-addon-pseudo-states"] },
+      "test-storybooks/storybook-11-react": {
+        "ignoreDependencies": ["@visual-check/storybook", "storybook-addon-pseudo-states"]
+      },
       "test-storybooks/setup": {
         "ignoreDependencies": [
           "@visual-check/chromium",
