@@ -1,4 +1,4 @@
-import { describe, expect, expectTypeOf, it, vi } from 'vitest'
+import { beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import {
   type App,
   type Component,
@@ -8,12 +8,32 @@ import {
   h,
   type InjectionKey,
   inject,
+  nextTick,
   type PropType,
   provide,
+  ref,
 } from 'vue'
 import { renderToString } from 'vue/server-renderer'
+import type { ForcedState } from '../forced-state/forced-states.js'
+import { forcedStateClassOf } from '../forced-state/forced-states.js'
 import { type GridStyle, gridLayoutOf, type PropValues } from '../grid-story/grid-layout.js'
 import { Combinations, type CombinationsProps } from './combinations.js'
+import { fakeVueTree } from './vue-tree.fixture.js'
+
+/**
+ * What forcing and the cells did, in order, shared with the mocked `forceStates`.
+ */
+const { log } = vi.hoisted(() => ({ log: [] as string[] }))
+
+vi.mock('../forced-state/force-states.js', () => ({
+  forceStates: (states: readonly ForcedState[]) => {
+    log.push(`force ${states.join(' ')}`)
+
+    return () => {
+      log.push(`stop ${states.join(' ')}`)
+    }
+  },
+}))
 
 /**
  * What the test button takes.
@@ -107,7 +127,54 @@ function spansOf(markup: string): (string | undefined)[] {
   return [...markup.matchAll(/<span>(.*?)<\/span>/g)].map(([, text]) => text)
 }
 
+/**
+ * A cell that logs when it's set up.
+ */
+const LoggedCell = defineComponent({
+  props: { size: String },
+  setup(props) {
+    log.push('cell setup')
+
+    return () => h('button', props.size)
+  },
+})
+
+/**
+ * The log's lines from the first one starting with the prefix.
+ */
+function logFrom(prefix: string): string[] {
+  const index = log.findIndex((line) => line.startsWith(prefix))
+
+  if (index === -1) {
+    throw new Error(`The log has no line starting with "${prefix}": ${JSON.stringify(log)}`)
+  }
+
+  return log.slice(index)
+}
+
+/**
+ * Collects what the app reports to its error handler, in order.
+ */
+function errorsOf(app: App): unknown[] {
+  const errors: unknown[] = []
+
+  app.config.errorHandler = (error) => {
+    errors.push(error)
+  }
+
+  return errors
+}
+
+/**
+ * Matches an error thrown by visual-check.
+ */
+const visualCheckError = expect.objectContaining({ message: expect.stringMatching(/^visual-check: /) })
+
 describe('Combinations', () => {
+  beforeEach(() => {
+    log.length = 0
+  })
+
   it('draws the grid, a caption above each row and a cell for each combination', async () => {
     const markup = await gridMarkupOf({
       component: Button,
@@ -286,6 +353,122 @@ describe('Combinations', () => {
 
     await expect(gridMarkupOf({ component: Cell, props: { size: [] } })).rejects.toThrow(/^visual-check: /)
     expect(setup).not.toHaveBeenCalled()
+  })
+
+  it("forces the layout's states once, before any cell is set up and before the grid is inserted", () => {
+    const { createApp, root } = fakeVueTree(log)
+
+    createApp(() =>
+      h(Combinations, { component: LoggedCell, props: { size: ['sm', 'lg'] }, states: ['hover', 'focus-visible'] }),
+    ).mount(root)
+
+    expect(log.filter((line) => line.startsWith('force'))).toStrictEqual(['force hover focus-visible'])
+    expect(log[0]).toBe('force hover focus-visible')
+    expect(log.at(-1)).toBe('insert div')
+    expect(log).toContain('cell setup')
+  })
+
+  it('forces nothing without states', () => {
+    const omitted = fakeVueTree(log)
+    const empty = fakeVueTree(log)
+
+    omitted.createApp(() => h(Combinations, { component: LoggedCell, props: { size: ['sm'] } })).mount(omitted.root)
+    empty
+      .createApp(() => h(Combinations, { component: LoggedCell, props: { size: ['sm'] }, states: [] }))
+      .mount(empty.root)
+
+    expect(log.filter((line) => /^(force|stop)/.test(line))).toStrictEqual([])
+  })
+
+  it('keeps forcing while mounted, and stops once on unmount', () => {
+    const { createApp, root } = fakeVueTree(log)
+    const app = createApp(() => h(Combinations, { component: LoggedCell, props: { size: ['sm'] }, states: ['hover'] }))
+
+    app.mount(root)
+
+    expect(log).not.toContain('stop hover')
+
+    app.unmount()
+
+    expect(logFrom('remove')).toStrictEqual(['remove div', 'stop hover'])
+  })
+
+  it('restarts when the states change, before the new state cells are inserted', async () => {
+    const { createApp, root } = fakeVueTree(log)
+    const states = ref<ForcedState[]>(['hover'])
+
+    createApp(() => h(Combinations, { component: LoggedCell, props: { size: ['sm'] }, states: states.value })).mount(
+      root,
+    )
+    log.length = 0
+    states.value = ['hover', 'focus']
+    await nextTick()
+
+    expect(log.slice(0, 2)).toStrictEqual(['stop hover', 'force hover focus'])
+    expect(log).toContain(`insert div.${forcedStateClassOf('focus')}`)
+    expect(log.filter((line) => /^(force|stop)/.test(line))).toHaveLength(2)
+  })
+
+  it('does not restart when re-rendered with other args and the same states, in a new array', async () => {
+    const { createApp, root } = fakeVueTree(log)
+    const label = ref('Go')
+
+    createApp(() =>
+      h(Combinations, {
+        component: LoggedCell,
+        props: { size: ['sm'] },
+        args: { label: label.value },
+        states: ['hover'],
+      }),
+    ).mount(root)
+    label.value = 'Stop'
+    await nextTick()
+
+    expect(log.filter((line) => /^(force|stop)/.test(line))).toStrictEqual(['force hover'])
+  })
+
+  it('forces nothing when the layout throws, and never sets up the cell component', () => {
+    const { createApp, root } = fakeVueTree(log)
+    const app = createApp(() => h(Combinations, { component: LoggedCell, props: { size: [] }, states: ['hover'] }))
+    const errors = errorsOf(app)
+
+    app.mount(root)
+
+    expect(errors).toStrictEqual([visualCheckError])
+    expect(log).not.toContain('force hover')
+    expect(log).not.toContain('cell setup')
+  })
+
+  it('stops forcing and drops the grid when the layout starts throwing, and forces again once it stops', async () => {
+    const { createApp, root } = fakeVueTree(log)
+    const states = ref<ForcedState[]>(['hover'])
+    const app = createApp(() =>
+      h(Combinations, { component: LoggedCell, props: { size: ['sm'] }, states: states.value }),
+    )
+    const errors = errorsOf(app)
+
+    app.mount(root)
+    log.length = 0
+    // Unsafe on purpose: an untyped caller can pass a state the grid doesn't know.
+    states.value = ['visited' as ForcedState]
+    await nextTick()
+
+    expect(errors).toStrictEqual([visualCheckError])
+    expect(log.filter((line) => /^(force|stop|remove)/.test(line))).toStrictEqual(['stop hover', 'remove div'])
+
+    log.length = 0
+    states.value = ['focus']
+    await nextTick()
+
+    expect(errors).toHaveLength(1)
+    expect(log[0]).toBe('force focus')
+    expect(log).toContain(`insert div.${forcedStateClassOf('focus')}`)
+  })
+
+  it('forces nothing when rendered on the server', async () => {
+    await gridMarkupOf({ component: LoggedCell, props: { size: ['sm'] }, states: ['hover'] })
+
+    expect(log).toStrictEqual(['cell setup', 'cell setup'])
   })
 
   it("types the props' values from the component", () => {
