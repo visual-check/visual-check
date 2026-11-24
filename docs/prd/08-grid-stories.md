@@ -135,6 +135,14 @@ Capture finds every grid by its `data-visual-check-grid` attribute in the top do
   - an unknown or repeated state throws;
   - the React port forces states in `useInsertionEffect`;
   - the rewrite edits `selectorText` in place, so other rewriters' rule objects and indexes survive.
+- Decided while building the plain-DOM port (#91):
+  - `combinations()` gives the grid's element, a `<div>`, for the story to return or place. It needs a DOM, and throws without one;
+  - `render` is called once per cell, in document order, with the row's props. It returns a new node or a string of HTML, which becomes the cell's content. The same node for two cells, or anything other than a node or a string, throws;
+  - styles are set property by property, in the layout's order;
+  - a lit template isn't a node, so `render` throws on one. With web components, it renders the template into an element first;
+  - the plain-DOM port forces its states from the call, before any cell is rendered, until the grid, once in the page, leaves it. A grid that never enters the page keeps them forced. If `render` throws, or watching the page fails, forcing stops;
+  - the test Storybooks use Storybook's html renderer (`test-storybooks/storybook-<major>-html/`). The web-components renderer mounts a returned node the same way and has no test Storybook here;
+  - the plain-DOM Storybooks hold `EveryCombination`, `ForcedStates` and `LateStyles`, and their `update` must write the React Storybook's baselines byte for byte.
 
 [47]: https://github.com/visual-check/visual-check/issues/47
 [48]: https://github.com/visual-check/visual-check/issues/48
