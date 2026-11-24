@@ -10,7 +10,9 @@
     "test-storybooks/storybook-9-vue/visual-check.config.ts",
     "test-storybooks/storybook-10-vue/visual-check.config.ts",
     "test-storybooks/storybook-11-vue/visual-check.config.ts",
-    "test-storybooks/storybook-10-angular/visual-check.config.ts"
+    "test-storybooks/storybook-9-angular/visual-check.config.ts",
+    "test-storybooks/storybook-10-angular/visual-check.config.ts",
+    "test-storybooks/storybook-11-angular/visual-check.config.ts"
   ],
   "ignorePatterns": ["test-storybooks/storybook-10-react/static/**", "test-storybooks/setup/fixtures/**"],
   "workspaces": {
@@ -26,6 +28,8 @@
       "test-storybooks/storybook-11-html": { "ignoreDependencies": ["@visual-check/storybook"] },
       "test-storybooks/storybook-9-vue": { "ignoreDependencies": ["@visual-check/storybook", "vue"] },
       "test-storybooks/storybook-11-vue": { "ignoreDependencies": ["@visual-check/storybook", "vue"] },
+      "test-storybooks/storybook-9-angular": { "ignoreDependencies": ["@visual-check/storybook"] },
+      "test-storybooks/storybook-11-angular": { "ignoreDependencies": ["@visual-check/storybook"] },
       "test-storybooks/setup": {
         "ignoreDependencies": [
           "@visual-check/chromium",
@@ -235,12 +239,16 @@
         "test-storybooks/storybook-10-vue/visual-check.config.ts",
         "test-storybooks/storybook-11-vue/.storybook/main.ts",
         "test-storybooks/storybook-11-vue/visual-check.config.ts",
+        "test-storybooks/storybook-9-angular/.storybook/main.ts",
+        "test-storybooks/storybook-9-angular/visual-check.config.ts",
         "test-storybooks/storybook-10-angular/.storybook/main.ts",
         "test-storybooks/storybook-10-angular/.storybook/test-storybook-config.ts",
         "test-storybooks/storybook-10-angular/.storybook/own-modules-first.ts",
         "test-storybooks/storybook-10-angular/.storybook/own-modules-first.test.ts",
         "test-storybooks/storybook-10-angular/stories/*.stories.ts",
         "test-storybooks/storybook-10-angular/visual-check.config.ts",
+        "test-storybooks/storybook-11-angular/.storybook/main.ts",
+        "test-storybooks/storybook-11-angular/visual-check.config.ts",
         "test-storybooks/setup/*.ts",
         "packages/cli/skill/scripts/run.mjs",
         "packages/*/test/**/*.test.ts",

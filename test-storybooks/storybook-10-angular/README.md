@@ -4,6 +4,8 @@ One of this repo's own test Storybooks ([PRD 18](../../docs/prd/18-repo-ci.md#th
 
 It has no pseudo-states addon and no preview annotations: the React test Storybooks' shared preview changes no grid snapshot.
 
+The [Storybook 9.1](../storybook-9-angular/README.md) (Angular 20) and [Storybook 11](../storybook-11-angular/README.md) (Angular 22) Angular test Storybooks have no stories of their own: they read this package's stories and `.storybook/test-storybook-config.ts`, and run `storybook-10-html`'s `e2e.ts` from their own folders.
+
 ## The grid stories
 
 `stories/grid.stories.ts` holds the `Grid` stories, with the React grid stories' IDs and DOM, written with standalone `@Component` classes whose inputs are signal inputs. Their chips' looks, CSS and `play` checks come from `storybook-10-react/stories/grid-parts.ts`, so the grid is literally the same.
@@ -42,8 +44,10 @@ Turbo builds the CLI, `@visual-check/storybook` and the Storybook first.
 
 ## Rewriting the baselines
 
-Never write them here with `update`: they must be the React port's images. When a grid baseline of `storybook-10-react` changes, copy it here:
+Never write them here with `update`: they must be the React port's images. When a grid baseline of `storybook-10-react` changes, copy it here, and into `storybook-9-angular` and `storybook-11-angular`:
 
 ```sh
+cp test-storybooks/storybook-10-react/.visual-check/baselines/grid--{every-combination,forced-states,late-styles}.png test-storybooks/storybook-9-angular/.visual-check/baselines/
 cp test-storybooks/storybook-10-react/.visual-check/baselines/grid--{every-combination,forced-states,late-styles}.png test-storybooks/storybook-10-angular/.visual-check/baselines/
+cp test-storybooks/storybook-10-react/.visual-check/baselines/grid--{every-combination,forced-states,late-styles}.png test-storybooks/storybook-11-angular/.visual-check/baselines/
 ```

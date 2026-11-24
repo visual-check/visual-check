@@ -97,7 +97,9 @@ jobs:
           - storybook-9-vue
           - storybook-10-vue
           - storybook-11-vue
+          - storybook-9-angular
           - storybook-10-angular
+          - storybook-11-angular
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
