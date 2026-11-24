@@ -27,6 +27,15 @@
     "unused-dependencies": "warn",
     "boundary-violation": "error"
   },
+  "overrides": [
+    {
+      "files": [
+        "packages/storybook/src/forced-state/page.fixture.ts",
+        "packages/storybook/src/forced-state/style-sheet.fixture.ts"
+      ],
+      "rules": { "unused-class-members": "off" }
+    }
+  ],
   "boundaries": {
     "zones": [
       { "name": "cli/capture/driver/cdp", "patterns": ["packages/cli/src/capture/driver/cdp/**"] },

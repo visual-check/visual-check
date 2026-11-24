@@ -25,7 +25,7 @@ interface FakeStyleRuleOptions {
 /**
  * What a fake stylesheet is given besides its rules.
  */
-interface FakeStyleSheetOptions {
+export interface FakeStyleSheetOptions {
   /**
    * Its URL, for a `<link>` or `@import`ed sheet.
    */
@@ -46,44 +46,197 @@ interface FakeStyleSheetOptions {
 const ruleTextPattern = /^\s*([^{]+?)\s*\{\s*(.*?)\s*\}\s*$/s
 
 /**
+ * A fake `CSSGroupingRule`, `@media` (`type` 4) unless another type is given, whose `insertRule` parses
+ * `selector { body }`. Its prototype stands for `CSSGroupingRule.prototype`.
+ */
+export class FakeCSSGroupingRule {
+  /**
+   * The rule's `CSSRule` type.
+   */
+  readonly type: number
+  /**
+   * The rules in it.
+   */
+  readonly cssRules: CSSRule[]
+  /**
+   * The sheet it belongs to, if any.
+   */
+  parentStyleSheet: CSSStyleSheet | null = null
+
+  /**
+   * A rule of the type holding the rules.
+   */
+  constructor(type: number, rules: CSSRule[]) {
+    this.type = type
+    this.cssRules = rules
+  }
+
+  /**
+   * Parses `selector { body }` and puts it in the rules at the index.
+   */
+  insertRule(text: string, index = 0): number {
+    return insertParsedRule(this.cssRules, text, index, this.parentStyleSheet)
+  }
+
+  /**
+   * Removes the rule at the index.
+   */
+  deleteRule(index: number): void {
+    this.cssRules.splice(index, 1)
+  }
+}
+
+/**
+ * A fake `CSSStyleRule` (`type` 1) whose `selectorText` setter ignores what `rejects` returns true for. Like the real
+ * one, it's a grouping rule, for nested rules.
+ */
+class FakeCSSStyleRule extends FakeCSSGroupingRule {
+  /**
+   * Its declarations.
+   */
+  style = { cssText: 'color: red;' }
+  /**
+   * Its selector list.
+   */
+  #selectorText: string
+  /**
+   * How many times `selectorText` was set.
+   */
+  #sets = 0
+  /**
+   * Whether the browser rejects a selector list.
+   */
+  readonly #rejects: ((selectorText: string) => boolean) | undefined
+
+  /**
+   * A style rule with the selector list.
+   */
+  constructor(selectorText: string, options: FakeStyleRuleOptions) {
+    super(1, options.cssRules ?? [])
+    this.#selectorText = selectorText
+    this.#rejects = options.rejects
+  }
+
+  /**
+   * The selector list.
+   */
+  get selectorText(): string {
+    return this.#selectorText
+  }
+
+  /**
+   * Sets the selector list, unless the browser rejects it.
+   */
+  set selectorText(value: string) {
+    this.#sets += 1
+
+    if (!this.#rejects?.(value)) {
+      this.#selectorText = value
+    }
+  }
+
+  /**
+   * How many times `selectorText` was set, rejected values included.
+   */
+  get selectorTextSets(): number {
+    return this.#sets
+  }
+}
+
+/**
+ * A fake `CSSStyleSheet` whose `insertRule`, `replaceSync` and `replace` parse `selector { body }`. Its prototype stands
+ * for `CSSStyleSheet.prototype`.
+ */
+export class FakeCSSStyleSheet {
+  /**
+   * Its URL, for a `<link>` or `@import`ed sheet.
+   */
+  readonly href: string | null
+  /**
+   * The `<style>` or `<link>` it belongs to.
+   */
+  readonly ownerNode: unknown
+  /**
+   * Its rules.
+   */
+  #rules: CSSRule[]
+  /**
+   * Whether reading its rules throws a `SecurityError`.
+   */
+  readonly #crossOrigin: boolean
+
+  /**
+   * A sheet holding the rules.
+   */
+  constructor(rules: CSSRule[], options: FakeStyleSheetOptions = {}) {
+    this.href = options.href ?? null
+    this.ownerNode = options.ownerNode ?? null
+    this.#rules = [...rules]
+    this.#crossOrigin = options.crossOrigin ?? false
+  }
+
+  /**
+   * Its rules; throws a `SecurityError` when it's cross-origin.
+   */
+  get cssRules(): CSSRule[] {
+    if (this.#crossOrigin) {
+      throw { name: 'SecurityError' }
+    }
+
+    return this.#rules
+  }
+
+  /**
+   * Parses `selector { body }` and puts it in the rules at the index.
+   */
+  insertRule(text: string, index = 0): number {
+    return insertParsedRule(this.#rules, text, index, this)
+  }
+
+  /**
+   * Removes the rule at the index.
+   */
+  deleteRule(index: number): void {
+    this.#rules.splice(index, 1)
+  }
+
+  /**
+   * Replaces the rules with those parsed from `a { … } b { … }`.
+   */
+  replaceSync(text: string): void {
+    this.#rules = this.#parsed(text)
+  }
+
+  /**
+   * Replaces the rules a microtask later, as a parse would, without calling `replaceSync`, and resolves to the sheet.
+   */
+  async replace(text: string): Promise<this> {
+    await undefined
+    this.#rules = this.#parsed(text)
+
+    return this
+  }
+
+  /**
+   * The rules parsed from `a { … } b { … }`.
+   */
+  #parsed(text: string): CSSRule[] {
+    return ruleTextsOf(text).map((ruleText) => parsedRuleOf(ruleText, this))
+  }
+}
+
+/**
  * A fake `CSSStyleRule` (`type` 1) whose `selectorText` setter ignores what `rejects` returns true for.
  */
 export function fakeStyleRule(selectorText: string, options: FakeStyleRuleOptions = {}): FakeStyleRule {
-  let current = selectorText
-  let sets = 0
-  const cssRules = options.cssRules ?? []
-  const rule = {
-    type: 1,
-    style: { cssText: 'color: red;' },
-    cssRules,
-    parentStyleSheet: null,
-    get selectorText() {
-      return current
-    },
-    set selectorText(value: string) {
-      sets += 1
-
-      if (!options.rejects?.(value)) {
-        current = value
-      }
-    },
-    get selectorTextSets() {
-      return sets
-    },
-    insertRule: (text: string, index = 0) => insertParsedRule(cssRules, text, index, null),
-    deleteRule: (index: number) => {
-      cssRules.splice(index, 1)
-    },
-  }
-
-  return rule as unknown as FakeStyleRule
+  return new FakeCSSStyleRule(selectorText, options) as unknown as FakeStyleRule
 }
 
 /**
  * A fake grouping rule, `@media` (`type` 4) unless another type is given.
  */
 export function fakeGroupingRule(rules: CSSRule[], type = 4): CSSGroupingRule {
-  return { type, cssRules: rules } as unknown as CSSGroupingRule
+  return new FakeCSSGroupingRule(type, rules) as unknown as CSSGroupingRule
 }
 
 /**
@@ -101,35 +254,10 @@ export function fakeKeyframesRule(): CSSKeyframesRule {
 }
 
 /**
- * A fake `CSSStyleSheet` holding the rules, whose `insertRule`, `replaceSync` and `replace` parse `selector { body }`.
+ * A fake `CSSStyleSheet` holding the rules.
  */
 export function fakeStyleSheet(rules: CSSRule[], options: FakeStyleSheetOptions = {}): CSSStyleSheet {
-  let cssRules = [...rules]
-  const sheet = {
-    href: options.href ?? null,
-    ownerNode: options.ownerNode ?? null,
-    get cssRules() {
-      if (options.crossOrigin) {
-        throw { name: 'SecurityError' }
-      }
-
-      return cssRules
-    },
-    insertRule: (text: string, index = 0) => insertParsedRule(cssRules, text, index, sheet),
-    deleteRule: (index: number) => {
-      cssRules.splice(index, 1)
-    },
-    replaceSync: (text: string) => {
-      cssRules = ruleTextsOf(text).map((ruleText) => parsedRuleOf(ruleText, sheet))
-    },
-    replace: async (text: string) => {
-      sheet.replaceSync(text)
-
-      return sheet
-    },
-  }
-
-  return sheet as unknown as CSSStyleSheet
+  return new FakeCSSStyleSheet(rules, options) as unknown as CSSStyleSheet
 }
 
 /**
