@@ -76,7 +76,6 @@ If Google objects to shipping its headless shell inside the image, the fallback 
 - Publish the unscoped `visual-check` placeholder with its deprecation message.
 - Make `visual-check/test-apps` and `visual-check/action` public repos.
 - Register the release workflow as each package's trusted publisher on npm.
-- Include the MIT notice of Storybook's pseudo-states addon in `@visual-check/storybook`.
 
 ## Sources
 
