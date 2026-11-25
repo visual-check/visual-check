@@ -102,6 +102,7 @@
       { "name": "repo-checks/workspace", "patterns": ["packages/repo-checks/src/workspace/**"] },
       { "name": "repo-checks/lockstep", "patterns": ["packages/repo-checks/src/lockstep/**"] },
       { "name": "repo-checks/chromium-checksums", "patterns": ["packages/repo-checks/src/chromium-checksums/**"] },
+      { "name": "repo-checks/chromium-bump", "patterns": ["packages/repo-checks/src/chromium-bump/**"] },
       { "name": "repo-checks/no-playwright", "patterns": ["packages/repo-checks/src/no-playwright/**"] },
       { "name": "repo-checks/source-layout", "patterns": ["packages/repo-checks/src/source-layout/**"] }
     ],
@@ -187,6 +188,7 @@
       { "from": "repo-checks/workspace", "allow": [] },
       { "from": "repo-checks/lockstep", "allow": ["repo-checks/workspace"] },
       { "from": "repo-checks/chromium-checksums", "allow": ["repo-checks/workspace"] },
+      { "from": "repo-checks/chromium-bump", "allow": ["repo-checks/chromium-checksums", "repo-checks/workspace"] },
       { "from": "repo-checks/no-playwright", "allow": ["repo-checks/workspace"] },
       { "from": "repo-checks/source-layout", "allow": ["repo-checks/workspace"] }
     ],
@@ -203,6 +205,7 @@
         "packages/storybook/src/angular.ts",
         "packages/storybook-addon/src/manager.ts",
         "packages/storybook-addon/src/preset.ts",
+        "packages/repo-checks/src/bump-chromium.ts",
         "packages/repo-checks/src/check-chromium-checksums.ts",
         "packages/repo-checks/src/check-lockstep.ts",
         "test-storybooks/storybook-9-react/.storybook/main.ts",

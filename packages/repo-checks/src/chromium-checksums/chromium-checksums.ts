@@ -32,6 +32,8 @@ export function readChromiumChecksums(root: URL): ChromiumChecksums {
 
 /**
  * The Chrome for Testing download URL of a headless shell zip.
+ *
+ * @public
  */
 export function chromiumDownloadUrl(chromium: string, platform: string): string {
   return `https://storage.googleapis.com/chrome-for-testing-public/${chromium}/${platform}/chrome-headless-shell-${platform}.zip`
@@ -61,6 +63,16 @@ async function sha256OfUrl(url: string, fetcher: (url: string) => Promise<Respon
 }
 
 /**
+ * Words a failed download of a platform's zip, with the error's cause when it has one.
+ */
+function downloadFailure(platform: string, url: string, error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  const cause = error instanceof Error && error.cause instanceof Error ? `: ${error.cause.message}` : ''
+
+  return `${platform}: download failed (${url}): ${message}${cause}`
+}
+
+/**
  * Downloads every listed headless shell zip and lists each one whose hash differs or that fails to download.
  *
  * @public
@@ -78,13 +90,36 @@ export async function findChecksumProblems(
 
         return actual === expected ? [] : [`${platform}: expected ${expected}, got ${actual} (${url})`]
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        const cause = error instanceof Error && error.cause instanceof Error ? `: ${error.cause.message}` : ''
-
-        return [`${platform}: download failed (${url}): ${message}${cause}`]
+        return [downloadFailure(platform, url, error)]
       }
     }),
   )
 
   return results.flat()
+}
+
+/**
+ * Downloads each platform's headless shell zip of a Chromium version and hashes it, keyed in the platforms' order.
+ * Rejects on the first download that fails, naming its platform and URL.
+ *
+ * @public
+ */
+export async function computeChecksums(
+  chromium: string,
+  platforms: readonly string[],
+  fetcher: (url: string) => Promise<Response> = fetch,
+): Promise<Record<string, string>> {
+  const hashes = await Promise.all(
+    platforms.map(async (platform) => {
+      const url = chromiumDownloadUrl(chromium, platform)
+
+      try {
+        return [platform, await sha256OfUrl(url, fetcher)] as const
+      } catch (error) {
+        throw new Error(downloadFailure(platform, url, error))
+      }
+    }),
+  )
+
+  return Object.fromEntries(hashes)
 }
