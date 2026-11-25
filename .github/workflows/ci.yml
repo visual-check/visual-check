@@ -4,6 +4,8 @@ on:
   pull_request:
   push:
     branches: [main]
+  # The Browser package bump job starts it on its branch: a pull request a workflow opens starts no workflow.
+  workflow_dispatch:
 
 permissions:
   contents: read

@@ -16,6 +16,8 @@ on:
       - packages/repo-checks/src/check-chromium-checksums.ts
       - packages/repo-checks/src/workspace/manifests.ts
       - .github/workflows/chromium-checksums.yml
+  # The Browser package bump job starts it on its branch: a pull request a workflow opens starts no workflow.
+  workflow_dispatch:
 
 permissions:
   contents: read
