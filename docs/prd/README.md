@@ -83,18 +83,18 @@ Smaller things left out of v1 are listed in each area's file.
 
 ## Risks
 
-| Risk                                                                      | What happens then                                                                                             |
-| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Apple hasn't said whether Linux VMs keep Rosetta after macOS 27           | Projects on Apple Silicon move to `linux/arm64`, which the default tolerance absorbs                          |
-| Storybook's test path and `loadStory` are internals                       | The adapter absorbs changes. Without the test path, captures are about 100 ms slower and still correct        |
-| Storybook 11 isn't stable yet                                             | The adapter's reading of 11 is re-checked at stable. The test apps and this repo already run an 11 prerelease |
-| The addon relies on Storybook APIs marked experimental                    | v1 needs it on Storybook 10 only. Storybook 11 is decided later                                               |
-| Google hasn't confirmed that its headless shell may ship inside the image | Fall back to a download at run time, or Debian's Chromium, as a new browser package version                   |
-| The launch arguments were measured on one older browser build             | The comparison against Playwright is repeated on the first build, and reviewed on every bump                  |
-| The migration target once saw pixel noise at 2 CI workers                 | Measured again with visual-check as an acceptance check. `workers` can be set to 1                            |
-| Fallow needs a lot of memory on very large repos                          | The run falls back to all stories, with a warning                                                             |
-| The arm64 image can't pin its system packages to a dated snapshot         | Each image records its package list, and users always pull by digest                                          |
-| release-please's linked versions have old open bugs                       | A CI check keeps the three versions equal                                                                     |
+| Risk                                                                      | What happens then                                                                                                       |
+| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Apple hasn't said whether Linux VMs keep Rosetta after macOS 27           | Projects on Apple Silicon move to `linux/arm64`, which the default tolerance absorbs                                    |
+| Storybook's test path and `loadStory` are internals                       | The adapter absorbs changes. Without the test path, captures are about 100 ms slower and still correct                  |
+| Storybook 11 isn't stable yet                                             | The adapter's reading of 11 is re-checked at stable. The test apps and this repo already run an 11 prerelease           |
+| The addon relies on Storybook APIs marked experimental                    | v1 needs it on Storybook 10 only. Storybook 11 is decided later                                                         |
+| Google hasn't confirmed that its headless shell may ship inside the image | Fall back to a download at run time, or Debian's Chromium, as a new browser package version                             |
+| The launch arguments were measured on one older browser build             | The comparison against Playwright is repeated on the first build, and reviewed on every bump                            |
+| The migration target once saw pixel noise at 2 CI workers                 | Measured again with visual-check as an acceptance check. `workers` can be set to 1                                      |
+| Fallow needs a lot of memory on very large repos                          | The run falls back to all stories, with a warning                                                                       |
+| The arm64 image can't pin its system packages to a dated snapshot         | Each image records its package list, and users always pull by digest                                                    |
+| release-please's linked versions have old open bugs                       | A CI check, and the release run before it packs, keep the three versions equal and release-please's config on the group |
 
 ## Open questions
 

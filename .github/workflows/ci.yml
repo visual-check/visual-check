@@ -29,6 +29,19 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Biome
         run: pnpm exec biome ci .
+      # actionlint's release tarball, checked against its published checksum, as in the test apps' CI. It also runs
+      # shellcheck, which the runner image has, on every run step.
+      - name: actionlint
+        env:
+          VERSION: 1.7.12
+          SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          tarball="$RUNNER_TEMP/actionlint.tar.gz"
+          curl -fsSL --retry 5 -o "$tarball" \
+            "https://github.com/rhysd/actionlint/releases/download/v$VERSION/actionlint_${VERSION}_linux_amd64.tar.gz"
+          echo "$SHA256  $tarball" | sha256sum --check --strict
+          tar -xzf "$tarball" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color
       - name: Typecheck
         run: pnpm turbo run test:type
       - name: Fallow

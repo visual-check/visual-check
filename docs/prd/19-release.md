@@ -7,7 +7,7 @@ A release publishes only the package files that passed the test apps. The CLI, t
 ## Versions
 
 - Packages are `0.x` until v1's done criteria are met. Then they become 1.0.0 ([index](README.md)).
-- While at `0.x`, a breaking change bumps the minor.
+- While at `0.x`, a breaking change bumps the minor, and a feature or a fix the patch.
 - A change to the flags the Action passes, or to the report folder, also needs a new Action major ([GitHub Action](14-github-action.md)).
 - **The lockstep group:** `@visual-check/cli`, `@visual-check/storybook` and `@visual-check/storybook-addon` share one version and always release together.
 - **`@visual-check/chromium`** has its own versions, whose major is the Chromium major ([Packages](01-packages.md)).
@@ -75,13 +75,26 @@ If Google objects to shipping its headless shell inside the image, the fallback 
 
 - Publish the unscoped `visual-check` placeholder with its deprecation message.
 - Make `visual-check/test-apps` and `visual-check/action` public repos.
-- Register the release workflow as each package's trusted publisher on npm.
+- Register the release workflow, `release.yml` with no environment, as each lockstep package's trusted publisher on npm. npm takes this only for a package that's already on npm, and the first publish must follow within 2 days.
 
 ## Sources
 
 - [Test apps repo][34], [GitHub Action design][40], [Storybook addon][41], [Playwright peer dependency and Chromium version][45], [Reading per-story options][46], [Storybook 9 floor and Storybook 11][48], [Cartesian stories helper][50], [Chromium sandbox in the browser image][51], [Windows and macOS on GitHub Actions][33], [Agent skill shape][20], [Package layout and naming][16].
 - [ADR 0007](../adr/0007-browser-build-comes-from-a-peer-package.md), [ADR 0008](../adr/0008-browser-runs-in-our-own-image.md), [ADR 0009](../adr/0009-grid-stories-draw-everything-in-the-story.md).
 - Decided while writing this PRD: `0.x` versions, release-please, the release steps, trusted publishing, when the checks by hand run, the two-weekly browser job, how the test apps' baselines move on a bump, and the first browser package's build.
+- Decided while building the lockstep release (#94):
+  - `.github/workflows/release.yml` runs release-please on every push to main through `googleapis/release-please-action` v5.0.0 (release-please 17.6.0), with `release-please-config.json` and `.release-please-manifest.json` at the root;
+  - the components are `cli`, `storybook`, `storybook-addon` and `chromium`, tagged `<component>-v<version>`. The linked-versions group is `visual-check`, and its release PR is "chore(main): release visual-check libraries";
+  - `group-pull-request-title-pattern` repeats that title, without which release-please makes no release from the merged PR (googleapis/release-please#2306). `separate-pull-requests` keeps the browser package's release PR apart;
+  - the group starts at 0.1.0. release-please reads commits after `bootstrap-sha`, the commit before this workflow, so 0.1.0's changelog starts there. While at `0.x`, a breaking change bumps the minor, and a `feat` or a `fix` the patch (`bump-minor-pre-major`, `bump-patch-for-minor-pre-major`), so a caret range on `0.x` never takes a breaking change. The highest bump in the group wins;
+  - GitHub releases are created as drafts, and their tags are created at once, because GitHub makes a draft's tag only on publishing and release-please finds the last release by its tag;
+  - the release PR is opened with the workflow's own token, so no workflow runs on it. The release run checks the lockstep versions and release-please's config on the tagged commit before it packs, and that the CLI's version there is the one release-please released. "Allow GitHub Actions to create and approve pull requests" is on;
+  - the run packs the tagged commit with the pack workflow CI uses, so the test apps and npm get one artifact. Pack and publish print each tarball's SHA-256;
+  - publishing waits for every test-apps job. It publishes the CLI, then the storybook helper, then the addon, with `npm publish <file> --access public --provenance` and the job's OIDC token (npm 11.5.1 or later). Each package names this repository, which npm's provenance check needs. A version already on npm is skipped, so re-running a run's failed jobs is safe while its artifact lasts, 3 days. Re-running all jobs releases nothing;
+  - then the GitHub releases are published, the CLI's marked latest;
+  - run by hand, or on a PR that changes the release or pack workflow, it's a dry run of the checked-out commit: no release-please, `npm publish --dry-run --force` without an OIDC token, and no GitHub releases;
+  - a PR's merge commit is its title and body, so the title's type counts and so does a footer in the body. An empty commit counts for every component, the browser package included;
+  - the browser package's version comes from a `Release-As:` footer on the bump PR's commit, which touches only `packages/chromium/`. This workflow never publishes it.
 
 [16]: https://github.com/visual-check/visual-check/issues/16
 [20]: https://github.com/visual-check/visual-check/issues/20
