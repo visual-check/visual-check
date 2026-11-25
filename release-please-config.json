@@ -4,6 +4,7 @@
   "bootstrap-sha": "c9bec998f914a5551c59ac7c27fabac53d3f9b53",
   "separate-pull-requests": true,
   "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": true,
   "draft": true,
   "force-tag-creation": true,
   "group-pull-request-title-pattern": "chore${scope}: release visual-check libraries",

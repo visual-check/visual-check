@@ -7,7 +7,7 @@ A release publishes only the package files that passed the test apps. The CLI, t
 ## Versions
 
 - Packages are `0.x` until v1's done criteria are met. Then they become 1.0.0 ([index](README.md)).
-- While at `0.x`, a breaking change bumps the minor.
+- While at `0.x`, a breaking change bumps the minor, and a feature or a fix the patch.
 - A change to the flags the Action passes, or to the report folder, also needs a new Action major ([GitHub Action](14-github-action.md)).
 - **The lockstep group:** `@visual-check/cli`, `@visual-check/storybook` and `@visual-check/storybook-addon` share one version and always release together.
 - **`@visual-check/chromium`** has its own versions, whose major is the Chromium major ([Packages](01-packages.md)).
@@ -86,7 +86,7 @@ If Google objects to shipping its headless shell inside the image, the fallback 
   - `.github/workflows/release.yml` runs release-please on every push to main through `googleapis/release-please-action` v5.0.0 (release-please 17.6.0), with `release-please-config.json` and `.release-please-manifest.json` at the root;
   - the components are `cli`, `storybook`, `storybook-addon` and `chromium`, tagged `<component>-v<version>`. The linked-versions group is `visual-check`, and its release PR is "chore(main): release visual-check libraries";
   - `group-pull-request-title-pattern` repeats that title, without which release-please makes no release from the merged PR (googleapis/release-please#2306). `separate-pull-requests` keeps the browser package's release PR apart;
-  - the group starts at 0.1.0. release-please reads commits after `bootstrap-sha`, the commit before this workflow, so 0.1.0's changelog starts there. A `feat` bumps the minor, a `fix` the patch, and a breaking change the minor while at `0.x`;
+  - the group starts at 0.1.0. release-please reads commits after `bootstrap-sha`, the commit before this workflow, so 0.1.0's changelog starts there. While at `0.x`, a breaking change bumps the minor, and a `feat` or a `fix` the patch (`bump-minor-pre-major`, `bump-patch-for-minor-pre-major`), so a caret range on `0.x` never takes a breaking change. The highest bump in the group wins;
   - GitHub releases are created as drafts, and their tags are created at once, because GitHub makes a draft's tag only on publishing and release-please finds the last release by its tag;
   - the release PR is opened with the workflow's own token, so no workflow runs on it. The release run checks the lockstep versions and release-please's config on the tagged commit before it packs, and that the CLI's version there is the one release-please released. "Allow GitHub Actions to create and approve pull requests" is on;
   - the run packs the tagged commit with the pack workflow CI uses, so the test apps and npm get one artifact. Pack and publish print each tarball's SHA-256;
