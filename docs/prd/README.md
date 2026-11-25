@@ -159,7 +159,7 @@ Tests, CI and release
 - Images are compared on the newest browser package only. The oldest gets a smoke run.
 - Packages are `0.x` for now, released with release-please. Checks by hand run before releases that touch their area, and once more before 1.0.0.
 - A release packs once, runs the test apps on those files and publishes the same files through npm's trusted publishing.
-- The browser job runs every two weeks and stops at a PR. When a bump moves pixels, the test apps' baselines are rewritten on a branch that the bump's PR tests against.
+- The browser job runs once a month and stops at a PR. When a bump moves pixels, the test apps' baselines are rewritten on a branch that the bump's PR tests against.
 - The CLI builds every docs link from one base address.
 - Action `v1` accepts CLIs from the first `0.x` up to, but not including, 2.0.
 - The docs site is one Next.js app with Fumadocs on Vercel: the landing page at the home page, the docs under `/docs`. It updates on release.

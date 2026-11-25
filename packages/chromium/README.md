@@ -35,7 +35,7 @@ The Browser package workflow (`.github/workflows/chromium.yml`) builds and verif
 
 ## Bumping
 
-The Browser package bump workflow (`.github/workflows/chromium-bump.yml`) runs on the 1st and the 15th. When Chrome for Testing's Stable build is newer, it opens a pull request with the new version and checksums, and for a new major the CLI's wider browser range. Its checklist covers the image, the launch arguments in `packages/cli/src/capture/driver/cdp/launch-arguments.ts` and the baselines. The whole flow is in [Release process](../../docs/prd/19-release.md#releasing-the-browser-package).
+The Browser package bump workflow (`.github/workflows/chromium-bump.yml`) runs on the 1st of each month. When Chrome for Testing's Stable build is newer, it opens a pull request with the new version and checksums, and for a new major the CLI's wider browser range. Its checklist covers the image, the launch arguments in `packages/cli/src/capture/driver/cdp/launch-arguments.ts` and the baselines. The whole flow is in [Release process](../../docs/prd/19-release.md#releasing-the-browser-package).
 
 ## Versioning
 
