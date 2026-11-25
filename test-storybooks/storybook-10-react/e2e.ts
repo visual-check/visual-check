@@ -32,6 +32,11 @@
 // which are written on amd64. It makes the committed baselines case's checks, on a server that leaves out the stories
 // of the file that fails to load.
 //
+// With `--oldest-browser` it runs one smoke case, with the installed browser package, which CI's Oldest browser job
+// replaces with npm's oldest in the CLI's range: `update` of one story into an empty folder launches the browser and
+// captures, with no image comparison. It runs in the package's own image, which the CLI pulls by tag and digest, unless
+// TEST_STORYBOOK_IMAGE names one. It needs docker.
+//
 // With `--skill-script` it runs the agent skill's runner script cases in place of every other case, with `--host` on
 // the machine itself, else with TEST_STORYBOOK_IMAGE naming the browser image. Each case installs the script with a
 // setup.json whose CLI command is `pnpm exec visual-check` in this package's folder, and whose Storybooks start with
@@ -79,6 +84,7 @@ import {
   packageDir,
   problemUnless,
   readBrowserPackage,
+  readBrowserPackageVersion,
   runCases,
   thisMachinesChromeForTestingPlatform,
   visualCheckContainers,
@@ -132,6 +138,11 @@ const affectedOnly = process.argv.includes('--affected')
  * Whether the check runs the committed baselines on the arm64 browser image, as the `--arm64` argument says.
  */
 const onArm64Image = process.argv.includes('--arm64')
+
+/**
+ * Whether the check runs the smoke case with the installed browser package, as the `--oldest-browser` argument says.
+ */
+const onOldestBrowser = process.argv.includes('--oldest-browser')
 
 /**
  * Whether the check runs the agent skill's runner script cases in place of every other case, as the `--skill-script`
@@ -1188,14 +1199,14 @@ function findPackageNameProblems(packageName: string | undefined): string[] {
 }
 
 /**
- * Lists what is wrong with the arguments: `--inside-image`, `--host` and `--arm64` are separate modes, `--no-docker`
- * needs `--host`, `--affected` needs `--host` and goes without `--no-docker`, and `--skill-script` goes alone or with
- * `--host`.
+ * Lists what is wrong with the arguments: `--inside-image`, `--host`, `--arm64` and `--oldest-browser` are separate
+ * modes, `--no-docker` needs `--host`, `--affected` needs `--host` and goes without `--no-docker`, and `--skill-script`
+ * goes alone or with `--host`.
  */
 function findArgumentProblems(): string[] {
-  const modeCount = [insideImage, onHost, onArm64Image].filter(Boolean).length
+  const modeCount = [insideImage, onHost, onArm64Image, onOldestBrowser].filter(Boolean).length
   const conflicts: [boolean, string][] = [
-    [modeCount > 1, '--inside-image, --host and --arm64 are separate modes: give one of them.'],
+    [modeCount > 1, '--inside-image, --host, --arm64 and --oldest-browser are separate modes: give one of them.'],
     [withoutDocker && !onHost, '--no-docker only runs with --host.'],
     [affectedOnly && !onHost, '--affected only runs with --host.'],
     [affectedOnly && withoutDocker, '--affected runs in place of the host cases, so it goes without --no-docker.'],
@@ -1212,14 +1223,14 @@ function findArgumentProblems(): string[] {
  * `findArgumentProblems`, whose table one more condition would make too complex.
  */
 function findSkillScriptArgumentProblems(): string[] {
-  return skillScriptOnly && [insideImage, onArm64Image, withoutDocker, affectedOnly].some(Boolean)
+  return skillScriptOnly && [insideImage, onArm64Image, onOldestBrowser, withoutDocker, affectedOnly].some(Boolean)
     ? ['--skill-script runs in place of the other cases: give it alone, or with --host.']
     : []
 }
 
 /**
  * Lists what the mode the arguments pick needs and doesn't have: inside visual-check's image its marker and no docker,
- * on the machine itself what `--no-docker` needs, else the browser image.
+ * on the machine itself what `--no-docker` needs, with `--oldest-browser` docker, else the browser image.
  */
 function findModeProblems(): string[] {
   if (insideImage) {
@@ -1228,6 +1239,10 @@ function findModeProblems(): string[] {
 
   if (onHost) {
     return findHostProblems()
+  }
+
+  if (onOldestBrowser) {
+    return findOldestBrowserProblems()
   }
 
   return findBrowserImageProblems()
@@ -1240,6 +1255,16 @@ function findModeProblems(): string[] {
 function findHostProblems(): string[] {
   return withoutDocker && executableOnPath('docker') !== undefined
     ? ['docker is on the PATH: --no-docker checks the error for a run without it, so run it where there is none.']
+    : []
+}
+
+/**
+ * Lists what the smoke case needs: docker, which runs the browser package's image or TEST_STORYBOOK_IMAGE's. It needs
+ * no TEST_STORYBOOK_IMAGE, since the CLI pulls the package's own image without one.
+ */
+function findOldestBrowserProblems(): string[] {
+  return executableOnPath('docker') === undefined
+    ? ['docker is not on the PATH: --oldest-browser runs the browser in its image, so run it where there is docker.']
     : []
 }
 
@@ -3410,6 +3435,57 @@ function hostCases(host: HostRun): Case[] {
 }
 
 /**
+ * Gives the problem when the browser package's own image, `<tag>@<digest>`, isn't on this machine, which means the CLI
+ * didn't pull it, or none when it is.
+ */
+function pulledImageProblems(): string[] {
+  const { tag, digest } = readBrowserPackage().image
+  const pulled = `${tag}@${digest}`
+
+  try {
+    docker(['image', 'inspect', pulled])
+
+    return []
+  } catch (error) {
+    return [`the CLI didn't pull the browser package's image ${pulled}: ${(error as Error).message}`]
+  }
+}
+
+/**
+ * With the installed browser package, `update` of the host story into an empty folder launches the browser, captures
+ * it and writes its baseline. With no TEST_STORYBOOK_IMAGE, the CLI pulled the package's own image to do so. Its server
+ * lists that one story, since `update` writes every missing baseline whatever the selection.
+ */
+async function checkOldestBrowser(): Promise<string[]> {
+  return await withStorybookServer({ onlyStory: hostStoryId }, (server) =>
+    withTemporaryFolder(async (folder) => {
+      const config = writeConfig(folder, server.url, join(folder, 'baselines'))
+      const run = await runCli(['update', '--filter', hostStoryId, '--config', config])
+
+      return [
+        ...expectedRunProblems('update', run, { [hostStoryId]: 'written' }),
+        ...(image ? [] : pulledImageProblems()),
+      ]
+    }),
+  )
+}
+
+/**
+ * The smoke case `--oldest-browser` runs, named with the installed browser package's version and Chromium.
+ */
+function oldestBrowserCases(): Case[] {
+  const { chromium } = readBrowserPackage()
+  const version = readBrowserPackageVersion()
+
+  return [
+    {
+      name: `oldest browser: update captures ${hostStoryId} with the browser package ${version}'s Chromium ${chromium} and writes it, in the package's own image unless TEST_STORYBOOK_IMAGE names one`,
+      run: checkOldestBrowser,
+    },
+  ]
+}
+
+/**
  * Runs the host cases and resolves with whether all of them passed. They share one server, whose `index.json` lists
  * only the host story, and a temporary folder, which holds their config and baselines, and their cache when the caller
  * doesn't name one.
@@ -4598,6 +4674,8 @@ if (setupProblems.length > 0) {
   process.exitCode = (await runAffectedCases(withoutLoadFails(readExpectedOutcomes()))) ? 0 : 1
 } else if (onHost) {
   process.exitCode = (await runHostCases()) ? 0 : 1
+} else if (onOldestBrowser) {
+  process.exitCode = (await runCases(oldestBrowserCases())) ? 0 : 1
 } else if (onArm64Image) {
   process.exitCode = (await runCases(arm64ImageCases(withoutLoadFails(readExpectedOutcomes())))) ? 0 : 1
 } else {

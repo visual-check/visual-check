@@ -395,6 +395,81 @@ jobs:
             exit 1
           fi
 
+  # A smoke run with the oldest browser package in the CLI's range (docs/prd/18-repo-ci.md › Browser range): npm's,
+  # in place of the workspace's, in its own image, which the CLI pulls by tag and digest without signing in. It launches
+  # the browser and captures one story, with no image comparison: images are compared on the newest browser package
+  # only, the workspace's. While no browser package in the range is on npm, it runs the workspace's with a local image.
+  oldest-browser:
+    name: Oldest browser
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Find the oldest browser package in the CLI's range
+        id: oldest
+        run: |
+          range=$(jq -er '.peerDependencies["@visual-check/chromium"]' packages/cli/package.json)
+          status=0
+          versions=$(npm view "@visual-check/chromium@$range" version --json 2> "$RUNNER_TEMP/npm-error") || status=$?
+          if (( status != 0 )); then
+            # npm answers E404 when it has no such package, or no version in the range.
+            if ! grep -q E404 <<< "$versions$(cat "$RUNNER_TEMP/npm-error")"; then
+              cat "$RUNNER_TEMP/npm-error" >&2
+              exit 1
+            fi
+            versions=null
+          fi
+          oldest=$(jq -r 'if type == "array" then .[] elif type == "string" then . else empty end' <<< "$versions" \
+            | sort -V | head -n 1)
+          echo "version=$oldest" >> "$GITHUB_OUTPUT"
+          if [[ -n $oldest ]]; then
+            echo "::notice::The oldest browser package in $range is $oldest."
+          else
+            echo "::notice::No browser package in $range is on npm yet, so this runs the workspace's."
+          fi
+      # The CLI resolves the browser package through packages/cli/node_modules/@visual-check/chromium, a link to
+      # packages/chromium, so npm's files go there.
+      - name: Put it in place of the workspace's
+        if: steps.oldest.outputs.version != ''
+        env:
+          VERSION: ${{ steps.oldest.outputs.version }}
+        run: |
+          npm pack "@visual-check/chromium@$VERSION" --pack-destination "$RUNNER_TEMP"
+          tar -xzf "$RUNNER_TEMP/visual-check-chromium-$VERSION.tgz" -C "$RUNNER_TEMP"
+          cp "$RUNNER_TEMP/package/chromium.json" packages/chromium/chromium.json
+          jq --arg version "$VERSION" '.version = $version' packages/chromium/package.json > "$RUNNER_TEMP/package.json"
+          mv "$RUNNER_TEMP/package.json" packages/chromium/package.json
+      - name: Create a docker-container builder
+        if: steps.oldest.outputs.version == ''
+        run: docker buildx create --driver docker-container --use
+      - name: Build the browser image
+        if: steps.oldest.outputs.version == ''
+        run: packages/chromium/image/build.sh amd64 --output type=docker,name=visual-check-chromium:ci
+      - name: Smoke run
+        env:
+          VERSION: ${{ steps.oldest.outputs.version }}
+        run: |
+          if [[ -z $VERSION ]]; then
+            export TEST_STORYBOOK_IMAGE=visual-check-chromium:ci
+          fi
+          pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --oldest-browser
+      - name: Upload the end-to-end output
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-output-${{ github.job }}
+          path: test-storybooks/storybook-10-react/e2e-output/
+          if-no-files-found: ignore
+          retention-days: 3
+
   inside-image:
     name: Inside the image
     runs-on: ubuntu-24.04
