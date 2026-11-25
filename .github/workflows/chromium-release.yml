@@ -1,0 +1,448 @@
+# Releases the browser package, @visual-check/chromium, when its version changes on main
+# (docs/prd/19-release.md › Releasing the browser package).
+#
+# It publishes the candidate a successful Browser package run (chromium.yml) pushed and tested for the same tree of
+# packages/chromium: it tags that run's two images by digest as one index, checks anyone can pull it, writes the index
+# digest into the package, records it on main, then publishes the package to npm and creates the GitHub release.
+# Nothing is built again. When main records the version's digest already, as after an earlier run, there is no
+# candidate to find: the run checks the tag against that digest and goes on from there.
+#
+# This file is @visual-check/chromium's npm trusted publisher, with no environment. npm checks this file's name, so
+# renaming it means registering the new name.
+#
+# Run by hand off main, or on a pull request that changes this workflow, it's a dry run of the checked-out commit: no
+# tag, no record, `npm publish --dry-run` on the packed package, and no GitHub release.
+name: Browser package release
+
+on:
+  push:
+    branches: [main]
+    paths: [packages/chromium/package.json]
+  pull_request:
+    paths: [.github/workflows/chromium-release.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One release at a time on main; a pull request's newer commit cancels its older dry run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # Whether to publish, the version, and the candidate to publish. A version on npm already publishes nothing, so a
+  # push that changes package.json for another reason is safe.
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      publish: ${{ steps.plan.outputs.publish }}
+      dry-run: ${{ steps.plan.outputs.dry-run }}
+      version: ${{ steps.plan.outputs.version }}
+      image: ${{ steps.plan.outputs.image }}
+      chromium: ${{ steps.plan.outputs.chromium }}
+      tree: ${{ steps.plan.outputs.tree }}
+      recorded: ${{ steps.plan.outputs.recorded }}
+      released: ${{ steps.plan.outputs.released }}
+      candidate-run: ${{ steps.candidate.outputs.run }}
+      candidate-attempt: ${{ steps.candidate.outputs.attempt }}
+      candidate-commit: ${{ steps.candidate.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Plan
+        id: plan
+        env:
+          DRY_RUN: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
+        run: |
+          # Whether npm has a package, or a version of it. npm answers E404 for both; any other failure stops the run.
+          npm_has() {
+            local output status=0
+            output=$(npm view "$1" version --json 2>&1) || status=$?
+            if (( status == 0 )); then
+              return 0
+            fi
+            if [[ $output == *E404* ]]; then
+              return 1
+            fi
+            echo "$output" >&2
+            exit 1
+          }
+          version=$(jq -er .version packages/chromium/package.json)
+          tag=$(jq -er .image.tag packages/chromium/chromium.json)
+          if [[ ${tag##*:} != "$version" ]]; then
+            echo "::error file=packages/chromium/chromium.json::image.tag is $tag, but the package version is $version."
+            exit 1
+          fi
+          # The bump writes zeros, and the record job writes the index digest on main. Recording changes the tree of
+          # packages/chromium, so a recorded version has no candidate to find.
+          recorded=true
+          if [[ $(jq -er .image.digest packages/chromium/chromium.json) == "sha256:$(printf '0%.0s' {1..64})" ]]; then
+            recorded=false
+          fi
+          {
+            echo "dry-run=$DRY_RUN"
+            echo "recorded=$recorded"
+            echo "version=$version"
+            echo "image=${tag%:*}"
+            echo "chromium=$(jq -er .chromium packages/chromium/chromium.json)"
+            echo "tree=$(git rev-parse HEAD:packages/chromium)"
+          } >> "$GITHUB_OUTPUT"
+          if [[ $DRY_RUN == true ]]; then
+            echo "::notice::A dry run: nothing is published."
+            echo publish=true >> "$GITHUB_OUTPUT"
+          elif ! npm_has @visual-check/chromium; then
+            echo "::notice::@visual-check/chromium isn't on npm yet, so it has no trusted publisher: the first release's npm setup (scripts/npm-bootstrap-wizard.sh, #96) comes first. Then run this workflow by hand on main."
+            echo publish=false >> "$GITHUB_OUTPUT"
+          elif npm_has "@visual-check/chromium@$version"; then
+            echo "::notice::@visual-check/chromium@$version is on npm already."
+            { echo publish=false; echo released=true; } >> "$GITHUB_OUTPUT"
+          else
+            echo publish=true >> "$GITHUB_OUTPUT"
+          fi
+      # The newest candidate for this tree from a successful Browser package run of this repository. A fork's run
+      # could name its own artifact the same way, so the run's repository must be this one. Downloading by name takes
+      # the run's newest artifact of that name, so an older attempt's candidate never takes the place of a newer one.
+      - name: Find the tested candidate
+        id: candidate
+        if: steps.plan.outputs.publish == 'true' && steps.plan.outputs.recorded == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ steps.plan.outputs.dry-run }}
+          TREE: ${{ steps.plan.outputs.tree }}
+        run: |
+          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=chromium-candidate-$TREE&per_page=100" \
+            --jq '[.artifacts[] | select(.expired | not)] | sort_by(.created_at) | reverse | .[].workflow_run.id')
+          for run in $runs; do
+            details=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run")
+            if jq -e --arg repository "$GITHUB_REPOSITORY" \
+              '.conclusion == "success" and .path == ".github/workflows/chromium.yml" and .head_repository.full_name == $repository' \
+              <<< "$details" > /dev/null; then
+              echo "::notice::The candidate comes from $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$run."
+              {
+                echo "run=$run"
+                echo "attempt=$(jq -r .run_attempt <<< "$details")"
+                echo "commit=$(jq -r .head_sha <<< "$details")"
+              } >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          if [[ $DRY_RUN == true ]]; then
+            echo "::notice::No successful Browser package run has tested packages/chromium at $TREE yet."
+            exit 0
+          fi
+          echo "::error::No successful Browser package run tested packages/chromium at $TREE. Run the Browser package workflow by hand on main, then this one again."
+          exit 1
+
+  # Tags the candidate's two images as the version's index and writes its digest into the package. A recorded version
+  # only has its tag checked against the recorded digest. The tag is public, so nothing is recorded or published until
+  # anyone can pull it.
+  image:
+    name: Image
+    needs: plan
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.publish == 'true' && needs.plan.outputs.dry-run == 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      actions: read
+    outputs:
+      digest: ${{ steps.index.outputs.digest }}
+    env:
+      IMAGE: ${{ needs.plan.outputs.image }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      RECORDED: ${{ needs.plan.outputs.recorded }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.plan.outputs.recorded == 'false'
+        with:
+          name: chromium-candidate-${{ needs.plan.outputs.tree }}
+          run-id: ${{ needs.plan.outputs.candidate-run }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/candidate
+      # The candidate must be for this version, Chromium and tree, so a run can't publish another package's images.
+      # It must come from the run's commit and one of its attempts. A re-run of failed jobs keeps the candidate of the
+      # attempt that made it, so the candidate's attempt may be older than the run's.
+      - name: Read the candidate
+        id: candidate
+        if: needs.plan.outputs.recorded == 'false'
+        env:
+          CHROMIUM: ${{ needs.plan.outputs.chromium }}
+          TREE: ${{ needs.plan.outputs.tree }}
+          RUN_COMMIT: ${{ needs.plan.outputs.candidate-commit }}
+          RUN_ATTEMPT: ${{ needs.plan.outputs.candidate-attempt }}
+        run: |
+          candidate="$RUNNER_TEMP/candidate/candidate.json"
+          cat "$candidate"
+          if ! jq -e --arg version "$VERSION" --arg chromium "$CHROMIUM" --arg tree "$TREE" \
+            '.version == $version and .chromium == $chromium and .tree == $tree' "$candidate" > /dev/null; then
+            echo "::error::The candidate isn't for version $VERSION, Chromium $CHROMIUM and tree $TREE."
+            exit 1
+          fi
+          if ! jq -e --arg commit "$RUN_COMMIT" --argjson attempt "$RUN_ATTEMPT" \
+            '.commit == $commit and (.run_attempt | type == "number" and . >= 1 and . <= $attempt)' "$candidate" > /dev/null; then
+            echo "::error::The candidate isn't from commit $RUN_COMMIT and attempts 1 to $RUN_ATTEMPT of its run."
+            exit 1
+          fi
+          for arch in amd64 arm64; do
+            digest=$(jq -r --arg arch "$arch" '.digests[$arch] // ""' "$candidate")
+            if [[ ! $digest =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::The candidate's $arch digest is '$digest', not a sha256 digest."
+              exit 1
+            fi
+            echo "$arch=$digest" >> "$GITHUB_OUTPUT"
+          done
+      - name: Log in to GHCR
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      # An earlier attempt of this run may have tagged it: then the tag must hold the candidate's images. The images
+      # pushed by digest made the package, so the registry answers "not found" for a missing tag. Any other answer
+      # stops the run. GHCR shows a multi-arch package's description from the index's annotations, so the index
+      # repeats the image's labels.
+      - name: Tag the candidate
+        if: needs.plan.outputs.recorded == 'false'
+        env:
+          AMD64: ${{ steps.candidate.outputs.amd64 }}
+          ARM64: ${{ steps.candidate.outputs.arm64 }}
+        run: |
+          sources=("$IMAGE@$AMD64" "$IMAGE@$ARM64")
+          for source in "${sources[@]}"; do
+            labels=$(docker buildx imagetools inspect "$source" --format '{{json .Image.Config.Labels}}')
+            if ! jq -e --arg version "$VERSION" '.["org.opencontainers.image.version"] == $version' <<< "$labels" > /dev/null; then
+              echo "::error::$source isn't labelled as version $VERSION."
+              exit 1
+            fi
+          done
+          if index=$(docker buildx imagetools inspect --raw "$IMAGE:$VERSION" 2>&1); then
+            tagged=$(jq -r '.manifests[].digest' <<< "$index" | sort)
+            expected=$(printf '%s\n' "$AMD64" "$ARM64" | sort)
+            if [[ $tagged != "$expected" ]]; then
+              echo "::error::$IMAGE:$VERSION exists with other images than the candidate's."
+              exit 1
+            fi
+            echo "::notice::$IMAGE:$VERSION holds the candidate's images already."
+          elif [[ $index == *": not found" ]]; then
+            labels=$(docker buildx imagetools inspect "${sources[0]}" --format '{{json .Image.Config.Labels}}')
+            annotations=()
+            for key in source description version; do
+              value=$(jq -er --arg key "org.opencontainers.image.$key" '.[$key]' <<< "$labels")
+              annotations+=(--annotation "index:org.opencontainers.image.$key=$value")
+            done
+            docker buildx imagetools create --tag "$IMAGE:$VERSION" "${annotations[@]}" "${sources[@]}"
+          else
+            echo "::error::Can't tell whether $IMAGE:$VERSION exists: $index"
+            exit 1
+          fi
+      - name: Write the index digest into the package
+        id: index
+        run: |
+          if [[ $RECORDED == true ]]; then
+            digest=$(jq -er .image.digest packages/chromium/chromium.json)
+          else
+            digest=sha256:$(docker buildx imagetools inspect --raw "$IMAGE:$VERSION" | sha256sum | cut -d ' ' -f 1)
+            jq --arg digest "$digest" '.image.digest = $digest' packages/chromium/chromium.json > "$RUNNER_TEMP/chromium.json"
+            mv "$RUNNER_TEMP/chromium.json" packages/chromium/chromium.json
+          fi
+          # Platforms, gzip layers, and the digest now in chromium.json.
+          packages/chromium/image/check-index.sh "$IMAGE:$VERSION" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      # Users pull the image without signing in, so it must be public before the package names it.
+      - name: Check anyone can pull it
+        env:
+          DIGEST: ${{ steps.index.outputs.digest }}
+        run: |
+          docker logout ghcr.io
+          if ! docker buildx imagetools inspect "$IMAGE:$VERSION@$DIGEST" > /dev/null; then
+            echo "::error::$IMAGE isn't pullable without signing in. Make the GHCR package public (its Package settings › Change visibility), then re-run this run's failed jobs."
+            exit 1
+          fi
+
+  # Records the index digest on main in one commit, so main's chromium.json matches npm's and Browser package runs
+  # check the published tag against it. The blob sha makes it fail rather than overwrite a newer change.
+  record:
+    name: Record the digest
+    needs: [plan, image]
+    if: ${{ !cancelled() && needs.image.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      commit: ${{ steps.record.outputs.commit }}
+    steps:
+      - name: Record the digest
+        id: record
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ${{ needs.plan.outputs.image }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          DIGEST: ${{ needs.image.outputs.digest }}
+        # The here-string adds the trailing newline the file has, and jq's 2-space output is the file's form.
+        run: |
+          api="repos/$GITHUB_REPOSITORY/contents/packages/chromium/chromium.json"
+          response=$(gh api "$api?ref=main")
+          content=$(jq -r .content <<< "$response" | base64 --decode)
+          if ! jq -e --arg tag "$IMAGE:$VERSION" '.image.tag == $tag' <<< "$content" > /dev/null; then
+            echo "::error::main's chromium.json no longer names $IMAGE:$VERSION, so this run records nothing."
+            exit 1
+          fi
+          if jq -e --arg digest "$DIGEST" '.image.digest == $digest' <<< "$content" > /dev/null; then
+            # An earlier attempt recorded it.
+            commit=$(gh api "repos/$GITHUB_REPOSITORY/commits?sha=main&path=packages/chromium/chromium.json&per_page=1" --jq '.[0].sha')
+          else
+            updated=$(jq --arg digest "$DIGEST" '.image.digest = $digest' <<< "$content")
+            commit=$(gh api --method PUT "$api" \
+              -f message="chore(chromium): record the index digest of $IMAGE:$VERSION" \
+              -f content="$(base64 --wrap=0 <<< "$updated")" \
+              -f sha="$(jq -r .sha <<< "$response")" -f branch=main --jq .commit.sha)
+          fi
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+  # The package from the recorded commit, so npm gets the digest main has. A dry run packs the checked-out commit.
+  pack:
+    name: Pack
+    needs: [plan, image, record]
+    if: ${{ !cancelled() && needs.plan.outputs.publish == 'true' && (needs.plan.outputs.dry-run == 'true' || needs.record.result == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.record.outputs.commit }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      # pnpm pack resolves the package's workspace: devDependencies, so it needs them installed.
+      - run: pnpm install --frozen-lockfile
+      - name: Pack
+        env:
+          DRY_RUN: ${{ needs.plan.outputs.dry-run }}
+          DIGEST: ${{ needs.image.outputs.digest }}
+        run: |
+          if [[ $DRY_RUN != true ]] && ! jq -e --arg digest "$DIGEST" '.image.digest == $digest' packages/chromium/chromium.json > /dev/null; then
+            echo "::error::packages/chromium/chromium.json doesn't record $DIGEST."
+            exit 1
+          fi
+          (cd packages/chromium && pnpm pack --pack-destination "$RUNNER_TEMP/package")
+          (cd "$RUNNER_TEMP/package" && sha256sum -- *.tgz)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: chromium-package
+          path: ${{ runner.temp }}/package
+          if-no-files-found: error
+          retention-days: 3
+
+  # The packed file on npm through npm's trusted publishing: npm trades this job's OIDC token for a publish token, so
+  # no token is stored. npm 11.5.1 or later does that; Node 24 ships 11.19.
+  publish:
+    name: Publish to npm
+    needs: [plan, pack]
+    if: ${{ !cancelled() && needs.pack.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: chromium-package
+          path: ${{ runner.temp }}/package
+      - name: Publish
+        env:
+          DRY_RUN: ${{ needs.plan.outputs.dry-run }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          npm --version
+          cd "$RUNNER_TEMP/package"
+          tarball="visual-check-chromium-$VERSION.tgz"
+          if [[ ! -f $tarball ]]; then
+            echo "::error::The packed files hold no $tarball."
+            exit 1
+          fi
+          # The same line as the Pack job's.
+          sha256sum -- "$tarball"
+          if [[ $DRY_RUN == true ]]; then
+            # Without the OIDC request variables, npm asks for no publish token. --force lets a dry run go on for a
+            # version that's on npm already.
+            env -u ACTIONS_ID_TOKEN_REQUEST_URL -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+              npm publish "./$tarball" --access public --provenance --dry-run --force
+          elif [[ $(npm view "@visual-check/chromium@$VERSION" version 2> /dev/null) == "$VERSION" ]]; then
+            # An earlier attempt of this run published it, so re-running the run's failed jobs is safe.
+            echo "::notice::@visual-check/chromium@$VERSION is on npm already."
+          else
+            npm publish "./$tarball" --access public --provenance
+          fi
+
+  # The GitHub release at the recorded commit. The CLI's release stays the repository's latest. A version npm has
+  # already gets its release too, from main's record, so a run that stopped after npm can finish.
+  github-release:
+    name: GitHub release
+    needs: [plan, image, record, publish]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.dry-run == 'false' && (needs.publish.result == 'success' || needs.plan.outputs.released == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          CHROMIUM: ${{ needs.plan.outputs.chromium }}
+          IMAGE: ${{ needs.plan.outputs.image }}
+          RECORDED_DIGEST: ${{ needs.image.outputs.digest }}
+          RECORDED_COMMIT: ${{ needs.record.outputs.commit }}
+        run: |
+          if gh release view "chromium-v$VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "::notice::The GitHub release chromium-v$VERSION exists already."
+            exit 0
+          fi
+          digest=$RECORDED_DIGEST
+          commit=$RECORDED_COMMIT
+          if [[ -z $digest ]]; then
+            content=$(gh api "repos/$GITHUB_REPOSITORY/contents/packages/chromium/chromium.json?ref=main" --jq .content \
+              | base64 --decode)
+            if ! jq -e --arg tag "$IMAGE:$VERSION" '.image.tag == $tag' <<< "$content" > /dev/null; then
+              echo "::error::main's chromium.json no longer names $IMAGE:$VERSION, so this run creates no release."
+              exit 1
+            fi
+            digest=$(jq -er .image.digest <<< "$content")
+            if [[ $digest == "sha256:$(printf '0%.0s' {1..64})" ]]; then
+              echo "::error::main's chromium.json records no digest for $IMAGE:$VERSION."
+              exit 1
+            fi
+            commit=$(gh api "repos/$GITHUB_REPOSITORY/commits?sha=main&path=packages/chromium/chromium.json&per_page=1" --jq '.[0].sha')
+          fi
+          notes="Chromium $CHROMIUM from Chrome for Testing's Stable channel.
+
+          - Image: \`$IMAGE:$VERSION@$digest\`, for linux/amd64 and linux/arm64.
+          - npm: https://www.npmjs.com/package/@visual-check/chromium/v/$VERSION"
+          gh release create "chromium-v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$commit" \
+            --title "chromium: v$VERSION" --latest=false --notes "$notes"
