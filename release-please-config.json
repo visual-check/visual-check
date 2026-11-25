@@ -11,8 +11,7 @@
   "packages": {
     "packages/cli": { "component": "cli", "initial-version": "0.1.0" },
     "packages/storybook": { "component": "storybook", "initial-version": "0.1.0" },
-    "packages/storybook-addon": { "component": "storybook-addon", "initial-version": "0.1.0" },
-    "packages/chromium": { "component": "chromium" }
+    "packages/storybook-addon": { "component": "storybook-addon", "initial-version": "0.1.0" }
   },
   "plugins": [
     { "type": "linked-versions", "groupName": "visual-check", "components": ["cli", "storybook", "storybook-addon"] }

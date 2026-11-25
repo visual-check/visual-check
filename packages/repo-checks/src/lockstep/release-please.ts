@@ -113,10 +113,10 @@ export function readReleasePleaseSetup(root: URL): ReleasePleaseSetup {
 }
 
 /**
- * Lists what keeps release-please from releasing exactly the lockstep group at one version: a lockstep package it
+ * Lists what keeps release-please from versioning exactly the lockstep group at one version: a lockstep package it
  * doesn't release or can't link, a linked-versions plugin missing or linking another group, a group title pattern it
- * can't read back, and a manifest version that differs from `package.json`. The browser package releases by itself on
- * its own version line, so its version and options aren't checked.
+ * can't read back, a manifest version that differs from `package.json`, and a package outside the group. The browser
+ * package releases on its own version line through its own workflow, `chromium-release.yml`.
  *
  * @public
  */
@@ -137,6 +137,9 @@ export function findReleasePleaseProblems(setup: ReleasePleaseSetup): string[] {
     ...componentless,
     ...findLinkedVersionsProblems(setup, lockstepPaths),
     ...findVersionProblems(setup, lockstepPaths),
+    ...Object.keys(setup.packages)
+      .filter((path) => !lockstepPaths.includes(path))
+      .map((path) => `${path} is in release-please-config.json, but release-please releases the lockstep group alone`),
   ]
 }
 
