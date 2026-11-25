@@ -35,13 +35,13 @@ The public repo `visual-check/test-apps` proves that the packages about to be pu
 
 ## Jobs
 
-| Runner         | Runs                                                                                                                                                                                                |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ubuntu-24.04` | Every app. One app also runs from a `node` job container with the `docker` CLI added, which tests the browser joining that container's network                                                      |
-| `windows-2025` | Every app, from the Windows host, each in a job of its own that installs Docker Desktop first. One app also runs from inside a WSL distro, in another job, through Docker Desktop's WSL integration |
+| Runner         | Runs                                                                                                                                           |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ubuntu-24.04` | Every app. One app also runs from a `node` job container with the `docker` CLI added, which tests the browser joining that container's network |
+| `windows-2025` | One app, from inside a WSL distro, with Docker Engine installed in the distro                                                                  |
 
 - There are no macOS jobs here.
-- A Windows job's setup takes up to 3 minutes: Docker Desktop is installed, the runner's own Docker service is stopped, then Docker Desktop is started. This repo holds that step as an action, with the version it pins.
+- No job installs Docker Desktop. Its install hung the Windows runner in about 1 job in 40, past every timeout, so Docker Desktop on Windows is a check by hand ([Release process](19-release.md)).
 
 ## When they run
 
@@ -52,13 +52,13 @@ The public repo `visual-check/test-apps` proves that the packages about to be pu
 ## What this covers for other areas
 
 - The Action and the reusable workflow, which every run goes through ([GitHub Action](14-github-action.md)).
-- Windows with Docker Desktop, from the host and from WSL ([Browser and platform](05-browser-and-platform.md)).
+- Node inside WSL with Docker Engine in the distro ([Browser and platform](05-browser-and-platform.md)).
 - Several Storybooks in one config, which the migration target doesn't exercise.
 
 ## Sources
 
 - [Test apps repo][34], [Windows and macOS on GitHub Actions][33], [Container runtimes on Windows][36], [GitHub Action design][40], [Playwright peer dependency and Chromium version][45], [Combined snapshots and network paths in v1][47], [Storybook 9 floor and Storybook 11][48], [Cartesian stories helper][50].
-- Decided while writing this PRD: the `sb11` app on a prerelease, every app on Windows, which packages are packed, visual-check set up ahead in each app, and runs going through the Action.
+- Decided while writing this PRD: the `sb11` app on a prerelease, Windows through WSL only, which packages are packed, visual-check set up ahead in each app, and runs going through the Action.
 - Decided while building the browser package release (#95): the reusable workflow checks out the test-apps branch named like the caller's when one exists, and passes it to the Action's reusable workflow through its `ref` input. Update baselines takes `visual-check-ref`, the visual-check branch whose packages and image it runs.
 
 [33]: https://github.com/visual-check/visual-check/issues/33
