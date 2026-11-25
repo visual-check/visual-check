@@ -260,13 +260,11 @@ pause
 
 stage "Register trusted publishers"
 say "Lets $REPO's workflow publish with OIDC, so no npm token is ever stored."
-say "The lockstep packages use release.yml. The browser package's workflow comes with #95;"
-say "if #95 publishes it from another file, revoke and re-register then (npm trust revoke)."
-ask CHROMIUM_WORKFLOW "Workflow file for @visual-check/chromium [release.yml]:"
-CHROMIUM_WORKFLOW=${CHROMIUM_WORKFLOW:-release.yml}
+say "The lockstep packages publish from release.yml, and the browser package from chromium-release.yml."
+say "If @visual-check/chromium already trusts another file from an earlier run, revoke it (npm trust revoke) and run this again."
 note "The first call asks for 2FA; tick 'skip 2FA for 5 minutes' to speed up the rest."
 for pkg in "${SCOPED[@]}"; do
-  file=release.yml; [[ $pkg == @visual-check/chromium ]] && file=$CHROMIUM_WORKFLOW
+  file=release.yml; [[ $pkg == @visual-check/chromium ]] && file=chromium-release.yml
   if "${NPM[@]}" trust list "$pkg" 2>/dev/null | grep -q "$REPO"; then
     note "$pkg already trusts $REPO, skipping"; continue
   fi
@@ -296,7 +294,7 @@ for pkg in "${SCOPED[@]}"; do
 done
 say "${BOLD}visual-check$RESET"
 "${NPM[@]}" view visual-check deprecated 2>/dev/null | sed 's/^/    deprecated: /' || true
-note "Next in #96: the chromium release, then merge the lockstep release PR."
+note "Next in #96: run Browser package by hand on main (it pushes the image and its candidate), make ghcr.io/visual-check/chromium public, run Browser package release by hand on main, then merge the lockstep release PR."
 pause
 
 finish

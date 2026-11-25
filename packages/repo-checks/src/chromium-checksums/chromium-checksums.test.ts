@@ -1,7 +1,12 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { repoRoot } from '../workspace/manifests.ts'
-import { chromiumDownloadUrl, findChecksumProblems, readChromiumChecksums } from './chromium-checksums.ts'
+import {
+  chromiumDownloadUrl,
+  computeChecksums,
+  findChecksumProblems,
+  readChromiumChecksums,
+} from './chromium-checksums.ts'
 
 const chunks = [
   new TextEncoder().encode('first chunk, '),
@@ -96,5 +101,30 @@ describe('findChecksumProblems', () => {
     )
 
     expect(problems).toEqual([`win64: download failed (${chromiumDownloadUrl(version, 'win64')}): reset`])
+  })
+})
+
+describe('computeChecksums', () => {
+  it('hashes each streamed download, keyed in the platforms order', async () => {
+    const requested: string[] = []
+    const checksums = await computeChecksums(version, ['win64', 'linux64'], async (url) => {
+      requested.push(url)
+
+      return streamedResponse()
+    })
+
+    expect(Object.entries(checksums)).toEqual([
+      ['win64', expectedHash],
+      ['linux64', expectedHash],
+    ])
+    expect(requested).toEqual([chromiumDownloadUrl(version, 'win64'), chromiumDownloadUrl(version, 'linux64')])
+  })
+
+  it('rejects naming the platform and URL when the response is not OK', async () => {
+    await expect(
+      computeChecksums(version, ['linux64', 'win64'], async (url) =>
+        url.includes('/win64/') ? new Response('', { status: 500 }) : streamedResponse(),
+      ),
+    ).rejects.toThrow(new Error(`win64: download failed (${chromiumDownloadUrl(version, 'win64')}): HTTP 500`))
   })
 })

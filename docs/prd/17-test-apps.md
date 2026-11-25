@@ -47,7 +47,7 @@ The public repo `visual-check/test-apps` proves that the packages about to be pu
 
 - **On every PR of this repo,** through test-apps' reusable workflow, so breakage shows before release day.
 - **Before every publish.** The release workflow packs the files, runs the test apps on them, and publishes those same files only when every job passes ([Release process](19-release.md)).
-- **On every browser bump's PR,** with the new browser package.
+- **On every browser bump's PR,** with the new browser package and the image merging publishes. When the bump moves pixels, they run from the test-apps branch named like the bump's: the reusable workflow checks out a branch named like the caller's when there is one.
 
 ## What this covers for other areas
 
@@ -59,6 +59,7 @@ The public repo `visual-check/test-apps` proves that the packages about to be pu
 
 - [Test apps repo][34], [Windows and macOS on GitHub Actions][33], [Container runtimes on Windows][36], [GitHub Action design][40], [Playwright peer dependency and Chromium version][45], [Combined snapshots and network paths in v1][47], [Storybook 9 floor and Storybook 11][48], [Cartesian stories helper][50].
 - Decided while writing this PRD: the `sb11` app on a prerelease, every app on Windows, which packages are packed, visual-check set up ahead in each app, and runs going through the Action.
+- Decided while building the browser package release (#95): the reusable workflow checks out the test-apps branch named like the caller's when one exists, and passes it to the Action's reusable workflow through its `ref` input. Update baselines takes `visual-check-ref`, the visual-check branch whose packages and image it runs.
 
 [33]: https://github.com/visual-check/visual-check/issues/33
 [34]: https://github.com/visual-check/visual-check/issues/34

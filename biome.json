@@ -31,7 +31,7 @@
       "suspicious": {
         "noUndeclaredEnvVars": {
           "level": "on",
-          "options": { "allowedEnvVars": ["SystemRoot", "VISUAL_CHECK_STORYBOOK"] }
+          "options": { "allowedEnvVars": ["GITHUB_OUTPUT", "SystemRoot", "VISUAL_CHECK_STORYBOOK"] }
         }
       },
       "style": {

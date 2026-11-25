@@ -1,0 +1,105 @@
+# Proposes a browser package bump (docs/prd/19-release.md › Releasing the browser package). Once a month it reads
+# Chrome for Testing's Stable channel. When Stable has a newer build than the browser package, a new major or a point
+# release, it writes the new version and checksums, raises the CLI's browser range for a new major, and opens a pull
+# request from chromium-bump/<Chromium version>. When Stable hasn't moved, or that branch exists, it does nothing.
+#
+# A pull request opened with this workflow's token starts no workflow, so the job starts the pull request's checks on
+# its branch itself: CI, Browser package, whose run pushes and tests the images merging publishes, and Browser
+# checksums.
+#
+# On a pull request that changes it, or run by hand on another branch than main, it's a dry run: it plans and writes
+# the files, and pushes and opens nothing.
+name: Browser package bump
+
+on:
+  schedule:
+    # The 1st of the month, off the hour, when GitHub delays fewer scheduled runs.
+    - cron: "41 6 1 * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/chromium-bump.yml
+      - packages/repo-checks/src/chromium-bump/**
+      - packages/repo-checks/src/bump-chromium.ts
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  bump:
+    name: Bump
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    env:
+      DRY_RUN: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Plan and write the bump
+        id: bump
+        run: node packages/repo-checks/src/bump-chromium.ts --body-file "$RUNNER_TEMP/chromium-bump.md"
+      - name: Show the dry run
+        if: steps.bump.outputs.changed == 'true' && env.DRY_RUN == 'true'
+        env:
+          TITLE: ${{ steps.bump.outputs.title }}
+          BRANCH: ${{ steps.bump.outputs.branch }}
+        run: |
+          {
+            echo "### $TITLE"
+            echo
+            echo "A dry run: nothing is pushed. The pull request would come from \`$BRANCH\`."
+            echo
+            echo '```'
+            git diff --stat
+            echo '```'
+            echo
+            cat "$RUNNER_TEMP/chromium-bump.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+      # The branch is named after the build, so an existing one means a pull request for this build was opened already.
+      - name: Open the pull request and start its checks
+        if: steps.bump.outputs.changed == 'true' && env.DRY_RUN == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.bump.outputs.branch }}
+          TITLE: ${{ steps.bump.outputs.title }}
+        run: |
+          status=0
+          git ls-remote --exit-code --heads origin "refs/heads/$BRANCH" > /dev/null || status=$?
+          case $status in
+            0)
+              echo "::notice::$BRANCH exists, so a pull request proposes this build already."
+              exit 0
+              ;;
+            2) ;;
+            *)
+              echo "::error::git ls-remote failed with exit code $status."
+              exit 1
+              ;;
+          esac
+          gh auth setup-git
+          git switch --create "$BRANCH"
+          git add packages/chromium packages/cli/package.json
+          git -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit --message "$TITLE"
+          git push origin "$BRANCH"
+          url=$(gh pr create --base main --head "$BRANCH" --title "$TITLE" --body-file "$RUNNER_TEMP/chromium-bump.md")
+          for workflow in ci.yml chromium.yml chromium-checksums.yml; do
+            gh workflow run "$workflow" --ref "$BRANCH"
+          done
+          echo "Opened $url, and started CI, Browser package and Browser checksums on $BRANCH." >> "$GITHUB_STEP_SUMMARY"

@@ -4,8 +4,9 @@
 #
 # It always packs visual-check/visual-check: the commit `ref` names when the caller passes one, as the release workflow
 # does with the commit release-please tagged. Else the commit under test when this repository calls it, else its
-# default branch, as actions/checkout picks for another repository. Until #95 publishes the browser image and the
-# browser package, the test apps install the packed browser package and load this image.
+# default branch, as actions/checkout picks for another repository. The test apps install the packed browser package and
+# load the image in the artifact. That's the image built here, or the one the caller names in `image-artifact`, as the
+# Browser package workflow does with the candidate it pushed.
 name: Pack
 
 on:
@@ -13,6 +14,12 @@ on:
     inputs:
       ref:
         description: The commit to pack. Empty packs the commit actions/checkout picks.
+        type: string
+        default: ""
+      image-artifact:
+        description: >-
+          An artifact of this run that holds the browser image as chromium-image.tar.gz, as the Browser package workflow
+          saves the image it pushed. Empty builds the amd64 image from the packed commit.
         type: string
         default: ""
 
@@ -49,12 +56,26 @@ jobs:
           ls -l "$RUNNER_TEMP/packages"
           # The release workflow's Publish to npm job prints the same lines for the files it publishes.
           (cd "$RUNNER_TEMP/packages" && sha256sum -- *.tgz)
+      # The caller's image, as pushed, so it isn't built twice.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: inputs.image-artifact != ''
+        with:
+          name: ${{ inputs.image-artifact }}
+          path: ${{ runner.temp }}/packages
       - name: Create a docker-container builder
+        if: inputs.image-artifact == ''
         run: docker buildx create --driver docker-container --use
       - name: Build the browser image
+        if: inputs.image-artifact == ''
         run: packages/chromium/image/build.sh amd64 --output type=docker,name=visual-check-chromium:test-apps
       - name: Save the browser image
+        if: inputs.image-artifact == ''
         run: docker save visual-check-chromium:test-apps | gzip > "$RUNNER_TEMP/packages/chromium-image.tar.gz"
+      # Either way, the image the test apps load.
+      - name: Show the browser image
+        run: |
+          ls -l "$RUNNER_TEMP/packages/chromium-image.tar.gz"
+          sha256sum "$RUNNER_TEMP/packages/chromium-image.tar.gz"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: visual-check-packages

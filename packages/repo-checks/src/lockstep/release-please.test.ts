@@ -3,15 +3,13 @@ import { repoRoot } from '../workspace/manifests.ts'
 import { findReleasePleaseProblems, type ReleasePleaseSetup, readReleasePleaseSetup } from './release-please.ts'
 
 /**
- * Builds a release-please setup that releases exactly the lockstep group, linked, at `0.0.0`, and the browser package
- * by itself at `157.0.0`.
+ * Builds a release-please setup that releases exactly the lockstep group, linked, at `0.0.0`.
  */
 const validSetup = (): ReleasePleaseSetup => ({
   packages: {
     'packages/cli': { component: 'cli' },
     'packages/storybook': { component: 'storybook' },
     'packages/storybook-addon': { component: 'storybook-addon' },
-    'packages/chromium': { component: 'chromium' },
   },
   plugins: [
     { type: 'linked-versions', groupName: 'visual-check', components: ['cli', 'storybook', 'storybook-addon'] },
@@ -20,13 +18,11 @@ const validSetup = (): ReleasePleaseSetup => ({
     'packages/cli': '0.0.0',
     'packages/storybook': '0.0.0',
     'packages/storybook-addon': '0.0.0',
-    'packages/chromium': '157.0.0',
   },
   manifests: {
     'packages/cli': { name: '@visual-check/cli', version: '0.0.0' },
     'packages/storybook': { name: '@visual-check/storybook', version: '0.0.0' },
     'packages/storybook-addon': { name: '@visual-check/storybook-addon', version: '0.0.0' },
-    'packages/chromium': { name: '@visual-check/chromium', version: '157.0.0' },
   },
   groupPullRequestTitlePattern: `chore\${scope}: release visual-check libraries`,
 })
@@ -41,13 +37,15 @@ describe('findReleasePleaseProblems', () => {
     expect(findReleasePleaseProblems(validSetup())).toEqual([])
   })
 
-  it('leaves the browser package alone', () => {
+  it('reports a package outside the lockstep group', () => {
     const setup = validSetup()
 
-    setup.packages['packages/chromium'] = {}
-    setup.manifests['packages/chromium'] = { name: '@visual-check/chromium', version: '158.0.0' }
+    setup.packages['packages/chromium'] = { component: 'chromium' }
+    setup.manifests['packages/chromium'] = { name: '@visual-check/chromium', version: '157.0.0' }
 
-    expect(findReleasePleaseProblems(setup)).toEqual([])
+    expect(findReleasePleaseProblems(setup)).toEqual([
+      'packages/chromium is in release-please-config.json, but release-please releases the lockstep group alone',
+    ])
   })
 
   it("reports a lockstep package release-please doesn't release", () => {

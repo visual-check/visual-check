@@ -8,7 +8,7 @@ Names the one Chromium build visual-check renders with. The package holds data o
 
 - `chromium`: the exact Chromium version, for example `157.0.8103.78`.
 - `image.tag`: visual-check's container image, `ghcr.io/visual-check/chromium:<package version>`.
-- `image.digest`: the image's index digest. visual-check pulls `<tag>@<digest>`.
+- `image.digest`: the image's index digest. visual-check pulls `<tag>@<digest>`. It's zeros until the version is published: the Browser package release workflow writes the index digest into the package it publishes, and records it on main.
 - `headlessShell`: the path of the headless shell inside the image.
 - `sha256`: the SHA-256 of each Chrome for Testing headless shell download, by platform: `linux64`, `linux-arm64`, `mac-x64`, `mac-arm64` and `win64`. `platform: 'host'` checks the download against it. The download is `https://storage.googleapis.com/chrome-for-testing-public/<chromium>/<platform>/chrome-headless-shell-<platform>.zip`.
 
@@ -27,7 +27,15 @@ image/verify-image.sh visual-check-chromium:arm64 arm64
 
 The architecture is `amd64` or `arm64`. Options after it go to `docker buildx build`.
 
-Running the Browser package workflow (`.github/workflows/chromium.yml`) by hand on `main` pushes the image when its version's tag is missing. A tag is never overwritten. Pull requests and other runs only build and check the image, and once the tag exists they check that `image.digest` matches it. After the push, the run fails until `image.digest` holds the index digest it prints in the run summary.
+The Browser package workflow (`.github/workflows/chromium.yml`) builds and verifies the image for both architectures on every pull request that changes this folder.
+
+- A version that isn't published is a candidate. On its pull request, or a run by hand, the workflow pushes both images by digest without a tag and runs the test apps on the amd64 one as pushed. A fork's pull request only builds and verifies.
+- Merging the version to `main` publishes it through `.github/workflows/chromium-release.yml`: it tags the candidate's images as `ghcr.io/visual-check/chromium:<version>`, writes the index digest into `image.digest`, then publishes the package. Nothing is built again.
+- A published version is only built, verified and checked against its tag: the tag's index digest must be `image.digest`. A tag is never overwritten.
+
+## Bumping
+
+The Browser package bump workflow (`.github/workflows/chromium-bump.yml`) runs on the 1st of each month. When Chrome for Testing's Stable build is newer, it opens a pull request with the new version and checksums, and for a new major the CLI's wider browser range. Its checklist covers the image, the launch arguments in `packages/cli/src/capture/driver/cdp/launch-arguments.ts` and the baselines. The whole flow is in [Release process](../../docs/prd/19-release.md#releasing-the-browser-package).
 
 ## Versioning
 

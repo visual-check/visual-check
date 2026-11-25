@@ -4,6 +4,11 @@
   "description": "Names the exact Chromium build visual-check renders with",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/visual-check/visual-check.git",
+    "directory": "packages/chromium"
+  },
   "files": [
     "chromium.json"
   ],

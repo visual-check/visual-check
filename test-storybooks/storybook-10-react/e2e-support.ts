@@ -35,6 +35,11 @@ export const diagnosticsDir = join(packageDir, 'e2e-output')
 const browserPackagePath = join(packageDir, 'node_modules', '@visual-check', 'chromium', 'chromium.json')
 
 /**
+ * The browser package's manifest, beside its `chromium.json`, which holds its version.
+ */
+const browserPackageManifestPath = join(packageDir, 'node_modules', '@visual-check', 'chromium', 'package.json')
+
+/**
  * Chrome for Testing's name for the platform of each machine visual-check downloads a headless shell for, by Node's
  * OS and architecture.
  */
@@ -95,6 +100,19 @@ interface BrowserPackage {
    * The SHA-256 of the headless shell's download, by Chrome for Testing's name for the platform.
    */
   sha256: Record<string, string>
+  /**
+   * visual-check's container image, which the CLI pulls as `<tag>@<digest>` unless the config names another.
+   */
+  image: {
+    /**
+     * The image's tag, such as `ghcr.io/visual-check/chromium:157.0.0`.
+     */
+    tag: string
+    /**
+     * The image's index digest, such as `sha256:…`.
+     */
+    digest: string
+  }
 }
 
 /**
@@ -116,6 +134,13 @@ export interface Case {
  */
 export function readBrowserPackage(): BrowserPackage {
   return JSON.parse(readFileSync(browserPackagePath, 'utf8')) as BrowserPackage
+}
+
+/**
+ * Reads the browser package's version, such as `157.0.0`, from its manifest.
+ */
+export function readBrowserPackageVersion(): string {
+  return (JSON.parse(readFileSync(browserPackageManifestPath, 'utf8')) as { version: string }).version
 }
 
 /**
