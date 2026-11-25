@@ -16,7 +16,7 @@ This repo's CI checks the code, runs the built CLI against the repo's own small 
 | macOS without Docker | macOS, Apple Silicon | `init`, affected stories, baseline files, the skill script's own tests, starting and stopping Storybook, the no-Docker error, one `host` capture, and the addon's end-to-end check with `host`                                                                                                                                                                         |
 | Ubuntu `host`        | Linux                | One `host` capture, where Chromium's sandbox can't start and visual-check relaunches without it                                                                                                                                                                                                                                                                        |
 | Windows skill script | Windows              | The skill script's and the agent skill's own tests, then, through Docker Desktop installed in the job: the script starts and stops Storybook, reuses one already running, stops at a port mismatch, starts only the Storybook a change reaches, and an interrupt mid-run stops Storybook, the CLI and the browser. Killing the CLI mid-run leaves no browser container |
-| Oldest browser       | Linux                | A smoke run with the oldest browser package in the CLI's range: it launches and captures, with no image comparison                                                                                                                                                                                                                                                     |
+| Oldest browser       | Linux                | A smoke run with the oldest browser package in the CLI's range from npm, in its own image pulled without signing in: it launches and captures one story with `update`, with no image comparison. Until one is on npm, the workspace's, with a local image                                                                                                              |
 | Inside the image     | Linux                | Captures inside visual-check's image with Node added, with no Docker or network: `host` and a platform mismatch too                                                                                                                                                                                                                                                    |
 | Job container        | Linux                | A run from a job container on another image with the `docker` CLI, which the browser's container joins                                                                                                                                                                                                                                                                 |
 | Devcontainer         | Linux                | A run from a devcontainer that uses the host's Docker                                                                                                                                                                                                                                                                                                                  |
@@ -33,6 +33,10 @@ Nightly, and not blocking:
 - A pull request that changes the nightly workflow runs it too.
 
 A pull request that changes the release workflow, or the pack workflow it calls, runs the release workflow as a dry run ([Release process](19-release.md)).
+
+- A pull request that changes the browser package runs the Browser package workflow. A new version's images are pushed by digest, and the test apps run on the amd64 one ([Release process](19-release.md)).
+- A pull request the browser bump job opens starts no workflow, so the job starts CI, the Browser package workflow and the checksums on its branch.
+- A pull request that changes the browser package's release workflow, or the bump workflow, runs it as a dry run.
 
 ## This repo's own test Storybooks
 
@@ -92,6 +96,7 @@ These rest on source reading, or on measurements made with Playwright before the
 
 - [Test apps repo][34], [Windows and macOS on GitHub Actions][33], [Container runtimes on Windows][36], [Cartesian stories helper][50], [Chromium sandbox in the browser image][51], [Playwright peer dependency and Chromium version][45], [Affected stories rules][14], [Agent skill shape][20], [Combined snapshots and network paths in v1][47].
 - Decided while writing this PRD: the repo's own test Storybooks, the Node versions, the setup job, the macOS and Windows jobs, the devcontainer and arm64 checks, and how the oldest browser is tested.
+- Decided while building the browser package release (#95): the Oldest browser job takes the lowest version npm has in the CLI's range and puts its `chromium.json` in place of the workspace's, so the CLI pulls that version's image by tag and digest. CI and the Browser package workflow also run by hand, which is how the bump job starts them.
 
 [14]: https://github.com/visual-check/visual-check/issues/14
 [20]: https://github.com/visual-check/visual-check/issues/20
