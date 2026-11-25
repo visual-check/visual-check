@@ -276,7 +276,7 @@ pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --host --sk
 TEST_STORYBOOK_IMAGE=visual-check-chromium:amd64 pnpm turbo run e2e --filter @visual-check/test-storybook-10-react -- --skill-script
 ```
 
-CI's "macOS without Docker" job runs the first, and "Windows skill script" the second through Docker Desktop.
+CI's "macOS without Docker" and "Windows skill script" jobs run the first.
 
 ## Running it on the arm64 image
 
