@@ -2,7 +2,7 @@
   "chromium": "157.0.8103.78",
   "image": {
     "tag": "ghcr.io/visual-check/chromium:157.0.0",
-    "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    "digest": "sha256:08815c78a05c2f5530c89dab7bde9c8012851b9368f8ef256dde5e88c8e8a7c5"
   },
   "headlessShell": "/opt/chrome-headless-shell/chrome-headless-shell",
   "sha256": {
