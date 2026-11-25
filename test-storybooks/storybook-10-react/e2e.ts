@@ -4583,7 +4583,7 @@ async function checkSkillInterrupt(folder: string, environment: NodeJS.ProcessEn
     }
 
     try {
-      return await afterInterruptProblems({ child, followed }, before)
+      return await afterInterruptProblems({ child, followed }, before, environment)
     } finally {
       followed.kill()
     }
@@ -4592,12 +4592,13 @@ async function checkSkillInterrupt(folder: string, environment: NodeJS.ProcessEn
 
 /**
  * Notes the processes the capturing script started, outside Windows, interrupts it, and gives the problems with what
- * is left: how it ended, Storybook still answering, any of those processes still running, and in the image a
- * visual-check container that isn't in `before`.
+ * is left: how it ended, Storybook still answering, any of those processes still running, on the host on Windows a
+ * headless shell from the run's cache still running, and in the image a visual-check container that isn't in `before`.
  */
 async function afterInterruptProblems(
   { child, followed }: SkillScriptRun,
   before: ReadonlySet<string>,
+  environment: NodeJS.ProcessEnv,
 ): Promise<string[]> {
   const started = process.platform === 'win32' ? [] : descendantsOf(child.pid ?? 0)
 
@@ -4607,8 +4608,59 @@ async function afterInterruptProblems(
     ...(await interruptedProblems(followed)),
     ...(await stoppedProblems()),
     ...(await processesGoneProblems(started)),
-    ...(onHost ? [] : await waitForRemoval(before)),
+    ...(await leftBehindProblems(before, environment)),
   ]
+}
+
+/**
+ * Gives the problems with what an interrupted run left behind: in the image a visual-check container that isn't in
+ * `before`, on the host on Windows a headless shell from the run's cache still running, else none.
+ */
+async function leftBehindProblems(before: ReadonlySet<string>, environment: NodeJS.ProcessEnv): Promise<string[]> {
+  if (!onHost) {
+    return await waitForRemoval(before)
+  }
+
+  if (process.platform === 'win32') {
+    return await browsersGoneProblems(environment.VISUAL_CHECK_CACHE_DIR)
+  }
+
+  return []
+}
+
+/**
+ * Waits for every process whose executable is inside `cacheDir`, the headless shells the run started, to end. Gives
+ * the problem with the ones that still run once the time is up. Windows only: there the script's tree isn't listed
+ * before the interrupt, and a running executable keeps its folder from being removed.
+ */
+async function browsersGoneProblems(cacheDir: string | undefined): Promise<string[]> {
+  if (cacheDir === undefined) {
+    return []
+  }
+
+  const gone = await waitUntil(() => windowsProcessesIn(cacheDir).length === 0, skillStopTimeouts.stopped)
+
+  return gone
+    ? []
+    : [
+        `headless shells the run started still run ${skillStopTimeouts.stopped / 1000} s after the script ended: ${windowsProcessesIn(cacheDir).join(', ')}`,
+      ]
+}
+
+/**
+ * Lists the processes whose executable is inside `folder` on Windows, each as `<pid> <executable>`, through
+ * PowerShell's `Get-CimInstance Win32_Process`.
+ */
+function windowsProcessesIn(folder: string): string[] {
+  const query =
+    'Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($env:E2E_FOLDER, [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { "$($_.ProcessId) $($_.ExecutablePath)" }'
+  const listing = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', query], {
+    encoding: 'utf8',
+    env: { ...process.env, E2E_FOLDER: resolvePath(folder) },
+    windowsHide: true,
+  })
+
+  return listing.stdout.split(/\r?\n/).filter((line) => line.trim() !== '')
 }
 
 /**
