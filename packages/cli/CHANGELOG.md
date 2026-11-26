@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1](https://github.com/visual-check/visual-check/compare/cli-v0.1.0...cli-v0.1.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* a full-page capture grows the viewport to the page, so fixed and sticky elements sit where the page puts them ([#166](https://github.com/visual-check/visual-check/issues/166)) ([42c5d7b](https://github.com/visual-check/visual-check/commit/42c5d7bffcfb84786b8d3fc18f88f1f32119882b)), closes [#164](https://github.com/visual-check/visual-check/issues/164)
+* **cli:** a capture that fits the viewport no longer resizes the page ([#168](https://github.com/visual-check/visual-check/issues/168)) ([39bef3a](https://github.com/visual-check/visual-check/commit/39bef3a6d823e1043e1fada57805f8ec6e3fc0e8)), closes [#165](https://github.com/visual-check/visual-check/issues/165)
+
 ## 0.1.0 (2026-11-26)
 
 

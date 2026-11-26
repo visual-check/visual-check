@@ -1,5 +1,5 @@
 {
-  "packages/cli": "0.1.0",
-  "packages/storybook": "0.1.0",
-  "packages/storybook-addon": "0.1.0"
+  "packages/cli": "0.1.1",
+  "packages/storybook": "0.1.1",
+  "packages/storybook-addon": "0.1.1"
 }
