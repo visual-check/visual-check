@@ -347,7 +347,9 @@ export interface Page {
   growViewportToContent: () => Promise<boolean>
   /**
    * Captures an area of the page without resizing the viewport. The full page is the whole document at the viewport's
-   * width, beyond the viewport's height too. A box is that rectangle of the document, wherever it lies. Resolves with
+   * width, beyond the viewport's height too. A box is that rectangle of the document, wherever it lies. An area inside
+   * the viewport leaves the page alone; one that reaches past it may resize the page while it's captured, which the
+   * page sees as `resize` events. Resolves with
    * the PNG bytes exactly as the browser made them. A touch viewport's emulation holds in the capture, with no hover
    * and a coarse pointer, and is still on afterwards. Fails with a `CaptureTooLargeError`, without capturing, when the
    * capture would be over 32,767 device pixels on a side. Fails with a `PageTimeoutError` when the browser doesn't

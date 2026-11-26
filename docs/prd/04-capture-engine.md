@@ -47,7 +47,7 @@ v1 captures in Chromium only, through visual-check's own raw CDP driver. Nothing
 
 Once per page:
 
-- **No font table.** Every capture reaches beyond the viewport, which resets the page's web preferences and drops a table set through `Page.setFontFamilies`, and Chromium takes the table once per page. A page would be measured with the table's fonts and painted with the system's, so the generic families keep the system's fonts.
+- **No font table.** A capture that reaches past the viewport, such as a full page with `growViewport: false`, resets the page's web preferences and drops a table set through `Page.setFontFamilies`, and Chromium takes the table once per page. A page would be measured with the table's fonts and painted with the system's, so the generic families keep the system's fonts.
 - **User agent** ends in `StorybookTestRunner`, which puts Storybook on its test path.
 - **Emulation:** `timezone`, `locale` and `colorScheme` from the config, focus emulation, and `prefers-reduced-motion: no-preference`.
 - **A script at document start** that does these things:
@@ -70,8 +70,9 @@ Once per page:
 
 Rules:
 
-- `touch: true` turns on touch and mobile emulation together. A capture, full page or `element` box, goes beyond the viewport, which resets hover and pointer media as it starts and again as it ends, so the driver turns touch emulation back on right behind the capture command, before Chromium paints the capture, and again after it. That order is observed Chromium 157 behaviour the protocol doesn't promise; the hover box in the e2e Modes stories guards it. The snapshot has no hover and a coarse pointer, and so does the page afterwards.
-- Before a full-page capture, the viewport's height grows to the content's, rounded up, once, keeping the screen's size, the width, the scale and touch ([ADR 0012](../adr/0012-full-page-capture-grows-the-viewport.md)). A page that fits the viewport, a page over 32,767 device pixels tall, an `element` capture and a story with `growViewport: false` keep the viewport. The capture itself never resizes it, and the next story's viewport is set as usual.
+- `touch: true` turns on touch and mobile emulation together. A capture that reaches past the viewport resets hover and pointer media as it starts and again as it ends, so the driver turns touch emulation back on right behind the capture command, before Chromium paints the capture, and again after it. That order is observed Chromium 157 behaviour the protocol doesn't promise; the hover box in the e2e Modes stories guards it. The snapshot has no hover and a coarse pointer, and so does the page afterwards.
+- Before a full-page capture, the viewport's height grows to the content's, rounded up, once, keeping the screen's size, the width, the scale and touch ([ADR 0012](../adr/0012-full-page-capture-grows-the-viewport.md)). A page that fits the viewport, a page over 32,767 device pixels tall, an `element` capture and a story with `growViewport: false` keep the viewport. The next story's viewport is set as usual.
+- A capture that fits the viewport, as a grown full page and most `element` boxes do, is taken from what the viewport shows, so the page doesn't notice it. Only a capture that reaches past the viewport is taken beyond it, and Chromium then resizes the page to 1 × 1 and back while it captures, so the page gets `resize` events and one that reacts to them can change afterwards ([#165](https://github.com/visual-check/visual-check/issues/165)).
 - The PNG is stored exactly as the browser returned it. The byte comparison in [Visual diff](09-visual-diff.md) depends on that.
 - The full page is the viewport's width and the content's height. Content wider than the viewport is cut at the viewport's width.
 - An element capture is the element's border box, rounded out to whole CSS pixels.

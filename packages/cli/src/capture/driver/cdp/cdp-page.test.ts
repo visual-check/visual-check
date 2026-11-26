@@ -940,24 +940,43 @@ describe('Page.evaluate', () => {
 })
 
 /**
- * Answers `Page.getLayoutMetrics` with a layout viewport this wide and content this tall, in CSS pixels. The content
- * is 500 px wider than the viewport unless told otherwise, which a full-page capture leaves out.
+ * Answers `Page.getLayoutMetrics` with a layout viewport this wide and 720 px tall, the same visual viewport scrolled
+ * down by `scrollY`, and content this tall, in CSS pixels. The content is 500 px wider than the viewport unless told
+ * otherwise, which a full-page capture leaves out.
  */
-function layoutOf(clientWidth: number, contentHeight: number, contentWidth = clientWidth + 500): CommandHandler {
+function layoutOf(
+  clientWidth: number,
+  contentHeight: number,
+  contentWidth = clientWidth + 500,
+  scrollY = 0,
+): CommandHandler {
   return (command: ReceivedCommand, fake: FakeBrowser) =>
     fake.reply(command, {
-      cssLayoutViewport: { pageX: 0, pageY: 0, clientWidth, clientHeight: 720 },
+      cssLayoutViewport: { pageX: 0, pageY: scrollY, clientWidth, clientHeight: 720 },
+      cssVisualViewport: {
+        offsetX: 0,
+        offsetY: 0,
+        pageX: 0,
+        pageY: scrollY,
+        clientWidth,
+        clientHeight: 720,
+        scale: 1,
+        zoom: 1,
+      },
       cssContentSize: { x: 0, y: 0, width: contentWidth, height: contentHeight },
     })
 }
 
 /**
- * The capture command the first page sends for this clip, at scale 1.
+ * The capture command the first page sends for this clip, at scale 1, beyond the viewport unless told otherwise.
  */
-function captureCommand(clip: { x: number; y: number; width: number; height: number }): SentCommand {
+function captureCommand(
+  clip: { x: number; y: number; width: number; height: number },
+  captureBeyondViewport = true,
+): SentCommand {
   return {
     method: 'Page.captureScreenshot',
-    params: { format: 'png', captureBeyondViewport: true, clip: { ...clip, scale: 1 } },
+    params: { format: 'png', captureBeyondViewport, clip: { ...clip, scale: 1 } },
     sessionId,
   }
 }
@@ -986,14 +1005,63 @@ describe('Page.capture', () => {
     ])
   })
 
-  it('captures a box as given, without reading the layout', async () => {
+  it('captures a box below the viewport as given, beyond the viewport', async () => {
     const { browser, page } = await openPage()
 
     await page.capture({ x: 16, y: 2000, width: 320, height: 48 })
-    expect(sentOf(browser, 'Page.getLayoutMetrics')).toEqual([])
     expect(sentOf(browser, 'Page.captureScreenshot')).toEqual([
       captureCommand({ x: 16, y: 2000, width: 320, height: 48 }),
     ])
+  })
+
+  it.each([
+    ['inside the viewport', { x: 16, y: 100, width: 320, height: 48 }],
+    ['the size of the viewport', { x: 0, y: 0, width: 375, height: 720 }],
+  ])('captures a box %s without going beyond it, so the page is not resized', async (_case, box) => {
+    const { browser, page } = await openPage({ handlers: { 'Page.getLayoutMetrics': layoutOf(375, 3000) } })
+
+    await page.capture(box)
+    expect(sentOf(browser, 'Page.captureScreenshot')).toEqual([captureCommand(box, false)])
+  })
+
+  it.each([
+    ['inside the scrolled viewport', { x: 0, y: 1000, width: 320, height: 48 }, false],
+    ['above the scrolled viewport', { x: 0, y: 100, width: 320, height: 48 }, true],
+    ['across its bottom edge', { x: 0, y: 1600, width: 320, height: 48 }, true],
+    ['across its right edge', { x: 100, y: 1000, width: 320, height: 48 }, true],
+  ])('captures a box %s beyond the viewport only when it reaches past it', async (_case, box, beyondViewport) => {
+    const { browser, page } = await openPage({
+      handlers: { 'Page.getLayoutMetrics': layoutOf(375, 3000, 375, 900) },
+    })
+
+    await page.capture(box)
+    expect(sentOf(browser, 'Page.captureScreenshot')).toEqual([captureCommand(box, beyondViewport)])
+  })
+
+  it('captures a full page that fits the viewport, as a grown one does, without going beyond it', async () => {
+    const { browser, page } = await openPage({ handlers: { 'Page.getLayoutMetrics': layoutOf(375, 720) } })
+
+    await page.capture('full-page')
+    expect(sentOf(browser, 'Page.captureScreenshot')).toEqual([
+      captureCommand({ x: 0, y: 0, width: 375, height: 720 }, false),
+    ])
+  })
+
+  it("fails, sending no capture, when the browser's layout answer has no visual viewport", async () => {
+    const { browser, page } = await openPage({
+      handlers: {
+        'Page.getLayoutMetrics': (command: ReceivedCommand, fake: FakeBrowser) =>
+          fake.reply(command, {
+            cssLayoutViewport: { pageX: 0, pageY: 0, clientWidth: 1280, clientHeight: 720 },
+            cssContentSize: { x: 0, y: 0, width: 1280, height: 720 },
+          }),
+      },
+    })
+
+    await expect(page.capture({ x: 0, y: 0, width: 10, height: 10 })).rejects.toThrow(
+      "The browser's answer to Page.getLayoutMetrics has no cssVisualViewport.",
+    )
+    expect(sentOf(browser, 'Page.captureScreenshot')).toEqual([])
   })
 
   it('resolves with the exact bytes the browser sent', async () => {
@@ -1003,12 +1071,27 @@ describe('Page.capture', () => {
     expect([...bytes]).toEqual([...Buffer.from(defaultCaptureData, 'base64')])
   })
 
+  it('turns touch emulation back on behind the screenshot and after it when the content is taller than a touch viewport', async () => {
+    const { browser, page } = await openPage({ handlers: { 'Page.getLayoutMetrics': layoutOf(375, 3000) } })
+
+    await page.setViewport(touchViewport)
+
+    const sentBefore = browser.received.length
+
+    await page.capture('full-page')
+    expect(sent(browser).slice(sentBefore)).toEqual([
+      { method: 'Page.getLayoutMetrics', params: {}, sessionId },
+      expect.objectContaining({ method: 'Page.captureScreenshot' }),
+      { method: 'Emulation.setTouchEmulationEnabled', params: { enabled: true, maxTouchPoints: 5 }, sessionId },
+      { method: 'Emulation.setTouchEmulationEnabled', params: { enabled: true, maxTouchPoints: 5 }, sessionId },
+    ])
+  })
+
   it.each([
-    ['taller than', { width: 375, height: 3000 }],
     ['wider than', { width: 375.5, height: 667 }],
-    ['the size of', { width: 375, height: 667 }],
+    ['the size of', { width: 375, height: 720 }],
   ])(
-    'turns touch emulation back on behind the screenshot and after it when the content is %s a touch viewport',
+    'sends nothing after the screenshot when the content is %s a touch viewport, since the capture stays in it',
     async (_shape, content) => {
       const { browser, page } = await openPage({
         handlers: { 'Page.getLayoutMetrics': layoutOf(375, content.height, content.width) },
@@ -1021,9 +1104,7 @@ describe('Page.capture', () => {
       await page.capture('full-page')
       expect(sent(browser).slice(sentBefore)).toEqual([
         { method: 'Page.getLayoutMetrics', params: {}, sessionId },
-        expect.objectContaining({ method: 'Page.captureScreenshot' }),
-        { method: 'Emulation.setTouchEmulationEnabled', params: { enabled: true, maxTouchPoints: 5 }, sessionId },
-        { method: 'Emulation.setTouchEmulationEnabled', params: { enabled: true, maxTouchPoints: 5 }, sessionId },
+        captureCommand({ x: 0, y: 0, width: 375, height: content.height }, false),
       ])
     },
   )
@@ -1094,9 +1175,10 @@ describe('Page.capture', () => {
 
     const sentBefore = browser.received.length
 
-    await page.capture({ x: 0, y: 100, width: 320, height: 48 })
+    await page.capture({ x: 0, y: 2000, width: 320, height: 48 })
     expect(sent(browser).slice(sentBefore)).toEqual([
-      captureCommand({ x: 0, y: 100, width: 320, height: 48 }),
+      { method: 'Page.getLayoutMetrics', params: {}, sessionId },
+      captureCommand({ x: 0, y: 2000, width: 320, height: 48 }),
       { method: 'Emulation.setTouchEmulationEnabled', params: { enabled: true, maxTouchPoints: 5 }, sessionId },
       { method: 'Emulation.setTouchEmulationEnabled', params: { enabled: true, maxTouchPoints: 5 }, sessionId },
     ])

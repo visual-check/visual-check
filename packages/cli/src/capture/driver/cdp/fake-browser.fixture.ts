@@ -95,6 +95,11 @@ export const pageSetup: PageSetup = {
 const defaultLayoutViewport = { pageX: 0, pageY: 0, clientWidth: 800, clientHeight: 600 }
 
 /**
+ * The visual viewport the fake browser reports for a page by default, in CSS pixels: the layout viewport, unscrolled.
+ */
+const defaultVisualViewport = { ...defaultLayoutViewport, offsetX: 0, offsetY: 0, scale: 1, zoom: 1 }
+
+/**
  * The content size the fake browser reports for a page by default, in CSS pixels.
  */
 const defaultContentSize = { x: 0, y: 0, width: 800, height: 1200 }
@@ -216,10 +221,14 @@ function evaluateToUndefined(command: ReceivedCommand, browser: FakeBrowser): vo
 }
 
 /**
- * Answers with the default layout viewport and content size.
+ * Answers with the default layout and visual viewports and content size.
  */
 function answerLayoutMetrics(command: ReceivedCommand, browser: FakeBrowser): void {
-  browser.reply(command, { cssLayoutViewport: defaultLayoutViewport, cssContentSize: defaultContentSize })
+  browser.reply(command, {
+    cssLayoutViewport: defaultLayoutViewport,
+    cssVisualViewport: defaultVisualViewport,
+    cssContentSize: defaultContentSize,
+  })
 }
 
 /**
