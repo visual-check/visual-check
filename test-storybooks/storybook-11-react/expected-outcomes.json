@@ -21,6 +21,7 @@
   "capture-area--element-off": "passed",
   "capture-area--element-zero-size": "broken",
   "capture-area--full-page": "passed",
+  "capture-area--full-page-grows": "passed",
   "capture-area--too-tall": "broken",
   "card--default": "passed",
   "disabled--brought-back": "passed",
