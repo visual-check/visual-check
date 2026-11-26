@@ -69,6 +69,31 @@ function readFullPageBox(reply: Record<string, unknown>): CaptureBox {
 }
 
 /**
+ * Says whether the box, in CSS pixels of the document, lies inside the visual viewport a `Page.getLayoutMetrics`
+ * answer gives, edges included. Throws when the answer lacks the visual viewport.
+ */
+function fitsVisualViewport(box: CaptureBox, reply: Record<string, unknown>): boolean {
+  const viewport = reply.cssVisualViewport
+  const fields = ['pageX', 'pageY', 'clientWidth', 'clientHeight'] as const
+
+  if (
+    !isRecord(viewport) ||
+    !fields.every((field: string) => typeof viewport[field] === 'number' && Number.isFinite(viewport[field]))
+  ) {
+    throw new Error("The browser's answer to Page.getLayoutMetrics has no cssVisualViewport.")
+  }
+
+  const { pageX, pageY, clientWidth, clientHeight } = viewport as Record<(typeof fields)[number], number>
+
+  return (
+    box.x >= pageX &&
+    box.y >= pageY &&
+    box.x + box.width <= pageX + clientWidth &&
+    box.y + box.height <= pageY + clientHeight
+  )
+}
+
+/**
  * Throws a `CaptureTooLargeError` when a capture of the box at this device scale factor would be over 32,767 device
  * pixels on a side, each side rounded up to whole device pixels.
  */
@@ -439,9 +464,13 @@ class CdpPage implements Page {
 
   /**
    * Measures the full page and, when it's taller than the viewport but fits a capture, overrides the device metrics
-   * again with the viewport's height set to the page's, the screen's kept, and touch emulation set again with them. The
-   * kept viewport stays the one `setViewport` set, so its device scale factor and touch still size and drive captures.
-   * Before any `setViewport`, it does nothing: there is no viewport to grow.
+   * again with the viewport's height set to the page's and the screen's kept. The kept viewport stays the one
+   * `setViewport` set, so its device scale factor and touch still size and drive captures. Before any `setViewport`, it
+   * does nothing: there is no viewport to grow.
+   *
+   * It leaves touch emulation alone, which holds through the new metrics. In Chromium 157, turning touch emulation off
+   * on a loaded page sets `(hover: none)` and drops the hover and pointer types the browser was launched with, so a
+   * page without touch would lose its hover styles until the next navigation.
    */
   async growViewportToContent(): Promise<boolean> {
     this.throwIfFailed()
@@ -461,7 +490,7 @@ class CdpPage implements Page {
         }
 
         this.throwIfFailed()
-        await this.overrideDeviceMetrics(viewport, height)
+        await this.setDeviceMetrics(viewport, height)
 
         return true
       })(),
@@ -526,9 +555,9 @@ class CdpPage implements Page {
   }
 
   /**
-   * Captures the area as PNG, beyond the viewport, and resolves with the bytes as the browser sent them. The full page
-   * is the layout viewport's width by the content's height. A touch viewport's emulation holds in the capture and is
-   * still on afterwards. A capture over 32,767 device pixels on a side fails with a `CaptureTooLargeError` before the
+   * Captures the area as PNG, beyond the viewport only when it reaches past the visual viewport, and resolves with the
+   * bytes as the browser sent them. The full page is the layout viewport's width by the content's height. A touch
+   * viewport's emulation holds in the capture and is still on afterwards. A capture over 32,767 device pixels on a side fails with a `CaptureTooLargeError` before the
    * browser is asked for it.
    */
   async capture(area: CaptureArea): Promise<Uint8Array> {
@@ -707,28 +736,34 @@ class CdpPage implements Page {
 
   /**
    * Captures the area: a box as given, or, for the full page, the box the layout gives. Checks its size in device
-   * pixels, with the last viewport's device scale factor, or 1 before any, before sending anything for it.
+   * pixels, with the last viewport's device scale factor, or 1 before any, before sending the capture.
    *
-   * A capture beyond the viewport, even one whose content fits it, swaps the page's web preferences for its own while
-   * it runs, and puts them back once it's done. Each swap resets the hover and pointer media that touch emulation
-   * sets. So for a touch viewport, touch emulation goes on again twice. First right behind the screenshot command,
-   * without waiting for its answer: Chromium 157 takes that in before it paints the capture, so the capture has no
-   * hover and a coarse pointer. The protocol doesn't promise that order, so check it again on a Chromium bump: the
+   * A box inside the visual viewport is captured from what the viewport shows, which leaves the page alone. Only a box
+   * that reaches past it is captured beyond the viewport, because that resizes the page while it runs: the page gets
+   * `resize` events to 1 x 1 and back, and a page that reacts to them changes after the capture
+   * ([#165](https://github.com/visual-check/visual-check/issues/165)).
+   *
+   * A capture beyond the viewport swaps the page's web preferences for its own while it runs, and puts them back once
+   * it's done. Each swap resets the hover and pointer media that touch emulation sets. So for a touch viewport, touch
+   * emulation goes on again twice. First right behind the screenshot command, without waiting for its answer: Chromium
+   * 157 takes that in before it paints the capture, so the capture has no hover and a coarse pointer. The protocol doesn't promise that order, so check it again on a Chromium bump: the
    * hover box in the e2e Modes stories shows a regression, as a hover style in a touch mode's snapshot. Then again
    * once the capture is done. The next `setViewport` would turn it on anyway, but this keeps the page's contract: a
    * touch viewport's emulation is still on after a capture, for later calls on the same page.
    */
   private async captureBox(area: CaptureArea): Promise<Uint8Array> {
-    const box = area === 'full-page' ? readFullPageBox(await this.send('Page.getLayoutMetrics')) : area
+    const metrics = await this.send('Page.getLayoutMetrics')
+    const box = area === 'full-page' ? readFullPageBox(metrics) : area
+    const beyondViewport = !fitsVisualViewport(box, metrics)
 
     this.throwIfFailed()
     checkCaptureSize(box, this.viewport?.deviceScaleFactor ?? 1)
 
-    const touch = this.viewport?.touch === true
+    const touch = beyondViewport && this.viewport?.touch === true
     const [reply] = await Promise.all([
       this.send('Page.captureScreenshot', {
         format: 'png',
-        captureBeyondViewport: true,
+        captureBeyondViewport: beyondViewport,
         clip: { x: box.x, y: box.y, width: box.width, height: box.height, scale: 1 },
       }),
       ...(touch ? [this.setTouchEmulation(true)] : []),
@@ -748,19 +783,24 @@ class CdpPage implements Page {
    * too. The commands go in parallel.
    */
   private overrideDeviceMetrics(viewport: PageViewport, height: number): Promise<unknown> {
+    return Promise.all([this.setDeviceMetrics(viewport, height), this.setTouchEmulation(viewport.touch)])
+  }
+
+  /**
+   * Overrides the device metrics alone with the viewport's width, device scale factor and touch, at `height`, with the
+   * viewport's own size as the screen's. Touch emulation holds through it.
+   */
+  private setDeviceMetrics(viewport: PageViewport, height: number): Promise<Record<string, unknown>> {
     const { width, deviceScaleFactor, touch } = viewport
 
-    return Promise.all([
-      this.send('Emulation.setDeviceMetricsOverride', {
-        width,
-        height,
-        deviceScaleFactor,
-        mobile: touch,
-        screenWidth: width,
-        screenHeight: viewport.height,
-      }),
-      this.setTouchEmulation(touch),
-    ])
+    return this.send('Emulation.setDeviceMetricsOverride', {
+      width,
+      height,
+      deviceScaleFactor,
+      mobile: touch,
+      screenWidth: width,
+      screenHeight: viewport.height,
+    })
   }
 
   /**
