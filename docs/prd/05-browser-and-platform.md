@@ -82,13 +82,13 @@ A CI job container or a devcontainer can be built on visual-check's image.
 
 ## Runtimes by OS
 
-| OS                   | Supported                   | Notes                                                                                                        |
-| -------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Linux                | Docker Engine               | Docker Desktop for Linux, rootless Docker and Podman take the same paths but aren't tested                   |
-| macOS, Apple Silicon | OrbStack and Docker Desktop | Both run amd64 under Rosetta by default. Colima and Podman default to QEMU, which can't run amd64 Chromium   |
-| macOS, Intel         | Colima                      | No emulation needed                                                                                          |
-| Windows x64          | Docker Desktop              | It renders like a Linux runner. CI tests it on Windows Server 2025. Windows 10 and 11 desktops aren't tested |
-| Node inside WSL      | As Linux                    | With Docker Engine in the distro: host networking. With Docker Desktop: the proxy                            |
+| OS                   | Supported                   | Notes                                                                                                                 |
+| -------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Linux                | Docker Engine               | Docker Desktop for Linux, rootless Docker and Podman take the same paths but aren't tested                            |
+| macOS, Apple Silicon | OrbStack and Docker Desktop | Both run amd64 under Rosetta by default. Colima and Podman default to QEMU, which can't run amd64 Chromium            |
+| macOS, Intel         | Colima                      | No emulation needed                                                                                                   |
+| Windows x64          | Docker Desktop              | It renders like a Linux runner. Checked by hand before a release, not in CI. Windows 10 and 11 desktops aren't tested |
+| Node inside WSL      | As Linux                    | With Docker Engine in the distro: host networking, tested in CI. With Docker Desktop: the proxy, checked by hand      |
 
 Not supported in v1:
 
