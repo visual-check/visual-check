@@ -143,6 +143,12 @@ export interface VisualCheckOptions<ModeName extends string> {
    */
   element?: string | null | undefined
   /**
+   * Whether a full-page capture first grows the viewport's height to the page's, so fixed and sticky elements sit where
+   * they would on a screen as tall as the page. `false` keeps the viewport's height, so `100vh` stays it. Defaults to
+   * `true`. An element's capture never grows it.
+   */
+  growViewport?: boolean | undefined
+  /**
    * The regions to paint over, by name. A name set to `null` drops the inherited mask. `null` drops them all.
    */
   masks?: Record<string, Mask | null> | null | undefined
@@ -180,6 +186,10 @@ export interface VisualCheckParameter {
    * A CSS selector for the element to capture, or `null` for the full page.
    */
   element?: string | null
+  /**
+   * Whether a full-page capture first grows the viewport's height to the page's.
+   */
+  growViewport?: boolean
   /**
    * The regions to paint over, by name, or `null` for none.
    */
@@ -221,7 +231,7 @@ export type VisualCheck<ModeName extends string> = (options: VisualCheckOptions<
  * - `modes`: the most specific list.
  * - `viewport` and `tolerance`: merged key by key.
  * - `masks`: merged by name. A name set to `null` drops one mask, and `masks: null` drops all of them.
- * - `wait`, `element` and `disable`: the most specific value.
+ * - `wait`, `element`, `growViewport` and `disable`: the most specific value.
  *
  * A key set to `undefined` is left out, so it never hides an inherited value. `null` is kept, and turns one off. The
  * helper checks nothing at run time. visual-check validates the merged options before it captures.
@@ -250,6 +260,7 @@ export function defineVisualCheck(declaration?: VisualCheckDeclaration<string>):
   if (declaration === undefined) {
     return declareModes
   }
+
   return declareModes(declaration)
 }
 

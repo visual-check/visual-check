@@ -285,6 +285,10 @@ export interface FakeBrowserRecord {
    */
   preparations: { id: string; element: unknown; masks: unknown; findRemote: unknown }[]
   /**
+   * The ID of the story on each page asked to grow its viewport to the page, in order.
+   */
+  grown: string[]
+  /**
    * The setup of every page opened.
    */
   setups: PageSetup[]
@@ -327,6 +331,7 @@ export function newRecord(): FakeBrowserRecord {
     urls: [],
     reads: [],
     preparations: [],
+    grown: [],
     setups: [],
     viewports: [],
     pageCloses: 0,
@@ -458,6 +463,12 @@ export function fakeDriverOf({
         setViewport: async (viewport) => {
           failIfGone()
           record.viewports.push(viewport)
+        },
+        growViewportToContent: async () => {
+          failIfGone()
+          record.grown.push(id)
+
+          return false
         },
         goto: async (url) => {
           failIfGone()

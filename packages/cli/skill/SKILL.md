@@ -59,6 +59,7 @@ While you troubleshoot a broken story, read its entry's console messages (`conso
    - `changed-after-capture`, `unstable` or `timeout`: a `wait` hook on the story, or in `preview` when many stories share the cause;
    - `navigated-away`, `play-threw` or `load-failed`: the project's code to fix. For a story that navigates away, await the new page before clicking, or render `MemoryRouter` with `useTransitions={false}`;
    - `too-tall`: `element`, or a smaller viewport;
+   - a full-page snapshot whose `100vh` sections stretch to the page's height: `growViewport: false`, which keeps the viewport's height and paints fixed elements where they sit in it;
    - a grid that's too wide (`grid-too-wide`) or too tall: the story to fix, for example by splitting the grid into several stories.
 3. **The remote-content hint** (a `hints` entry of kind `remote-content`), **or `update`'s remote-content warning:** serve the image from Storybook, then mock it with MSW, then mask it by host.
 4. **A flaky snapshot, or a story that moves:** a mask by selector for timers, spinners and skeletons, or a `wait` hook.

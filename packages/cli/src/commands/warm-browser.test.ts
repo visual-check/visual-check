@@ -111,6 +111,11 @@ function fakeBrowserOf(version = '157.0.8103.78'): FakeBrowser {
 
     return {
       setViewport: failIfGone,
+      growViewportToContent: async () => {
+        await failIfGone()
+
+        return false
+      },
       goto: failIfGone,
       evaluate: async (expression, timeoutMs) => {
         await failIfGone()

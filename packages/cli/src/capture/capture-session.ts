@@ -115,6 +115,13 @@ export interface StoryToCapture {
    */
   element?: string
   /**
+   * Whether a full-page capture first grows the viewport's height to the page's, so fixed and sticky elements sit
+   * where they would on a screen as tall as the page. `false` captures the full page beyond the viewport at the
+   * viewport's height, so `100vh` stays the viewport's height. Without it, the viewport grows. An element's capture
+   * never grows it.
+   */
+  growViewport?: boolean
+  /**
    * The masks painted over the story before its capture, in order. None without it.
    */
   masks?: readonly StoryMask[]
@@ -482,6 +489,8 @@ type Step =
   | 'load'
   | 'story'
   | 'assets'
+  | 'grow-viewport'
+  | 'assets-after-grow'
   | 'wait'
   | 'assets-after-wait'
   | 'end-state'
@@ -494,7 +503,7 @@ type Step =
  * A check of the story's images and fonts: the one once the story finished, the one after its wait hook ran, or the one
  * after its end state changed the page.
  */
-type AssetsStep = Extract<Step, 'assets' | 'assets-after-wait' | 'assets-after-end-state'>
+type AssetsStep = Extract<Step, 'assets' | 'assets-after-grow' | 'assets-after-wait' | 'assets-after-end-state'>
 
 /**
  * What each step does, as a phrase that follows "while".
@@ -504,6 +513,8 @@ const stepNames: Record<Step, string> = {
   load: 'loading the story',
   story: 'waiting for the story to finish',
   assets: 'waiting for images and fonts',
+  'grow-viewport': 'growing the viewport to the page',
+  'assets-after-grow': 'waiting for images and fonts after growing the viewport',
   wait: "running the story's wait hook",
   'assets-after-wait': 'waiting for images and fonts after its wait hook',
   'end-state': 'bringing the story to its end state',
@@ -520,6 +531,8 @@ const stepTimeouts: Partial<Record<Step, string>> = {
   load: 'its page was still loading',
   story: 'its page stopped answering while visual-check waited for the story to finish',
   assets: 'its page stopped answering while visual-check waited for its images and fonts',
+  'assets-after-grow':
+    'its page stopped answering while visual-check waited for its images and fonts after growing the viewport',
   wait: 'its page stopped answering while its wait hook ran',
   'assets-after-wait':
     'its page stopped answering while visual-check waited for its images and fonts after its wait hook',
@@ -534,6 +547,7 @@ const stepTimeouts: Partial<Record<Step, string>> = {
  */
 const assetsCheckSuffixes: Record<AssetsStep, string> = {
   assets: '',
+  'assets-after-grow': ' after growing the viewport',
   'assets-after-wait': ' after its wait hook',
   'assets-after-end-state': ' after its end state',
 }
@@ -949,10 +963,11 @@ interface CapturedSnapshot {
 
 /**
  * Captures a story on an open page: sets the story's viewport, loads the story, waits until Storybook reports it
- * finished with nothing gone wrong, waits for its images and fonts, runs its wait hook, brings it to its end state,
- * measures its element, paints its masks, hides the caret and captures the element's box, or the full page when the
- * story has no element. When the story has a wait hook, its images and fonts are checked again after it, and when the
- * end state changed anything, they're checked again before the masks. Loading, the waits, the hook, the end state,
+ * finished with nothing gone wrong, waits for its images and fonts, grows the viewport to the page for a full-page
+ * capture, runs its wait hook, brings it to its end state, measures its element, paints its masks, hides the caret and
+ * captures the element's box, or the full page when the story has no element. When the viewport grew, its images and
+ * fonts are checked again, when the story has a wait hook, they're checked again after it, and when the end state
+ * changed anything, they're checked again before the masks. Loading, the waits, the hook, the end state,
  * those checks and the masks share readyTimeout, each getting only what's left of it. When the story asks for it with
  * `findRemoteContent`, the snapshot comes with the remote content it shows, unless the search didn't answer in time.
  * When the settings ask to list hosts, it also gives the hosts the page sent requests to, read once the capture is
@@ -1007,6 +1022,20 @@ async function captureOnPage(
   }
 
   /**
+   * Grows the viewport's height to the page's for a full-page capture, unless the story turns that off, and checks its
+   * images and fonts again when it grew. Gives why the story isn't ready, or nothing when it is.
+   */
+  const growViewport = async (): Promise<BrokenStory | undefined> => {
+    if (story.element !== undefined || story.growViewport === false) {
+      return undefined
+    }
+
+    step = 'grow-viewport'
+
+    return (await page.growViewportToContent()) ? await checkAssets('assets-after-grow') : undefined
+  }
+
+  /**
    * Runs the story's wait hook, if it has one, and checks its images and fonts again once it ran. Gives why the story
    * isn't ready, or nothing when it is.
    */
@@ -1039,6 +1068,14 @@ async function captureOnPage(
 
     return endState.changed ? await checkAssets('assets-after-end-state') : undefined
   }
+
+  /**
+   * Gets the finished story ready to capture: waits for its images and fonts, grows the viewport, runs its wait hook
+   * and brings it to its end state, stopping at the first that leaves it not ready. Gives why the story isn't ready,
+   * or nothing when it is.
+   */
+  const getReady = async (): Promise<BrokenStory | undefined> =>
+    (await checkAssets('assets')) ?? (await growViewport()) ?? (await runWaitHook()) ?? (await bringToEndState())
 
   /**
    * Measures the story's element, paints its masks and hides the caret. Gives what to capture: the element's box, or
@@ -1076,7 +1113,7 @@ async function captureOnPage(
       return brokenBy(describeStoryWait(wait, settings.readyTimeoutMs))
     }
 
-    const broken = (await checkAssets('assets')) ?? (await runWaitHook()) ?? (await bringToEndState())
+    const broken = await getReady()
 
     if (broken !== undefined) {
       return brokenBy(broken)

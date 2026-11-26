@@ -118,6 +118,71 @@ function FullPageScene() {
 }
 
 /**
+ * How tall each section of the page that grows the viewport is, in px: five of them make it 2000 px tall above its save
+ * bar.
+ */
+const growSectionHeight = 400
+
+/**
+ * How tall the sticky save bar is, in px.
+ */
+const saveBarHeight = 64
+
+/**
+ * A page 2064 px tall: five sections of 400 px and a save bar that sticks to the viewport's bottom, as a form's does,
+ * with a badge fixed 96 px above the viewport's bottom right corner.
+ */
+function StickyBarScene() {
+  return (
+    <div style={{ fontFamily: 'sans-serif', fontSize: 16 }}>
+      {['Section 1 of 5', 'Section 2 of 5', 'Section 3 of 5', 'Section 4 of 5', 'Section 5 of 5'].map(
+        (label, index) => (
+          <section
+            key={label}
+            style={{
+              boxSizing: 'border-box',
+              height: growSectionHeight,
+              padding: 24,
+              background: index % 2 === 0 ? '#fef3c7' : '#dcfce7',
+            }}
+          >
+            {label}
+          </section>
+        ),
+      )}
+      <div
+        style={{
+          position: 'sticky',
+          bottom: 0,
+          height: saveBarHeight,
+          padding: '0 24px',
+          lineHeight: `${saveBarHeight}px`,
+          background: '#1e3a8a',
+          color: '#ffffff',
+        }}
+      >
+        Sticky save bar
+      </div>
+      <div
+        style={{
+          position: 'fixed',
+          right: 24,
+          bottom: 96,
+          width: 160,
+          height: 48,
+          lineHeight: '48px',
+          textAlign: 'center',
+          background: '#be123c',
+          color: '#ffffff',
+        }}
+      >
+        Fixed badge
+      </div>
+    </div>
+  )
+}
+
+/**
  * Opens the full page's modal dialog, which sits in `document.body`, outside the story's canvas.
  */
 function openDialog(canvasElement: HTMLElement): void {
@@ -210,18 +275,28 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 /**
- * `element: null` captures the full page: the viewport's width by the content's height, 1280 × 2000. `play` opens the
- * modal dialog, so the snapshot shows the hero 720 px tall, the fixed header once at the top, and the dialog over the
+ * `element: null` captures the full page: the viewport's width by the content's height, 1280 × 2000. `growViewport:
+ * false` keeps the viewport 720 px tall, and `play` opens the modal dialog, so the snapshot shows the hero 720 px tall, the fixed header once at the top, and the dialog over the
  * first viewport. A rounded fixed element over a translucent fixed layer rasterizes its antialiased corners ±1 level
  * differently between captures (measured: 17 px, about 1 run in 4). Tolerance absorbs that in `test`, but `update`
  * would then write a baseline that isn't byte-identical to the committed one, so the dialog keeps square corners.
  */
 export const FullPage: Story = {
-  parameters: { ...visualCheck({ element: null }) },
+  parameters: { ...visualCheck({ element: null, growViewport: false }) },
   render: () => <FullPageScene />,
   play: ({ canvasElement }) => {
     openDialog(canvasElement)
   },
+}
+
+/**
+ * Sets `element: null` and leaves the viewport's growth on, so the viewport grows to the page, 2064 px, before the
+ * capture: the snapshot shows the save bar at the page's bottom, below the fifth section, and the badge 96 px above the
+ * page's bottom, not mid-page where they sit in a 720 px viewport.
+ */
+export const FullPageGrows: Story = {
+  parameters: { ...visualCheck({ element: null }) },
+  render: () => <StickyBarScene />,
 }
 
 /**

@@ -42,10 +42,11 @@ A story runs under visual-check as it does in plain Storybook. visual-check wait
 1. Set the viewport, scale and touch, then `goto` the story.
 2. Wait for `storyFinished`, which comes after `play` and `afterEach`. The four error events are watched too, because `storyFinished` can report success when `play` threw.
 3. In the page: make lazy images eager, decode every image, and wait for `document.fonts.ready`.
-4. Run the `wait` hook, if the story has one. Then check images and fonts again.
-5. Bring the page to its end state.
-6. Paint the masks and hide the caret, after the end state and its check of images and fonts. The caret is hidden in every document, shadow root and same-origin frame.
-7. Capture once.
+4. For a full-page capture, grow the viewport's height to the page's ([Per-story options](07-per-story-options.md#capture-area)). When it grew, check images and fonts again.
+5. Run the `wait` hook, if the story has one. Then check images and fonts again.
+6. Bring the page to its end state.
+7. Paint the masks and hide the caret, after the end state and its check of images and fonts. The caret is hidden in every document, shadow root and same-origin frame.
+8. Capture once.
 
 Rules:
 

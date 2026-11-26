@@ -337,6 +337,15 @@ export interface Page {
    */
   evaluate: (expression: string, timeoutMs: number) => Promise<unknown>
   /**
+   * Grows the viewport's height to the full page's, the content's height rounded up, so fixed and sticky elements lay
+   * out where they would on a screen as tall as the page. Keeps the width, the device scale factor, touch emulation and
+   * the screen's size the last `setViewport` set. Resolves true when it grew the viewport. Does nothing and resolves
+   * false when the full page fits the viewport, and when it would be over 32,767 device pixels tall, which its capture
+   * then reports. The next `setViewport` sets the viewport as it says. Fails with a `PageTimeoutError` when the browser
+   * doesn't answer within the driver's own fixed limit.
+   */
+  growViewportToContent: () => Promise<boolean>
+  /**
    * Captures an area of the page without resizing the viewport. The full page is the whole document at the viewport's
    * width, beyond the viewport's height too. A box is that rectangle of the document, wherever it lies. Resolves with
    * the PNG bytes exactly as the browser made them. A touch viewport's emulation holds in the capture, with no hover

@@ -23,6 +23,7 @@ describe('defineVisualCheck', () => {
     const result = visualCheck({
       viewport: { width: 800 },
       element: '#root',
+      growViewport: false,
       masks: { clock: { selector: '.clock' }, ad: { host: 'ads.example.com' }, gone: null },
       tolerance: { color: 0.1, pixels: '1%' },
       disable: true,
@@ -33,6 +34,7 @@ describe('defineVisualCheck', () => {
       visualCheck: {
         viewport: { width: 800 },
         element: '#root',
+        growViewport: false,
         masks: {
           clock: { selector: '.clock', host: null },
           ad: { host: 'ads.example.com', selector: null },

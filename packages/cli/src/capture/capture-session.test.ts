@@ -265,6 +265,7 @@ describe('a capture', () => {
       { page: 1, method: 'goto', args: [primary.url, 10_000] },
       { page: 1, method: 'evaluate', args: [storyWaitExpression('button--primary', 10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
+      { page: 1, method: 'growViewportToContent', args: [] },
       { page: 1, method: 'evaluate', args: [waitHookExpression('button--primary', 10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [endStateExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [plainPrepExpression(10_000), 11_000] },
@@ -281,6 +282,7 @@ describe('a capture', () => {
     })
     expect(driver.calls.slice(3)).toEqual([
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
+      { page: 1, method: 'growViewportToContent', args: [] },
       { page: 1, method: 'evaluate', args: [waitHookExpression('button--primary', 10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [endStateExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
@@ -330,10 +332,10 @@ describe('a capture', () => {
     expect(driver.calls[1]?.args).toEqual([primary.url, 9500])
     expect(driver.calls[2]?.args).toEqual([storyWaitExpression('button--primary', 6500), 7500])
     expect(driver.calls[3]?.args).toEqual([assetsReadyExpression(4500), 5500])
-    expect(driver.calls[4]?.args).toEqual([waitHookExpression('button--primary', 3000), 4000])
-    expect(driver.calls[5]?.args).toEqual([endStateExpression(3000), 4000])
-    expect(driver.calls[6]?.args).toEqual([assetsReadyExpression(1500), 2500])
-    expect(driver.calls[7]?.args).toEqual([plainPrepExpression(0), 1000])
+    expect(driver.calls[5]?.args).toEqual([waitHookExpression('button--primary', 3000), 4000])
+    expect(driver.calls[6]?.args).toEqual([endStateExpression(3000), 4000])
+    expect(driver.calls[7]?.args).toEqual([assetsReadyExpression(1500), 2500])
+    expect(driver.calls[8]?.args).toEqual([plainPrepExpression(0), 1000])
   })
 
   it('rounds the time left up to whole ms', async () => {
@@ -349,7 +351,7 @@ describe('a capture', () => {
 
     await session.capture(primary)
     await session.capture(secondary)
-    expect(driver.calls[10]).toEqual({ page: 1, method: 'goto', args: [secondary.url, 10_000] })
+    expect(driver.calls[11]).toEqual({ page: 1, method: 'goto', args: [secondary.url, 10_000] })
   })
 
   it('gives the snapshot exactly as the browser made it', async () => {
@@ -397,6 +399,7 @@ describe("the story's wait hook", () => {
     })
     expect(driver.calls.slice(3)).toEqual([
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
+      { page: 1, method: 'growViewportToContent', args: [] },
       { page: 1, method: 'evaluate', args: [waitHookExpression('button--primary', 10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [endStateExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [plainPrepExpression(10_000), 11_000] },
@@ -413,6 +416,7 @@ describe("the story's wait hook", () => {
     })
     expect(driver.calls.slice(3)).toEqual([
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
+      { page: 1, method: 'growViewportToContent', args: [] },
       { page: 1, method: 'evaluate', args: [waitHookExpression('button--primary', 10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [endStateExpression(10_000), 11_000] },
@@ -436,8 +440,8 @@ describe("the story's wait hook", () => {
     })
 
     await openCaptureSession(driver, settings).capture(primary)
-    expect(driver.calls[4]?.args).toEqual([waitHookExpression('button--primary', 7000), 8000])
-    expect(driver.calls[5]?.args).toEqual([assetsReadyExpression(3000), 4000])
+    expect(driver.calls[5]?.args).toEqual([waitHookExpression('button--primary', 7000), 8000])
+    expect(driver.calls[6]?.args).toEqual([assetsReadyExpression(3000), 4000])
   })
 
   it.each([
@@ -483,7 +487,15 @@ describe("the story's wait hook", () => {
       broken: { reason, message, ...details },
       console: [],
     })
-    expect(driver.methods()).toEqual(['1:setViewport', '1:goto', '1:evaluate', '1:evaluate', '1:evaluate', '1:close'])
+    expect(driver.methods()).toEqual([
+      '1:setViewport',
+      '1:goto',
+      '1:evaluate',
+      '1:evaluate',
+      '1:growViewportToContent',
+      '1:evaluate',
+      '1:close',
+    ])
   })
 
   /**
@@ -674,6 +686,90 @@ describe("the story's wait hook", () => {
   })
 })
 
+describe('growing the viewport to the page', () => {
+  it('grows it after the first check of images and fonts, before the wait hook, for a full-page capture', async () => {
+    const driver = new FakeDriver()
+
+    await openCaptureSession(driver, settings).capture(primary)
+    expect(driver.calls.slice(3, 6)).toEqual([
+      { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
+      { page: 1, method: 'growViewportToContent', args: [] },
+      { page: 1, method: 'evaluate', args: [waitHookExpression('button--primary', 10_000), 11_000] },
+    ])
+  })
+
+  it.each([
+    ['captures an element', { ...primary, element: '#card' }],
+    ['turns it off', { ...primary, growViewport: false }],
+  ])('leaves it as it is for a story that %s', async (_what, story) => {
+    const driver = new FakeDriver()
+
+    await openCaptureSession(driver, settings).capture(story)
+    expect(driver.methods()).not.toContain('1:growViewportToContent')
+    expect(driver.methods()).toContain('1:capture')
+  })
+
+  it('checks images and fonts again once it grew, then runs the wait hook', async () => {
+    const driver = new FakeDriver({ pages: [{ growViewportToContent: async () => true }] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      snapshot: defaultSnapshot,
+      console: [],
+    })
+    expect(driver.calls.slice(3, 7)).toEqual([
+      { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
+      { page: 1, method: 'growViewportToContent', args: [] },
+      { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
+      { page: 1, method: 'evaluate', args: [waitHookExpression('button--primary', 10_000), 11_000] },
+    ])
+  })
+
+  it('makes a broken story of images still loading once it grew, saying it was after growing the viewport', async () => {
+    let checks = 0
+    const driver = new FakeDriver({
+      pages: [
+        {
+          growViewportToContent: async () => true,
+          assetsWait: async () => {
+            checks += 1
+
+            return checks === 1 ? readyAnswer() : imagesTimedOutAnswer(1)
+          },
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'timeout',
+        message:
+          "The story wasn't ready within readyTimeout (10000 ms): 1 of its images was still loading after growing the viewport.",
+        readyTimeoutMs: 10000,
+      },
+      console: [],
+    })
+    expect(driver.methods()).not.toContain('1:capture')
+  })
+
+  it('makes a broken story, error, of a page that failed to grow it, naming that step', async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          growViewportToContent: async () => {
+            throw new Error('The browser said no.')
+          },
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: { reason: 'error', message: 'Growing the viewport to the page failed: The browser said no.' },
+      console: [],
+    })
+    expect(driver.methods().at(-1)).toBe('1:close')
+  })
+})
+
 describe('the masks', () => {
   /**
    * A story with an element and masks.
@@ -712,7 +808,7 @@ describe('the masks', () => {
     const driver = new FakeDriver({ pages: [{ endStateWait: async () => settledAnswer(true) }] })
 
     await openCaptureSession(driver, settings).capture(primary)
-    expect(driver.calls.slice(5)).toEqual([
+    expect(driver.calls.slice(6)).toEqual([
       { page: 1, method: 'evaluate', args: [endStateExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [plainPrepExpression(10_000), 11_000] },
@@ -735,7 +831,7 @@ describe('the masks', () => {
     })
 
     await openCaptureSession(driver, settings).capture(primary)
-    expect(driver.calls[6]?.args).toEqual([plainPrepExpression(4500), 5500])
+    expect(driver.calls[7]?.args).toEqual([plainPrepExpression(4500), 5500])
   })
 
   it("capture the element's box when the page gives one", async () => {
@@ -881,7 +977,7 @@ describe('the remote content', () => {
     const driver = new FakeDriver()
 
     await openCaptureSession(driver, settings).capture(retried)
-    expect(driver.calls[6]?.args).toEqual([
+    expect(driver.calls[7]?.args).toEqual([
       prepareCaptureExpression({ element: null, masks: [], maskColor: '#00FF00', findRemote: true }, 10_000),
       11_000,
     ])
@@ -892,7 +988,7 @@ describe('the remote content', () => {
     const driver = new FakeDriver({ pages: [{ capturePrep: async () => ({ outcome: 'ready', box: null, remote }) }] })
     const capture = await openCaptureSession(driver, settings).capture(primary)
 
-    expect(driver.calls[6]?.args).toEqual([plainPrepExpression(10_000), 11_000])
+    expect(driver.calls[7]?.args).toEqual([plainPrepExpression(10_000), 11_000])
     expect(capture).toEqual({ snapshot: defaultSnapshot, console: [] })
     expect(capture).not.toHaveProperty('remoteContent')
   })
@@ -981,6 +1077,7 @@ describe("clearing the previous story's storage", () => {
       '1:goto',
       '1:evaluate',
       '1:evaluate',
+      '1:growViewportToContent',
       '1:evaluate',
       '1:evaluate',
       '1:evaluate',
@@ -990,6 +1087,7 @@ describe("clearing the previous story's storage", () => {
       '1:goto',
       '1:evaluate',
       '1:evaluate',
+      '1:growViewportToContent',
       '1:evaluate',
       '1:evaluate',
       '1:evaluate',
@@ -999,6 +1097,7 @@ describe("clearing the previous story's storage", () => {
       '1:goto',
       '1:evaluate',
       '1:evaluate',
+      '1:growViewportToContent',
       '1:evaluate',
       '1:evaluate',
       '1:evaluate',
@@ -1021,6 +1120,7 @@ describe("clearing the previous story's storage", () => {
       '2:goto',
       '2:evaluate',
       '2:evaluate',
+      '2:growViewportToContent',
       '2:evaluate',
       '2:evaluate',
       '2:evaluate',
@@ -1034,7 +1134,7 @@ describe("clearing the previous story's storage", () => {
 
     await session.capture(primary)
     await session.capture(secondary)
-    expect(driver.calls[10]).toEqual({ page: 1, method: 'goto', args: [secondary.url, 10_000] })
+    expect(driver.calls[11]).toEqual({ page: 1, method: 'goto', args: [secondary.url, 10_000] })
   })
 
   it.each([
@@ -1055,13 +1155,14 @@ describe("clearing the previous story's storage", () => {
 
     await session.capture(primary)
     expect(await session.capture(secondary)).toEqual({ snapshot: defaultSnapshot, console: [] })
-    expect(driver.methods().slice(8)).toEqual([
+    expect(driver.methods().slice(9)).toEqual([
       '1:clearStorage',
       '1:close',
       '2:setViewport',
       '2:goto',
       '2:evaluate',
       '2:evaluate',
+      '2:growViewportToContent',
       '2:evaluate',
       '2:evaluate',
       '2:evaluate',
@@ -1719,6 +1820,7 @@ describe('a broken story', () => {
       '2:goto',
       '2:evaluate',
       '2:evaluate',
+      '2:growViewportToContent',
       '2:evaluate',
       '2:evaluate',
       '2:evaluate',
@@ -1919,6 +2021,7 @@ describe('a story that navigates away', () => {
     `${page}:goto`,
     `${page}:evaluate`,
     `${page}:evaluate`,
+    `${page}:growViewportToContent`,
     `${page}:evaluate`,
     `${page}:evaluate`,
     `${page}:evaluate`,
@@ -2111,6 +2214,7 @@ describe('capturing the same page again', () => {
     `${page}:goto`,
     `${page}:evaluate`,
     `${page}:evaluate`,
+    `${page}:growViewportToContent`,
     `${page}:evaluate`,
     `${page}:evaluate`,
     `${page}:evaluate`,
@@ -2173,7 +2277,17 @@ describe('capturing the same page again', () => {
 
       expect(capture).toStrictEqual({ snapshot: first, completingMs: undefined, console: [], capturedAgain: again })
       expect('snapshot' in capture && capture.capturedAgain).toBe(again)
-      expect(driver.methods()).toEqual([...capturedOn(1), '1:capture'])
+      expect(driver.methods().filter((method) => method !== '1:growViewportToContent')).toEqual([
+        '1:setViewport',
+        '1:goto',
+        '1:evaluate',
+        '1:evaluate',
+        '1:evaluate',
+        '1:evaluate',
+        '1:evaluate',
+        '1:capture',
+        '1:capture',
+      ])
       expect(driver.calls.slice(-2)).toEqual([
         { page: 1, method: 'capture', args: [area] },
         { page: 1, method: 'capture', args: [area] },

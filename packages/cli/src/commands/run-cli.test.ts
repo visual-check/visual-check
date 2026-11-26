@@ -3895,6 +3895,23 @@ describe('runCli capture area and masks', () => {
   })
 })
 
+describe('runCli viewport growth', () => {
+  it("grows the viewport for each full-page story, leaving it for one that turns it off and an element's", async () => {
+    const options = { a: { growViewport: false }, b: {}, c: { element: '#card' }, d: { growViewport: true } }
+    const { project } = await createRun(['a', 'b', 'c', 'd'], {
+      a: defaultRunSnapshot,
+      b: defaultRunSnapshot,
+      c: defaultRunSnapshot,
+      d: defaultRunSnapshot,
+    })
+    const { options: run, record } = fakeBrowser({}, { read: { options } })
+    const result = await runCli(['test', '--all'], {}, project, run)
+
+    expect(result.exitCode).toBe(0)
+    expect(record.grown.sort()).toEqual(['b', 'd'])
+  })
+})
+
 describe('runCli warning when a Storybook ignores the test path', () => {
   it('warns once at the end, naming the Storybook and its version, when the median is 50 ms or more', async () => {
     const { project } = await createRun(

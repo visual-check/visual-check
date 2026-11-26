@@ -6,7 +6,7 @@ Everything a project sets for a Storybook, a stories file or a story lives in `p
 
 ## Where options live
 
-- **Keys:** `modes`, `viewport`, `element`, `masks`, `tolerance`, `wait` and `disable`. Any other key exits 2.
+- **Keys:** `modes`, `viewport`, `element`, `growViewport`, `masks`, `tolerance`, `wait` and `disable`. Any other key exits 2.
 - **Levels:** `preview` for every story of a Storybook, a stories file's meta for that file, and the story.
 - The project's config sits beneath `preview`, with defaults for `tolerance`, `viewport` and `maskColor` only. It holds no masks and no modes.
 - visual-check reads no tags, not even Storybook's `!test`.
@@ -14,13 +14,13 @@ Everything a project sets for a Storybook, a stories file or a story lives in `p
 
 How levels merge, through Storybook's own merging:
 
-| Key                          | Merge                                                         |
-| ---------------------------- | ------------------------------------------------------------- |
-| `modes`                      | The most specific level's list wins                           |
-| `viewport`                   | Deep-merges, so a story can set `{ width: 375 }` alone        |
-| `tolerance`                  | Deep-merges, so a level can set only `color` or only `pixels` |
-| `masks`                      | Merges by name                                                |
-| `wait`, `element`, `disable` | The most specific level wins                                  |
+| Key                                          | Merge                                                         |
+| -------------------------------------------- | ------------------------------------------------------------- |
+| `modes`                                      | The most specific level's list wins                           |
+| `viewport`                                   | Deep-merges, so a story can set `{ width: 375 }` alone        |
+| `tolerance`                                  | Deep-merges, so a level can set only `color` or only `pixels` |
+| `masks`                                      | Merges by name                                                |
+| `wait`, `element`, `growViewport`, `disable` | The most specific level wins                                  |
 
 ## The helper
 
@@ -78,14 +78,18 @@ Every story's merged options are checked before any capture. Each of these exits
 
 ## Capture area
 
-- **Full page** is the default. The whole document is captured at the viewport's width, beyond the viewport's height, without resizing it.
-  - `100vh` stays the viewport's height, and fixed elements are painted once.
+- **Full page** is the default. The whole document is captured at the viewport's width. Once the story's images and fonts are ready, the viewport's height grows to the page's, once, so fixed and sticky elements sit where they would on a screen as tall as the page, such as a sticky save bar at the page's bottom ([ADR 0012](../adr/0012-full-page-capture-grows-the-viewport.md)).
+  - The screen's size stays the viewport's, and the width, scale and touch don't change.
+  - `100vh` becomes the page's height, as it was measured before the growth. Content that grows with the viewport isn't chased: what lies below the grown viewport is captured beyond it.
+  - A page over 32,767 device pixels tall keeps its viewport, and its capture is `too-tall`.
+  - `growViewport: false` turns the growth off: the full page is captured beyond the viewport's height, `100vh` stays the viewport's height, and fixed elements are painted once, where they sit in the viewport.
   - Dialogs and drawers portaled outside the story are included.
 - **`element: '<selector>'`** captures that element's box, cut at the page's edge. `element: null` returns to the full page.
   - Anything portaled outside the box is lost, and anything overlapping it is included.
   - It's matched in the top document only, not in shadow roots or frames. The first match is captured.
   - No match, or a box of zero size, makes a broken story (`element-missing`).
   - An invalid CSS selector makes a broken story (`error`). The page learns it only at capture, so it isn't an exit 2.
+  - The viewport never grows for it, so `growViewport` does nothing with it.
 - A capture over 32,767 device pixels on either side makes a broken story (`too-tall`). The message says to set `element` or a smaller viewport, or to capture a smaller element when `element` is already set. For a grid too tall, the message says to split the grid into several stories ([Grid stories](08-grid-stories.md)).
 
 ## Leaving stories out
