@@ -1404,17 +1404,33 @@ describe('Page.growViewportToContent', () => {
     const { browser, page } = await openPage({ handlers: { 'Page.getLayoutMetrics': layoutOf(375, 3000.4) } })
 
     await page.setViewport(touchViewport)
+
+    const sentBefore = browser.received.length
+
     expect(await page.growViewportToContent()).toBe(true)
-    expect(sentOf(browser, 'Emulation.setDeviceMetricsOverride').at(-1)).toEqual({
-      method: 'Emulation.setDeviceMetricsOverride',
-      params: { width: 375, height: 3001, deviceScaleFactor: 2, mobile: true, screenWidth: 375, screenHeight: 667 },
-      sessionId,
-    })
-    expect(sentOf(browser, 'Emulation.setTouchEmulationEnabled').at(-1)).toEqual({
-      method: 'Emulation.setTouchEmulationEnabled',
-      params: { enabled: true, maxTouchPoints: 5 },
-      sessionId,
-    })
+    expect(sent(browser).slice(sentBefore)).toEqual([
+      { method: 'Page.getLayoutMetrics', params: {}, sessionId },
+      {
+        method: 'Emulation.setDeviceMetricsOverride',
+        params: { width: 375, height: 3001, deviceScaleFactor: 2, mobile: true, screenWidth: 375, screenHeight: 667 },
+        sessionId,
+      },
+    ])
+  })
+
+  it('leaves touch emulation alone when it grows a viewport without touch, so the page keeps its hover', async () => {
+    const { browser, page } = await openPage({ handlers: { 'Page.getLayoutMetrics': layoutOf(1280, 3000) } })
+
+    await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1, touch: false })
+
+    const sentBefore = browser.received.length
+
+    expect(await page.growViewportToContent()).toBe(true)
+    expect(
+      sent(browser)
+        .slice(sentBefore)
+        .map((command) => command.method),
+    ).toEqual(['Page.getLayoutMetrics', 'Emulation.setDeviceMetricsOverride'])
   })
 
   it('keeps the viewport setViewport set for later captures, so their size is counted at its scale', async () => {

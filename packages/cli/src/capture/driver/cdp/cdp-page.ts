@@ -464,9 +464,13 @@ class CdpPage implements Page {
 
   /**
    * Measures the full page and, when it's taller than the viewport but fits a capture, overrides the device metrics
-   * again with the viewport's height set to the page's, the screen's kept, and touch emulation set again with them. The
-   * kept viewport stays the one `setViewport` set, so its device scale factor and touch still size and drive captures.
-   * Before any `setViewport`, it does nothing: there is no viewport to grow.
+   * again with the viewport's height set to the page's and the screen's kept. The kept viewport stays the one
+   * `setViewport` set, so its device scale factor and touch still size and drive captures. Before any `setViewport`, it
+   * does nothing: there is no viewport to grow.
+   *
+   * It leaves touch emulation alone, which holds through the new metrics. In Chromium 157, turning touch emulation off
+   * on a loaded page sets `(hover: none)` and drops the hover and pointer types the browser was launched with, so a
+   * page without touch would lose its hover styles until the next navigation.
    */
   async growViewportToContent(): Promise<boolean> {
     this.throwIfFailed()
@@ -486,7 +490,7 @@ class CdpPage implements Page {
         }
 
         this.throwIfFailed()
-        await this.overrideDeviceMetrics(viewport, height)
+        await this.setDeviceMetrics(viewport, height)
 
         return true
       })(),
@@ -779,19 +783,24 @@ class CdpPage implements Page {
    * too. The commands go in parallel.
    */
   private overrideDeviceMetrics(viewport: PageViewport, height: number): Promise<unknown> {
+    return Promise.all([this.setDeviceMetrics(viewport, height), this.setTouchEmulation(viewport.touch)])
+  }
+
+  /**
+   * Overrides the device metrics alone with the viewport's width, device scale factor and touch, at `height`, with the
+   * viewport's own size as the screen's. Touch emulation holds through it.
+   */
+  private setDeviceMetrics(viewport: PageViewport, height: number): Promise<Record<string, unknown>> {
     const { width, deviceScaleFactor, touch } = viewport
 
-    return Promise.all([
-      this.send('Emulation.setDeviceMetricsOverride', {
-        width,
-        height,
-        deviceScaleFactor,
-        mobile: touch,
-        screenWidth: width,
-        screenHeight: viewport.height,
-      }),
-      this.setTouchEmulation(touch),
-    ])
+    return this.send('Emulation.setDeviceMetricsOverride', {
+      width,
+      height,
+      deviceScaleFactor,
+      mobile: touch,
+      screenWidth: width,
+      screenHeight: viewport.height,
+    })
   }
 
   /**
