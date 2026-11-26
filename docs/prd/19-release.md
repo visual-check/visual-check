@@ -12,6 +12,7 @@ A release publishes only the package files that passed the test apps. The CLI, t
 - **The lockstep group:** `@visual-check/cli`, `@visual-check/storybook` and `@visual-check/storybook-addon` share one version and always release together.
 - **`@visual-check/chromium`** has its own versions, whose major is the Chromium major ([Packages](01-packages.md)).
 - **The Action** has its own versions in its own repo: immutable `vX.Y.Z` releases and a moving `v1` tag.
+- **GitHub releases are immutable** in both repos, through GitHub's immutable releases setting: once published, a release's tag and assets can't change. The lockstep group's drafts stay editable until the release run publishes them, and the browser package's release is created once. The releases published before the setting was turned on, the lockstep group's 0.1.0 and the browser package's 157.0.0, stay mutable.
 
 What waits for a visual-check major:
 
