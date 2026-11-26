@@ -604,6 +604,16 @@ describe('the 30 s limit on a page call', () => {
       "The page didn't set its viewport within 30 s.",
     ],
     [
+      'growViewportToContent',
+      'Page.getLayoutMetrics',
+      async (page: Page) => {
+        await page.setViewport(touchViewport)
+
+        return page.growViewportToContent()
+      },
+      "The page didn't grow its viewport within 30 s.",
+    ],
+    [
       'capture',
       'Page.captureScreenshot',
       (page: Page) => page.capture('full-page'),
@@ -1304,6 +1314,70 @@ describe('Page.capture', () => {
       deviceWidth: 32_768,
       deviceHeight: 2,
     })
+  })
+})
+
+describe('Page.growViewportToContent', () => {
+  it("grows a touch viewport's height to the content's, rounded up, keeping its screen, scale and touch", async () => {
+    const { browser, page } = await openPage({ handlers: { 'Page.getLayoutMetrics': layoutOf(375, 3000.4) } })
+
+    await page.setViewport(touchViewport)
+    expect(await page.growViewportToContent()).toBe(true)
+    expect(sentOf(browser, 'Emulation.setDeviceMetricsOverride').at(-1)).toEqual({
+      method: 'Emulation.setDeviceMetricsOverride',
+      params: { width: 375, height: 3001, deviceScaleFactor: 2, mobile: true, screenWidth: 375, screenHeight: 667 },
+      sessionId,
+    })
+    expect(sentOf(browser, 'Emulation.setTouchEmulationEnabled').at(-1)).toEqual({
+      method: 'Emulation.setTouchEmulationEnabled',
+      params: { enabled: true, maxTouchPoints: 5 },
+      sessionId,
+    })
+  })
+
+  it('keeps the viewport setViewport set for later captures, so their size is counted at its scale', async () => {
+    const { page } = await openPage({ handlers: { 'Page.getLayoutMetrics': layoutOf(375, 3000) } })
+
+    await page.setViewport(touchViewport)
+    await page.growViewportToContent()
+    await expect(page.capture({ x: 0, y: 0, width: 16_384, height: 1 })).rejects.toMatchObject({
+      deviceWidth: 32_768,
+    })
+  })
+
+  it.each([
+    ['as tall as the viewport', 667],
+    ['shorter than the viewport', 400],
+  ])('does nothing and resolves false when the content is %s', async (_case, contentHeight) => {
+    const { browser, page } = await openPage({ handlers: { 'Page.getLayoutMetrics': layoutOf(375, contentHeight) } })
+
+    await page.setViewport(touchViewport)
+    expect(await page.growViewportToContent()).toBe(false)
+    expect(sentOf(browser, 'Emulation.setDeviceMetricsOverride')).toHaveLength(1)
+  })
+
+  it('does nothing and resolves false when the content is over 32,767 device pixels tall', async () => {
+    const { browser, page } = await openPage({ handlers: { 'Page.getLayoutMetrics': layoutOf(375, 16_384) } })
+
+    await page.setViewport(touchViewport)
+    expect(await page.growViewportToContent()).toBe(false)
+    expect(sentOf(browser, 'Emulation.setDeviceMetricsOverride')).toHaveLength(1)
+  })
+
+  it('grows to a content up to 32,767 device pixels tall', async () => {
+    const { browser, page } = await openPage({ handlers: { 'Page.getLayoutMetrics': layoutOf(375, 16_383) } })
+
+    await page.setViewport(touchViewport)
+    expect(await page.growViewportToContent()).toBe(true)
+    expect(sentOf(browser, 'Emulation.setDeviceMetricsOverride').at(-1)?.params).toMatchObject({ height: 16_383 })
+  })
+
+  it('sends nothing and resolves false before any viewport is set', async () => {
+    const { browser, page } = await openPage()
+    const sentBefore = sent(browser).length
+
+    expect(await page.growViewportToContent()).toBe(false)
+    expect(sent(browser).slice(sentBefore)).toEqual([])
   })
 })
 

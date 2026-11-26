@@ -120,6 +120,7 @@ function fakeDriverOf(behaviour: FakeBehaviour = {}): FakeDriver {
 function pageOf(fake: FakeDriver, behaviour: FakeBehaviour): Page {
   return {
     setViewport: async () => undefined,
+    growViewportToContent: async () => false,
     goto: async (url, timeoutMs) => {
       fake.gotos.push([url, timeoutMs])
 

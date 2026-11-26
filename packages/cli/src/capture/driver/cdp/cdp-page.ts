@@ -429,25 +429,45 @@ class CdpPage implements Page {
    */
   async setViewport(viewport: PageViewport): Promise<void> {
     this.throwIfFailed()
-
-    const { width, height, deviceScaleFactor, touch } = viewport
-
     await this.guarded(
-      Promise.all([
-        this.send('Emulation.setDeviceMetricsOverride', {
-          width,
-          height,
-          deviceScaleFactor,
-          mobile: touch,
-          screenWidth: width,
-          screenHeight: height,
-        }),
-        this.setTouchEmulation(touch),
-      ]),
+      this.overrideDeviceMetrics(viewport, viewport.height),
       commandTimeLimitMs,
       `The page didn't set its viewport within ${commandTimeLimitMs / 1000} s.`,
     )
     this.viewport = viewport
+  }
+
+  /**
+   * Measures the full page and, when it's taller than the viewport but fits a capture, overrides the device metrics
+   * again with the viewport's height set to the page's, the screen's kept, and touch emulation set again with them. The
+   * kept viewport stays the one `setViewport` set, so its device scale factor and touch still size and drive captures.
+   * Before any `setViewport`, it does nothing: there is no viewport to grow.
+   */
+  async growViewportToContent(): Promise<boolean> {
+    this.throwIfFailed()
+
+    const viewport = this.viewport
+
+    if (viewport === undefined) {
+      return false
+    }
+
+    return this.guarded(
+      (async (): Promise<boolean> => {
+        const { height } = readFullPageBox(await this.send('Page.getLayoutMetrics'))
+
+        if (height <= viewport.height || Math.ceil(height * viewport.deviceScaleFactor) > maxCaptureSide) {
+          return false
+        }
+
+        this.throwIfFailed()
+        await this.overrideDeviceMetrics(viewport, height)
+
+        return true
+      })(),
+      commandTimeLimitMs,
+      `The page didn't grow its viewport within ${commandTimeLimitMs / 1000} s.`,
+    )
   }
 
   /**
@@ -720,6 +740,27 @@ class CdpPage implements Page {
     }
 
     return Buffer.from(readString(reply, 'data', 'Page.captureScreenshot'), 'base64')
+  }
+
+  /**
+   * Overrides the device metrics with the viewport's width, device scale factor and touch, at `height`, with the
+   * viewport's own size as the screen's, and turns touch emulation on or off with it. A touch viewport is a mobile one
+   * too. The commands go in parallel.
+   */
+  private overrideDeviceMetrics(viewport: PageViewport, height: number): Promise<unknown> {
+    const { width, deviceScaleFactor, touch } = viewport
+
+    return Promise.all([
+      this.send('Emulation.setDeviceMetricsOverride', {
+        width,
+        height,
+        deviceScaleFactor,
+        mobile: touch,
+        screenWidth: width,
+        screenHeight: viewport.height,
+      }),
+      this.setTouchEmulation(touch),
+    ])
   }
 
   /**

@@ -85,6 +85,11 @@ function fakeBrowserOf(version: string = browserPackage.chromium): FakeBrowser {
       setViewport: async () => {
         failIfGone()
       },
+      growViewportToContent: async () => {
+        failIfGone()
+
+        return false
+      },
       goto: async (url) => {
         failIfGone()
         id = new URL(url).searchParams.get('id') ?? ''

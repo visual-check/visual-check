@@ -66,6 +66,7 @@ function fakeDriverOf(proxyPort: () => number, behaviour: FakeBehaviour = {}): F
   const proxyAtCloses: string[] = []
   const page: Page = {
     setViewport: async () => undefined,
+    growViewportToContent: async () => false,
     goto: async (url) => {
       urls.push(url)
 

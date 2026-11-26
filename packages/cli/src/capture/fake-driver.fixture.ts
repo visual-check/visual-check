@@ -102,6 +102,10 @@ export interface FakePageBehaviour extends FakeEvaluation {
    */
   goto?: (url: string, timeoutMs: number) => Promise<void>
   /**
+   * Answers `growViewportToContent`. The page fits its viewport, so it resolves false, when it is left out.
+   */
+  growViewportToContent?: () => Promise<boolean>
+  /**
    * Answers `capture`.
    */
   capture?: (area: CaptureArea) => Promise<Uint8Array>
@@ -223,6 +227,11 @@ export class FakeDriver implements Driver {
         record('evaluate', [expression, timeoutMs])
 
         return await answerEvaluate(answers, expression, timeoutMs)
+      },
+      growViewportToContent: async () => {
+        record('growViewportToContent', [])
+
+        return (await answers.growViewportToContent?.()) ?? false
       },
       capture: async (area) => {
         record('capture', [area])

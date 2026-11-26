@@ -459,6 +459,11 @@ export function fakeDriverOf({
           failIfGone()
           record.viewports.push(viewport)
         },
+        growViewportToContent: async () => {
+          failIfGone()
+
+          return false
+        },
         goto: async (url) => {
           failIfGone()
           pageUrl = url
