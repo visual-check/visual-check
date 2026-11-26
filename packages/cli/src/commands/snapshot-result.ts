@@ -162,12 +162,12 @@ function masksOf(masks: StoryOptions['masks']): StoryMask[] {
 }
 
 /**
- * Gives the story's ID, the URL of its own page with the snapshot's globals, the snapshot's viewport, and the element
- * and the masks the story's options set. A story with no element, or with `null`, is captured in full, and one with no
- * masks is captured with none.
+ * Gives the story's ID, the URL of its own page with the snapshot's globals, the snapshot's viewport, and the element,
+ * the masks and the viewport's growth the story's options set. A story with no element, or with `null`, is captured in
+ * full, one with no masks is captured with none, and one that doesn't set `growViewport` grows the viewport.
  */
 export function storyToCaptureOf({ storybook, story, options, globals, viewport }: SnapshotToCapture): StoryToCapture {
-  const { element } = options
+  const { element, growViewport } = options
   const masks = masksOf(options.masks)
 
   return {
@@ -175,6 +175,7 @@ export function storyToCaptureOf({ storybook, story, options, globals, viewport 
     url: storyUrlOf(storybook.url, story.id, globals),
     viewport,
     ...(typeof element === 'string' ? { element } : {}),
+    ...(growViewport === undefined ? {} : { growViewport }),
     ...(masks.length === 0 ? {} : { masks }),
   }
 }

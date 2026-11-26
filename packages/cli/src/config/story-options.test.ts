@@ -9,7 +9,7 @@ const newerHint = ' If a newer @visual-check/storybook wrote it, install @visual
 /**
  * The known keys an unknown-key issue lists at the top level.
  */
-const topKeys = 'modes, viewport, element, masks, tolerance, disable, wait'
+const topKeys = 'modes, viewport, element, growViewport, masks, tolerance, disable, wait'
 
 /**
  * Checks a value that must be valid and returns its options.
@@ -336,6 +336,18 @@ describe('checkStoryOptions', () => {
     })
   })
 
+  describe('growViewport', () => {
+    it('takes true and false', () => {
+      expect(optionsOf({ growViewport: true })).toStrictEqual({ growViewport: true })
+      expect(optionsOf({ growViewport: false })).toStrictEqual({ growViewport: false })
+    })
+
+    it.each([null, 'false', 0, {}])('rejects %j', (growViewport) => {
+      expect(issuesOf({ growViewport })).toHaveLength(1)
+      expect(issuesOf({ growViewport })[0]).toMatch(/^visualCheck\.growViewport: must be true or false\. Got /)
+    })
+  })
+
   describe('disable', () => {
     it('takes true and false', () => {
       expect(optionsOf({ disable: true })).toStrictEqual({ disable: true })
@@ -382,6 +394,7 @@ describe('checkStoryOptions', () => {
         modes: { dark: { globals: { theme: 'dark' } }, mobile: null },
         viewport: { width: 375, height: 667, deviceScaleFactor: 2, touch: true },
         element: null,
+        growViewport: false,
         masks: { ad: { selector: '.ad', host: null }, old: null },
         tolerance: { color: 0.02, pixels: '1%' },
         disable: false,
@@ -393,6 +406,7 @@ describe('checkStoryOptions', () => {
         modes: { dark: { globals: { theme: 'dark' } }, mobile: null },
         viewport: { width: 375, height: 667, deviceScaleFactor: 2, touch: true },
         element: null,
+        growViewport: false,
         masks: { ad: { selector: '.ad' }, old: null },
         tolerance: { color: 0.02, pixels: '1%' },
         disable: false,

@@ -60,6 +60,10 @@ export interface StoryOptions {
    */
   element?: string | null
   /**
+   * Whether a full-page capture grows the viewport's height to the page's first. `false` keeps the viewport's height.
+   */
+  growViewport?: boolean
+  /**
    * The regions to paint over, by name, or `null` for none. A name set to `null` drops one mask.
    */
   masks?: Record<string, StoryMask | null> | null
@@ -223,6 +227,7 @@ const storyKeys = {
   modes: checkModes,
   viewport: checkViewport,
   element: orNull({ ...nonEmptyString, text: 'a non-empty string, or null' }),
+  growViewport: optionalKey({ text: 'true or false', accepts: (value) => typeof value === 'boolean' }),
   masks: checkMasks,
   tolerance: checkTolerance,
   disable: optionalKey({ text: 'true or false', accepts: (value) => typeof value === 'boolean' }),
