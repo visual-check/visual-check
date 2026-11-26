@@ -32,6 +32,10 @@ export interface PackedManifest {
    */
   dependencies?: Record<string, string>
   /**
+   * The dev dependencies, with the spec of each.
+   */
+  devDependencies?: Record<string, string>
+  /**
    * The optional dependencies, with the spec of each.
    */
   optionalDependencies?: Record<string, string>
@@ -199,9 +203,37 @@ export async function startRegistry(tarballs: readonly Tarball[]): Promise<Regis
 }
 
 /**
- * The fields of a manifest whose dependencies another packed package can be in.
+ * The fields of a `package.json` that list dependencies, each with its spec.
  */
-const dependencyFields = ['dependencies', 'peerDependencies', 'optionalDependencies'] as const
+const dependencyFields = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'] as const
+
+/**
+ * The dependency lists of a `package.json`, a packed one or a project's.
+ */
+type DependencyLists = Partial<Record<(typeof dependencyFields)[number], Record<string, string>>>
+
+/**
+ * Gives a `package.json` with the spec of each dependency named in `versions`, in every dependency list, set to that
+ * exact version. Every other field stays as it was.
+ */
+function withDependencyVersions<Manifest extends DependencyLists>(
+  manifest: Manifest,
+  versions: ReadonlyMap<string, string>,
+): Manifest {
+  const rewritten: DependencyLists = { ...manifest }
+
+  for (const field of dependencyFields) {
+    const specs = manifest[field]
+
+    if (specs !== undefined) {
+      rewritten[field] = Object.fromEntries(
+        Object.entries(specs).map(([name, spec]) => [name, versions.get(name) ?? spec]),
+      )
+    }
+  }
+
+  return rewritten as Manifest
+}
 
 /**
  * Gives a version of its own for one try of a packed package: its version with `local.` and the UTC time, to the
@@ -216,23 +248,31 @@ export function localVersionOf(version: string, date: Date): string {
 
 /**
  * Gives a packed `package.json` with the versions in `versions`, keyed by package name: its own `version` when its name
- * is there, and the spec of each dependency, peer dependency and optional dependency that is there, which becomes that
- * exact version. Every other field stays as it was.
+ * is there, and the spec of each dependency, dev dependency, peer dependency and optional dependency that is there,
+ * which becomes that exact version. Every other field stays as it was.
  */
 export function manifestWithVersions(manifest: PackedManifest, versions: ReadonlyMap<string, string>): PackedManifest {
-  const rewritten: PackedManifest = { ...manifest, version: versions.get(manifest.name) ?? manifest.version }
+  return withDependencyVersions({ ...manifest, version: versions.get(manifest.name) ?? manifest.version }, versions)
+}
 
-  for (const field of dependencyFields) {
-    const specs = manifest[field]
+/**
+ * Gives the text of a project's `package.json` with each dependency, dev dependency, peer dependency and optional
+ * dependency named in `versions` at that exact version, indented as it was and with its final newline, if any. Gives
+ * `undefined` when it lists none of them.
+ */
+export function packageJsonWithVersions(text: string, versions: ReadonlyMap<string, string>): string | undefined {
+  const manifest = JSON.parse(text) as DependencyLists
+  const listsOne = dependencyFields.some((field) =>
+    Object.keys(manifest[field] ?? {}).some((name) => versions.has(name)),
+  )
 
-    if (specs !== undefined) {
-      rewritten[field] = Object.fromEntries(
-        Object.entries(specs).map(([name, spec]) => [name, versions.get(name) ?? spec]),
-      )
-    }
+  if (!listsOne) {
+    return undefined
   }
 
-  return rewritten
+  const indent = /^[ \t]+(?=")/m.exec(text)?.[0] ?? '  '
+
+  return `${JSON.stringify(withDependencyVersions(manifest, versions), null, indent)}${text.endsWith('\n') ? '\n' : ''}`
 }
 
 /**
