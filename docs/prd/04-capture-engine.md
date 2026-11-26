@@ -64,14 +64,14 @@ Once per page:
 
 1. Set the viewport, the device scale factor and touch on the page.
 2. `goto` `iframe.html?id=<story-id>&viewMode=story`, with the mode's globals in the URL.
-3. Wait until the story is ready, run the `wait` hook, and bring the page to its end state ([Readiness and stability](06-readiness-and-stability.md)).
+3. Wait until the story is ready, grow the viewport to the page for a full-page capture, run the `wait` hook, and bring the page to its end state ([Readiness and stability](06-readiness-and-stability.md)).
 4. Paint the masks and hide the caret.
 5. Capture the full page or the `element` box, as a standard PNG.
 
 Rules:
 
 - `touch: true` turns on touch and mobile emulation together. A capture, full page or `element` box, goes beyond the viewport, which resets hover and pointer media as it starts and again as it ends, so the driver turns touch emulation back on right behind the capture command, before Chromium paints the capture, and again after it. That order is observed Chromium 157 behaviour the protocol doesn't promise; the hover box in the e2e Modes stories guards it. The snapshot has no hover and a coarse pointer, and so does the page afterwards.
-- The full page is captured beyond the viewport without resizing it.
+- Before a full-page capture, the viewport's height grows to the content's, rounded up, once, keeping the screen's size, the width, the scale and touch ([ADR 0012](../adr/0012-full-page-capture-grows-the-viewport.md)). A page that fits the viewport, a page over 32,767 device pixels tall, an `element` capture and a story with `growViewport: false` keep the viewport. The capture itself never resizes it, and the next story's viewport is set as usual.
 - The PNG is stored exactly as the browser returned it. The byte comparison in [Visual diff](09-visual-diff.md) depends on that.
 - The full page is the viewport's width and the content's height. Content wider than the viewport is cut at the viewport's width.
 - An element capture is the element's border box, rounded out to whole CSS pixels.
