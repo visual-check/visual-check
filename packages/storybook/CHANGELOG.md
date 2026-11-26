@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/visual-check/visual-check/compare/storybook-v0.1.0...storybook-v0.1.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* a full-page capture grows the viewport to the page, so fixed and sticky elements sit where the page puts them ([#166](https://github.com/visual-check/visual-check/issues/166)) ([42c5d7b](https://github.com/visual-check/visual-check/commit/42c5d7bffcfb84786b8d3fc18f88f1f32119882b)), closes [#164](https://github.com/visual-check/visual-check/issues/164)
+
 ## 0.1.0 (2026-11-26)
 
 
