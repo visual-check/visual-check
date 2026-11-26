@@ -1,14 +1,10 @@
+import { framesFunction, taskFrameMs } from './frames.js'
 import { pageRootsFunction } from './page-roots.js'
 
 /**
  * How many rounds of finishing animations the end state runs at most.
  */
 const maxRounds = 20
-
-/**
- * How long each of a frame's two tasks lasts in a page without `requestAnimationFrame`, in ms.
- */
-const taskFrameMs = 16
 
 /**
  * The SMIL animation elements an SVG holds.
@@ -113,11 +109,9 @@ const cssEscapePattern = String.raw`/\\(?:([0-9a-fA-F]{1,6}) ?|([^]))/g`
  * 6. Lets two more frames pass when it changed anything, as a change made just before capture can still be rastering
  *    on a busy machine.
  *
- * A frame is two `requestFrame` callbacks, then a task. In a page without `requestFrame`, or when asking for the first
- * callback throws, it's two tasks of 16 ms, and when only asking for the second throws, it's one callback, then two
- * tasks of 16 ms. Only animations on their document's timeline are touched, a frame's own for one in a frame:
- * scroll-driven and view-driven ones, and those with no timeline, are left alone, and so are those the page paused
- * itself, Storybook 11's aside. Only `finish()` calls made in the top document are noted: a frame's own calls aren't,
+ * A frame is as `framesFunction` says. Only animations on their document's timeline are touched, a frame's own for one
+ * in a frame: scroll-driven and view-driven ones, and those with no timeline, are left alone, and so are those the page
+ * paused itself, Storybook 11's aside. Only `finish()` calls made in the top document are noted: a frame's own calls aren't,
  * though the end state's calls on a frame's animations still wait two quiet checks a frame apart.
  *
  * Left to the project, through a mask or a `wait` hook: SVG in `<img>`, SVG with SMIL animation behind a URL whose
@@ -683,47 +677,16 @@ export const endStateFunction = `(context) => {
     ]
   }
 
-  // A frame: two animation frames, then a task. Without requestFrame, or from the point where asking for an animation
-  // frame throws, it goes on with two tasks of 16 ms instead. A task that can't be scheduled ends the frame at once, so
-  // a frame never throws, in its callbacks either, and never stays pending.
+  // Letting frames pass, as framesFunction says.
 
-  const frame = () =>
-    new Promise((resolve) => {
-      const task = (callback, ms) => {
-        try {
-          setTimer(callback, ms)
-        } catch {
-          resolve()
-        }
-      }
-      const tasks = () => task(() => task(resolve, ${taskFrameMs}), ${taskFrameMs})
-      const animationFrame = (callback) => {
-        if (requestFrame === undefined) {
-          tasks()
-          return
-        }
-        try {
-          requestFrame(callback)
-        } catch {
-          tasks()
-        }
-      }
-      animationFrame(() => animationFrame(() => task(resolve, 0)))
-    })
+  const framesPassedBefore = (${framesFunction})({ setTimer, requestFrame })
 
   return async (timeoutMs) => {
     let timer
     const deadline = new Promise((resolve) => {
       timer = setTimer(() => resolve(timedOut), timeoutMs)
     })
-    const framesPassed = async (count) => {
-      for (let passed = 0; passed < count; passed += 1) {
-        if ((await Promise.race([frame(), deadline])) === timedOut) {
-          return false
-        }
-      }
-      return true
-    }
+    const framesPassed = (count) => framesPassedBefore(count, deadline)
     // Animations whose finish() threw, such as one with a playback rate of 0, aren't finished again: they're put on
     // their first keyframe with the infinite ones.
     const unfinishable = new Set()

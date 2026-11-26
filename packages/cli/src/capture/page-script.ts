@@ -1,6 +1,7 @@
 import { parkedByStorybookSource, storybookPageScript } from '../storybook/preview-script.js'
 import { consoleMessageFunction, keptConsoleMessageCharacters, keptConsoleMessages } from './driver/driver.js'
 import { endStateFunction } from './end-state.js'
+import { framesFunction } from './frames.js'
 import { type CapturePrepRequest, prepareCaptureFunction } from './prepare-capture.js'
 import { remoteContentFunction } from './remote-content.js'
 
@@ -40,6 +41,9 @@ const stateGlobal = '__visualCheck'
  *   decoded again. Then it forces layout, so the fonts the layout needs start loading, and waits for
  *   `document.fonts.ready`. One time limit covers both. A page without an API it uses, such as `document.fonts`, has
  *   nothing to wait for there;
+ * - gives `letFramesPass`, which the frames expression calls once the viewport grew, so the page reacts to the new
+ *   size before anything goes on: an `IntersectionObserver`, a `ResizeObserver` or a `resize` listener calls back,
+ *   and the render it causes is done. It lets the frames pass as `framesFunction` says, within a time limit;
  * - gives `bringToEndState`, which the end state expression calls at capture. It brings every animation in the
  *   document and in every shadow root to its end state, then freezes their videos, SVGs, inline or as CSS images, and
  *   GIFs, then brings the animations that freezing them started to their end state too, as `endStateFunction` says,
@@ -53,7 +57,7 @@ const stateGlobal = '__visualCheck'
  *   `prepareCaptureFunction` says.
  *
  * It keeps the browser's own `setTimeout`, `clearTimeout` and `requestAnimationFrame`, so a story that fakes or
- * replaces timers or frames doesn't stall the wait, the end state or the remote content search, its own `fetch`, so a
+ * replaces timers or frames doesn't stall the waits, the end state or the remote content search, its own `fetch`, so a
  * story that mocks it doesn't answer the end state's requests for SVG files, and its own `JSON.stringify`, so a page
  * that replaces it can't change what is sent. It takes and hides the message function
  * before anything else runs, so a failure anywhere still leaves the page's own scripts without it. The adapter's
@@ -294,6 +298,22 @@ ${storybookPageScript};
     }
   }
 
+  // Letting frames pass, so the page reacts to a viewport that grew.
+
+  const framesPassedBefore = (${framesFunction})({ setTimer, requestFrame })
+
+  const letFramesPass = async (count, timeoutMs) => {
+    let timer
+    const deadline = new Promise((resolve) => {
+      timer = setTimer(resolve, timeoutMs)
+    })
+    try {
+      return (await framesPassedBefore(count, deadline)) ? { outcome: 'passed' } : { outcome: 'timed-out' }
+    } finally {
+      clearTimer(timer)
+    }
+  }
+
   // The end state, brought about only at capture.
 
   const bringToEndState = (${endStateFunction})({
@@ -324,7 +344,15 @@ ${storybookPageScript};
   })
 
   Object.defineProperty(globalThis, '${stateGlobal}', {
-    value: Object.freeze({ shadowRoots, messages, waitForAssets, bringToEndState, findRemoteContent, prepareCapture }),
+    value: Object.freeze({
+      shadowRoots,
+      messages,
+      waitForAssets,
+      letFramesPass,
+      bringToEndState,
+      findRemoteContent,
+      prepareCapture,
+    }),
   })
 })()
 })((() => {
@@ -395,6 +423,62 @@ export function assetsReadyExpression(timeoutMs: number): string {
   const state = globalThis.${stateGlobal}
   return state === undefined ? { outcome: 'script-missing' } : state.waitForAssets(${limit})
 })()`
+}
+
+/**
+ * How many frames pass once the viewport grew: the first runs the rendering update that calls the page's observers
+ * back, the second paints what their render changed.
+ */
+const framesAfterGrowth = 2
+
+/**
+ * What letting frames pass found in the page.
+ */
+export type FramesPassed =
+  | {
+      /**
+       * The frames passed.
+       */
+      outcome: 'passed'
+    }
+  | {
+      /**
+       * The time limit passed first.
+       */
+      outcome: 'timed-out'
+    }
+  | {
+      /**
+       * The page script hadn't run in the page, so there was nothing to let the frames pass with.
+       */
+      outcome: 'script-missing'
+    }
+
+/**
+ * Builds the expression that lets two frames pass in the page once the viewport grew, so the page reacts to the new
+ * size, or gives up once `timeoutMs` passes, rounded up to whole ms. Its value is the page's answer, which
+ * `readFramesPassed` reads.
+ */
+export function framesAfterGrowthExpression(timeoutMs: number): string {
+  const limit = Math.max(0, Math.ceil(timeoutMs))
+
+  return `(async () => {
+  const state = globalThis.${stateGlobal}
+  return state === undefined ? { outcome: 'script-missing' } : state.letFramesPass(${framesAfterGrowth}, ${limit})
+})()`
+}
+
+/**
+ * Reads the value the frames expression gave. Throws, quoting the value, when it's not an answer the page gives.
+ */
+export function readFramesPassed(value: unknown): FramesPassed {
+  const answer: Record<string, unknown> = typeof value === 'object' && value !== null ? { ...value } : {}
+
+  if (answer.outcome === 'passed' || answer.outcome === 'timed-out' || answer.outcome === 'script-missing') {
+    return { outcome: answer.outcome }
+  }
+
+  throw new Error(`Letting frames pass in the page gave an answer visual-check doesn't know: ${JSON.stringify(value)}.`)
 }
 
 /**

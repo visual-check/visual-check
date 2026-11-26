@@ -15,7 +15,7 @@ import { readyAnswer } from './page-script.fixture.js'
 /**
  * How a fake page answers the waits, the end state, the capture preparation and the options read evaluated in it. One
  * left out answers as on a story that's ready: the story wait gives `finishedAnswer()`, the wait for images and fonts
- * gives `readyAnswer()`, the wait hook finds none to run, the end state gives `settledAnswer()`, changing nothing, the
+ * gives `readyAnswer()`, the frames after the viewport grew pass, the wait hook finds none to run, the end state gives `settledAnswer()`, changing nothing, the
  * capture preparation is ready for the full page, and the options read finds every file loaded and no story with
  * options.
  */
@@ -28,6 +28,10 @@ interface FakeEvaluation {
    * Answers the wait for images and fonts, given the driver's time limit for it.
    */
   assetsWait?: (timeoutMs: number) => Promise<unknown>
+  /**
+   * Answers letting frames pass once the viewport grew, given the driver's time limit for it.
+   */
+  framesWait?: (timeoutMs: number) => Promise<unknown>
   /**
    * Answers the run of the story's wait hook, given the driver's time limit for it.
    */
@@ -53,6 +57,7 @@ interface FakeEvaluation {
 const evaluationAnswers: [string, keyof FakeEvaluation, (expression: string) => unknown][] = [
   ['.waitForStory(', 'storyWait', () => finishedAnswer()],
   ['.waitForAssets(', 'assetsWait', () => readyAnswer()],
+  ['.letFramesPass(', 'framesWait', () => ({ outcome: 'passed' })],
   ['.runWait(', 'waitHook', () => ({ outcome: 'none' })],
   ['.bringToEndState(', 'endStateWait', () => settledAnswer()],
   ['.prepareCapture(', 'capturePrep', () => ({ outcome: 'ready', box: null })],
@@ -61,10 +66,10 @@ const evaluationAnswers: [string, keyof FakeEvaluation, (expression: string) => 
 
 /**
  * Answers an expression evaluated in a fake page as `evaluation` says. It tells the waits apart by the function each
- * calls in the page: `waitForStory` for the story wait, `waitForAssets` for the wait for images and fonts, `runWait`
- * for the wait hook, `bringToEndState` for the end state, `prepareCapture` for the capture preparation and
- * `readOptions` for the options read. Throws on any other expression, so one the fake doesn't know, such as a wait
- * whose function was renamed, fails clearly.
+ * calls in the page: `waitForStory` for the story wait, `waitForAssets` for the wait for images and fonts,
+ * `letFramesPass` for the frames after the viewport grew, `runWait` for the wait hook, `bringToEndState` for the end
+ * state, `prepareCapture` for the capture preparation and `readOptions` for the options read. Throws on any other
+ * expression, so one the fake doesn't know, such as a wait whose function was renamed, fails clearly.
  *
  * @public
  */
