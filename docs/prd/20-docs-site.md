@@ -31,6 +31,9 @@ All under `/docs`.
 **Getting started**
 
 - Install and `init`, then `update`, then `test`.
+- Linters and visual-check's own files. Biome lints the agent skill's runner script, and Fallow reports `visual-check.config.ts`, and maybe the runner script, as unused. The page shows the exclusions, and says the skill's files are rewritten on every upgrade, so they aren't to be reformatted:
+  - Biome: `"!.agents/skills/visual-check"` and `"!.claude/skills/visual-check"` (the copy on Windows) added to `files.includes`;
+  - Fallow: `"supportEntry": ["visual-check.config.ts"]`, which keeps the config's import of `@visual-check/cli` counted, and `"ignorePatterns": [".agents/skills/visual-check/**", ".claude/skills/visual-check/**"]`.
 - It says up front that readiness never waits for the network. A failure on the first `test` means a story needs tuning: a `wait` hook, a mask or its animations.
 
 **Config**
@@ -139,7 +142,7 @@ All under `/docs`.
 
 **Agent skill**
 
-- What `init` writes, how the skill refreshes after an upgrade, and allowing the command in the agent's own settings.
+- What `init` writes, how the skill refreshes after an upgrade, and allowing the command in the agent's own settings. Getting started's note on linters applies to the skill's files.
 
 **Supported Storybooks**
 
