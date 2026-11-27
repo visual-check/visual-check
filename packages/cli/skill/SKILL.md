@@ -56,6 +56,7 @@ While you troubleshoot a broken story, read its entry's console messages (`conso
 
 1. **Exit 2:** relay the error and the fix it names. Never suggest `platform: 'host'`.
 2. **A broken story,** by its `reason`:
+   - any reason, with a `failed-loads` hint: the server that serves Storybook dropped its files, not the story. Serve it with a server that takes many connections, or lower `--workers`; never a `wait` hook for it;
    - `changed-after-capture`, `unstable` or `timeout`: a `wait` hook on the story, or in `preview` when many stories share the cause;
    - `navigated-away`, `play-threw` or `load-failed`: the project's code to fix. For a story that navigates away, await the new page before clicking, or render `MemoryRouter` with `useTransitions={false}`;
    - `too-tall`: `element`, or a smaller viewport;

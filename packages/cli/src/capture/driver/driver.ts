@@ -276,6 +276,22 @@ export function readConsoleMessage(payload: string): ConsoleMessage | undefined 
 }
 
 /**
+ * A load of a file that failed at the network level on a page.
+ *
+ * @public
+ */
+export interface FailedLoad {
+  /**
+   * The file's full URL.
+   */
+  url: string
+  /**
+   * The browser's network error, such as `net::ERR_EMPTY_RESPONSE`.
+   */
+  error: string
+}
+
+/**
  * A page in a browser context of its own, set up once, that stories are loaded and captured in. It emulates
  * `prefers-reduced-motion: no-preference` and keeps focus as if its window were focused.
  *
@@ -313,6 +329,9 @@ export function readConsoleMessage(payload: string): ConsoleMessage | undefined 
  * was passed on there by a service worker of the page's browser context. A response a service worker built itself, as
  * MSW's mocks are, doesn't count, and fonts, stylesheets, images and scripts never do. A page that doesn't watch turns
  * on no request reporting and attaches to no service worker, so it costs nothing.
+ *
+ * Every page keeps the loads of its document's origin that failed at the network level, which `failedLoads` gives. The
+ * browser's log reports only problems, so watching it costs a page nothing, unlike watching requests.
  *
  * @public
  */
@@ -385,6 +404,14 @@ export interface Page {
    * reads them once a call failed, before it closes the page. Never fails.
    */
   consoleMessages: () => ConsoleMessage[]
+  /**
+   * Gives the loads that failed at the network level since the last `goto` started, such as a dropped or refused
+   * connection, each of the origin of the document the main frame showed when it failed: that `goto`'s, or one the page
+   * went to since. The first 10 of them, each URL once, in order: a failure of another origin, such as a CDN's, is never
+   * kept, so it never crowds out one of the story's own. A cancellation and an HTTP error status don't count. They are
+   * kept after the page can no longer be used too, so a caller reads them once a call failed. Never fails.
+   */
+  failedLoads: () => FailedLoad[]
   /**
    * Closes the page and its browser context. Every call in flight and every later call fails. Calling it again returns
    * the same promise.

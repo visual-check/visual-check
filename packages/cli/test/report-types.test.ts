@@ -4,6 +4,7 @@ import type {
   ReportBrokenReason,
   ReportConsoleLevel,
   ReportDiffReason,
+  ReportHint,
   ReportPixels,
   ReportSelection,
   TestReport,
@@ -73,6 +74,7 @@ describe('the report types exported from the package entry', () => {
     expectTypeOf<UpdateReportEntry['status']>().toEqualTypeOf<'written' | 'deleted' | 'broken'>()
     expectTypeOf<ReportDiffReason>().toEqualTypeOf<'pixels' | 'size'>()
     expectTypeOf<ReportConsoleLevel>().toEqualTypeOf<'debug' | 'info' | 'log' | 'warn' | 'error'>()
+    expectTypeOf<ReportHint['kind']>().toEqualTypeOf<'remote-content' | 'failed-loads'>()
     expectTypeOf<Extract<TestReportEntry, { status: 'differs' }>['reason']>().toEqualTypeOf<ReportDiffReason>()
     expectTypeOf<Extract<TestReportEntry, { status: 'broken' }>['reason']>().toEqualTypeOf<ReportBrokenReason>()
     expectTypeOf<Extract<UpdateReportEntry, { status: 'written' }>['reason']>().toEqualTypeOf<'missing' | 'differs'>()

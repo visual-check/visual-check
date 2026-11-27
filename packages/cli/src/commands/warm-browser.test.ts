@@ -137,6 +137,7 @@ function fakeBrowserOf(version = '157.0.8103.78'): FakeBrowser {
       },
       requestHosts: () => [],
       consoleMessages: () => [],
+      failedLoads: () => [],
     }
   }
   const browser: FakeBrowser = {

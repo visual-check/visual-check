@@ -48,7 +48,7 @@
 // the cases share the cache as the host cases do, but it needn't start empty.
 import { type ChildProcessByStdio, spawn, spawnSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { createServer, type ServerResponse } from 'node:http'
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { basename, dirname, extname, join, relative, resolve as resolvePath, sep } from 'node:path'
 import type { Readable } from 'node:stream'
@@ -57,6 +57,7 @@ import { isDeepStrictEqual } from 'node:util'
 import type {
   ReportBrokenReason,
   ReportConsoleMessage,
+  ReportFailedLoad,
   ReportImages,
   ReportSize,
   TestReport,
@@ -849,6 +850,25 @@ interface ServeOptions {
    * list them.
    */
   withLoadFails?: boolean
+  /**
+   * Once the server has been asked for this story's page, it destroys the socket of every later request whose pathname
+   * matches `path`, answering nothing. The options-reading page asks first, so it gets the file.
+   */
+  dropAfterStoryPage?: DroppedFiles
+}
+
+/**
+ * The files the server drops once it has been asked for one story's page.
+ */
+interface DroppedFiles {
+  /**
+   * The ID of the story whose page request starts the dropping.
+   */
+  storyId: string
+  /**
+   * Matches the pathnames of the files dropped.
+   */
+  path: RegExp
 }
 
 /**
@@ -1404,14 +1424,16 @@ function storyPageMarkupOf(options: ServeOptions, storyId: string, load: number)
 
 /**
  * Serves the static build on a free port of 127.0.0.1, changed as the options say, and records the requests for story
- * pages. While it holds them, it keeps each one's answer until they're released. The options-reading page is never
- * held or recorded, so a run reads every story's options before it asks for a story page. It never answers a request
- * for the font file the font readiness story asks for, until it stops.
+ * pages. While it holds them, it keeps each one's answer until they're released. Once asked for the page of the story
+ * `dropAfterStoryPage` names, it drops the connection of every request for the files it names. The options-reading
+ * page is never held or recorded, so a run reads every story's options before it asks for a story page. It never
+ * answers a request for the font file the font readiness story asks for, until it stops.
  */
 async function serveStorybook(options: ServeOptions = {}): Promise<StorybookServer> {
   const storyPageRequests: string[] = []
   const heldAnswers: (() => void)[] = []
   let holding = options.holdStoryPages ?? false
+  let dropping = false
 
   /**
    * Records a request for a story page, then answers it with the markup that load gets, or keeps the answer while the
@@ -1419,6 +1441,7 @@ async function serveStorybook(options: ServeOptions = {}): Promise<StorybookServ
    */
   const answerStoryPage = (storyId: string, answerWith: (markup: string | undefined) => void): void => {
     storyPageRequests.push(storyId)
+    dropping ||= options.dropAfterStoryPage?.storyId === storyId
 
     const load = storyPageRequests.filter((requested) => requested === storyId).length
     const markup = storyPageMarkupOf(options, storyId, load)
@@ -1431,6 +1454,20 @@ async function serveStorybook(options: ServeOptions = {}): Promise<StorybookServ
     }
 
     answer()
+  }
+
+  /**
+   * Answers a request for anything but a story page with the static build's file, or destroys its socket, answering
+   * nothing, once the server drops that file.
+   */
+  const answerFile = (request: IncomingMessage, pathname: string, response: ServerResponse): void => {
+    if (dropping && options.dropAfterStoryPage?.path.test(pathname) === true) {
+      request.socket.destroy()
+
+      return
+    }
+
+    serveFile(pathname, response, options, options.injectIntoIframe)
   }
 
   const server = createServer((request, response) => {
@@ -1447,7 +1484,7 @@ async function serveStorybook(options: ServeOptions = {}): Promise<StorybookServ
       return
     }
 
-    serveFile(pathname, response, options, options.injectIntoIframe)
+    answerFile(request, pathname, response)
   })
 
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -2923,6 +2960,67 @@ async function checkRemoteContentHint(): Promise<string[]> {
       ]
     }),
   )
+}
+
+/**
+ * The story whose stories file the server drops on its page, and that file's pathname in the static build.
+ */
+const droppedStoriesFile: DroppedFiles = { storyId: 'card--default', path: /^\/assets\/card\.stories-[\w-]+\.js$/ }
+
+/**
+ * With the server dropping the connection of every request for `card--default`'s stories file once it was asked for
+ * that story's page, `test` on that story alone, with no retry, exits 1: the story is broken, and its line says its
+ * page couldn't load that file from Storybook, with the browser's network error. Its failure in the end block holds
+ * the hint about the server, naming `python3 -m http.server`, and its report entry has a `failed-loads` hint whose
+ * first file is that stories file, with the browser's network error.
+ */
+async function checkFailedLoadsHint(): Promise<string[]> {
+  const { storyId, path } = droppedStoriesFile
+
+  return await withStorybookServer({ dropAfterStoryPage: droppedStoriesFile }, (server) =>
+    withTemporaryFolder(async (folder) => {
+      const config = writeConfig(folder, server.url, committedBaselines, { retries: 0 })
+      const run = await runCli(['test', '--filter', `^${storyId}$`, '--config', config])
+
+      return [
+        ...expectedRunProblems('test', run, { [storyId]: 'broken' }),
+        ...lineSaysProblems(run, storyId, "couldn't load /assets/card.stories-"),
+        ...lineSaysProblems(run, storyId, 'from Storybook: net::ERR_'),
+        ...stdoutSaysProblems(run, [
+          "hint: Storybook's server dropped the connection or never answered.",
+          'python3 -m http.server',
+        ]),
+        ...reportProblems(folder, (report) => failedLoadsEntryProblems(report, storyId, path)),
+      ]
+    }),
+  )
+}
+
+/**
+ * Gives the files of the `failed-loads` hints of the report's entry for the story, in order, or none.
+ */
+function failedLoadsOf(report: TestReport, storyId: string): ReportFailedLoad[] {
+  const hints = report.snapshots.find((snapshot) => snapshot.id === storyId)?.hints ?? []
+
+  return hints.flatMap((hint) => (hint.kind === 'failed-loads' ? hint.files : []))
+}
+
+/**
+ * Gives the problem when the report's entry for the story has no `failed-loads` hint whose first file's pathname
+ * matches `path` and whose error is a network error, or none.
+ */
+function failedLoadsEntryProblems(report: TestReport, storyId: string, path: RegExp): string[] {
+  const [file] = failedLoadsOf(report, storyId)
+
+  if (file === undefined) {
+    return [`${storyId}'s entry has no failed-loads hint with a file`]
+  }
+
+  return path.test(new URL(file.url).pathname) && file.error.startsWith('net::ERR_')
+    ? []
+    : [
+        `${storyId}'s failed-loads hint's first file isn't its stories file with a network error: ${JSON.stringify(file)}`,
+      ]
 }
 
 /**
@@ -4801,6 +4899,10 @@ if (setupProblems.length > 0) {
     {
       name: `remote content hint: with ${unmaskedRemoteContent.storyId}'s host mask dropped, test exits 1, it differs, and its failure in the end block holds the hint naming localhost on the server's port, its mask and the docs page`,
       run: checkRemoteContentHint,
+    },
+    {
+      name: "failed loads hint: with card--default's stories file dropped by the server on its page, test exits 1, the story is broken saying its page couldn't load that file from Storybook, its failure holds the hint about the server, and its report entry lists the file",
+      run: checkFailedLoadsHint,
     },
     {
       name: "test path: a Storybook that ignores the test path's user agent triggers the warning once, and the run passes",

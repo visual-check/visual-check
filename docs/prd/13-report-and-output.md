@@ -82,7 +82,7 @@ Each entry:
 | `pixels`                                 | `{ differ, allowed, budget, scale }`, with `budget` as written: `20` or `"0.1%"`                                                                             |
 | `size`                                   | `null`, or `{ baseline: [w, h], snapshot: [w, h] }` on a size difference                                                                                     |
 | `details`                                | `null`, or a broken story's details                                                                                                                          |
-| `hints`                                  | `[{ kind: "remote-content", hosts, message }]`                                                                                                               |
+| `hints`                                  | `[{ kind: "remote-content", hosts, message }]` or `[{ kind: "failed-loads", files: [{ url, error }], message }]`                                             |
 | `console`                                | `[{ level, text }]`                                                                                                                                          |
 | `baseline`                               | The baseline's path, relative to the config folder                                                                                                           |
 | `images`                                 | `{ baseline, snapshot, diff }`, relative to the report folder. A broken story's image is `images.snapshot`                                                   |
@@ -147,6 +147,7 @@ Both `log` and `live` end with the same block:
 ## Hints and warnings
 
 - **Remote content:** a failure that differs only inside remote content carries a hint that names the hosts, shows the mask line and links the docs page.
+- **Failed loads:** a broken story whose page couldn't load Storybook's files carries a hint about the server, linking the CI docs page.
 - **No changed files:** a hint about `--all`.
 - **Storybooks left out:** in a local affected run, a note after the header names the Storybooks no changed file reaches, which the run never reaches ([Affected stories](11-affected-stories.md#required-storybooks)).
 - **Selection couldn't be worked out:** a warning that every story was selected.

@@ -363,6 +363,7 @@ describe('Driver.newPage', () => {
         params: { source: 'window.__visualCheck = true' },
         sessionId,
       },
+      { method: 'Log.enable', params: {}, sessionId },
       {
         method: 'Browser.setDownloadBehavior',
         params: { behavior: 'deny', browserContextId: 'context-1' },
@@ -483,7 +484,7 @@ describe('Driver.newPage', () => {
 })
 
 describe('Page', () => {
-  it('turns on no Network, Log, lifecycle events or request interception through a whole capture', async () => {
+  it('turns on no Network, lifecycle events or request interception through a whole capture', async () => {
     const { browser, page } = await openPage()
 
     await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1, touch: false })
@@ -511,6 +512,7 @@ describe('Page', () => {
         'Runtime.enable',
         'Runtime.addBinding',
         'Page.addScriptToEvaluateOnNewDocument',
+        'Log.enable',
         'Emulation.setDeviceMetricsOverride',
         'Emulation.setTouchEmulationEnabled',
         'Page.navigate',
@@ -2672,5 +2674,159 @@ describe('Page.consoleMessages', () => {
     sendMessage(browser, logged('second'), 1)
     await flush()
     expect(given).toEqual([logMessage('first')])
+  })
+})
+
+/**
+ * Has the browser log, in the page's session or another, that the load of `url` failed with this text.
+ */
+function logLoad(
+  browser: FakeBrowser,
+  url: string,
+  text = 'Failed to load resource: net::ERR_EMPTY_RESPONSE',
+  session = sessionId,
+): void {
+  browser.emit('Log.entryAdded', { entry: { source: 'network', level: 'error', text, url } }, session)
+}
+
+describe('Page.failedLoads', () => {
+  const chunkUrl = `${storyOrigin}/assets/card.stories-B0zV1TVO.js`
+
+  it('turns the Log domain on and no Network domain in its setup when the setup has watchRequests off', async () => {
+    const { browser } = await openPage()
+
+    expect(sentOf(browser, 'Log.enable')).toEqual([{ method: 'Log.enable', params: {}, sessionId }])
+    expect(sentOf(browser, 'Network.enable')).toEqual([])
+  })
+
+  it('gives none before any goto', async () => {
+    const { browser, page } = await openPage()
+
+    logLoad(browser, chunkUrl)
+    await flush()
+    expect(page.failedLoads()).toEqual([])
+  })
+
+  it("keeps a network error of the goto document's origin", async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    logLoad(browser, chunkUrl)
+    await flush()
+    expect(page.failedLoads()).toEqual([{ url: chunkUrl, error: 'net::ERR_EMPTY_RESPONSE' }])
+  })
+
+  it("drops another origin, an HTTP status, a cancellation, another source or level, and another session's", async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    logLoad(browser, 'https://fonts.example.com/inter.woff2')
+    logLoad(
+      browser,
+      `${storyOrigin}/missing.js`,
+      'Failed to load resource: the server responded with a status of 404 (Not Found)',
+    )
+    logLoad(browser, `${storyOrigin}/aborted.js`, 'Failed to load resource: net::ERR_ABORTED')
+    browser.emit(
+      'Log.entryAdded',
+      {
+        entry: {
+          source: 'javascript',
+          level: 'error',
+          text: 'Failed to load resource: net::ERR_FAILED',
+          url: chunkUrl,
+        },
+      },
+      sessionId,
+    )
+    browser.emit(
+      'Log.entryAdded',
+      {
+        entry: { source: 'network', level: 'warning', text: 'Failed to load resource: net::ERR_FAILED', url: chunkUrl },
+      },
+      sessionId,
+    )
+    logLoad(browser, chunkUrl, undefined, 'session-9')
+    await flush()
+    expect(page.failedLoads()).toEqual([])
+  })
+
+  it('keeps each URL once, in order', async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    logLoad(browser, chunkUrl)
+    logLoad(browser, `${storyOrigin}/assets/preview.css`, 'Failed to load resource: net::ERR_CONNECTION_RESET')
+    logLoad(browser, chunkUrl, 'Failed to load resource: net::ERR_CONNECTION_REFUSED')
+    await flush()
+    expect(page.failedLoads()).toEqual([
+      { url: chunkUrl, error: 'net::ERR_EMPTY_RESPONSE' },
+      { url: `${storyOrigin}/assets/preview.css`, error: 'net::ERR_CONNECTION_RESET' },
+    ])
+  })
+
+  it('keeps only the first 10', async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    for (let index = 1; index <= 12; index += 1) {
+      logLoad(browser, `${storyOrigin}/assets/chunk-${index}.js`)
+    }
+
+    await flush()
+
+    const kept = page.failedLoads()
+
+    expect(kept).toHaveLength(10)
+    expect(kept[0]?.url).toBe(`${storyOrigin}/assets/chunk-1.js`)
+    expect(kept[9]?.url).toBe(`${storyOrigin}/assets/chunk-10.js`)
+  })
+
+  it('forgets them once a goto starts', async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    logLoad(browser, chunkUrl)
+    await flush()
+    await page.goto(burgersUrl, 1000)
+    expect(page.failedLoads()).toEqual([])
+  })
+
+  it("keeps a failure of the goto document's origin after 10 of other origins", async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    for (let index = 1; index <= 10; index += 1) {
+      logLoad(browser, `https://cdn-${index}.example.com/image.png`)
+    }
+
+    logLoad(browser, chunkUrl)
+    await flush()
+    expect(page.failedLoads()).toEqual([{ url: chunkUrl, error: 'net::ERR_EMPTY_RESPONSE' }])
+  })
+
+  it('keeps the failures from before the main frame commits a document of another origin', async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    logLoad(browser, chunkUrl)
+    browser.emit(
+      'Page.frameNavigated',
+      { frame: mainFrame(targetId, 'https://elsewhere.example.com/', 'loader-9') },
+      sessionId,
+    )
+    await flush()
+    expect(page.failedLoads()).toEqual([{ url: chunkUrl, error: 'net::ERR_EMPTY_RESPONSE' }])
+  })
+
+  it('keeps them once the page can no longer be used', async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    logLoad(browser, chunkUrl)
+    browser.emit('Inspector.targetCrashed', {}, sessionId)
+    await flush()
+    await expect(page.evaluate('1', 1000)).rejects.toMatchObject({ name: 'PageCrashedError' })
+    expect(page.failedLoads()).toEqual([{ url: chunkUrl, error: 'net::ERR_EMPTY_RESPONSE' }])
   })
 })

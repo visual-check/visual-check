@@ -4,6 +4,7 @@ import {
   CaptureTooLargeError,
   type ConsoleMessage,
   consoleMessageFunction,
+  type FailedLoad,
   keptConsoleMessages,
   maxCaptureSide,
   type Page,
@@ -14,6 +15,7 @@ import {
   readConsoleMessage,
 } from '../driver.js'
 import { type CdpConnection, type CdpEvent, isRecord } from './cdp-connection.js'
+import { failedLoadOf } from './failed-loads.js'
 import { LoadedDocument } from './loaded-document.js'
 import { MainFrameNavigation } from './main-frame-navigation.js'
 import { RequestWatch } from './request-watch.js'
@@ -34,6 +36,11 @@ const disposeTimeLimitMs = 5_000
  * How many touch points a touch viewport's page reports, as `navigator.maxTouchPoints`, like a phone.
  */
 const maxTouchPoints = 5
+
+/**
+ * How many failed loads a page keeps per `goto`: the first ones.
+ */
+const keptFailedLoads = 10
 
 /**
  * Reads a string field the browser's answer must carry. Throws, naming the method and the field, when it's missing.
@@ -178,15 +185,15 @@ function mainFrameCommitOf(event: CdpEvent, mainFrameId: string): Record<string,
 }
 
 /**
- * Reads a frame's security origin, such as `http://127.0.0.1:6006`, or undefined when it is opaque, which Chromium
- * reports as `://`, as for `about:blank`, a `data:` URL or an error page.
+ * Reads the origin of a frame's security origin or of a URL, such as `http://127.0.0.1:6006`, or undefined when it is
+ * opaque, which Chromium reports as `://`, as for `about:blank`, a `data:` URL or an error page.
  */
-function tupleOriginOf(securityOrigin: unknown): string | undefined {
-  if (typeof securityOrigin !== 'string' || !URL.canParse(securityOrigin)) {
+function tupleOriginOf(originOrUrl: unknown): string | undefined {
+  if (typeof originOrUrl !== 'string' || !URL.canParse(originOrUrl)) {
     return undefined
   }
 
-  const { origin } = new URL(securityOrigin)
+  const { origin } = new URL(originOrUrl)
 
   return origin === 'null' ? undefined : origin
 }
@@ -304,6 +311,11 @@ interface PageIds {
  * keeps only the calls from the main world of a document of the main frame created since the last `goto` started, so
  * a call the document before it makes as that `goto` runs doesn't count.
  *
+ * It keeps the loads that failed at the network level, which the Log domain reports in its session as it turns that
+ * domain on. The Log domain reports only problems, so it costs the page nothing, unlike the Network domain. It keeps
+ * them since the last `goto` started, and keeps only those of the origin of the document the main frame last
+ * committed, so a failure of another origin, such as a CDN's, never crowds out the story's own.
+ *
  * When its setup asks it to watch requests, it also turns the Network domain on in its session and attaches to the
  * service workers of its browser context, as `RequestWatch` describes, and listens to their sessions too. Otherwise it
  * sends no `Network` command and attaches to no service worker.
@@ -390,6 +402,12 @@ class CdpPage implements Page {
   private readonly messageContexts = new Set<number>()
 
   /**
+   * The first 10 loads that failed at the network level since the last `goto` started, each URL once, in order, each of
+   * the origin of the document the main frame had committed when it failed.
+   */
+  private recentFailedLoads: FailedLoad[] = []
+
+  /**
    * Watches the page's session for a crash, a detach, its main frame's navigations and its dialogs, the browser for its
    * popups, and the connection for its close. Watches the page's requests and service workers too when `watchRequests`
    * says so.
@@ -404,11 +422,11 @@ class CdpPage implements Page {
 
   /**
    * Sets the page up once: the user agent, the emulated time zone, locale, colour scheme, motion and focus, the message
-   * function and the init script, and denies downloads and every permission in the page's browser context. When the
-   * page watches requests, it also turns the Network domain on in its session and has the session report service
-   * workers. A failed discovery never fails the setup. The commands go in parallel, but the browser takes a session's
-   * commands in order, so the message function is in every document before the init script runs there, including after
-   * a navigation.
+   * function and the init script, turns the Log domain on for failed loads, and denies downloads and every permission
+   * in the page's browser context. When the page watches requests, it also turns the Network domain on in its session
+   * and has the session report service workers. A failed discovery never fails the setup. The commands go in parallel,
+   * but the browser takes a session's commands in order, so the message function is in every document before the init
+   * script runs there, including after a navigation.
    */
   async setUp(browserUserAgent: string, setup: PageSetup): Promise<void> {
     await this.unlessFailed(
@@ -431,6 +449,7 @@ class CdpPage implements Page {
         this.send('Runtime.enable'),
         this.send('Runtime.addBinding', { name: consoleMessageFunction }),
         this.send('Page.addScriptToEvaluateOnNewDocument', { source: setup.initScript }),
+        this.send('Log.enable'),
         this.connection.send('Browser.setDownloadBehavior', {
           behavior: 'deny',
           browserContextId: this.ids.browserContextId,
@@ -504,7 +523,7 @@ class CdpPage implements Page {
    * stops listening once it settles. Forgets the document the last `goto` loaded at once, and follows the new one from
    * the moment its load event is taken in, so a commit right behind that event already counts. Once it has settled, it
    * stops the navigation, so a load that a late answer to `Page.navigate` reveals after the `goto` failed doesn't count.
-   * Forgets the messages the page sent before it.
+   * Forgets the messages the page sent and the loads that failed before it.
    */
   async goto(url: string, timeoutMs: number): Promise<void> {
     this.throwIfFailed()
@@ -512,6 +531,7 @@ class CdpPage implements Page {
     this.gotoOrigin = undefined
     this.requestWatch?.reset()
     this.recentConsoleMessages = []
+    this.recentFailedLoads = []
     this.messageContexts.clear()
 
     const navigation = new MainFrameNavigation(url, this.ids.targetId, this.loaderIds, (later: readonly CdpEvent[]) =>
@@ -608,6 +628,14 @@ class CdpPage implements Page {
   }
 
   /**
+   * Gives a copy of the first 10 loads of the goto document's origin that failed at the network level since the last
+   * `goto` started, in order.
+   */
+  failedLoads(): FailedLoad[] {
+    return [...this.recentFailedLoads]
+  }
+
+  /**
    * Closes the page: fails every call in flight and every later one, stops listening, and disposes the page's browser
    * context. Resolves once the browser has answered, either way, or after 5 s. Calling it again returns the same
    * promise.
@@ -634,8 +662,8 @@ class CdpPage implements Page {
 
   /**
    * Fails the page when an event says it can no longer be used or that it navigated away from the document its last
-   * `goto` loaded, keeps a message the page script sent, handles its dialogs and popups, and, when it watches requests,
-   * tells the watch about the event.
+   * `goto` loaded, keeps a message the page script sent and a load that failed, handles its dialogs and popups, and,
+   * when it watches requests, tells the watch about the event.
    */
   private watch(event: CdpEvent): void {
     const failure = pageFailureOf(event, this.ids.sessionId)
@@ -645,6 +673,7 @@ class CdpPage implements Page {
     }
 
     this.keepMessage(event)
+    this.keepFailedLoad(event)
 
     if (event.sessionId === this.ids.sessionId) {
       this.followMainFrame(event)
@@ -715,6 +744,27 @@ class CdpPage implements Page {
 
     this.recentConsoleMessages.push(message)
     this.recentConsoleMessages.splice(0, this.recentConsoleMessages.length - keptConsoleMessages)
+  }
+
+  /**
+   * Keeps the load a `Log.entryAdded` event of the page's session reports as failed at the network level, if it
+   * reports one of the origin of the document the main frame last committed, unless its URL is kept already or 10 are.
+   * None counts before that document commits, or when its origin is opaque.
+   */
+  private keepFailedLoad(event: CdpEvent): void {
+    const load = failedLoadOf(event, this.ids.sessionId)
+
+    if (
+      load === undefined ||
+      this.gotoOrigin === undefined ||
+      tupleOriginOf(load.url) !== this.gotoOrigin ||
+      this.recentFailedLoads.length >= keptFailedLoads ||
+      this.recentFailedLoads.some((kept: FailedLoad) => kept.url === load.url)
+    ) {
+      return
+    }
+
+    this.recentFailedLoads.push(load)
   }
 
   /**

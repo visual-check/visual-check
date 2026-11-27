@@ -561,6 +561,7 @@ export function fakeDriverOf({
         },
         requestHosts: () => (setup.watchRequests ? (story.requestHosts ?? []) : []),
         consoleMessages: () => [...(story.consoleMessages ?? [])],
+        failedLoads: () => [],
       }
     },
     close: async () => {
