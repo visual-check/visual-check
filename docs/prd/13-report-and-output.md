@@ -158,7 +158,8 @@ Both `log` and `live` end with the same block:
 
 - The CLI writes it whenever `GITHUB_STEP_SUMMARY` is set, under any reporter. It works from a plain `run:` step, the Action and the reusable workflow alike.
 - It holds the shard, the counts, the flaky snapshots and a table of failures: Storybook, story, mode, status and message. The table is cut to stay under GitHub's 1 MiB per step.
-- Layout: a heading with the version, command and shard, the counts, up to 100 flaky snapshots, then the table. A cut table keeps its first rows and ends with a note counting the rest. 1 KiB stays free for the Action's artifact link.
+- Layout: a heading with the version, command and shard, the counts, up to 100 flaky snapshots, then, in a `test` with a snapshot that differs, a missing baseline or an orphan, how to update the baselines locally, then the table. A cut table keeps its first rows and ends with a note counting the rest. 1 KiB stays free for the Action's artifact link.
+- The update note names the root script whose command is exactly `visual-check update`, else `visual-check update`, and says Docker must be up unless the platform is `host`.
 - A summary that can't be written adds a warning on stderr and never changes the exit code.
 - On a `test` or `update` run's exit 2, once the command line names one, it holds the error.
 - It has no images, because a summary only shows images from public URLs.

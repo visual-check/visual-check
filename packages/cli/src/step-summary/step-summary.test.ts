@@ -358,6 +358,112 @@ describe('stepSummaryOf', () => {
   })
 })
 
+describe('stepSummaryOf with a local update', () => {
+  /**
+   * The update of a project with a `visual:update` script, whose browser runs in Docker.
+   */
+  const scriptInDocker = { script: 'visual:update', docker: true }
+
+  /**
+   * A `test` report of one snapshot that differs.
+   */
+  const differing = testReportWith([
+    testEntryWith({ id: 'a', status: 'differs', reason: 'pixels', message: '84 differ, 80 allowed' }),
+  ])
+
+  it('says how to update the baselines with the script, before the failures', () => {
+    expect(stepSummaryOf(differing, roomy, scriptInDocker)).toBe(
+      [
+        '### visual-check 0.1.0 · test',
+        '',
+        '0 passed · 1 differs',
+        '',
+        'If the changes are intended, update the baselines on your machine: with Storybook running and Docker up, ' +
+          'run the `visual:update` script, then commit the baselines it writes and deletes.',
+        '',
+        '**Failures**',
+        '',
+        '| Storybook | Story | Mode | Status | Message |',
+        '| --- | --- | --- | --- | --- |',
+        '| web | a |  | differs | 84 differ, 80 allowed |',
+        '',
+      ].join('\n'),
+    )
+  })
+
+  it('names visual-check update when no script runs it', () => {
+    expect(stepSummaryOf(differing, roomy, { script: undefined, docker: true })).toContain(
+      '\n\nIf the changes are intended, update the baselines on your machine: with Storybook running and Docker up, ' +
+        'run `visual-check update`, then commit the baselines it writes and deletes.\n\n**Failures**\n',
+    )
+  })
+
+  it('leaves Docker out on the host platform', () => {
+    expect(stepSummaryOf(differing, roomy, { script: 'visual:update', docker: false })).toContain(
+      '\n\nIf the changes are intended, update the baselines on your machine: with Storybook running, ' +
+        'run the `visual:update` script, then commit the baselines it writes and deletes.\n\n**Failures**\n',
+    )
+  })
+
+  it('comes after the flaky snapshots', () => {
+    const report = testReportWith([
+      testEntryWith({ id: 'a', status: 'passed', reason: null, flaky: true }),
+      testEntryWith({ id: 'b', status: 'missing', reason: null, message: 'No baseline yet.' }),
+    ])
+
+    expect(stepSummaryOf(report, roomy, scriptInDocker)).toMatch(
+      /\n- web · a\n\nIf the changes are intended, [^\n]+\n\n\*\*Failures\*\*\n/,
+    )
+  })
+
+  it.each([
+    ['differs', testEntryWith({ id: 'a', status: 'differs', reason: 'pixels' })],
+    ['missing', testEntryWith({ id: 'a', status: 'missing', reason: null })],
+    ['orphan', testEntryWith({ id: 'a', story: null, status: 'orphan', reason: null })],
+  ])('is there for a snapshot that is %s, alone or with a broken story', (_, entry) => {
+    const report = testReportWith([entry, testEntryWith({ id: 'b', status: 'broken', reason: 'error' })])
+
+    expect(stepSummaryOf(testReportWith([entry]), roomy, scriptInDocker)).toContain('If the changes are intended')
+    expect(stepSummaryOf(report, roomy, scriptInDocker)).toContain('If the changes are intended')
+  })
+
+  it.each([
+    [
+      'a test whose only failures are broken stories',
+      testReportWith([testEntryWith({ id: 'a', status: 'broken', reason: 'error', message: 'Boom.' })]),
+    ],
+    [
+      'an update',
+      updateReportWith([updateEntryWith({ id: 'a', status: 'broken', reason: 'error', message: 'Boom.' })], {
+        broken: 1,
+      }),
+    ],
+    ['a run that exited 2', testReportWith([], { exitCode: 2, error: { message: 'Boom.', storybooks: [] } })],
+  ])('is left out of %s', (_, report) => {
+    expect(stepSummaryOf(report, roomy, scriptInDocker)).toBe(stepSummaryOf(report, roomy))
+    expect(stepSummaryOf(report, roomy, scriptInDocker)).not.toContain('If the changes are intended')
+  })
+
+  it('is left out with no local update given', () => {
+    expect(stepSummaryOf(differing, roomy)).not.toContain('If the changes are intended')
+  })
+
+  it('counts in the part before the table that must fit', () => {
+    const report = testReportWith([
+      testEntryWith({ id: 'a', status: 'differs', reason: 'pixels', message: 'x'.repeat(500) }),
+    ])
+    const whole = stepSummaryOf(report, roomy, scriptInDocker)
+    const head = whole.slice(0, whole.indexOf('\n| web |'))
+    const cutNote =
+      "\n\n_1 more failure isn't shown, to keep this summary under GitHub's 1 MiB. report.json lists them all._\n"
+    const fitting = Buffer.byteLength(`${head}${cutNote}`, 'utf8') + 1
+
+    expect(head).toContain('If the changes are intended')
+    expect(stepSummaryOf(report, fitting, scriptInDocker)).toBe(`${head}${cutNote}`)
+    expect(stepSummaryOf(report, fitting - 1, scriptInDocker)).toBe('')
+  })
+})
+
 describe('appendStepSummary', () => {
   it("creates the file when it doesn't exist", async () => {
     const path = join(temporaryFolder(), 'summary.md')

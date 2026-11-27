@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RunReporter } from '../reporter/run-event.js'
@@ -42,6 +42,9 @@ const differingSummary = [
   `### visual-check ${version} · test`,
   '',
   '1 passed · 1 differs',
+  '',
+  'If the changes are intended, update the baselines on your machine: with Storybook running and Docker up, ' +
+    'run `visual-check update`, then commit the baselines it writes and deletes.',
   '',
   '**Failures**',
   '',
@@ -89,6 +92,35 @@ describe('runCli writing the GitHub step summary', () => {
     await runCli(['test', '--all'], { GITHUB_STEP_SUMMARY: 'summary.md' }, project, options)
 
     expect(readFileSync(summary, 'utf8')).toBe(differingSummary)
+  })
+
+  it("names the root's script that runs visual-check update in a failing test's note", async () => {
+    const { project, options, summary } = await differingRun()
+
+    writeFileSync(
+      join(project, 'package.json'),
+      JSON.stringify({ scripts: { 'visual:check': 'visual-check test', 'visual:update': 'visual-check update' } }),
+    )
+    await runCli(['test', '--all'], { GITHUB_STEP_SUMMARY: summary }, project, options)
+
+    expect(readFileSync(summary, 'utf8')).toBe(
+      differingSummary.replace('run `visual-check update`', 'run the `visual:update` script'),
+    )
+  })
+
+  it("puts the note in a failing consistency-only test's summary", async () => {
+    const { project } = await createRun(['a'])
+    const summary = join(project, 'summary.md')
+
+    writeFileSync(
+      join(project, 'package.json'),
+      JSON.stringify({ scripts: { 'visual:update': 'visual-check update' } }),
+    )
+    await runCli(['test', '--consistency'], { GITHUB_STEP_SUMMARY: summary }, project, fakeBrowser().options)
+
+    expect(readFileSync(summary, 'utf8')).toContain(
+      'with Storybook running and Docker up, run the `visual:update` script, then commit',
+    )
   })
 
   it('writes the error of a test whose Storybook is down', async () => {

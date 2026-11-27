@@ -552,6 +552,8 @@ export function readTextFile(path: string): string {
 
 /**
  * Reads and parses a JSON file, without a leading byte order mark. Gives `undefined` when it can't be read or parsed.
+ *
+ * @public
  */
 export function readJsonFile(path: string): unknown {
   try {

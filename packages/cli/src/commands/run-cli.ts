@@ -26,11 +26,12 @@ import { testEndLinesOf } from '../reporter/end-block.js'
 import { logReporterOf } from '../reporter/log-reporter.js'
 import { reporterOf } from '../reporter/reporter-choice.js'
 import type { RunReporter } from '../reporter/run-event.js'
-import { appendStepSummary, StepSummaryError } from '../step-summary/step-summary.js'
+import { appendStepSummary, type LocalUpdate, StepSummaryError } from '../step-summary/step-summary.js'
 import type { Story } from '../storybook/read-stories.js'
 import { readStoriesMatchers } from '../storybook/stories-matchers.js'
 import { checkStorybooks } from './check-storybooks.js'
 import { createLaunchBrowser, type LaunchBrowser } from './launch-browser.js'
+import { localUpdateOf } from './local-update.js'
 import { parseCommandLine, type RunOptions, UsageError } from './parse-command-line.js'
 import { type BrowserPlacement, type PlaceBrowserOptions, placeBrowser, workerCountOf } from './place-browser.js'
 import { type RunOutput, reportLineOf, runOutputOf } from './run-output.js'
@@ -102,6 +103,11 @@ interface RunResult extends CliResult {
    * no run.
    */
   report?: Report
+  /**
+   * How the person updates the baselines on their machine, which a failing `test`'s step summary says. Absent for
+   * `update` and for a run that stopped.
+   */
+  localUpdate?: LocalUpdate
 }
 
 /**
@@ -359,7 +365,7 @@ async function withStepSummary(
   environment: Record<string, string | undefined>,
   cwd: string,
 ): Promise<CliResult> {
-  const { report, ...cliResult } = result
+  const { report, localUpdate, ...cliResult } = result
   const path = environment.GITHUB_STEP_SUMMARY
 
   if (report === undefined || path === undefined || path === '') {
@@ -367,7 +373,7 @@ async function withStepSummary(
   }
 
   try {
-    await appendStepSummary(resolve(cwd, path), report)
+    await appendStepSummary(resolve(cwd, path), report, localUpdate)
   } catch (error) {
     if (error instanceof StepSummaryError) {
       // The path as the environment gives it, which the person set, rather than the resolved one.
@@ -754,7 +760,7 @@ async function selectedOutcomeOf(
   }
 
   return await withTestReport(
-    { exitCode: result.exitCode, ...output },
+    { exitCode: result.exitCode, ...output, localUpdate: localUpdateOf(config.path, config.platform) },
     context,
     { ...facts, consistencyOnly: options.consistency, shard: options.shard },
     result.checkedOnly,
