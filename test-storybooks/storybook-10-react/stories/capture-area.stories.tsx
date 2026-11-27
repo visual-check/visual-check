@@ -409,6 +409,140 @@ export const FullPageGrowsReacts: Story = {
 }
 
 /**
+ * How long the pages whose `wait` hook changes their height take to swap their loading content for the loaded content,
+ * in ms: long after the viewport first grows, which follows Storybook's report that the story finished.
+ */
+const loadDelay = 1500
+
+/**
+ * How long their `wait` hooks look for the loaded content before they give up, in ms: well past `loadDelay`, and within
+ * visual-check's default `readyTimeout` of 10 s.
+ */
+const loadTimeout = 5000
+
+/**
+ * Whether the page's content has loaded: false at first, true `loadDelay` ms after it renders.
+ */
+function useLoaded(): boolean {
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    const timer = setTimeout(() => setLoaded(true), loadDelay)
+
+    return () => clearTimeout(timer)
+  }, [])
+
+  return loaded
+}
+
+/**
+ * How tall the loading block of the page that gets shorter is, in px.
+ */
+const loadingBlockHeight = 2400
+
+/**
+ * The labels of the sections that replace the loading block, 400 px each, so 1200 px in all.
+ */
+const shortSections = ['Loaded section 1 of 3', 'Loaded section 2 of 3', 'Loaded section 3 of 3']
+
+/**
+ * A page that shows a loading block 2400 px tall, then, `loadDelay` ms after it renders, three 400 px sections in its
+ * place, 1200 px in all.
+ */
+function ShrinksWhileLoadingScene() {
+  const loaded = useLoaded()
+
+  if (!loaded) {
+    return (
+      <div
+        style={{
+          boxSizing: 'border-box',
+          height: loadingBlockHeight,
+          padding: 24,
+          background: '#e4e4e7',
+          fontFamily: 'sans-serif',
+          fontSize: 16,
+        }}
+      >
+        Loading
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ fontFamily: 'sans-serif', fontSize: 16 }}>
+      {shortSections.map((label, index) => (
+        <section
+          key={label}
+          style={{
+            boxSizing: 'border-box',
+            height: growSectionHeight,
+            padding: 24,
+            background: index % 2 === 0 ? '#fef3c7' : '#dcfce7',
+          }}
+        >
+          {label}
+        </section>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * A page that shows a short note saying it's loading, which fits the 720 px viewport, then, `loadDelay` ms after it
+ * renders, `StickyBarScene`, 2064 px tall.
+ */
+function GrowsWhileLoadingScene() {
+  const loaded = useLoaded()
+
+  if (!loaded) {
+    return (
+      <div style={{ padding: 24 }}>
+        <Note>Loading</Note>
+      </div>
+    )
+  }
+
+  return <StickyBarScene />
+}
+
+/**
+ * Sets `element: null` and leaves the viewport's growth on, on a page whose loading block, 2400 px tall, becomes three
+ * 400 px sections while its `wait` hook waits for the third. The page is measured again after the hook, so the
+ * snapshot, 1280 × 1200, ends with the third section. Measured only before the hook, it was 1280 × 2400, with a blank
+ * band below the sections.
+ */
+export const FullPageShrinksWhileWaiting: Story = {
+  parameters: {
+    ...visualCheck({
+      element: null,
+      wait: async ({ canvas }) => {
+        await canvas.findByText('Loaded section 3 of 3', undefined, { timeout: loadTimeout })
+      },
+    }),
+  },
+  render: () => <ShrinksWhileLoadingScene />,
+}
+
+/**
+ * Sets `element: null` and leaves the viewport's growth on, on a page whose short loading note, which fits the 720 px
+ * viewport, becomes `FullPageGrows`'s 2064 px page while its `wait` hook waits for the save bar. The page is measured
+ * again after the hook, so the snapshot, 1280 × 2064, shows the save bar at the page's bottom. Measured only before the
+ * hook, the page was captured beyond the 720 px viewport, with the save bar and the badge mid-page.
+ */
+export const FullPageGrowsWhileWaiting: Story = {
+  parameters: {
+    ...visualCheck({
+      element: null,
+      wait: async ({ canvas }) => {
+        await canvas.findByText('Sticky save bar', undefined, { timeout: loadTimeout })
+      },
+    }),
+  },
+  render: () => <GrowsWhileLoadingScene />,
+}
+
+/**
  * Inherits the meta's `element`, so the snapshot is the card's box alone, 320 × 160, though the card is 1500 px down
  * the page.
  */

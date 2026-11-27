@@ -23,6 +23,8 @@
   "capture-area--full-page": "passed",
   "capture-area--full-page-grows": "passed",
   "capture-area--full-page-grows-reacts": "passed",
+  "capture-area--full-page-grows-while-waiting": "passed",
+  "capture-area--full-page-shrinks-while-waiting": "passed",
   "capture-area--too-tall": "broken",
   "card--default": "passed",
   "disabled--brought-back": "passed",
