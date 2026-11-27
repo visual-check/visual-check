@@ -91,7 +91,11 @@ Turbo builds the package first. It prints one line per package manager, then eac
 
 ## Trying a local build in another project
 
-`try-local.ts` sets up one of your own projects with this checkout's packages, for a manual test before they're on npm. It builds and packs the packages of the checkout it runs from, a worktree included, with its uncommitted changes. Each package but `@visual-check/chromium` gets a version of the try's own, such as `0.0.0-local.20261123153045` (the UTC time), in its packed `package.json`, and so does each dependency between them, so a project that installed an earlier try's build can't keep it: at one version, a package manager may reuse what it installed. The checkout's `package.json` files don't change. The browser package keeps its version, since the CLI only takes a plain release in its peer range. The Setup check needs none of this: its project and package store are new on every run. The try serves the packages the way the check does, and runs `init` through `pnpm dlx` in the project. The registry is named for the `@visual-check` scope through the environment, so the project's `.npmrc` doesn't change. Then it adds the browser image to the config.
+`try-local.ts` sets up one of your own projects with this checkout's packages, for a manual test before they're on npm. It builds and packs the packages of the checkout it runs from, a worktree included, with its uncommitted changes. Each package but `@visual-check/chromium` gets a version of the try's own, such as `0.0.0-local.20261123153045` (the UTC time), in its packed `package.json`, and so does each dependency between them, so a project that installed an earlier try's build can't keep it: at one version, a package manager may reuse what it installed. The checkout's `package.json` files don't change. The browser package keeps its version, since the CLI only takes a plain release in its peer range. The Setup check needs none of this: its project and package store are new on every run. The try serves the packages the way the check does. The registry is named for the `@visual-check` scope through the environment, so the project's `.npmrc` doesn't change.
+
+A project that lists visual-check's packages already, such as one on an npm release, would keep that release: `init` leaves installed versions alone. So first, each `package.json` git tracks where the project's nearest lockfile is, or below it, the root's and every workspace package's, gets each `@visual-check/*` dependency it lists, in any dependency list, at the try's exact version, `@visual-check/chromium` at the packed one. Then the package manager of that lockfile installs them. pnpm installs with `auto-install-peers` off: it would drop the prerelease from the addon's peer range on the CLI and look for a plain version the registry doesn't have, and the lockfile keeps the peers it installed before. A project that lists none is left to `init`, as before.
+
+Then the try runs `init` through `pnpm dlx` in the project, which refreshes the agent skill in a project that has one, and adds the browser image to the config.
 
 ```sh
 pnpm try-local ~/code/my-app                # init asks its questions
@@ -102,7 +106,9 @@ pnpm try-local ~/code/my-app --image visual-check-chromium:arm64
 - `init` runs in your terminal, so it shows its terminal UI there: the questions, the setup steps and the summary.
 - The project must be in a git repo with nothing uncommitted. A relative path is taken from where you run `pnpm`.
 - `--image` defaults to `visual-check-chromium:ci`. When Docker has no such image, the script prints the command that builds it.
-- `init`'s installs reach the registry through `npm_config_@visual-check:registry`, which pnpm, npm and Yarn 1 read. Yarn 4 and Bun don't, so they can't install the packages.
+- `init`'s installs, and the try's own in a project that lists the packages, reach the registry through `npm_config_@visual-check:registry`, which pnpm, npm and Yarn 1 read. Yarn 4 and Bun don't, so they can't install the packages.
+- A project with no lockfile has installed nothing, so it's left to `init` too.
+- Until `--restore`, the project's `package.json` files name versions only the try's registry has, so installing again without it fails. Running the CLI, such as `pnpm exec visual-check --version`, which prints the try's version, needs no install.
 
 When you're done, bring the project back:
 

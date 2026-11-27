@@ -1,8 +1,9 @@
 // Tries this checkout's packages in another project, the way a user would, before they're on npm. It builds and packs
 // the packages of the checkout it's in (a worktree included, with its uncommitted changes), each but the browser's at a
 // version of this try's own, such as `0.1.0-local.20261123153045`, so no package manager takes them for an earlier
-// try's build. It serves them from a registry on 127.0.0.1 and runs `init` through `pnpm dlx` in the project, with the
-// registry named for the `@visual-check` scope through the environment, so no `.npmrc` changes. Then it adds the
+// try's build. It serves them from a registry on 127.0.0.1, named for the `@visual-check` scope through the environment,
+// so no `.npmrc` changes. A project that lists `@visual-check/*` packages already gets each pointed at the try's version
+// in every `package.json` and installs them. Then the try runs `init` through `pnpm dlx` in the project, and adds the
 // browser image to the config, until the browser package names a published one.
 //
 // The project must be in a git repo with nothing uncommitted. `--restore` brings it back: it resets the repo to the
@@ -29,6 +30,7 @@ import {
   localVersionOf,
   manifestWithVersions,
   type PackedManifest,
+  packageJsonWithVersions,
   packedPackages,
   startRegistry,
   type Tarball,
@@ -82,6 +84,48 @@ const usage = [
   'Usage: pnpm try-local <project> [--yes] [--image <image>]',
   '       pnpm try-local --restore <project>',
 ].join('\n')
+
+/**
+ * Where the project installs: the folder of the lockfile nearest to it, and the package manager of that lockfile.
+ */
+interface Installer {
+  /**
+   * The folder of the lockfile.
+   */
+  folder: string
+  /**
+   * The package manager that installs from it, such as `pnpm`.
+   */
+  packageManager: string
+}
+
+/**
+ * A `package.json` of the project's that lists packages the try packed.
+ */
+interface PinnedPackageJson {
+  /**
+   * Its path.
+   */
+  path: string
+  /**
+   * Its text with each of those packages at the try's version.
+   */
+  text: string
+}
+
+/**
+ * How the try installs its packages in a project that lists them already.
+ */
+interface Pins {
+  /**
+   * Where the project installs.
+   */
+  installer: Installer
+  /**
+   * Each `package.json` that lists them.
+   */
+  packageJsons: PinnedPackageJson[]
+}
 
 /**
  * A problem that stops the script, which it prints before exiting 1.
@@ -199,11 +243,10 @@ function withLocalVersions(tarballs: readonly Tarball[], folder: string): Tarbal
 }
 
 /**
- * Runs `init` through `pnpm dlx` in the project, at the packed CLI's version, with the registry named for the
- * `@visual-check` scope and a package cache of its own in `folder`. Gives its exit code. A Ctrl-C reaches `init` too,
- * so the script waits for it to end.
+ * Gives the environment the project's commands run in: the registry named for the `@visual-check` scope, pnpm's package
+ * cache of its own in `folder`, and no `CI`.
  */
-function runInit(project: string, cliVersion: string, registryUrl: string, folder: string, yes: boolean) {
+function registryEnvironmentOf(registryUrl: string, folder: string): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = {
     ...process.env,
     'npm_config_@visual-check:registry': `${registryUrl}/`,
@@ -212,11 +255,58 @@ function runInit(project: string, cliVersion: string, registryUrl: string, folde
 
   delete environment.CI
 
-  const args = ['dlx', `@visual-check/cli@${cliVersion}`, 'init', ...(yes ? ['--yes'] : [])]
-  const child = spawn('pnpm', args, { cwd: project, stdio: 'inherit', env: environment })
-  const waitForInit = () => undefined
+  return environment
+}
 
-  process.on('SIGINT', waitForInit)
+/**
+ * Gives the path of each `package.json` git tracks in `folder` and below it.
+ */
+function trackedPackageJsonsOf(folder: string): string[] {
+  const args = ['-C', folder, 'ls-files', '-z', '--', 'package.json', ':(glob)**/package.json']
+  const output = spawnSync('git', args, { encoding: 'utf8' }).stdout ?? ''
+
+  return [...new Set(output.split('\0').filter((path) => path !== ''))].map((path) => join(folder, path))
+}
+
+/**
+ * Gives each `package.json` git tracks in `folder` and below it that lists a package in `versions`, with each at that
+ * version.
+ */
+function pinnedPackageJsonsOf(folder: string, versions: ReadonlyMap<string, string>): PinnedPackageJson[] {
+  return trackedPackageJsonsOf(folder).flatMap((path) => {
+    const text = packageJsonWithVersions(readFileSync(path, 'utf8'), versions)
+
+    return text === undefined ? [] : [{ path, text }]
+  })
+}
+
+/**
+ * Gives how the try installs the packed packages when the project lists any of them already: each `package.json`
+ * where its lockfile is, or below it, that lists one, with each at the packed version. Gives `undefined` for a project
+ * that lists none, or has no lockfile, so it has installed nothing: `init` sets it up.
+ */
+function pinsOf(project: string, top: string, tarballs: readonly Tarball[]): Pins | undefined {
+  const installer = nearestLockfileOf(project, top)
+
+  if (installer === undefined) {
+    return undefined
+  }
+
+  const versions = new Map(tarballs.map(({ manifest }) => [manifest.name, manifest.version]))
+  const packageJsons = pinnedPackageJsonsOf(installer.folder, versions)
+
+  return packageJsons.length === 0 ? undefined : { installer, packageJsons }
+}
+
+/**
+ * Runs a command of the project's, in the registry's environment, without blocking the script, which serves the
+ * registry. Gives its exit code. A Ctrl-C reaches the command too, so the script waits for it to end.
+ */
+function runServed(command: string, args: readonly string[], cwd: string, environment: NodeJS.ProcessEnv) {
+  const child = spawn(command, args, { cwd, stdio: 'inherit', env: environment })
+  const waitForCommand = () => undefined
+
+  process.on('SIGINT', waitForCommand)
 
   return new Promise<number>((resolveExit) => {
     child.on('error', (error) => {
@@ -224,10 +314,40 @@ function runInit(project: string, cliVersion: string, registryUrl: string, folde
       resolveExit(127)
     })
     child.on('close', (code) => {
-      process.off('SIGINT', waitForInit)
+      process.off('SIGINT', waitForCommand)
       resolveExit(code ?? 130)
     })
   })
+}
+
+/**
+ * Points each `package.json` at the try's versions and installs them from the registry. Gives the install's exit code.
+ */
+function installPins({ installer, packageJsons }: Pins, environment: NodeJS.ProcessEnv): Promise<number> {
+  const { folder, packageManager } = installer
+
+  console.log(`The project lists visual-check's packages. Installing the try's versions with ${packageManager}:`)
+
+  for (const { path, text } of packageJsons) {
+    writeFileSync(path, text)
+    console.log(`  ${relative(folder, path)}`)
+  }
+
+  // pnpm drops the prerelease from a peer range it installs itself, so it would look for the addon's CLI peer at a
+  // plain version the registry doesn't have. The lockfile keeps the peers it installed before.
+  const args = packageManager === 'pnpm' ? ['install', '--config.auto-install-peers=false'] : ['install']
+
+  return runServed(packageManager, args, folder, environment)
+}
+
+/**
+ * Runs `init` through `pnpm dlx` in the project, at the packed CLI's version, in the registry's environment. Gives its
+ * exit code.
+ */
+function runInit(project: string, cliVersion: string, environment: NodeJS.ProcessEnv, yes: boolean) {
+  const args = ['dlx', `@visual-check/cli@${cliVersion}`, 'init', ...(yes ? ['--yes'] : [])]
+
+  return runServed('pnpm', args, project, environment)
 }
 
 /**
@@ -298,8 +418,24 @@ function checkCanTry(project: string, top: string, recordPath: string): void {
 }
 
 /**
+ * Installs the try's versions when the project lists them already, then runs `init`. Gives the exit code of the first
+ * that fails, or 0.
+ */
+async function installAndInit(
+  project: string,
+  pins: Pins | undefined,
+  cliVersion: string,
+  environment: NodeJS.ProcessEnv,
+  yes: boolean,
+): Promise<number> {
+  const installCode = pins === undefined ? 0 : await installPins(pins, environment)
+
+  return installCode !== 0 ? installCode : await runInit(project, cliVersion, environment, yes)
+}
+
+/**
  * Packs the packages into `folder`, each but the browser's at a version of this try's own, serves them, records the
- * project's commit and runs `init`. Gives its exit code.
+ * project's commit, installs them when the project lists them already, and runs `init`. Gives its exit code.
  */
 async function initFromTarballs(
   project: string,
@@ -310,12 +446,18 @@ async function initFromTarballs(
 ): Promise<number> {
   const tarballs = withLocalVersions(packPackages(join(folder, 'packed')), join(folder, 'tarballs'))
   const cli = tarballs.find(({ manifest }) => manifest.name === '@visual-check/cli') ?? fail('No CLI was packed.')
+  const pins = pinsOf(project, top, tarballs)
   const record: TryRecord = { head: gitOutput(top, ['rev-parse', 'HEAD']) ?? fail(`${top} has no commit.`) }
   const registry = await startRegistry(tarballs)
+  const environment = registryEnvironmentOf(registry.url, folder)
 
   writeFileSync(recordPath, `${JSON.stringify(record)}\n`)
 
-  return runInit(project, cli.manifest.version, registry.url, folder, yes).finally(registry.stop)
+  try {
+    return await installAndInit(project, pins, cli.manifest.version, environment, yes)
+  } finally {
+    await registry.stop()
+  }
 }
 
 /**
@@ -362,7 +504,7 @@ function foldersUpTo(project: string, top: string): string[] {
  * Gives the folder nearest to the project, up to the repo's root, that holds a lockfile, and the package manager of
  * that lockfile. Gives `undefined` when there's none.
  */
-function nearestLockfileOf(project: string, top: string): { folder: string; packageManager: string } | undefined {
+function nearestLockfileOf(project: string, top: string): Installer | undefined {
   for (const folder of foldersUpTo(project, top)) {
     const lockfile = lockfiles.find(([name]) => existsSync(join(folder, name)))
 

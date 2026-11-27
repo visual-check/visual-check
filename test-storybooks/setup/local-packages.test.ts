@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { localVersionOf, manifestWithVersions } from './local-packages.ts'
+import { localVersionOf, manifestWithVersions, packageJsonWithVersions } from './local-packages.ts'
 
 describe('localVersionOf', () => {
   const date = new Date('2026-11-23T09:05:07.123Z')
@@ -25,6 +25,7 @@ describe('manifestWithVersions', () => {
       version: '0.1.0',
       main: './dist/index.js',
       dependencies: { '@visual-check/cli': '0.1.0', react: '^19.0.0' },
+      devDependencies: { '@visual-check/cli': 'workspace:*', vitest: '^5.0.0' },
       peerDependencies: { '@visual-check/cli': '0.1.0', storybook: '^10.0.0' },
       optionalDependencies: { '@visual-check/cli': '^0.1.0' },
     }
@@ -34,6 +35,7 @@ describe('manifestWithVersions', () => {
       version: '0.1.0-local.1',
       main: './dist/index.js',
       dependencies: { '@visual-check/cli': '0.1.0-local.1', react: '^19.0.0' },
+      devDependencies: { '@visual-check/cli': '0.1.0-local.1', vitest: '^5.0.0' },
       peerDependencies: { '@visual-check/cli': '0.1.0-local.1', storybook: '^10.0.0' },
       optionalDependencies: { '@visual-check/cli': '0.1.0-local.1' },
     })
@@ -54,5 +56,57 @@ describe('manifestWithVersions', () => {
       name: '@visual-check/cli',
       version: '0.1.0-local.1',
     })
+  })
+})
+
+describe('packageJsonWithVersions', () => {
+  const versions = new Map([
+    ['@visual-check/cli', '0.1.1-local.1'],
+    ['@visual-check/chromium', '157.0.0'],
+  ])
+
+  it('sets each dependency it names, in every list, to that exact version, and leaves every other field', () => {
+    const text = JSON.stringify(
+      {
+        name: 'my-app',
+        private: true,
+        scripts: { 'visual:check': 'visual-check test' },
+        dependencies: { react: '^19.0.0' },
+        devDependencies: { '@visual-check/chromium': '^157.0.0', '@visual-check/cli': '^0.1.1', vite: '^7.0.0' },
+        peerDependencies: { '@visual-check/cli': '>=0.1.0' },
+        optionalDependencies: { '@visual-check/cli': 'catalog:' },
+      },
+      null,
+      2,
+    )
+
+    expect(JSON.parse(packageJsonWithVersions(text, versions) ?? '')).toEqual({
+      name: 'my-app',
+      private: true,
+      scripts: { 'visual:check': 'visual-check test' },
+      dependencies: { react: '^19.0.0' },
+      devDependencies: { '@visual-check/chromium': '157.0.0', '@visual-check/cli': '0.1.1-local.1', vite: '^7.0.0' },
+      peerDependencies: { '@visual-check/cli': '0.1.1-local.1' },
+      optionalDependencies: { '@visual-check/cli': '0.1.1-local.1' },
+    })
+  })
+
+  it('keeps the indent and the final newline', () => {
+    const tabbed = '{\n\t"devDependencies": {\n\t\t"@visual-check/cli": "0.1.1"\n\t}\n}\n'
+    const spaced = '{\n    "devDependencies": {\n        "@visual-check/cli": "0.1.1"\n    }\n}'
+
+    expect(packageJsonWithVersions(tabbed, versions)).toBe(
+      '{\n\t"devDependencies": {\n\t\t"@visual-check/cli": "0.1.1-local.1"\n\t}\n}\n',
+    )
+    expect(packageJsonWithVersions(spaced, versions)).toBe(
+      '{\n    "devDependencies": {\n        "@visual-check/cli": "0.1.1-local.1"\n    }\n}',
+    )
+  })
+
+  it("gives undefined for one that lists none of them, even by another package's name", () => {
+    const text = '{\n  "name": "@visual-check/cli",\n  "dependencies": { "@visual-check/storybook": "0.1.1" }\n}\n'
+
+    expect(packageJsonWithVersions(text, versions)).toBeUndefined()
+    expect(packageJsonWithVersions('{ "name": "my-app" }', versions)).toBeUndefined()
   })
 })
