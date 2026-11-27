@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/visual-check/visual-check/compare/storybook-addon-v0.1.1...storybook-addon-v0.1.2) (2026-11-27)
+
+
+### Miscellaneous Chores
+
+* **storybook-addon:** Synchronize visual-check versions
+
 ## [0.1.1](https://github.com/visual-check/visual-check/compare/storybook-addon-v0.1.0...storybook-addon-v0.1.1) (2026-11-26)
 
 
