@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/visual-check/visual-check/compare/cli-v0.1.1...cli-v0.1.2) (2026-11-27)
+
+
+### Bug Fixes
+
+* **cli:** once the viewport grows, the page reacts to it before the capture ([#170](https://github.com/visual-check/visual-check/issues/170)) ([9c831bb](https://github.com/visual-check/visual-check/commit/9c831bb4884fd6c8e0067ae115b060f524026085)), closes [#169](https://github.com/visual-check/visual-check/issues/169)
+
 ## [0.1.1](https://github.com/visual-check/visual-check/compare/cli-v0.1.0...cli-v0.1.1) (2026-11-26)
 
 
