@@ -276,12 +276,82 @@ export function packageJsonWithVersions(text: string, versions: ReadonlyMap<stri
 }
 
 /**
- * Gives the config `init` wrote with `image` added after `storybooks`, as the test Storybooks' configs have it until the
- * browser package names a published image. Gives `undefined` when the config doesn't end as `init` writes it.
+ * Gives whether the config names an image: a line of it starts with `image:`.
+ */
+export function configNamesImage(config: string): boolean {
+  return /^\s*image:/m.test(config)
+}
+
+/**
+ * Gives the config `init` wrote with `image` added after `storybooks`. Gives `undefined` when the config doesn't end as
+ * `init` writes it.
  */
 export function configWithImage(config: string, image: string): string | undefined {
   const quotedImage = `'${image.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`
   const withImage = config.replace(configEnd, `\n  },\n  image: ${quotedImage},\n})\n`)
 
   return withImage === config ? undefined : withImage
+}
+
+/**
+ * The image the browser package names, from its `chromium.json`.
+ */
+export interface BrowserImage {
+  /**
+   * Its tag, such as `ghcr.io/visual-check/chromium:157.0.0`.
+   */
+  tag: string
+  /**
+   * Its digest: `sha256:` and 64 zeros until the image is published.
+   */
+  digest: string
+}
+
+/**
+ * Where the CLI gets the browser image in the try: from the browser package, when the config names none, or from the
+ * config's `image`. `pullable` says whether the image names a registry host (its first path segment holds a `.` or a
+ * `:`, or is `localhost`), so the CLI pulls it rather than Docker needing a local build. A Docker Hub short name, such
+ * as `acme/chromium:1`, counts as local.
+ */
+export type ImagePlan = { kind: 'package'; reference: string } | { kind: 'config'; image: string; pullable: boolean }
+
+/**
+ * The digest a browser package names until merging publishes its image. Keep it as `unpublishedDigest` in
+ * `packages/repo-checks/src/chromium-bump/chromium-bump.ts` has it.
+ */
+const unpublishedDigest = `sha256:${'0'.repeat(64)}`
+
+/**
+ * The image the config names when none is asked for and the browser package's isn't published: the one CI builds.
+ */
+const defaultImage = 'visual-check-chromium:ci'
+
+/**
+ * Gives whether the image's first path segment names a registry: it holds a `.` or a `:`, or is `localhost`.
+ */
+function isPullable(image: string): boolean {
+  const slash = image.indexOf('/')
+  const first = slash === -1 ? undefined : image.slice(0, slash)
+
+  return first !== undefined && (first.includes('.') || first.includes(':') || first === 'localhost')
+}
+
+/**
+ * Gives where the CLI gets the browser image, for the image asked for, if any, and the browser package's image. With
+ * none asked for, or the browser package's tag (with or without its digest), a published browser package's image is
+ * left to the package. Otherwise the config names the image asked for, or the one CI builds. The browser package's
+ * unpublished tag isn't pullable: no registry serves it yet.
+ */
+export function imagePlanOf(requested: string | undefined, browserImage: BrowserImage): ImagePlan {
+  const { tag, digest } = browserImage
+  const reference = `${tag}@${digest}`
+  const isPackage = requested === undefined || requested === tag || requested === reference
+
+  if (isPackage && digest !== unpublishedDigest) {
+    return { kind: 'package', reference }
+  }
+
+  const image = requested ?? defaultImage
+
+  return { kind: 'config', image, pullable: !isPackage && isPullable(image) }
 }

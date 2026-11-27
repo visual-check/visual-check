@@ -3,8 +3,9 @@
 // version of this try's own, such as `0.1.0-local.20261123153045`, so no package manager takes them for an earlier
 // try's build. It serves them from a registry on 127.0.0.1, named for the `@visual-check` scope through the environment,
 // so no `.npmrc` changes. A project that lists `@visual-check/*` packages already gets each pointed at the try's version
-// in every `package.json` and installs them. Then the try runs `init` through `pnpm dlx` in the project, and adds the
-// browser image to the config, until the browser package names a published one.
+// in every `package.json` and installs them. Then the try runs `init` through `pnpm dlx` in the project. With no
+// `--image`, the config names no image when the browser package names a published one, so the CLI pulls that, and on a
+// branch whose browser package isn't published yet, the try adds the image CI builds. `--image` names another.
 //
 // The project must be in a git repo with nothing uncommitted. `--restore` brings it back: it resets the repo to the
 // commit it was on, removes every file the try added, `.visual-check/` folders included, and installs again.
@@ -26,7 +27,11 @@ import { tmpdir } from 'node:os'
 import { basename, join, relative, resolve, sep } from 'node:path'
 import { parseArgs } from 'node:util'
 import {
+  type BrowserImage,
+  configNamesImage,
   configWithImage,
+  type ImagePlan,
+  imagePlanOf,
   localVersionOf,
   manifestWithVersions,
   type PackedManifest,
@@ -60,11 +65,6 @@ const browserPackage = '@visual-check/chromium'
  * The file in the project's git folder that holds the record.
  */
 const recordName = 'visual-check-try-local.json'
-
-/**
- * The browser image the config names when `--image` names none: the one CI builds.
- */
-const defaultImage = 'visual-check-chromium:ci'
 
 /**
  * Each lockfile, and the package manager that installs from it.
@@ -361,14 +361,20 @@ function configWithImageAt(path: string, image: string): string | undefined {
 
   const config = readFileSync(path, 'utf8')
 
-  return /^\s*image:/m.test(config) ? undefined : configWithImage(config, image)
+  return configNamesImage(config) ? undefined : configWithImage(config, image)
 }
 
 /**
- * Says how to build the image when Docker doesn't have it.
+ * Says what happens when Docker doesn't have the image: the CLI pulls a pullable one, and another needs a build.
  */
-function hintImageBuild(image: string): void {
+function hintImageBuild(image: string, pullable: boolean): void {
   if (spawnSync('docker', ['image', 'inspect', image], { stdio: 'ignore' }).status === 0) {
+    return
+  }
+
+  if (pullable) {
+    console.log(`Docker has no ${image} image yet. The CLI pulls it on its first run.`)
+
     return
   }
 
@@ -381,10 +387,42 @@ function hintImageBuild(image: string): void {
 }
 
 /**
- * Adds the browser image to the config `init` wrote, and says how to build the image when Docker doesn't have it.
+ * Gives the image this checkout's browser package names.
  */
-function addImage(project: string, image: string): void {
+function browserImageOf(): BrowserImage {
+  const path = join(repoRoot, 'packages', 'chromium', 'chromium.json')
+
+  return (JSON.parse(readFileSync(path, 'utf8')) as { image: BrowserImage }).image
+}
+
+/**
+ * Says which image the CLI runs when the try leaves it to the browser package: one the config at `path` names already,
+ * as in a project that used visual-check before, or else the browser package's.
+ */
+function sayPackageImage(path: string, reference: string): void {
+  const namesImage = existsSync(path) && configNamesImage(readFileSync(path, 'utf8'))
+
+  console.log(
+    namesImage
+      ? `\nThe config names an image already, so the CLI runs that rather than the browser package's image, ${reference}.`
+      : `\nThe config names no image, so the CLI pulls the browser package's image, ${reference}.`,
+  )
+}
+
+/**
+ * Leaves the image to the browser package, or adds the plan's image to the config `init` wrote and says how Docker gets
+ * it when Docker doesn't have it.
+ */
+function useImage(project: string, plan: ImagePlan): void {
   const path = join(project, 'visual-check.config.ts')
+
+  if (plan.kind === 'package') {
+    sayPackageImage(path, plan.reference)
+
+    return
+  }
+
+  const { image, pullable } = plan
   const withImage = configWithImageAt(path, image)
 
   if (withImage === undefined) {
@@ -394,7 +432,7 @@ function addImage(project: string, image: string): void {
     console.log(`\nThe config names the image ${image}.`)
   }
 
-  hintImageBuild(image)
+  hintImageBuild(image, pullable)
 }
 
 /**
@@ -464,7 +502,7 @@ async function initFromTarballs(
  * Builds and packs this checkout's packages, serves them, and runs `init` in the project. Records the project's commit
  * first, so `--restore` can bring it back.
  */
-async function tryLocal(project: string, image: string, yes: boolean): Promise<void> {
+async function tryLocal(project: string, image: string | undefined, yes: boolean): Promise<void> {
   const top = repoTopOf(project)
   const recordPath = recordPathOf(project)
 
@@ -478,7 +516,7 @@ async function tryLocal(project: string, image: string, yes: boolean): Promise<v
     const exitCode = await initFromTarballs(project, top, recordPath, folder, yes)
 
     if (exitCode === 0) {
-      addImage(project, image)
+      useImage(project, imagePlanOf(image, browserImageOf()))
     } else {
       process.exitCode = exitCode
     }
@@ -597,7 +635,7 @@ async function main(): Promise<void> {
   if (restoring === true) {
     restore(project)
   } else {
-    await tryLocal(project, image ?? defaultImage, yes === true)
+    await tryLocal(project, image, yes === true)
   }
 }
 

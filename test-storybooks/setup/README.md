@@ -95,7 +95,7 @@ Turbo builds the package first. It prints one line per package manager, then eac
 
 A project that lists visual-check's packages already, such as one on an npm release, would keep that release: `init` leaves installed versions alone. So first, each `package.json` git tracks where the project's nearest lockfile is, or below it, the root's and every workspace package's, gets each `@visual-check/*` dependency it lists, in any dependency list, at the try's exact version, `@visual-check/chromium` at the packed one. Then the package manager of that lockfile installs them. pnpm installs with `auto-install-peers` off: it would drop the prerelease from the addon's peer range on the CLI and look for a plain version the registry doesn't have, and the lockfile keeps the peers it installed before. A project that lists none is left to `init`, as before.
 
-Then the try runs `init` through `pnpm dlx` in the project, which refreshes the agent skill in a project that has one, and adds the browser image to the config.
+Then the try runs `init` through `pnpm dlx` in the project, which refreshes the agent skill in a project that has one. Without `--image`, the try adds no image to the config when the browser package names a published one, so the CLI pulls that. On a branch whose browser package isn't published yet, it names `visual-check-chromium:ci`.
 
 ```sh
 pnpm try-local ~/code/my-app                # init asks its questions
@@ -105,7 +105,7 @@ pnpm try-local ~/code/my-app --image visual-check-chromium:arm64
 
 - `init` runs in your terminal, so it shows its terminal UI there: the questions, the setup steps and the summary.
 - The project must be in a git repo with nothing uncommitted. A relative path is taken from where you run `pnpm`.
-- `--image` defaults to `visual-check-chromium:ci`. When Docker has no such image, the script prints the command that builds it.
+- `--image` names another image in the config. When Docker has no such image, the script prints the command that builds it, unless the image names a registry host (its first path segment holds a `.` or a `:`, or is `localhost`): the CLI pulls that on its first run. A Docker Hub short name, such as `acme/chromium:1`, counts as local. Naming the published browser package's tag adds no image.
 - `init`'s installs, and the try's own in a project that lists the packages, reach the registry through `npm_config_@visual-check:registry`, which pnpm, npm and Yarn 1 read. Yarn 4 and Bun don't, so they can't install the packages.
 - A project with no lockfile has installed nothing, so it's left to `init` too.
 - Until `--restore`, the project's `package.json` files name versions only the try's registry has, so installing again without it fails. Running the CLI, such as `pnpm exec visual-check --version`, which prints the try's version, needs no install.

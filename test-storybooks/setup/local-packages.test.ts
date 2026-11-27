@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { localVersionOf, manifestWithVersions, packageJsonWithVersions } from './local-packages.ts'
+import {
+  configNamesImage,
+  imagePlanOf,
+  localVersionOf,
+  manifestWithVersions,
+  packageJsonWithVersions,
+} from './local-packages.ts'
 
 describe('localVersionOf', () => {
   const date = new Date('2026-11-23T09:05:07.123Z')
@@ -108,5 +114,68 @@ describe('packageJsonWithVersions', () => {
 
     expect(packageJsonWithVersions(text, versions)).toBeUndefined()
     expect(packageJsonWithVersions('{ "name": "my-app" }', versions)).toBeUndefined()
+  })
+})
+
+describe('imagePlanOf', () => {
+  const tag = 'ghcr.io/visual-check/chromium:157.0.0'
+  const published = { tag, digest: `sha256:${'ab'.repeat(32)}` }
+  const unpublished = { tag, digest: `sha256:${'0'.repeat(64)}` }
+  const reference = `${tag}@${published.digest}`
+
+  it('leaves the image to a published browser package when none is asked for', () => {
+    expect(imagePlanOf(undefined, published)).toEqual({ kind: 'package', reference })
+  })
+
+  it("names the image CI builds when none is asked for and the browser package's isn't published", () => {
+    expect(imagePlanOf(undefined, unpublished)).toEqual({
+      kind: 'config',
+      image: 'visual-check-chromium:ci',
+      pullable: false,
+    })
+  })
+
+  it('leaves the image to a published browser package when its tag, or its tag and digest, is asked for', () => {
+    expect(imagePlanOf(tag, published)).toEqual({ kind: 'package', reference })
+    expect(imagePlanOf(reference, published)).toEqual({ kind: 'package', reference })
+  })
+
+  it("names the unpublished browser package's tag, which no registry serves yet", () => {
+    expect(imagePlanOf(tag, unpublished)).toEqual({ kind: 'config', image: tag, pullable: false })
+  })
+
+  it('names any other image, pullable when its first path segment names a registry', () => {
+    expect(imagePlanOf('ghcr.io/acme/chromium:1', published)).toEqual({
+      kind: 'config',
+      image: 'ghcr.io/acme/chromium:1',
+      pullable: true,
+    })
+    expect(imagePlanOf('localhost:5000/x', published)).toMatchObject({ pullable: true })
+    expect(imagePlanOf('localhost/x', published)).toMatchObject({ pullable: true })
+    expect(imagePlanOf('registry:5000/x', published)).toMatchObject({ pullable: true })
+    expect(imagePlanOf('visual-check-chromium:ci', published)).toEqual({
+      kind: 'config',
+      image: 'visual-check-chromium:ci',
+      pullable: false,
+    })
+    expect(imagePlanOf('acme/chromium:1', published)).toMatchObject({ pullable: false })
+  })
+
+  it("names another pullable image when the browser package's isn't published", () => {
+    expect(imagePlanOf('ghcr.io/acme/chromium:1', unpublished)).toEqual({
+      kind: 'config',
+      image: 'ghcr.io/acme/chromium:1',
+      pullable: true,
+    })
+  })
+})
+
+describe('configNamesImage', () => {
+  it('finds an image on a line of its own', () => {
+    expect(configNamesImage("export default defineConfig({\n  image: 'acme:1',\n})\n")).toBe(true)
+  })
+
+  it('finds none in a config without one', () => {
+    expect(configNamesImage('export default defineConfig({\n  storybooks: {},\n})\n')).toBe(false)
   })
 })
