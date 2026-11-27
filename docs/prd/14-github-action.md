@@ -77,10 +77,11 @@ For exit 1 and exit 2 alike, the Action:
   1. `actions/checkout` and `actions/setup-node`;
   2. install;
   3. `storybook build`;
-  4. serve the static build on the port in the Storybook's `url`, in the background;
+  4. serve the static build on the port in the Storybook's `url`, in the background, with a server that takes many connections at once, such as `npx http-server storybook-static -p 6006 -a 127.0.0.1 --silent`;
   5. wait for the port;
   6. `uses: visual-check/action@v1`.
 - There's one server per Storybook.
+- Not `python3 -m http.server`: its listen backlog is 5, so under parallel workers it drops connections and stories break at random with `Failed to fetch dynamically imported module`. Not `serve` with its default `cleanUrls` either: it redirects `iframe.html` to `/iframe` and drops the story's query.
 - An unsharded CI `test` runs the consistency check first and stops when it fails.
 - **Sharded:** the hand-written matrix or the reusable workflow ([Sharding and the consistency check](12-sharding-and-consistency.md)).
 - **Job containers and devcontainers** are covered in [Browser and platform](05-browser-and-platform.md). The docs lead with plain runners.

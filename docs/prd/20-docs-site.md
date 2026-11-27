@@ -118,6 +118,7 @@ All under `/docs`.
 **CI**
 
 - The Action and the reusable workflow: build, serve, wait, run.
+- Serving the static build: `http-server`, as the examples do. Why not `python3 -m http.server` (its listen backlog of 5 drops connections under parallel workers: stories break at random with failed module loads, and the run's hint about failed loads links here) and not `serve` with `cleanUrls` (it redirects `iframe.html` and drops the query).
 - Why Linux runners only.
 - Sharding: both matrix shapes, `fail-fast: false`, and shard jobs waiting for the consistency job.
 - Each shard building its own Storybook, building once and passing the build along, or pointing at a deployed Storybook.
