@@ -21,7 +21,13 @@ import {
 import { animationsTimedOutAnswer, mediaTimedOutAnswer, settledAnswer } from './end-state.fixture.js'
 import { defaultSnapshot, FakeDriver, type FakePageBehaviour } from './fake-driver.fixture.js'
 import { fontsTimedOutAnswer, imagesTimedOutAnswer, readyAnswer } from './page-script.fixture.js'
-import { assetsReadyExpression, endStateExpression, pageInitScript, prepareCaptureExpression } from './page-script.js'
+import {
+  assetsReadyExpression,
+  endStateExpression,
+  framesAfterGrowthExpression,
+  pageInitScript,
+  prepareCaptureExpression,
+} from './page-script.js'
 
 /**
  * The settings every session in these tests captures with.
@@ -709,19 +715,86 @@ describe('growing the viewport to the page', () => {
     expect(driver.methods()).toContain('1:capture')
   })
 
-  it('checks images and fonts again once it grew, then runs the wait hook', async () => {
+  it('lets two frames pass once it grew, so the page reacts, then checks images and fonts again and runs the wait hook', async () => {
     const driver = new FakeDriver({ pages: [{ growViewportToContent: async () => true }] })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
       snapshot: defaultSnapshot,
       console: [],
     })
-    expect(driver.calls.slice(3, 7)).toEqual([
+    expect(driver.calls.slice(3, 8)).toEqual([
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
       { page: 1, method: 'growViewportToContent', args: [] },
+      { page: 1, method: 'evaluate', args: [framesAfterGrowthExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [waitHookExpression('button--primary', 10_000), 11_000] },
     ])
+  })
+
+  it('lets no frame pass when the page fits its viewport', async () => {
+    const driver = new FakeDriver()
+
+    await openCaptureSession(driver, settings).capture(primary)
+    expect(driver.calls).not.toContainEqual({
+      page: 1,
+      method: 'evaluate',
+      args: [framesAfterGrowthExpression(10_000), 11_000],
+    })
+  })
+
+  it('makes a broken story of frames that never passed once it grew, saying visual-check let the page react', async () => {
+    const driver = new FakeDriver({
+      pages: [{ growViewportToContent: async () => true, framesWait: async () => ({ outcome: 'timed-out' }) }],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'timeout',
+        message:
+          "The story wasn't ready within readyTimeout (10000 ms): visual-check was still letting the page react to the grown viewport.",
+        readyTimeoutMs: 10000,
+      },
+      console: [],
+    })
+    expect(driver.methods()).not.toContain('1:capture')
+  })
+
+  it('makes a broken story, error, of a page without the page script once it grew', async () => {
+    const driver = new FakeDriver({
+      pages: [{ growViewportToContent: async () => true, framesWait: async () => ({ outcome: 'script-missing' }) }],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'error',
+        message:
+          "visual-check's page script didn't run in the story's page, so it couldn't let the page react to the grown viewport.",
+      },
+      console: [],
+    })
+  })
+
+  it('makes a broken story of a page that stopped answering while it reacted to the grown viewport', async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          growViewportToContent: async () => true,
+          framesWait: async (timeoutMs) => {
+            throw new PageTimeoutError("The expression evaluated in the page didn't finish within 11 s.", timeoutMs)
+          },
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'timeout',
+        message:
+          "The story wasn't ready within readyTimeout (10000 ms): its page stopped answering while visual-check let it react to the grown viewport.",
+        readyTimeoutMs: 10000,
+      },
+      console: [],
+    })
   })
 
   it('makes a broken story of images still loading once it grew, saying it was after growing the viewport', async () => {

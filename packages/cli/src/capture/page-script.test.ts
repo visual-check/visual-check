@@ -8,9 +8,11 @@ import { fontsTimedOutAnswer, imagesTimedOutAnswer, readyAnswer } from './page-s
 import {
   assetsReadyExpression,
   endStateExpression,
+  framesAfterGrowthExpression,
   pageInitScript,
   prepareCaptureExpression,
   readAssetsReadiness,
+  readFramesPassed,
 } from './page-script.js'
 import { fakeCaptureDocument } from './prepare-capture.fixture.js'
 import { fakeElement, fakeFrame, fakeImg, fakePageDocument, fakeShadowRoot } from './remote-content.fixture.js'
@@ -630,6 +632,7 @@ describe('the page script', () => {
 
     expect(page.run("Object.keys(globalThis).includes('__visualCheck')")).toBe(false)
     expect(page.run('Object.isFrozen(globalThis.__visualCheck)')).toBe(true)
+    expect(page.run('typeof globalThis.__visualCheck.letFramesPass')).toBe('function')
     expect(page.run('typeof globalThis.__visualCheck.bringToEndState')).toBe('function')
     expect(page.run('typeof globalThis.__visualCheck.findRemoteContent')).toBe('function')
     expect(page.run('typeof globalThis.__visualCheck.prepareCapture')).toBe('function')
@@ -986,6 +989,106 @@ describe('readAssetsReadiness', () => {
   ])('throws on %s, quoting it', (_what, value) => {
     expect(() => readAssetsReadiness(value)).toThrow(
       `The wait for images and fonts in the page gave an answer visual-check doesn't know: ${JSON.stringify(value)}.`,
+    )
+  })
+})
+
+describe('the frames after the viewport grew', () => {
+  it('let two frames pass, so what the page does in reaction to the new size is done before it answers', async () => {
+    const frames = new FakeFrames()
+    const page = openPage({ requestAnimationFrame: frames.requestFrame })
+    const reactions: string[] = []
+
+    // The rendering update that calls the page's observers back, then the one that paints what they changed.
+    frames.react(1, () => reactions.push('observers'))
+    frames.react(3, () => reactions.push('render'))
+
+    const answer = page.evaluate(framesAfterGrowthExpression(1000)).then((value) => {
+      reactions.push('answered')
+
+      return value
+    })
+
+    await vi.runAllTimersAsync()
+    expect(await answer).toEqual({ outcome: 'passed' })
+    expect(reactions).toEqual(['observers', 'render', 'answered'])
+    expect(frames.requestFrame).toHaveBeenCalledTimes(4)
+  })
+
+  it('reads no document, as the frames need none', async () => {
+    const page = openPage({ requestAnimationFrame: new FakeFrames().requestFrame })
+    const answer = page.evaluate(framesAfterGrowthExpression(1000))
+
+    await vi.runAllTimersAsync()
+    await answer
+    expect(page.documentReads()).toBe(0)
+  })
+
+  it('counts two tasks of 16 ms as a frame in a page without requestAnimationFrame', async () => {
+    const page = openPage()
+    let settled = false
+    const answer = page.evaluate(framesAfterGrowthExpression(1000)).finally(() => {
+      settled = true
+    })
+
+    await vi.advanceTimersByTimeAsync(63)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await answer).toEqual({ outcome: 'passed' })
+  })
+
+  it('times out when no frame comes, at its time limit rounded up to whole ms', async () => {
+    const page = openPage({ requestAnimationFrame: () => 0 })
+    let settled = false
+    const answer = page.evaluate(framesAfterGrowthExpression(999.2)).finally(() => {
+      settled = true
+    })
+
+    await vi.advanceTimersByTimeAsync(999)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await answer).toEqual({ outcome: 'timed-out' })
+  })
+
+  it("keeps the browser's own frames and timers when the story replaced them", async () => {
+    const frames = new FakeFrames()
+    const page = openPage({ requestAnimationFrame: frames.requestFrame })
+
+    page.run('globalThis.requestAnimationFrame = () => 0')
+    page.run('globalThis.setTimeout = () => 0; globalThis.clearTimeout = () => undefined')
+
+    const answer = page.evaluate(framesAfterGrowthExpression(1000))
+
+    await vi.runAllTimersAsync()
+    expect(await answer).toEqual({ outcome: 'passed' })
+  })
+
+  it('leaves no timer behind once the frames passed', async () => {
+    const page = openPage({ requestAnimationFrame: new FakeFrames().requestFrame })
+    const answer = page.evaluate(framesAfterGrowthExpression(1000))
+
+    await vi.advanceTimersByTimeAsync(100)
+    expect(await answer).toEqual({ outcome: 'passed' })
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("gives script-missing in a page where the page script didn't run", async () => {
+    expect(await blankPage().evaluate(framesAfterGrowthExpression(1000))).toEqual({ outcome: 'script-missing' })
+  })
+})
+
+describe('readFramesPassed', () => {
+  it.each(['passed', 'timed-out', 'script-missing'])('reads %s', (outcome) => {
+    expect(readFramesPassed({ outcome })).toEqual({ outcome })
+  })
+
+  it.each([
+    ['a number', 42],
+    ['null', null],
+    ['another outcome', { outcome: 'settled' }],
+  ])('throws on %s, quoting it', (_what, value) => {
+    expect(() => readFramesPassed(value)).toThrow(
+      `Letting frames pass in the page gave an answer visual-check doesn't know: ${JSON.stringify(value)}.`,
     )
   })
 })

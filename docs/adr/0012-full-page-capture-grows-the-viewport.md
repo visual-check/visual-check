@@ -6,7 +6,7 @@ Before a full-page capture, visual-check grows the viewport's height to the page
 
 - A snapshot shows the page as a screen as tall as the page shows it, with fixed and sticky elements at the page's bottom, as harnesses that resize the viewport before capturing show it.
 - `100vh` becomes the page's height, as it was measured once the story's images and fonts were ready, so a full-screen section grows with the page. `growViewport: false` keeps the viewport's height for a story that needs it.
-- The viewport grows after the first check of images and fonts and before the `wait` hook, so the hook and the end state run at the grown size. When it grew, images and fonts are checked again, since a taller viewport can show lazy images.
+- The viewport grows after the first check of images and fonts and before the `wait` hook, so the hook and the end state run at the grown size. When it grew, two frames pass before anything goes on, so the page's reaction to the new size, such as an `IntersectionObserver` scroll-spy marking the last section, is done before the capture rather than in the second after it ([#169](https://github.com/visual-check/visual-check/issues/169)). Then images and fonts are checked again, since a taller viewport can show lazy images.
 - Content that grows with the viewport isn't chased: what lies below the grown viewport is captured beyond it, as before.
 - Each tall story's snapshot changed once, so its baseline needs `update` after the upgrade.
 - A page over 32,767 device pixels tall keeps its viewport, and its capture is `too-tall` as before.

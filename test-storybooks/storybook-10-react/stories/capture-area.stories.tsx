@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import type { ReactNode } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { visualCheck } from '../.storybook/visual-check.ts'
 
@@ -290,6 +290,105 @@ export const FullPage: Story = {
 }
 
 /**
+ * How tall the scroll-spy rail is, in px.
+ */
+const railHeight = 56
+
+/**
+ * The labels of the scroll-spy page's sections, one rail item each.
+ */
+const spySections = ['Section 1 of 5', 'Section 2 of 5', 'Section 3 of 5', 'Section 4 of 5', 'Section 5 of 5']
+
+/**
+ * A page with a rail on top and five 400 px sections below it, 2056 px tall in all. An `IntersectionObserver` marks the
+ * rail item of every section wholly in view, as a scroll spy does: in a 720 px viewport only the first, and once the
+ * viewport grew to the page, all five. Each mark waits an animation frame after the observer's callback, as a scroll
+ * spy that batches its updates does, so the page reacts to the new size over two rendering updates.
+ */
+function ScrollSpyScene() {
+  const sections = useRef<(HTMLElement | null)[]>([])
+  const [inView, setInView] = useState<ReadonlySet<number>>(new Set())
+
+  useEffect(() => {
+    let frame = 0
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const changes = entries.map((entry) => ({
+          index: spySections.indexOf(entry.target.getAttribute('data-section') ?? ''),
+          visible: entry.isIntersecting,
+        }))
+
+        frame = requestAnimationFrame(() =>
+          setInView((current) => {
+            const next = new Set(current)
+
+            for (const { index, visible } of changes) {
+              if (visible) {
+                next.add(index)
+              } else {
+                next.delete(index)
+              }
+            }
+
+            return next
+          }),
+        )
+      },
+      { threshold: 1 },
+    )
+
+    for (const section of sections.current) {
+      if (section !== null) {
+        observer.observe(section)
+      }
+    }
+
+    return () => {
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+    }
+  }, [])
+
+  return (
+    <div style={{ fontFamily: 'sans-serif', fontSize: 16 }}>
+      <nav style={{ display: 'flex', gap: 8, height: railHeight, padding: '12px 24px', boxSizing: 'border-box' }}>
+        {spySections.map((label, index) => (
+          <span
+            key={label}
+            style={{
+              padding: '0 12px',
+              lineHeight: '32px',
+              borderRadius: 16,
+              background: inView.has(index) ? '#1e3a8a' : '#e4e4e7',
+              color: inView.has(index) ? '#ffffff' : '#3f3f46',
+            }}
+          >
+            {label}
+          </span>
+        ))}
+      </nav>
+      {spySections.map((label, index) => (
+        <section
+          key={label}
+          ref={(section) => {
+            sections.current[index] = section
+          }}
+          data-section={label}
+          style={{
+            boxSizing: 'border-box',
+            height: growSectionHeight,
+            padding: 24,
+            background: index % 2 === 0 ? '#fef3c7' : '#dcfce7',
+          }}
+        >
+          {label}
+        </section>
+      ))}
+    </div>
+  )
+}
+
+/**
  * Sets `element: null` and leaves the viewport's growth on, so the viewport grows to the page, 2064 px, before the
  * capture: the snapshot shows the save bar at the page's bottom, below the fifth section, and the badge 96 px above the
  * page's bottom, not mid-page where they sit in a 720 px viewport.
@@ -297,6 +396,16 @@ export const FullPage: Story = {
 export const FullPageGrows: Story = {
   parameters: { ...visualCheck({ element: null }) },
   render: () => <StickyBarScene />,
+}
+
+/**
+ * Sets `element: null` and leaves the viewport's growth on, on a page whose scroll spy reacts to the grown viewport.
+ * Frames pass once the viewport grew, so the snapshot, 1280 × 2056, shows every rail item marked. Without them the
+ * capture would show only the first marked, and the page would change in the second after it.
+ */
+export const FullPageGrowsReacts: Story = {
+  parameters: { ...visualCheck({ element: null }) },
+  render: () => <ScrollSpyScene />,
 }
 
 /**
