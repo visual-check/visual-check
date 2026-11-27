@@ -32,7 +32,7 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
 - A Storybook no script starts gets a command too, in the same never-downloading form: an Nx target as `nx run <project>:<target>` from the workspace root, and a Storybook with no start found as `storybook dev -p <its URL's port>`, with `-c` when its config folder isn't `.storybook`, from its `dir`.
 - `SKILL.md`'s `metadata.visual-check-version` names the CLI version that wrote it. The package ships the skill's source in `skill/`.
 - `init` writes every Storybook of the config. When a run needs a Storybook `setup.json` has no start command for, the script exits 2 and asks to run `init` again.
-- `.claude/skills/visual-check` is a link to that folder, because Claude Code reads only its own path. It's a copy on Windows. The link is committed, so on Windows the copy shows as a changed file in git. That's accepted.
+- `.claude/skills/visual-check` is a link to that folder, because Claude Code reads only its own path. It's a copy on Windows. The link is committed, so on Windows the copy shows as a changed file in git. That's accepted. When git ignores the folder or the link, `init` warns, naming the rule; it never edits `.gitignore`.
 - Not used: model choice, `allowed-tools`, runner subagents and images. Users allow the command in their own agent's settings.
 
 ## Install and refresh
@@ -103,6 +103,7 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
 
 1. **Exit 2:** relay the error and its fix. Never suggest `host`.
 2. **A broken story,** by reason:
+   - any reason, with a `failed-loads` hint: the server that serves Storybook dropped its files, not the story. Serve it with a server that takes many connections, or lower `--workers`; never a `wait` hook for it;
    - `changed-after-capture`, `unstable` or `timeout`: a `wait` hook on the story, or in `preview` when many stories share the cause;
    - `navigated-away`, `play-threw` or `load-failed`: the project's code to fix. For a story that navigates away, await the new page before clicking, or render `MemoryRouter` with `useTransitions={false}`;
    - `too-tall`: `element`, or a smaller viewport;

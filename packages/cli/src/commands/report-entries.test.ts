@@ -3,6 +3,7 @@ import { baselineStemOf } from '../baselines/baseline-files.js'
 import type { BrokenStory } from '../capture/capture-session.js'
 import type { ResolvedStorybook } from '../config/resolve-config.js'
 import type { ReportBrokenDetails } from '../report/report-document.js'
+import { failedLoadsHintMessageOf } from './failed-loads-hint.js'
 import type { PlannedSnapshot, SnapshotToCapture } from './plan-snapshots.js'
 import {
   consoleOf,
@@ -204,6 +205,28 @@ describe('testEntryOf', () => {
           'See https://visual-check.vercel.app/docs/remote-content',
       },
     ])
+  })
+
+  it("gives a failed loads hint with the files of a broken story whose page couldn't load Storybook's files", () => {
+    const failedLoads = [
+      { url: 'http://localhost:6006/assets/card.stories-B0zV1TVO.js', error: 'net::ERR_EMPTY_RESPONSE' },
+    ]
+    const result: SnapshotResult = {
+      status: 'broken',
+      detail: '',
+      attempts: 1,
+      broken: { reason: 'timeout', message: 'Not ready.', readyTimeoutMs: 10_000, failedLoads },
+    }
+
+    expect(testEntryOf(itemOf(), result, configFolder).hints).toEqual([
+      { kind: 'failed-loads', files: failedLoads, message: failedLoadsHintMessageOf() },
+    ])
+  })
+
+  it('gives no failed loads hint to a broken story without any', () => {
+    const result: SnapshotResult = { status: 'broken', detail: '', attempts: 1, broken: brokenStory }
+
+    expect(testEntryOf(itemOf(), result, configFolder).hints).toEqual([])
   })
 
   it("describes a flaky pass by the retry that passed, with the first capture's comparison and images", () => {

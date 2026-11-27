@@ -20,6 +20,7 @@ import type {
   UpdateReportCounts,
   UpdateReportEntry,
 } from '../report/report-document.js'
+import { failedLoadsHintMessageOf } from './failed-loads-hint.js'
 import type { PlannedSnapshot } from './plan-snapshots.js'
 import { remoteContentHintMessageOf } from './remote-content-hint.js'
 import type { ReportedComparison, SnapshotResult, SnapshotStatus } from './snapshot-result.js'
@@ -222,14 +223,26 @@ function baselineHeadOf(storybook: ResolvedStorybook, path: string): EntryHead {
 }
 
 /**
+ * Gives a result's hints: the remote content one when it differs only inside remote content, then the failed loads one
+ * when its story broke on a page that couldn't load some of Storybook's own files.
+ */
+function hintsOf(result: SnapshotResult): ReportHint[] {
+  const { hintHosts } = result
+  const files = result.broken?.failedLoads ?? []
+
+  return [
+    ...(hintHosts === undefined
+      ? []
+      : [{ kind: 'remote-content' as const, hosts: hintHosts, message: remoteContentHintMessageOf(hintHosts) }]),
+    ...(files.length === 0 ? [] : [{ kind: 'failed-loads' as const, files, message: failedLoadsHintMessageOf() }]),
+  ]
+}
+
+/**
  * Gives the last fields of a snapshot's entry from its result, with `message`.
  */
 function tailOf(item: PlannedSnapshot, result: SnapshotResult, configFolder: string, message: string): EntryTail {
-  const { comparison, hintHosts } = result
-  const hints: ReportHint[] =
-    hintHosts === undefined
-      ? []
-      : [{ kind: 'remote-content', hosts: hintHosts, message: remoteContentHintMessageOf(hintHosts) }]
+  const { comparison } = result
 
   return {
     message,
@@ -241,7 +254,7 @@ function tailOf(item: PlannedSnapshot, result: SnapshotResult, configFolder: str
         : pixelsOf(comparison, item.tolerance, item.viewport.deviceScaleFactor),
     size: comparison === undefined ? null : sizeOf(comparison),
     details: result.broken === undefined ? null : detailsOf(result.broken),
-    hints,
+    hints: hintsOf(result),
     console: consoleOf(result.console ?? []),
     baseline: displayPathOf(configFolder, baselinePathOf(item.storybook.baselines, item.key)),
     images: result.images ?? noImages,

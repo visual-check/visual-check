@@ -195,13 +195,13 @@ export interface ReportBrokenDetails {
 }
 
 /**
- * A hint on a failure.
+ * A hint on a snapshot that differs only inside remote content.
  *
  * @public
  */
-export interface ReportHint {
+export interface ReportRemoteContentHint {
   /**
-   * What the hint is about: remote content, the only kind so far.
+   * What the hint is about: remote content.
    */
   kind: 'remote-content'
   /**
@@ -213,6 +213,49 @@ export interface ReportHint {
    */
   message: string
 }
+
+/**
+ * A load of one of Storybook's files that failed at the network level on a story's page.
+ *
+ * @public
+ */
+export interface ReportFailedLoad {
+  /**
+   * The file's full URL.
+   */
+  url: string
+  /**
+   * The browser's network error, such as `net::ERR_EMPTY_RESPONSE`.
+   */
+  error: string
+}
+
+/**
+ * A hint on a broken story whose page couldn't load some of Storybook's own files, which points at the server.
+ *
+ * @public
+ */
+export interface ReportFailedLoadsHint {
+  /**
+   * What the hint is about: loads of Storybook's files that failed.
+   */
+  kind: 'failed-loads'
+  /**
+   * The loads of Storybook's own origin that failed, the first 10, in order.
+   */
+  files: ReportFailedLoad[]
+  /**
+   * The hint for people.
+   */
+  message: string
+}
+
+/**
+ * A hint on a failure.
+ *
+ * @public
+ */
+export type ReportHint = ReportRemoteContentHint | ReportFailedLoadsHint
 
 /**
  * The level of a console message.

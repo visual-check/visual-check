@@ -5,6 +5,7 @@ import type {
   CaptureArea,
   ConsoleMessage,
   Driver,
+  FailedLoad,
   Page,
   PageSetup,
   PageViewport,
@@ -126,6 +127,10 @@ export interface FakePageBehaviour extends FakeEvaluation {
    * Answers `consoleMessages`. The page sent no console message or error when it is left out.
    */
   consoleMessages?: () => ConsoleMessage[]
+  /**
+   * Answers `failedLoads`. No load of the page failed when it is left out.
+   */
+  failedLoads?: () => FailedLoad[]
 }
 
 /**
@@ -249,6 +254,7 @@ export class FakeDriver implements Driver {
       },
       requestHosts: () => answers.requestHosts?.() ?? [],
       consoleMessages: () => answers.consoleMessages?.() ?? [],
+      failedLoads: () => answers.failedLoads?.() ?? [],
     }
   }
 

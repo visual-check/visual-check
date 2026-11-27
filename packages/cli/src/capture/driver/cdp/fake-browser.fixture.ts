@@ -263,6 +263,7 @@ const defaultHandlers: Record<string, CommandHandler> = {
   'Emulation.setFocusEmulationEnabled': answerEmpty,
   'Runtime.enable': answerEmpty,
   'Runtime.addBinding': answerEmpty,
+  'Log.enable': answerEmpty,
   'Page.addScriptToEvaluateOnNewDocument': addInitScript,
   'Emulation.setDeviceMetricsOverride': answerEmpty,
   'Emulation.setTouchEmulationEnabled': answerEmpty,

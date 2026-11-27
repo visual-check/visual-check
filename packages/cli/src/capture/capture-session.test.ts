@@ -2717,6 +2717,132 @@ describe('the console messages of a capture', () => {
   })
 })
 
+describe('the failed loads of a broken story', () => {
+  const chunk = { url: 'http://localhost:6006/assets/card.stories-B0zV1TVO.js', error: 'net::ERR_EMPTY_RESPONSE' }
+  const stylesheet = { url: 'http://localhost:6006/assets/preview.css?v=1', error: 'net::ERR_CONNECTION_RESET' }
+  const font = { url: 'http://localhost:6006/fonts/inter.woff2', error: 'net::ERR_EMPTY_RESPONSE' }
+
+  it("add a sentence naming the one file to a timed-out story's message, and come with it", async () => {
+    const driver = new FakeDriver({
+      pages: [{ storyWait: async () => timedOutAnswer('story'), failedLoads: () => [chunk] }],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'timeout',
+        message:
+          "The story wasn't ready within readyTimeout (10000 ms): Storybook never sent storyFinished for it. Its page couldn't load /assets/card.stories-B0zV1TVO.js from Storybook: net::ERR_EMPTY_RESPONSE.",
+        readyTimeoutMs: 10_000,
+        failedLoads: [chunk],
+      },
+      console: [],
+    })
+  })
+
+  it("add a sentence counting several files and naming the first to an errored story's message", async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          storyWait: async () =>
+            finishedAnswer({ errors: [{ event: 'storyThrewException', text: 'TypeError: Failed to fetch' }] }),
+          failedLoads: () => [stylesheet, chunk, font],
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'error',
+        message:
+          "The story threw TypeError: Failed to fetch. Its page couldn't load 3 files from Storybook, the first /assets/preview.css?v=1: net::ERR_CONNECTION_RESET.",
+        failedLoads: [stylesheet, chunk, font],
+      },
+      console: [],
+    })
+  })
+
+  it("keep a play-threw story's message without their sentence as its error text when Storybook described no error", async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          storyWait: async () =>
+            finishedAnswer({ errors: [{ event: 'playFunctionThrewException', text: '', stack: [] }] }),
+          failedLoads: () => [chunk],
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toMatchObject({
+      broken: {
+        reason: 'play-threw',
+        message:
+          "The story's play function threw an error. Its page couldn't load /assets/card.stories-B0zV1TVO.js from Storybook: net::ERR_EMPTY_RESPONSE.",
+        errorText: "The story's play function threw an error.",
+      },
+    })
+  })
+
+  it('come with a broken story whose step failed, and one whose second capture failed', async () => {
+    const goneWrong = new FakeDriver({
+      pages: [
+        {
+          goto: async () => {
+            throw new PageCrashedError()
+          },
+          failedLoads: () => [chunk],
+        },
+      ],
+    })
+    let captures = 0
+    const capturedAgain = new FakeDriver({
+      pages: [
+        {
+          capture: async () => {
+            captures += 1
+
+            if (captures === 2) {
+              throw new PageCrashedError()
+            }
+
+            return defaultSnapshot
+          },
+          failedLoads: () => [chunk],
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(goneWrong, settings).capture(primary)).toMatchObject({
+      broken: { reason: 'crashed', failedLoads: [chunk] },
+    })
+    expect(
+      await openCaptureSession(capturedAgain, settings).capture({ ...primary, captureAgainIf: async () => true }),
+    ).toMatchObject({ broken: { reason: 'crashed', failedLoads: [chunk] } })
+  })
+
+  it('leave a broken story without any as it was', async () => {
+    const driver = new FakeDriver({ pages: [{ storyWait: async () => timedOutAnswer('story') }] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toStrictEqual({
+      broken: {
+        reason: 'timeout',
+        message: "The story wasn't ready within readyTimeout (10000 ms): Storybook never sent storyFinished for it.",
+        readyTimeoutMs: 10_000,
+      },
+      console: [],
+    })
+  })
+
+  it('are ignored for a snapshot that captures', async () => {
+    const driver = new FakeDriver({ pages: [{ failedLoads: () => [font] }] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toStrictEqual({
+      snapshot: defaultSnapshot,
+      completingMs: undefined,
+      console: [],
+    })
+  })
+})
+
 describe('the image of a broken story', () => {
   /**
    * A story that asks for an image of its page when it breaks.

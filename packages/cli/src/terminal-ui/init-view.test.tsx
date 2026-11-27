@@ -567,7 +567,7 @@ describe('startInitView', () => {
       questionProgress: (answered, total) => view.questionProgress(answered, total),
     }
     const runCommand: InitTools['runCommand'] = (_command, args) => {
-      if (!args.includes('--save-exact')) {
+      if (!args.some((arg) => arg.startsWith('@visual-check/cli@'))) {
         return Promise.resolve(0)
       }
 

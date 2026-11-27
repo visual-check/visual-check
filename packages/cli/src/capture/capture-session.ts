@@ -7,6 +7,7 @@ import {
   CaptureTooLargeError,
   type ConsoleMessage,
   type Driver,
+  type FailedLoad,
   maxCaptureSide,
   type Page,
   PageCrashedError,
@@ -232,11 +233,12 @@ export type BrokenReason =
  * stories file that didn't load. `update` gives one for a story that doesn't render the same way twice. Some reasons
  * keep details besides: the stories file's load error or the time it had, `play`'s stack, the readyTimeout that ran
  * out, the font faces still loading, where a story that navigated away went, the size of a capture too tall to take,
- * and the width of a grid wider than the viewport.
+ * and the width of a grid wider than the viewport. A broken story whose page couldn't load some of Storybook's own
+ * files keeps those too.
  *
  * @public
  */
-export type BrokenStory =
+export type BrokenStory = (
   | {
       /**
        * Why the story can't be captured.
@@ -280,7 +282,8 @@ export type BrokenStory =
       message: string
       /**
        * The error as Storybook described it, such as `Error: boom`, or the unhandled errors, `; ` apart. Empty when it
-       * described none.
+       * described none, unless the story's page had failed loads: then it's the message without their sentence, which
+       * the report shows in its place.
        */
       errorText: string
       /**
@@ -383,6 +386,12 @@ export type BrokenStory =
         viewportWidth: number
       }
     }
+) & {
+  /**
+   * The loads of Storybook's own files that failed at the network level on the story's page, when any did.
+   */
+  failedLoads?: FailedLoad[]
+}
 
 /**
  * The hosts a story reaches, as a capture lists them.
@@ -472,9 +481,10 @@ export interface CaptureSession {
    * first clears the cookies and storage that story left, and when that fails, it captures on a fresh page instead. A
    * story that navigates away is captured again at once, up to 2 more times, each on a fresh page in a fresh browser
    * context; when it navigates away a third time, it's a broken story. Any other story that can't be captured comes
-   * back as a broken story straight away, and the page is replaced by a fresh one for the next. When the story's
-   * `captureAgainIf` resolves true for the snapshot, the same page is captured again at once. Rejects with a
-   * `BrowserExitedError` when the browser exits, and, after closing the page, with whatever the story's
+   * back as a broken story straight away, and the page is replaced by a fresh one for the next. A broken story whose
+   * page couldn't load some of Storybook's own files at the network level keeps them, and its message names the first.
+   * When the story's `captureAgainIf` resolves true for the snapshot, the same page is captured again at once. Rejects
+   * with a `BrowserExitedError` when the browser exits, and, after closing the page, with whatever the story's
    * `captureAgainIf` rejects with. Call it once the previous capture has settled.
    */
   capture: (story: StoryToCapture) => Promise<StoryCapture>
@@ -564,6 +574,33 @@ const assetsCheckSuffixes: Record<AssetsStep, string> = {
 const endStateTimeouts: Record<Extract<EndState, { outcome: 'timed-out' }>['step'], string> = {
   animations: 'visual-check was still finishing its animations',
   media: 'visual-check was still putting its media on their first frame',
+}
+
+/**
+ * Gives the broken story with the loads of Storybook's own files that failed at the network level on its page, and a
+ * sentence at the end of its message naming the first, its path shown against the story's URL, and how many there were
+ * when more than one. A `play-threw` story whose error Storybook described as nothing keeps the message without that
+ * sentence as its error text, for the report's play details. Gives it as it is when none failed.
+ */
+function withFailedLoads(broken: BrokenStory, failedLoads: FailedLoad[], storyUrl: string): BrokenStory {
+  const [first] = failedLoads
+
+  if (first === undefined) {
+    return broken
+  }
+
+  const path = displayUrlOf(first.url, storyUrl)
+  const files =
+    failedLoads.length === 1
+      ? `${path} from Storybook`
+      : `${failedLoads.length} files from Storybook, the first ${path}`
+
+  return {
+    ...broken,
+    ...(broken.reason === 'play-threw' && broken.errorText === '' ? { errorText: broken.message } : {}),
+    message: `${broken.message} Its page couldn't load ${files}: ${first.error}.`,
+    failedLoads,
+  }
 }
 
 /**
@@ -1000,7 +1037,8 @@ interface CapturedSnapshot {
  * `gridProblemOf` says. Gives the area the snapshot was captured from beside it, and leaves the story's
  * `captureAgainIf` to the caller. A story that can't be captured comes back as a broken story. Either way it comes with
  * the console messages and errors the page sent, read once the capture is done or the story broke, while the page is
- * still open. Rejects only with a `BrowserExitedError`.
+ * still open, and a broken story with the loads of Storybook's files that failed on the page. Rejects only with a
+ * `BrowserExitedError`.
  */
 async function captureOnPage(
   page: Page,
@@ -1012,10 +1050,10 @@ async function captureOnPage(
   let step: Step = 'viewport'
 
   /**
-   * Gives the broken story with the messages the page sent.
+   * Gives the broken story with the messages the page sent and the loads of Storybook's files that failed on it.
    */
   const brokenBy = (broken: BrokenStory): Extract<StoryCapture, { broken: BrokenStory }> => ({
-    broken,
+    broken: withFailedLoads(broken, page.failedLoads(), story.url),
     console: page.consoleMessages(),
   })
 
@@ -1256,9 +1294,9 @@ async function withBrokenImage(
  * resolves true, captures the area the snapshot was captured from again at once, doing nothing to the page in between,
  * bound by the driver's own capture limit, and gives the snapshot with the second capture as `capturedAgain`. Gives the
  * snapshot as it is when the story has no `captureAgainIf` or it resolves false. A second capture that fails comes back
- * as a broken story, with the messages the page sent, read again. Rejects with a `BrowserExitedError` when the browser
- * exits during the second capture, and with whatever `captureAgainIf` rejects with: it runs outside the handling that
- * turns the page's failures into a broken story.
+ * as a broken story, with the messages the page sent, read again, and the loads that failed on it. Rejects with a
+ * `BrowserExitedError` when the browser exits during the second capture, and with whatever `captureAgainIf` rejects
+ * with: it runs outside the handling that turns the page's failures into a broken story.
  */
 async function captureAgainIfAsked(
   page: Page,
@@ -1280,7 +1318,11 @@ async function captureAgainIfAsked(
     }
 
     return {
-      broken: describeFailure(error, 'capture-again', story, settings.readyTimeoutMs),
+      broken: withFailedLoads(
+        describeFailure(error, 'capture-again', story, settings.readyTimeoutMs),
+        page.failedLoads(),
+        story.url,
+      ),
       console: page.consoleMessages(),
     }
   }
@@ -1333,6 +1375,10 @@ export function pageSetupOf(settings: CaptureSettings): PageSetup {
  *
  * A story whose page shows a grid wider than the viewport, or too tall to capture, is broken with `grid-too-wide` or
  * `too-tall` before anything is captured.
+ *
+ * A broken story whose page couldn't load some of Storybook's own files at the network level, such as a connection the
+ * server dropped, keeps them as `failedLoads`, and its message gains a sentence naming the first and the browser's
+ * error, with how many there were when more than one. Its reason stays as it was, and nothing more is retried.
  *
  * A story that asks for it with `imageWhenBroken` and breaks while its page still shows something, for the reasons
  * `error`, `play-threw`, `timeout`, `fonts-not-loaded`, `wait-threw`, `element-missing` and `grid-too-wide`, comes

@@ -4,8 +4,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { skillSourcePaths, skillVersionOf } from '../agent-skill/skill-markdown.js'
 import { ContainerError, DockerMissingError } from '../container/container-error.js'
 import { closingMessageTextOf } from './closing-message.js'
+import type { FindIgnoredPaths } from './ignored-skill.js'
 import {
-  browserRange,
+  browserVersion,
   cliVersion,
   commandsIn,
   gitignore,
@@ -532,6 +533,58 @@ describe('runInit', () => {
       expect(existsSync(join(root, '.agents'))).toBe(false)
     })
 
+    it('warns when git ignores the skill, after the notes and before Fallow', async () => {
+      const root = pnpmProject({ manifest: { scripts: { storybook: 'storybook dev' } } })
+      const asked: { root: string; paths: readonly string[] }[] = []
+      const findIgnoredPaths: FindIgnoredPaths = (at, paths) => {
+        asked.push({ root: at, paths })
+
+        return Promise.resolve([
+          { path: '.claude/skills/visual-check', source: '.gitignore', line: 1, pattern: '.claude/skills/*' },
+        ])
+      }
+      const fallow = [{ name: 'leftpad-zz', paths: ['src/a.js'] }]
+      const result = await runInit(root, toolsOf({ findIgnoredPaths }, { fallow }).tools)
+      const messages = [
+        "hint: The storybook script sets no port. Add -p 6006 to it, so Storybook always starts on the port in web-app's URL.",
+        "Warning: git ignores .claude/skills/visual-check (.gitignore line 1: .claude/skills/*), so the agent skill won't reach other clones. Change that rule so git keeps it.",
+        "Warning: package.json doesn't list leftpad-zz, imported in src/a.js. visual-check can't tell which stories it affects.",
+      ]
+
+      expect(result.exitCode).toBe(0)
+      expect(asked).toEqual([{ root, paths: [skillDir, claudeSkillDir] }])
+      expect(result.messages).toEqual(messages)
+      expect(result.stderr).toBe(messages.map((message) => `${message}\n`).join(''))
+    })
+
+    it('warns when git ignores the skill even when the install fails', async () => {
+      const root = pnpmProject()
+      const findIgnoredPaths: FindIgnoredPaths = () =>
+        Promise.resolve([{ path: '.claude/skills/visual-check', source: '.gitignore', line: 1, pattern: '.claude/' }])
+      const result = await runInit(root, toolsOf({ findIgnoredPaths }, { exitCodes: [1] }).tools)
+
+      expect(result.exitCode).toBe(2)
+      expect(result.messages[0]).toBe(
+        "Warning: git ignores .claude/skills/visual-check (.gitignore line 1: .claude/), so the agent skill won't reach other clones. Change that rule so git keeps it.",
+      )
+      expect(result.messages).toHaveLength(2)
+    })
+
+    it('asks git nothing when the person declines the skill', async () => {
+      const root = pnpmProject()
+      const prompter = scriptedPrompter(['', '', '', '', false, ''])
+      let asked = 0
+      const findIgnoredPaths: FindIgnoredPaths = () => {
+        asked += 1
+
+        return Promise.resolve([])
+      }
+      const result = await runInit(root, toolsOf({ yes: false, interactive: true, prompter, findIgnoredPaths }).tools)
+
+      expect(result.exitCode).toBe(0)
+      expect(asked).toBe(0)
+    })
+
     it('rewrites the skill files and refreshes setup.json from the config when run again', async () => {
       const root = pnpmProject()
 
@@ -803,7 +856,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
         commandsIn(
           root,
           { command: 'yarn', args: ['add', '--dev', '--exact', ...pnpmAdd.args.slice(3)] },
-          { command: 'yarn', args: ['add', '--dev', ...pnpmAddBrowser.args.slice(2)] },
+          { command: 'yarn', args: ['add', '--dev', '--exact', ...pnpmAddBrowser.args.slice(3)] },
           { command: 'npx', args: ['--no-install', ...pnpmAddon.args.slice(1)] },
         ),
       )
@@ -915,7 +968,11 @@ describe('runInit in a workspace', () => {
         args: ['add', '--save-dev', '--save-exact', '-w', `@visual-check/cli@${cliVersion}`],
         cwd: root,
       },
-      { command: 'pnpm', args: ['add', '--save-dev', '-w', `@visual-check/chromium@${browserRange}`], cwd: root },
+      {
+        command: 'pnpm',
+        args: ['add', '--save-dev', '--save-exact', '-w', `@visual-check/chromium@${browserVersion}`],
+        cwd: root,
+      },
       {
         command: 'pnpm',
         args: ['add', '--save-dev', '--save-exact', `@visual-check/storybook@${cliVersion}`],
@@ -1109,7 +1166,11 @@ export default defineConfig({
         args: ['add', '--save-dev', '--save-exact', '-w', `@visual-check/cli@${cliVersion}`],
         cwd: root,
       },
-      { command: 'pnpm', args: ['add', '--save-dev', '-w', `@visual-check/chromium@${browserRange}`], cwd: root },
+      {
+        command: 'pnpm',
+        args: ['add', '--save-dev', '--save-exact', '-w', `@visual-check/chromium@${browserVersion}`],
+        cwd: root,
+      },
       {
         command: 'pnpm',
         args: ['add', '--save-dev', '--save-exact', ...storybookSpecs],
@@ -1162,7 +1223,11 @@ export default defineConfig({
     expect(result.exitCode).toBe(0)
     expect(record.commands).toEqual([
       { command: 'npm', args: ['install', '--save-dev', '--save-exact', `@visual-check/cli@${cliVersion}`], cwd: root },
-      { command: 'npm', args: ['install', '--save-dev', `@visual-check/chromium@${browserRange}`], cwd: root },
+      {
+        command: 'npm',
+        args: ['install', '--save-dev', '--save-exact', `@visual-check/chromium@${browserVersion}`],
+        cwd: root,
+      },
       {
         command: 'npm',
         args: ['install', '--save-dev', '--save-exact', ...storybookSpecs],
@@ -1204,7 +1269,7 @@ export default defineConfig({
       commands: [
         `cd libs/ui && pnpm exec storybook add @visual-check/storybook-addon@${cliVersion} --yes --skip-install`,
         `pnpm add --save-dev --save-exact @visual-check/cli@${cliVersion}`,
-        `pnpm add --save-dev "@visual-check/chromium@${browserRange}"`,
+        `pnpm add --save-dev --save-exact @visual-check/chromium@${browserVersion}`,
         `cd libs/ui && rush add --dev --exact --skip-update -p @visual-check/storybook@${cliVersion} ` +
           `-p @visual-check/storybook-addon@${cliVersion}`,
         'rush update',

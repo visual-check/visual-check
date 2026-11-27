@@ -82,7 +82,7 @@ Each entry:
 | `pixels`                                 | `{ differ, allowed, budget, scale }`, with `budget` as written: `20` or `"0.1%"`                                                                             |
 | `size`                                   | `null`, or `{ baseline: [w, h], snapshot: [w, h] }` on a size difference                                                                                     |
 | `details`                                | `null`, or a broken story's details                                                                                                                          |
-| `hints`                                  | `[{ kind: "remote-content", hosts, message }]`                                                                                                               |
+| `hints`                                  | `[{ kind: "remote-content", hosts, message }]` or `[{ kind: "failed-loads", files: [{ url, error }], message }]`                                             |
 | `console`                                | `[{ level, text }]`                                                                                                                                          |
 | `baseline`                               | The baseline's path, relative to the config folder                                                                                                           |
 | `images`                                 | `{ baseline, snapshot, diff }`, relative to the report folder. A broken story's image is `images.snapshot`                                                   |
@@ -147,6 +147,7 @@ Both `log` and `live` end with the same block:
 ## Hints and warnings
 
 - **Remote content:** a failure that differs only inside remote content carries a hint that names the hosts, shows the mask line and links the docs page.
+- **Failed loads:** a broken story whose page couldn't load Storybook's files carries a hint about the server, linking the CI docs page.
 - **No changed files:** a hint about `--all`.
 - **Storybooks left out:** in a local affected run, a note after the header names the Storybooks no changed file reaches, which the run never reaches ([Affected stories](11-affected-stories.md#required-storybooks)).
 - **Selection couldn't be worked out:** a warning that every story was selected.
@@ -158,7 +159,8 @@ Both `log` and `live` end with the same block:
 
 - The CLI writes it whenever `GITHUB_STEP_SUMMARY` is set, under any reporter. It works from a plain `run:` step, the Action and the reusable workflow alike.
 - It holds the shard, the counts, the flaky snapshots and a table of failures: Storybook, story, mode, status and message. The table is cut to stay under GitHub's 1 MiB per step.
-- Layout: a heading with the version, command and shard, the counts, up to 100 flaky snapshots, then the table. A cut table keeps its first rows and ends with a note counting the rest. 1 KiB stays free for the Action's artifact link.
+- Layout: a heading with the version, command and shard, the counts, up to 100 flaky snapshots, then, in a `test` with a snapshot that differs, a missing baseline or an orphan, how to update the baselines locally, then the table. A cut table keeps its first rows and ends with a note counting the rest. 1 KiB stays free for the Action's artifact link.
+- The update note names the root script whose command is exactly `visual-check update`, else `visual-check update`, and says Docker must be up unless the platform is `host`.
 - A summary that can't be written adds a warning on stderr and never changes the exit code.
 - On a `test` or `update` run's exit 2, once the command line names one, it holds the error.
 - It has no images, because a summary only shows images from public URLs.

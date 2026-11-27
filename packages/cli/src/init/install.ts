@@ -32,9 +32,13 @@ export interface DependenciesToAdd {
   specs: string[]
   /**
    * Whether the package manager saves each at the exact version it resolves to, with no `^`: the packages that move in
-   * lockstep with the CLI. The browser package keeps the CLI's range.
+   * lockstep with the CLI, and the browser package at the version the CLI names.
    */
   exact: boolean
+  /**
+   * Whether this is the browser package's add, which has a step of its own.
+   */
+  browser: boolean
 }
 
 /**
@@ -76,9 +80,16 @@ interface DependenciesToAddInput {
    */
   cliVersion: string
   /**
-   * The range of `@visual-check/chromium` the CLI works with.
+   * The range of `@visual-check/chromium` the CLI works with, which the browser is added at when `browserVersion` is
+   * `undefined`.
    */
   browserRange: string
+  /**
+   * The exact version of `@visual-check/chromium` this CLI release was packed with, the newest it was tested on: its
+   * `devDependencies` entry, which `pnpm pack` writes over `workspace:*`. `undefined` when that entry isn't a plain
+   * version, as in this repository's workspace.
+   */
+  browserVersion: string | undefined
 }
 
 /**
@@ -90,13 +101,13 @@ function missingSpecsOf(manifest: Manifest, wanted: readonly (readonly [string, 
 
 /**
  * Works out the dependencies each package still needs: the CLI for the root, the Storybook package for each Storybook,
- * and the addon for each that gets it, all exact, merged into one entry per folder; and the browser for the root at the
- * CLI's range, in an entry of its own right after the root's exact one. A package that already lists a name doesn't get
- * it again, and an entry with nothing to add is left out. The root comes first.
+ * and the addon for each that gets it, all exact, merged into one entry per folder; and the browser for the root, in an
+ * entry of its own right after the root's: exact at the version the CLI names, else at the CLI's range. A package that
+ * already lists a name doesn't get it again, and an entry with nothing to add is left out. The root comes first.
  */
 export function dependenciesToAddOf(input: DependenciesToAddInput): DependenciesToAdd[] {
-  const { root, rootManifest, storybooks, addons, cliVersion, browserRange } = input
-  const found: Omit<DependenciesToAdd, 'exact'>[] = [
+  const { root, rootManifest, storybooks, addons, cliVersion, browserRange, browserVersion } = input
+  const found: Pick<DependenciesToAdd, 'dir' | 'specs'>[] = [
     { dir: root, specs: missingSpecsOf(rootManifest, [['@visual-check/cli', cliVersion]]) },
     ...storybooks.map(({ manifestDir, manifest }) => ({
       dir: manifestDir,
@@ -115,11 +126,12 @@ export function dependenciesToAddOf(input: DependenciesToAddInput): Dependencies
     merged.set(dir, [...specsSoFar, ...specs.filter((spec) => !specsSoFar.includes(spec))])
   }
 
-  const [rootAdd, ...packageAdds] = [...merged].map(([dir, specs]) => ({ dir, specs, exact: true }))
+  const [rootAdd, ...packageAdds] = [...merged].map(([dir, specs]) => ({ dir, specs, exact: true, browser: false }))
   const browserAdd = {
     dir: root,
-    specs: missingSpecsOf(rootManifest, [['@visual-check/chromium', browserRange]]),
-    exact: false,
+    specs: missingSpecsOf(rootManifest, [['@visual-check/chromium', browserVersion ?? browserRange]]),
+    exact: browserVersion !== undefined,
+    browser: true,
   }
 
   return [rootAdd, browserAdd, ...packageAdds].filter(
@@ -223,8 +235,8 @@ const browserInstallTitle = 'Install the browser package'
  * Returns the title of the step that adds an entry: the browser's, the root's, or the one that names the package's
  * folder, relative to the root.
  */
-function installTitleOf({ dir, exact }: DependenciesToAdd, root: string): string {
-  if (!exact) {
+function installTitleOf({ dir, browser }: DependenciesToAdd, root: string): string {
+  if (browser) {
     return browserInstallTitle
   }
 

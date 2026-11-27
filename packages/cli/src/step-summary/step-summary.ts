@@ -35,6 +35,28 @@ const errorCutNote = "_The error is cut, to keep this summary under GitHub's 1 M
 const tableHead = '| Storybook | Story | Mode | Status | Message |\n| --- | --- | --- | --- | --- |'
 
 /**
+ * The `test` statuses `update` fixes, which the note on updating the baselines locally answers.
+ */
+const updatableStatuses: readonly string[] = ['differs', 'missing', 'orphan']
+
+/**
+ * How the person updates the baselines on their machine, which a failing `test`'s summary says.
+ *
+ * @public
+ */
+export interface LocalUpdate {
+  /**
+   * The name of the project's script whose command is exactly `visual-check update`, such as `visual:update`, or
+   * `undefined` when none is.
+   */
+  script: string | undefined
+  /**
+   * Whether the browser runs in Docker on the person's machine: every platform but `host`.
+   */
+  docker: boolean
+}
+
+/**
  * An entry the summary lists, of either report.
  */
 type ListedEntry = ReportEntryFields & {
@@ -79,15 +101,16 @@ export class StepSummaryError extends Error {
 
 /**
  * Builds the run's step summary in Markdown, under `budgetBytes` in UTF-8: a heading naming the version, the command,
- * the shard and whether only the consistency check ran, then the counts, the flaky snapshots, at most 100, and a table
- * of the failures in the report's order, the names and cells escaped. The table keeps its first rows that fit, and a
- * note says how many it leaves out. A run that exited 2 gives the heading and its error instead, cut to fit with a
- * note that says so, or the heading alone when not even the note fits. Gives `''` when even the part before the
- * table's rows, or the heading, doesn't fit.
+ * the shard and whether only the consistency check ran, then the counts, the flaky snapshots, at most 100, then, for a
+ * `test` with a snapshot that differs, a missing baseline or an orphan and a `localUpdate` given, how to update the
+ * baselines locally, and a table of the failures in the report's order, the names and cells escaped. The table keeps
+ * its first rows that fit, and a note says how many it leaves out. A run that exited 2 gives the heading and its error
+ * instead, cut to fit with a note that says so, or the heading alone when not even the note fits. Gives `''` when even
+ * the part before the table's rows, or the heading, doesn't fit.
  *
  * @public
  */
-export function stepSummaryOf(report: Report, budgetBytes: number): string {
+export function stepSummaryOf(report: Report, budgetBytes: number, localUpdate?: LocalUpdate): string {
   const heading = headingOf(report)
 
   if (report.error !== null) {
@@ -95,13 +118,36 @@ export function stepSummaryOf(report: Report, budgetBytes: number): string {
   }
 
   const blocks = [heading, countsOf(report), ...flakyBlockOf(report)]
-  const rows = failuresOf(report).map(rowOf)
+  const failures = failuresOf(report)
 
-  if (rows.length === 0) {
+  if (failures.length === 0) {
     return withinBudget(`${blocks.join('\n\n')}\n`, budgetBytes)
   }
 
-  return failuresSummaryOf([...blocks, '**Failures**', tableHead].join('\n\n'), rows, report, budgetBytes)
+  const head = [...blocks, ...updateNoteOf(failures, localUpdate), '**Failures**', tableHead].join('\n\n')
+
+  return failuresSummaryOf(head, failures.map(rowOf), report, budgetBytes)
+}
+
+/**
+ * Gives the note on updating the baselines locally, when the failures the summary lists hold a snapshot that differs,
+ * a missing baseline or an orphan, the failures `update` fixes. An `update`'s failures are broken stories only, so it
+ * never gets one. The note names the project's script, else `visual-check update`, and asks for Docker unless the
+ * browser runs on the host. Gives no note with no `localUpdate`.
+ */
+function updateNoteOf(failures: readonly ListedEntry[], localUpdate: LocalUpdate | undefined): string[] {
+  if (localUpdate === undefined || !failures.some((entry) => updatableStatuses.includes(entry.status))) {
+    return []
+  }
+
+  const running = localUpdate.docker ? 'Storybook running and Docker up' : 'Storybook running'
+  // The script's name holds no backtick or line break, the only characters that would break the code span.
+  const run = localUpdate.script === undefined ? '`visual-check update`' : `the \`${localUpdate.script}\` script`
+
+  return [
+    `If the changes are intended, update the baselines on your machine: with ${running}, run ${run}, ` +
+      'then commit the baselines it writes and deletes.',
+  ]
 }
 
 /**
@@ -286,16 +332,17 @@ function byteLengthOf(text: string): number {
 /**
  * Appends the run's step summary to the file at `path`, creating it when it doesn't exist, so the file stays under
  * GitHub's 1 MiB with 1 KiB left for the Action: the budget counts what the file already holds. After what it holds,
- * a blank line comes first, so the summary's heading is one. Writes nothing when no summary fits.
+ * a blank line comes first, so the summary's heading is one. A failing `test` with a `localUpdate` says how to update
+ * the baselines locally. Writes nothing when no summary fits.
  *
  * @throws {StepSummaryError} When the file can't be read or written.
  * @public
  */
-export async function appendStepSummary(path: string, report: Report): Promise<void> {
+export async function appendStepSummary(path: string, report: Report, localUpdate?: LocalUpdate): Promise<void> {
   // GitHub gives each step its own summary file, so nothing else appends between the size check and the write.
   const existingBytes = await sizeOf(path)
   const start = existingBytes === 0 ? '' : separator
-  const summary = stepSummaryOf(report, stepLimitBytes - actionBytes - existingBytes - byteLengthOf(start))
+  const summary = stepSummaryOf(report, stepLimitBytes - actionBytes - existingBytes - byteLengthOf(start), localUpdate)
 
   if (summary === '') {
     return

@@ -8,6 +8,8 @@ export type PackageManager = 'npm' | 'pnpm' | 'yarn' | 'bun'
 /**
  * The `package.json` fields `init` reads. Each is `unknown`, because a manifest is user-written JSON: read it
  * defensively.
+ *
+ * @public
  */
 export interface Manifest {
   /**
@@ -50,6 +52,8 @@ export interface Manifest {
 
 /**
  * Returns whether `value` is a JSON object: not `null`, not an array, not a text or a number.
+ *
+ * @public
  */
 export function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -80,6 +84,8 @@ export function listsDependency(manifest: Manifest, name: string): boolean {
 
 /**
  * Returns the manifest's scripts that are text, in key order. A script that isn't text is left out.
+ *
+ * @public
  */
 export function scriptsOf(manifest: Manifest): Record<string, string> {
   if (!isJsonObject(manifest.scripts)) {

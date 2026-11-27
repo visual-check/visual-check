@@ -16,7 +16,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { BrowserDownloadError } from '../browser-download/browser-download-error.js'
 import { BrowserExitedError, BrowserLaunchError } from '../capture/driver/driver.js'
 import { ContainerError } from '../container/container-error.js'
-import { pnpmAdd, pnpmAddBrowser, pnpmClosingMessage, pnpmNextSteps } from '../init/init-tools.fixture.js'
+import { browserRange, pnpmAdd, pnpmClosingMessage, pnpmNextSteps } from '../init/init-tools.fixture.js'
 import { scriptedPrompter } from '../init/prompter.fixture.js'
 import type { InitResult } from '../init/run-init.js'
 import type { StoriesFile } from '../storybook/options-read.js'
@@ -79,7 +79,7 @@ import {
   writeMarker,
   writeStaleReport,
 } from './run-cli.fixture.js'
-import { type RunCliOptions, runCli } from './run-cli.js'
+import { plainVersionOf, type RunCliOptions, runCli } from './run-cli.js'
 
 /**
  * The config key that captures with one worker, so the snapshots finish, and their lines print, in planned order.
@@ -92,9 +92,10 @@ const oneWorker = 'workers: 1'
 const pnpmAddLine = [pnpmAdd.command, ...pnpmAdd.args].join(' ')
 
 /**
- * The command that adds the browser package to the `init` project at the CLI's range, under pnpm.
+ * The command that adds the browser package to the `init` project at the CLI's range, under pnpm: in this workspace the
+ * CLI's `devDependencies` name it as `workspace:*`, no plain version.
  */
-const pnpmAddBrowserLine = [pnpmAddBrowser.command, ...pnpmAddBrowser.args].join(' ')
+const pnpmAddBrowserLine = `pnpm add --save-dev @visual-check/chromium@${browserRange}`
 
 /**
  * The terminal UI's module as `init` loads it in a terminal: a stand-in, so no test draws in the real terminal.
@@ -149,7 +150,7 @@ function createInitProject(): string {
 
 /**
  * The fakes `init` reaches outside the process with: Node 22 on Linux, a running Docker, no git files, commands that
- * succeed and a Fallow that finds nothing.
+ * succeed, a Fallow that finds nothing and a git that ignores nothing.
  */
 function initFakes(): RunCliOptions {
   return {
@@ -159,6 +160,7 @@ function initFakes(): RunCliOptions {
     listFiles: async () => [],
     runCommand: async () => 0,
     findUnlistedDependencies: async () => [],
+    findIgnoredPaths: async () => [],
   }
 }
 
@@ -176,6 +178,16 @@ function fakeInitView(answers: (string | boolean)[]) {
 afterEach(cleanUpRuns)
 
 afterAll(removeMarkerFolder)
+
+describe('plainVersionOf', () => {
+  it('keeps a plain version', () => {
+    expect(plainVersionOf('157.0.0')).toBe('157.0.0')
+  })
+
+  it.each(['0.0.0-stage', 'workspace:*', '^157.0.0', undefined])('gives nothing for %s', (spec) => {
+    expect(plainVersionOf(spec)).toBeUndefined()
+  })
+})
 
 describe('runCli', () => {
   it('prints the package version for --version', async () => {

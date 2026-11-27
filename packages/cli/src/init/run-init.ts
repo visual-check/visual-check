@@ -1,6 +1,7 @@
 import { dirname, join } from 'node:path'
 import { installSkill } from '../agent-skill/install-skill.js'
 import type { SkillSetup } from '../agent-skill/setup-file.js'
+import { claudeSkillFolder, skillFolder } from '../agent-skill/skill-files.js'
 import { BaselineError } from '../baselines/baseline-error.js'
 import { listBaselines } from '../baselines/baseline-files.js'
 import { defaultBaselinesIn } from '../config/resolve-config.js'
@@ -16,6 +17,7 @@ import {
 import { type DetectedProject, type DetectedStorybook, detectProject } from './detect-project.js'
 import { type ExistingConfig, existingConfigOf, existingStorybooksOf } from './existing-config.js'
 import { type ListFiles, relativePathOf } from './find-storybooks.js'
+import { type FindIgnoredPaths, ignoredSkillWarningOf } from './ignored-skill.js'
 import { blockingProblemsOf, dockerWarningOf, versionNotesOf } from './init-checks.js'
 import {
   type AddonStep,
@@ -80,9 +82,16 @@ export interface InitTools {
    */
   cliVersion: string
   /**
-   * The range of `@visual-check/chromium` the CLI works with, which the browser package is added at.
+   * The range of `@visual-check/chromium` the CLI works with, which the browser package is added at when
+   * `browserVersion` is `undefined`.
    */
   browserRange: string
+  /**
+   * The exact version of `@visual-check/chromium` this CLI release was packed with, the newest it was tested on: its
+   * `devDependencies` entry, which `pnpm pack` writes over `workspace:*`. `undefined` when that entry isn't a plain
+   * version, as in this repository's workspace.
+   */
+  browserVersion: string | undefined
   /**
    * Asks the questions and shows the notes that come before and between them: the terminal UI, or with `--yes` outside
    * a terminal the defaults prompter. A prompter that collects its notes in `notes`, as the defaults prompter does, has
@@ -106,6 +115,10 @@ export interface InitTools {
    * Asks Fallow for the packages the project imports and doesn't list.
    */
   findUnlistedDependencies: FindUnlistedDependencies
+  /**
+   * Asks git which of the agent skill's paths it ignores.
+   */
+  findIgnoredPaths: FindIgnoredPaths
   /**
    * Reports the steps after the questions as they happen: each one's start and end, and its command's output.
    */
@@ -216,9 +229,10 @@ const checkUnlistedTitle = 'Check for unlisted dependencies'
  * Sets up visual-check in the workspace around `cwd`. It detects the project and runs the checks that stop it, before
  * it writes or runs anything. A stop gives detection's notes, then the problems. Then it notes what detection found,
  * the Storybook versions, Docker and a config that's already there, asks its questions, writes the files that are
- * missing and the scripts, installs the agent skill when the person says yes, writing over an earlier one, adds the
- * dependencies and the addon, and asks Fallow for unlisted dependencies. A check that fails, a question the person
- * gives up on, or a failed install, exits 2.
+ * missing and the scripts, installs the agent skill when the person says yes, writing over an earlier one, and warns
+ * when git ignores its folder or its link, adds the dependencies and the addon, and asks Fallow for unlisted
+ * dependencies. It never edits the project's own `.gitignore`. A check that fails, a question the person gives up on,
+ * or a failed install, exits 2.
  *
  * @throws Any error besides the ones it words, such as a `package.json` it can't write.
  *
@@ -370,6 +384,7 @@ function installPlanOf(cwd: string, project: DetectedProject, setup: Setup, tool
     addons,
     cliVersion,
     browserRange: tools.browserRange,
+    browserVersion: tools.browserVersion,
   })
   const addonSteps = addonStepsOf({ addons, packageManager, yarnBerry, cliVersion, root })
   const context = { packageManager, yarnBerry, root, packageManagerLists: workspace.packageManagerLists }
@@ -382,11 +397,11 @@ function installPlanOf(cwd: string, project: DetectedProject, setup: Setup, tool
 }
 
 /**
- * Writes the files and the scripts, adds the dependencies and the addon, and checks for unlisted dependencies. Under
- * Rush it adds nothing and prints the install steps instead. Standard output names the scripts it replaced, then gives
- * the install steps under Rush, then the closing message. A failed install exits 2 with no closing message. The result
- * carries a summary for the terminal UI: the scripts replaced, the install steps under Rush, and the next steps unless
- * the install failed.
+ * Writes the files and the scripts, warns when git ignores the agent skill it installed, adds the dependencies and the
+ * addon, and checks for unlisted dependencies. Under Rush it adds nothing and prints the install steps instead.
+ * Standard output names the scripts it replaced, then gives the install steps under Rush, then the closing message. A
+ * failed install exits 2 with no closing message. The result carries a summary for the terminal UI: the scripts
+ * replaced, the install steps under Rush, and the next steps unless the install failed.
  */
 async function applySetup(cwd: string, project: DetectedProject, setup: Setup, tools: InitTools): Promise<InitResult> {
   const { packageManager, scripts } = setup.answers
@@ -414,13 +429,18 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
     () => writeSetupFiles(project, setup, packageScripts, tools),
     () => 'done',
   )
+  const ignoredWarnings = await ignoredSkillNotesOf(project.root, setup.skill, tools.findIgnoredPaths)
   const replacedLine = replacedScriptsLineOf(replacedScripts)
   const replacedSummary = replacedLine === undefined ? {} : { replacedLine }
   const problem = await installDependencies({ steps: installSteps, cwd, runCommand, progress })
 
   if (problem !== undefined) {
     return {
-      ...resultOf(2, replacedLine === undefined ? '' : `${replacedLine}\n`, [...setup.notes, problem]),
+      ...resultOf(2, replacedLine === undefined ? '' : `${replacedLine}\n`, [
+        ...setup.notes,
+        ...ignoredWarnings,
+        problem,
+      ]),
       summary: replacedSummary,
     }
   }
@@ -453,7 +473,7 @@ async function applySetup(cwd: string, project: DetectedProject, setup: Setup, t
     .join('\n\n')
 
   return {
-    ...resultOf(0, stdout, [...setup.notes, ...addonWarnings, ...fallowWarnings]),
+    ...resultOf(0, stdout, [...setup.notes, ...ignoredWarnings, ...addonWarnings, ...fallowWarnings]),
     summary: { ...replacedSummary, ...(manualInstall === undefined ? {} : { manualInstall }), nextSteps },
   }
 }
@@ -559,6 +579,24 @@ function scriptsToSetOf(scripts: Answers['scripts']): Record<string, string> {
   }
 
   return toSet
+}
+
+/**
+ * Asks git, when `init` installed the agent skill, whether it ignores the skill's folder or its link. Gives the warning
+ * when it ignores either, else nothing.
+ */
+async function ignoredSkillNotesOf(
+  root: string,
+  skill: SkillSetup | undefined,
+  find: FindIgnoredPaths,
+): Promise<string[]> {
+  if (skill === undefined) {
+    return []
+  }
+
+  const warning = ignoredSkillWarningOf(await find(root, [skillFolder, claudeSkillFolder]))
+
+  return warning === undefined ? [] : [warning]
 }
 
 /**

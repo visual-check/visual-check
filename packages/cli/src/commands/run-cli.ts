@@ -14,6 +14,7 @@ import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config
 import { probeDocker } from '../container/docker-probe.js'
 import { isInsideContainer } from '../container/inside-container.js'
 import { type ListFiles, listProjectFiles } from '../init/find-storybooks.js'
+import { type FindIgnoredPaths, findIgnoredPaths } from '../init/ignored-skill.js'
 import { defaultsPrompter } from '../init/prompter.js'
 import { createRunCommand, type RunCommand } from '../init/run-command.js'
 import { type InitResult, type InitTools, runInit } from '../init/run-init.js'
@@ -25,11 +26,12 @@ import { testEndLinesOf } from '../reporter/end-block.js'
 import { logReporterOf } from '../reporter/log-reporter.js'
 import { reporterOf } from '../reporter/reporter-choice.js'
 import type { RunReporter } from '../reporter/run-event.js'
-import { appendStepSummary, StepSummaryError } from '../step-summary/step-summary.js'
+import { appendStepSummary, type LocalUpdate, StepSummaryError } from '../step-summary/step-summary.js'
 import type { Story } from '../storybook/read-stories.js'
 import { readStoriesMatchers } from '../storybook/stories-matchers.js'
 import { checkStorybooks } from './check-storybooks.js'
 import { createLaunchBrowser, type LaunchBrowser } from './launch-browser.js'
+import { localUpdateOf } from './local-update.js'
 import { parseCommandLine, type RunOptions, UsageError } from './parse-command-line.js'
 import { type BrowserPlacement, type PlaceBrowserOptions, placeBrowser, workerCountOf } from './place-browser.js'
 import { type RunOutput, reportLineOf, runOutputOf } from './run-output.js'
@@ -101,6 +103,11 @@ interface RunResult extends CliResult {
    * no run.
    */
   report?: Report
+  /**
+   * How the person updates the baselines on their machine, which a failing `test`'s step summary says. Absent for
+   * `update` and for a run that stopped.
+   */
+  localUpdate?: LocalUpdate
 }
 
 /**
@@ -179,6 +186,11 @@ export interface RunCliOptions extends PlaceBrowserOptions {
    * Fallow. A test gives a fake.
    */
   findUnlistedDependencies?: FindUnlistedDependencies
+  /**
+   * Asks git which of the agent skill's paths it ignores, which `init` warns about. By default it runs
+   * `git check-ignore`. A test gives a fake.
+   */
+  findIgnoredPaths?: FindIgnoredPaths
   /**
    * Finds the files the changed files reach, which a run that covers the affected stories asks once. By default it
    * runs Fallow. A test gives a fake.
@@ -353,7 +365,7 @@ async function withStepSummary(
   environment: Record<string, string | undefined>,
   cwd: string,
 ): Promise<CliResult> {
-  const { report, ...cliResult } = result
+  const { report, localUpdate, ...cliResult } = result
   const path = environment.GITHUB_STEP_SUMMARY
 
   if (report === undefined || path === undefined || path === '') {
@@ -361,7 +373,7 @@ async function withStepSummary(
   }
 
   try {
-    await appendStepSummary(resolve(cwd, path), report)
+    await appendStepSummary(resolve(cwd, path), report, localUpdate)
   } catch (error) {
     if (error instanceof StepSummaryError) {
       // The path as the environment gives it, which the person set, rather than the resolved one.
@@ -748,7 +760,7 @@ async function selectedOutcomeOf(
   }
 
   return await withTestReport(
-    { exitCode: result.exitCode, ...output },
+    { exitCode: result.exitCode, ...output, localUpdate: localUpdateOf(config.path, config.platform) },
     context,
     { ...facts, consistencyOnly: options.consistency, shard: options.shard },
     result.checkedOnly,
@@ -909,18 +921,38 @@ interface CliManifest {
    * The range of `@visual-check/chromium` the CLI takes as a peer.
    */
   browserRange: string
+  /**
+   * The exact version of `@visual-check/chromium` this CLI release was packed with, the newest it was tested on: its
+   * `devDependencies` entry, which `pnpm pack` writes over `workspace:*`. `undefined` when that entry isn't a plain
+   * version, as in this repository's workspace.
+   */
+  browserVersion: string | undefined
 }
 
 /**
- * Reads the version and the browser package's peer range from the CLI's `package.json`.
+ * Gives a dependency spec when it's a plain version, such as `157.0.0`, else `undefined`: for a range, a prerelease, a
+ * `workspace:` spec or no spec.
+ */
+export function plainVersionOf(spec: string | undefined): string | undefined {
+  return spec !== undefined && /^\d+\.\d+\.\d+$/.test(spec) ? spec : undefined
+}
+
+/**
+ * Reads the version, the browser package's peer range and the browser version it was packed with from the CLI's
+ * `package.json`.
  */
 function readCliManifest(): CliManifest {
   const manifest = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
     version: string
     peerDependencies: { '@visual-check/chromium': string }
+    devDependencies?: { '@visual-check/chromium'?: string }
   }
 
-  return { version: manifest.version, browserRange: manifest.peerDependencies['@visual-check/chromium'] }
+  return {
+    version: manifest.version,
+    browserRange: manifest.peerDependencies['@visual-check/chromium'],
+    browserVersion: plainVersionOf(manifest.devDependencies?.['@visual-check/chromium']),
+  }
 }
 
 /**
@@ -992,7 +1024,7 @@ function isTerminal(environment: Record<string, string | undefined>): boolean {
  * Gives `init` what it runs with: how it talks to the person, then what the CLI's caller gives, else the defaults.
  */
 function initToolsOf(yes: boolean, io: InitIo, cliOptions: RunCliOptions): InitTools {
-  const { version, browserRange } = readCliManifest()
+  const { version, browserRange, browserVersion } = readCliManifest()
 
   return {
     yes,
@@ -1001,6 +1033,7 @@ function initToolsOf(yes: boolean, io: InitIo, cliOptions: RunCliOptions): InitT
     os: cliOptions.os ?? process.platform,
     cliVersion: version,
     browserRange,
+    browserVersion,
     ...initAdaptersOf(cliOptions, io.progress),
   }
 }
@@ -1012,11 +1045,12 @@ function initToolsOf(yes: boolean, io: InitIo, cliOptions: RunCliOptions): InitT
 function initAdaptersOf(
   cliOptions: RunCliOptions,
   progress: SetupProgress,
-): Pick<InitTools, 'probeDocker' | 'listFiles' | 'runCommand' | 'findUnlistedDependencies'> {
+): Pick<InitTools, 'probeDocker' | 'listFiles' | 'runCommand' | 'findUnlistedDependencies' | 'findIgnoredPaths'> {
   return {
     probeDocker: cliOptions.probeDocker ?? probeDocker,
     listFiles: cliOptions.listFiles ?? listProjectFiles,
     runCommand: cliOptions.runCommand ?? createRunCommand((text) => progress.output(text)),
     findUnlistedDependencies: cliOptions.findUnlistedDependencies ?? findUnlistedDependencies,
+    findIgnoredPaths: cliOptions.findIgnoredPaths ?? findIgnoredPaths,
   }
 }

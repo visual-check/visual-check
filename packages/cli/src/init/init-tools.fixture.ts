@@ -23,8 +23,18 @@ export const cliVersion = cliManifest.version
 
 /**
  * The browser package's range the CLI takes.
+ *
+ * @public
  */
 export const browserRange = cliManifest.peerDependencies['@visual-check/chromium']
+
+/**
+ * The version of the workspace's browser package, which stands in for the one a published CLI names in its
+ * `devDependencies`.
+ */
+export const browserVersion = (
+  JSON.parse(readFileSync(new URL('../../../chromium/package.json', import.meta.url), 'utf8')) as { version: string }
+).version
 
 /**
  * The packages `init` adds at exact versions to a project that lists none of them and gets no addon, under pnpm.
@@ -51,14 +61,14 @@ export const pnpmAdd = {
 }
 
 /**
- * The command that adds the browser package at the CLI's range to a project that doesn't list it, under pnpm, after
- * the exact ones.
+ * The command that adds the browser package at its exact version to a project that doesn't list it, under pnpm, in an
+ * add of its own after the other root packages.
  *
  * @public
  */
 export const pnpmAddBrowser = {
   command: 'pnpm',
-  args: ['add', '--save-dev', `@visual-check/chromium@${browserRange}`],
+  args: ['add', '--save-dev', '--save-exact', `@visual-check/chromium@${browserVersion}`],
 }
 
 /**
@@ -281,6 +291,7 @@ export function toolsOf(
     os: 'linux',
     cliVersion,
     browserRange,
+    browserVersion,
     probeDocker: () => {
       record.probes += 1
 
@@ -297,6 +308,7 @@ export function toolsOf(
         ? Promise.reject(behaviour.fallow)
         : Promise.resolve(behaviour.fallow ?? [])
     },
+    findIgnoredPaths: async () => [],
     prompter: defaultsPrompter(),
     progress: recording.progress,
     ...overrides,
