@@ -466,18 +466,32 @@ class CdpPage implements Page {
   }
 
   /**
-   * Overrides the device metrics with the viewport, which also serves as the screen size, and turns touch emulation on
-   * or off with it. A touch viewport is a mobile one too. The page is reused across captures, so both are set either
-   * way. The commands go in parallel. Keeps the viewport once the browser has taken it, so captures are sized in its
-   * device pixels and a touch viewport's emulation holds in them.
+   * Overrides the device metrics with the viewport, which also serves as the screen size. A touch viewport is a mobile
+   * one too. Turns touch emulation on or off only when no viewport is kept yet or the kept one's touch differs.
+   * Chromium 157 keeps touch emulation across navigations, and turning it off again on a loaded page, though it's off
+   * already, drops `(hover: hover)` and the fine pointer until the next navigation, so setting a viewport again on a
+   * loaded page keeps its hover and pointer media. The commands go in parallel. Keeps the viewport once the browser has
+   * taken it, so captures are sized in its device pixels and a touch viewport's emulation holds in them. When setting
+   * it fails, forgets the kept one, since the browser may have taken part of it, so the next call sends touch again.
    */
   async setViewport(viewport: PageViewport): Promise<void> {
     this.throwIfFailed()
-    await this.guarded(
-      this.overrideDeviceMetrics(viewport, viewport.height),
-      commandTimeLimitMs,
-      `The page didn't set its viewport within ${commandTimeLimitMs / 1000} s.`,
-    )
+
+    try {
+      await this.guarded(
+        Promise.all([
+          this.setDeviceMetrics(viewport, viewport.height),
+          ...(this.viewport?.touch === viewport.touch ? [] : [this.setTouchEmulation(viewport.touch)]),
+        ]),
+        commandTimeLimitMs,
+        `The page didn't set its viewport within ${commandTimeLimitMs / 1000} s.`,
+      )
+    } catch (error) {
+      this.viewport = undefined
+
+      throw error
+    }
+
     this.viewport = viewport
   }
 
@@ -488,8 +502,8 @@ class CdpPage implements Page {
    * does nothing: there is no viewport to grow.
    *
    * It leaves touch emulation alone, which holds through the new metrics. In Chromium 157, turning touch emulation off
-   * on a loaded page sets `(hover: none)` and drops the hover and pointer types the browser was launched with, so a
-   * page without touch would lose its hover styles until the next navigation.
+   * on a loaded page, even when it's off already, sets `(hover: none)` and drops the hover and pointer types the browser
+   * was launched with, so a page without touch would lose its hover styles until the next navigation.
    */
   async growViewportToContent(): Promise<boolean> {
     this.throwIfFailed()
@@ -798,8 +812,8 @@ class CdpPage implements Page {
    * emulation goes on again twice. First right behind the screenshot command, without waiting for its answer: Chromium
    * 157 takes that in before it paints the capture, so the capture has no hover and a coarse pointer. The protocol doesn't promise that order, so check it again on a Chromium bump: the
    * hover box in the e2e Modes stories shows a regression, as a hover style in a touch mode's snapshot. Then again
-   * once the capture is done. The next `setViewport` would turn it on anyway, but this keeps the page's contract: a
-   * touch viewport's emulation is still on after a capture, for later calls on the same page.
+   * once the capture is done. A next `setViewport` with touch leaves touch emulation alone, so this keeps the page's
+   * contract: a touch viewport's emulation is still on after a capture, for later calls on the same page.
    */
   private async captureBox(area: CaptureArea): Promise<Uint8Array> {
     const metrics = await this.send('Page.getLayoutMetrics')
@@ -825,15 +839,6 @@ class CdpPage implements Page {
     }
 
     return Buffer.from(readString(reply, 'data', 'Page.captureScreenshot'), 'base64')
-  }
-
-  /**
-   * Overrides the device metrics with the viewport's width, device scale factor and touch, at `height`, with the
-   * viewport's own size as the screen's, and turns touch emulation on or off with it. A touch viewport is a mobile one
-   * too. The commands go in parallel.
-   */
-  private overrideDeviceMetrics(viewport: PageViewport, height: number): Promise<unknown> {
-    return Promise.all([this.setDeviceMetrics(viewport, height), this.setTouchEmulation(viewport.touch)])
   }
 
   /**

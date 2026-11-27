@@ -338,7 +338,8 @@ export interface FailedLoad {
 export interface Page {
   /**
    * Sets the size the page lays out and renders at, and turns touch and mobile emulation on or off as the viewport
-   * says. Fails with a `PageTimeoutError` when the browser doesn't answer within the driver's own fixed limit.
+   * says. Setting a viewport again on a loaded page, with the same touch, keeps the page's hover and pointer media.
+   * Fails with a `PageTimeoutError` when the browser doesn't answer within the driver's own fixed limit.
    */
   setViewport: (viewport: PageViewport) => Promise<void>
   /**
