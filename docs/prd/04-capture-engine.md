@@ -30,7 +30,7 @@ v1 captures in Chromium only, through visual-check's own raw CDP driver. Nothing
 ## Transport and launch
 
 - CDP runs over a pipe (`--remote-debugging-pipe`). There's no WebSocket and no published port.
-- Launch arguments: Playwright's Chromium arguments, plus `--disable-skia-runtime-opts`, always and with no option ([ADR 0003](../adr/0003-render-in-container-on-amd64.md)).
+- Launch arguments: Playwright's Chromium arguments, plus `--disable-skia-runtime-opts`, always and with no option ([ADR 0003](../adr/0003-render-in-container-on-amd64.md)), and `--disable-partial-raster`, always and with no option. Without it, Chromium rasters only a change's rectangle of a tile, which leaves out the fringe of LCD-antialiased text, so a text that got shorter could leave a pixel of the old one in a capture taken from the viewport, some of the time.
 - The sandbox flag depends on where the browser runs ([Browser and platform](05-browser-and-platform.md)).
 - In the container, the browser starts through the image's shell with redirections, so CDP uses the container's stdin and stdout and the browser's own output goes to stderr. The image needs no extra program.
 - Chromium's stderr is always drained, because a full stderr pipe freezes the browser. Its last 50 lines are kept, and so is its last fatal log line, first among them, when a stack trace pushes it out. They're printed only with a failed launch or a browser exit.

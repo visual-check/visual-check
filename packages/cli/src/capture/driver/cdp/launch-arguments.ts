@@ -122,10 +122,16 @@ const headlessSwitches = [
 
 /**
  * Builds the arguments Chromium is launched with: Playwright's switches for a headless launch, `--no-sandbox` when the
- * sandbox is off, `--disable-skia-runtime-opts`, the proxy when one is given, then the profile folder and the CDP pipe.
+ * sandbox is off, `--disable-skia-runtime-opts` and `--disable-partial-raster`, the proxy when one is given, then the
+ * profile folder and the CDP pipe.
  *
  * `--disable-skia-runtime-opts` is visual-check's own: it turns off Skia's code paths picked by CPU at run time, so
  * gradients come out the same under Rosetta as on real amd64 runners.
+ *
+ * `--disable-partial-raster` is visual-check's own too: a tile the page changed is rastered whole, not only inside the
+ * change's rectangle. Chromium's rectangle for text leaves out the fringe of LCD antialiasing, so with partial raster a
+ * text that gets shorter can leave a pixel of the old text's fringe behind, and now and then Chromium rasters the tile
+ * whole anyway, so the same story gave one capture or the other.
  *
  * The proxy is `--proxy-server` with `--proxy-bypass-list=<-loopback>`, which removes Chromium's implicit bypass of
  * loopback addresses, so a Storybook on `localhost` is reached through the proxy too.
@@ -136,6 +142,7 @@ export function launchArguments(options: { sandbox: boolean; profileDir: string;
     ...headlessSwitches,
     ...(options.sandbox ? [] : ['--no-sandbox']),
     '--disable-skia-runtime-opts',
+    '--disable-partial-raster',
     ...(options.proxyServer === undefined
       ? []
       : [`--proxy-server=${options.proxyServer}`, '--proxy-bypass-list=<-loopback>']),

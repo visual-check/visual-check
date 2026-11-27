@@ -46,29 +46,32 @@ describe('launchArguments', () => {
       '--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4',
       '--no-sandbox',
       '--disable-skia-runtime-opts',
+      '--disable-partial-raster',
       '--user-data-dir=/profile',
       '--remote-debugging-pipe',
       '--no-startup-window',
     ])
   })
 
-  it('leaves out --no-sandbox when the sandbox is on, and keeps --disable-skia-runtime-opts', () => {
+  it("leaves out --no-sandbox when the sandbox is on, and keeps visual-check's own switches", () => {
     const browserArguments = launchArguments({ sandbox: true, profileDir: '/profile' })
 
     expect(browserArguments).not.toContain('--no-sandbox')
     expect(browserArguments).toContain('--disable-skia-runtime-opts')
+    expect(browserArguments).toContain('--disable-partial-raster')
     expect(browserArguments).toHaveLength(launchArguments({ sandbox: false, profileDir: '/profile' }).length - 1)
   })
 
-  it("sends every request through the proxy, loopback included, after visual-check's own switch", () => {
+  it("sends every request through the proxy, loopback included, after visual-check's own switches", () => {
     const browserArguments = launchArguments({
       sandbox: false,
       profileDir: '/profile',
       proxyServer: 'socks5://host.docker.internal:40123',
     })
 
-    expect(browserArguments.slice(-6)).toEqual([
+    expect(browserArguments.slice(-7)).toEqual([
       '--disable-skia-runtime-opts',
+      '--disable-partial-raster',
       '--proxy-server=socks5://host.docker.internal:40123',
       '--proxy-bypass-list=<-loopback>',
       '--user-data-dir=/profile',
