@@ -85,7 +85,7 @@ The three packages of the lockstep group always share one version and release to
 `init` installs the packages ([Config and init](03-config-and-init.md)):
 
 - `@visual-check/cli` as a devDependency of the workspace root, at the CLI's exact version, with no `^`.
-- `@visual-check/chromium` as a devDependency of the workspace root, in an add of its own at the CLI's peer range, even where npm would install the peer by itself, so Renovate sees it.
+- `@visual-check/chromium` as a devDependency of the workspace root, in an add of its own at the exact version the CLI release names, the newest browser package it was tested on (with the exact flag, so every package manager saves it exactly whatever the project's `save-prefix`), even where npm would install the peer by itself, so Renovate sees it. ADR 0007: the project chooses when its browser changes.
 - `@visual-check/storybook`, at the CLI's exact version, as a devDependency of the deepest workspace package with a `package.json` holding each Storybook's `configDir`, else the root.
 - The addon at the CLI's exact version in the same package, for each Storybook on 10 that the developer ticks. `init` adds it, runs `storybook add … --skip-install`, then sets the spec back to exact, because `storybook add` writes a `^` range.
 - Under Rush, `init` prints the install steps and installs nothing.

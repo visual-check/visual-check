@@ -60,18 +60,38 @@ afterEach(() => {
 })
 
 describe('dependenciesToAddOf', () => {
-  const base = { root: '/p', rootManifest: {}, addons: [], cliVersion: '0.0.0', browserRange: '^157.0.0' }
+  const base = {
+    root: '/p',
+    rootManifest: {},
+    addons: [],
+    cliVersion: '0.0.0',
+    browserRange: '^157.0.0',
+    browserVersion: '157.0.0',
+  }
 
   /**
-   * The browser entry the root gets when it doesn't list the browser: the CLI's range, not exact.
+   * The browser entry the root gets when it doesn't list the browser: the version the CLI names, exact.
    */
-  const browserAdd = { dir: '/p', specs: ['@visual-check/chromium@^157.0.0'], exact: false }
+  const browserAdd = { dir: '/p', specs: ['@visual-check/chromium@157.0.0'], exact: true, browser: true }
 
-  it('adds the CLI and the Storybook package exactly, then the browser at its range, when nothing is listed', () => {
+  it("adds the browser at the CLI's range, not exact, when the CLI names no version of it", () => {
+    const manifest = { devDependencies: { '@visual-check/cli': '1', '@visual-check/storybook': '1' } }
+
+    expect(
+      dependenciesToAddOf({
+        ...base,
+        browserVersion: undefined,
+        rootManifest: manifest,
+        storybooks: [{ manifestDir: '/p', manifest }],
+      }),
+    ).toEqual([{ dir: '/p', specs: ['@visual-check/chromium@^157.0.0'], exact: false, browser: true }])
+  })
+
+  it('adds the CLI and the Storybook package exactly, then the browser exactly in an add of its own, when nothing is listed', () => {
     const storybooks = [{ manifestDir: '/p', manifest: {} }]
 
     expect(dependenciesToAddOf({ ...base, storybooks })).toEqual([
-      { dir: '/p', specs: ['@visual-check/cli@0.0.0', '@visual-check/storybook@0.0.0'], exact: true },
+      { dir: '/p', specs: ['@visual-check/cli@0.0.0', '@visual-check/storybook@0.0.0'], exact: true, browser: false },
       browserAdd,
     ])
   })
@@ -81,7 +101,7 @@ describe('dependenciesToAddOf', () => {
     const storybooks = [{ manifestDir: '/p', manifest }]
 
     expect(dependenciesToAddOf({ ...base, rootManifest: manifest, storybooks })).toEqual([
-      { dir: '/p', specs: ['@visual-check/storybook@0.0.0'], exact: true },
+      { dir: '/p', specs: ['@visual-check/storybook@0.0.0'], exact: true, browser: false },
       browserAdd,
     ])
   })
@@ -112,7 +132,7 @@ describe('dependenciesToAddOf', () => {
     ]
 
     expect(dependenciesToAddOf({ ...base, storybooks })).toEqual([
-      { dir: '/p', specs: ['@visual-check/cli@0.0.0', '@visual-check/storybook@0.0.0'], exact: true },
+      { dir: '/p', specs: ['@visual-check/cli@0.0.0', '@visual-check/storybook@0.0.0'], exact: true, browser: false },
       browserAdd,
     ])
   })
@@ -121,9 +141,9 @@ describe('dependenciesToAddOf', () => {
     const storybooks = [{ manifestDir: '/p/app', manifest: {} }]
 
     expect(dependenciesToAddOf({ ...base, storybooks })).toEqual([
-      { dir: '/p', specs: ['@visual-check/cli@0.0.0'], exact: true },
+      { dir: '/p', specs: ['@visual-check/cli@0.0.0'], exact: true, browser: false },
       browserAdd,
-      { dir: '/p/app', specs: ['@visual-check/storybook@0.0.0'], exact: true },
+      { dir: '/p/app', specs: ['@visual-check/storybook@0.0.0'], exact: true, browser: false },
     ])
   })
 
@@ -135,12 +155,13 @@ describe('dependenciesToAddOf', () => {
     ]
 
     expect(dependenciesToAddOf({ ...base, storybooks, addons })).toEqual([
-      { dir: '/p', specs: ['@visual-check/cli@0.0.0'], exact: true },
+      { dir: '/p', specs: ['@visual-check/cli@0.0.0'], exact: true, browser: false },
       browserAdd,
       {
         dir: '/p/app',
         specs: ['@visual-check/storybook@0.0.0', '@visual-check/storybook-addon@0.0.0'],
         exact: true,
+        browser: false,
       },
     ])
   })
@@ -155,16 +176,17 @@ describe('dependenciesToAddOf', () => {
         addons: [{ manifestDir: '/p/app', manifest }],
       }),
     ).toEqual([
-      { dir: '/p', specs: ['@visual-check/cli@0.0.0'], exact: true },
+      { dir: '/p', specs: ['@visual-check/cli@0.0.0'], exact: true, browser: false },
       browserAdd,
-      { dir: '/p/app', specs: ['@visual-check/storybook@0.0.0'], exact: true },
+      { dir: '/p/app', specs: ['@visual-check/storybook@0.0.0'], exact: true, browser: false },
     ])
   })
 })
 
 describe('installStepsOf', () => {
   const rootSpecs = ['@visual-check/cli@1.0.0']
-  const browserSpecs = ['@visual-check/chromium@^157.0.0']
+  const browserSpecs = ['@visual-check/chromium@157.0.0']
+  const browserRangeSpecs = ['@visual-check/chromium@^157.0.0']
   const packageSpecs = ['@visual-check/storybook@1.0.0']
 
   /**
@@ -193,7 +215,7 @@ describe('installStepsOf', () => {
    */
   function planned(
     packageManager: PackageManager,
-    install: { dir: string; specs: string[]; exact: boolean },
+    install: { dir: string; specs: string[]; exact: boolean; browser: boolean },
     packageManagerLists: PackageManagerLists,
     yarnBerry = false,
   ): [string, string][] {
@@ -213,14 +235,22 @@ describe('installStepsOf', () => {
     ['Yarn 4', 'yarn', true, 'yarn add --dev --exact', 'yarn add --dev'],
     ['bun', 'bun', false, 'bun add --dev --exact', 'bun add --dev'],
   ])(
-    'adds at a lone root under %s: exact, then the browser at its range',
+    'adds at a lone root under %s: exact, the browser exact too, or at its range when the CLI names no version',
     (_, packageManager, yarnBerry, exact, ranged) => {
-      expect(planned(packageManager, { dir: '/p', specs: rootSpecs, exact: true }, noLists, yarnBerry)).toEqual([
-        ['/p', `${exact} ${rootSpecs.join(' ')}`],
-      ])
-      expect(planned(packageManager, { dir: '/p', specs: browserSpecs, exact: false }, noLists, yarnBerry)).toEqual([
-        ['/p', `${ranged} ${browserSpecs.join(' ')}`],
-      ])
+      expect(
+        planned(packageManager, { dir: '/p', specs: rootSpecs, exact: true, browser: false }, noLists, yarnBerry),
+      ).toEqual([['/p', `${exact} ${rootSpecs.join(' ')}`]])
+      expect(
+        planned(packageManager, { dir: '/p', specs: browserSpecs, exact: true, browser: true }, noLists, yarnBerry),
+      ).toEqual([['/p', `${exact} ${browserSpecs.join(' ')}`]])
+      expect(
+        planned(
+          packageManager,
+          { dir: '/p', specs: browserRangeSpecs, exact: false, browser: true },
+          noLists,
+          yarnBerry,
+        ),
+      ).toEqual([['/p', `${ranged} ${browserRangeSpecs.join(' ')}`]])
     },
   )
 
@@ -235,19 +265,22 @@ describe('installStepsOf', () => {
     (_, packageManager, yarnBerry, exact, ranged) => {
       const lists = listsFor(packageManager)
 
-      expect(planned(packageManager, { dir: '/p', specs: rootSpecs, exact: true }, lists, yarnBerry)).toEqual([
-        ['/p', `${exact} ${rootSpecs.join(' ')}`],
-      ])
-      expect(planned(packageManager, { dir: '/p', specs: browserSpecs, exact: false }, lists, yarnBerry)).toEqual([
-        ['/p', `${ranged} ${browserSpecs.join(' ')}`],
-      ])
+      expect(
+        planned(packageManager, { dir: '/p', specs: rootSpecs, exact: true, browser: false }, lists, yarnBerry),
+      ).toEqual([['/p', `${exact} ${rootSpecs.join(' ')}`]])
+      expect(
+        planned(packageManager, { dir: '/p', specs: browserSpecs, exact: true, browser: true }, lists, yarnBerry),
+      ).toEqual([['/p', `${exact} ${browserSpecs.join(' ')}`]])
+      expect(
+        planned(packageManager, { dir: '/p', specs: browserRangeSpecs, exact: false, browser: true }, lists, yarnBerry),
+      ).toEqual([['/p', `${ranged} ${browserRangeSpecs.join(' ')}`]])
     },
   )
 
   it('adds -w at a pnpm root whose pnpm-workspace.yaml lists no packages', () => {
     const lists = { pnpm: [], workspaces: undefined }
 
-    expect(planned('pnpm', { dir: '/p', specs: rootSpecs, exact: true }, lists)).toEqual([
+    expect(planned('pnpm', { dir: '/p', specs: rootSpecs, exact: true, browser: false }, lists)).toEqual([
       ['/p', `pnpm add --save-dev --save-exact -w ${rootSpecs.join(' ')}`],
     ])
   })
@@ -258,7 +291,7 @@ describe('installStepsOf', () => {
   ])(
     'takes no root flag under %s when only another package manager lists packages',
     (packageManager, lists, command) => {
-      expect(planned(packageManager, { dir: '/p', specs: rootSpecs, exact: true }, lists)).toEqual([
+      expect(planned(packageManager, { dir: '/p', specs: rootSpecs, exact: true, browser: false }, lists)).toEqual([
         ['/p', `${command} ${rootSpecs.join(' ')}`],
       ])
     },
@@ -271,7 +304,7 @@ describe('installStepsOf', () => {
     ['Yarn 4', 'yarn', true, '/p/packages/ui', 'yarn add --dev --exact'],
     ['bun', 'bun', false, '/p/packages/ui', 'bun add --dev --exact'],
   ])('adds to a package its list names under %s', (_, packageManager, yarnBerry, runDir, command) => {
-    const install = { dir: '/p/packages/ui', specs: packageSpecs, exact: true }
+    const install = { dir: '/p/packages/ui', specs: packageSpecs, exact: true, browser: false }
 
     expect(planned(packageManager, install, listsFor(packageManager), yarnBerry)).toEqual([
       [runDir, `${command} ${packageSpecs.join(' ')}`],
@@ -285,7 +318,7 @@ describe('installStepsOf', () => {
     ['Yarn 4', 'yarn', true, 'yarn add --dev --exact'],
     ['bun', 'bun', false, 'bun add --dev --exact'],
   ])("adds in the folder of a package its list doesn't name under %s", (_, packageManager, yarnBerry, command) => {
-    const install = { dir: '/p/libs/ui', specs: packageSpecs, exact: true }
+    const install = { dir: '/p/libs/ui', specs: packageSpecs, exact: true, browser: false }
 
     expect(planned(packageManager, install, listsFor(packageManager), yarnBerry)).toEqual([
       ['/p/libs/ui', `${command} ${packageSpecs.join(' ')}`],
@@ -295,9 +328,9 @@ describe('installStepsOf', () => {
   it('keeps the order of the entries, each titled after what it installs and where', () => {
     const steps = installStepsOf({
       installs: [
-        { dir: '/p', specs: rootSpecs, exact: true },
-        { dir: '/p', specs: browserSpecs, exact: false },
-        { dir: '/p/packages/ui', specs: packageSpecs, exact: true },
+        { dir: '/p', specs: rootSpecs, exact: true, browser: false },
+        { dir: '/p', specs: browserSpecs, exact: true, browser: true },
+        { dir: '/p/packages/ui', specs: packageSpecs, exact: true, browser: false },
       ],
       packageManager: 'npm',
       yarnBerry: false,
@@ -314,7 +347,7 @@ describe('installStepsOf', () => {
       {
         title: 'Install the browser package',
         dir: '/p',
-        commandLine: { command: 'npm', args: ['install', '--save-dev', ...browserSpecs] },
+        commandLine: { command: 'npm', args: ['install', '--save-dev', '--save-exact', ...browserSpecs] },
       },
       {
         title: "Install visual-check's packages in packages/ui",
@@ -677,12 +710,13 @@ describe('rushInstallOf', () => {
     packageManagerLists: { pnpm: undefined, workspaces: undefined },
   }
   const installs = [
-    { dir: '/p', specs: ['@visual-check/cli@1.0.0'], exact: true },
-    { dir: '/p', specs: ['@visual-check/chromium@^157.0.0'], exact: false },
+    { dir: '/p', specs: ['@visual-check/cli@1.0.0'], exact: true, browser: false },
+    { dir: '/p', specs: ['@visual-check/chromium@157.0.0'], exact: true, browser: true },
     {
       dir: '/p/libs/ui',
       specs: ['@visual-check/storybook@1.0.0', '@visual-check/storybook-addon@1.0.0'],
       exact: true,
+      browser: false,
     },
   ]
   const addonSteps = addonStepsOf({
@@ -707,23 +741,27 @@ describe('rushInstallOf', () => {
       commands: [
         'cd libs/ui && pnpm exec storybook add @visual-check/storybook-addon@1.0.0 --yes --skip-install -c docs',
         'pnpm add --save-dev --save-exact @visual-check/cli@1.0.0',
-        'pnpm add --save-dev "@visual-check/chromium@^157.0.0"',
+        'pnpm add --save-dev --save-exact @visual-check/chromium@157.0.0',
         'cd libs/ui && rush add --dev --exact --skip-update -p @visual-check/storybook@1.0.0 -p @visual-check/storybook-addon@1.0.0',
         'rush update',
       ],
     })
   })
 
-  it("uses Rush's package manager's own flags at the root, and quotes a spec holding ^", () => {
+  it("uses Rush's package manager's own flags at the root, and quotes a spec holding ^ in the browser's range", () => {
     const manualInstall = rushInstallOf({
       ...context,
       packageManager: 'yarn',
-      installs: installs.slice(0, 2),
+      installs: [
+        ...installs.slice(0, 2),
+        { dir: '/p', specs: ['@visual-check/chromium@^157.0.0'], exact: false, browser: true },
+      ],
       addonSteps: [],
     })
 
-    expect(manualInstall?.commands.slice(0, 2)).toEqual([
+    expect(manualInstall?.commands.slice(0, 3)).toEqual([
       'yarn add --dev --exact @visual-check/cli@1.0.0',
+      'yarn add --dev --exact @visual-check/chromium@157.0.0',
       'yarn add --dev "@visual-check/chromium@^157.0.0"',
     ])
   })
@@ -731,7 +769,7 @@ describe('rushInstallOf', () => {
   it('quotes a spec holding ^ in rush add', () => {
     const manualInstall = rushInstallOf({
       ...context,
-      installs: [{ dir: '/p/libs/ui', specs: ['a@^1.0.0'], exact: true }],
+      installs: [{ dir: '/p/libs/ui', specs: ['a@^1.0.0'], exact: true, browser: false }],
       addonSteps: [],
     })
 

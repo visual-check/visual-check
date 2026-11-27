@@ -1126,22 +1126,36 @@ function readManifest(path: string): Required<Manifest> {
 }
 
 /**
- * Gives the spec `init` adds each of its own packages at, by the folder of the package it adds them to: the CLI at the
- * packed CLI's exact version and `@visual-check/chromium` at the CLI's peer range at the root, and
- * `@visual-check/storybook` and the addon at the CLI's exact version in each Storybook's package.
+ * Gives the exact version of `@visual-check/chromium` the packed CLI names in its `devDependencies`, which `pnpm pack`
+ * writes over `workspace:*`.
  *
- * @throws {Error} When the packed CLI has no peer dependency on `@visual-check/chromium`.
+ * @throws {Error} When that entry is missing or isn't a plain version.
  */
-function addedDependencySpecsOf(check: Check): Map<string, Record<string, string>> {
-  const { version, peerDependencies } = cliTarballOf(check).manifest
-  const browserRange = peerDependencies?.['@visual-check/chromium']
+function packedBrowserVersionOf(check: Check): string {
+  const browserVersion = cliTarballOf(check).manifest.devDependencies?.['@visual-check/chromium']
 
-  if (browserRange === undefined) {
-    throw new Error("The packed CLI's package.json has no peer dependency on @visual-check/chromium")
+  if (browserVersion === undefined || !/^\d+\.\d+\.\d+$/.test(browserVersion)) {
+    throw new Error(
+      "The packed CLI's package.json names no plain version of @visual-check/chromium in its devDependencies, " +
+        `it has ${describedValueOf(browserVersion)}`,
+    )
   }
 
+  return browserVersion
+}
+
+/**
+ * Gives the spec `init` adds each of its own packages at, by the folder of the package it adds them to: the CLI at the
+ * packed CLI's exact version and `@visual-check/chromium` at the exact version the packed CLI names in its
+ * `devDependencies` at the root, and `@visual-check/storybook` and the addon at the CLI's exact version in each
+ * Storybook's package.
+ *
+ * @throws {Error} When the packed CLI names no plain version of `@visual-check/chromium` in its `devDependencies`.
+ */
+function addedDependencySpecsOf(check: Check): Map<string, Record<string, string>> {
+  const { version } = cliTarballOf(check).manifest
   const specs = new Map<string, Record<string, string>>([
-    ['.', { '@visual-check/cli': version, '@visual-check/chromium': browserRange }],
+    ['.', { '@visual-check/cli': version, '@visual-check/chromium': packedBrowserVersionOf(check) }],
   ])
 
   for (const dir of check.fixture.storybookDirs) {

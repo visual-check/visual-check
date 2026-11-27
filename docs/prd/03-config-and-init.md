@@ -169,7 +169,7 @@ Yarn 4 refuses a package version published less than a day ago by default (`npmM
 - **The root `.visual-check/.gitignore`.**
 - **Dependencies,** as [Packages](01-packages.md) lists them:
   - `@visual-check/cli`, `@visual-check/storybook` and `@visual-check/storybook-addon` at the CLI's exact version (`--save-exact`, or `--exact` for Yarn and Bun);
-  - `@visual-check/chromium` at the CLI's peer range, in an add of its own at the root;
+  - `@visual-check/chromium` at the exact version the CLI release names, in an add of its own at the root, with the exact flag;
   - the CLI and the browser go to the workspace root, and `@visual-check/storybook` and the addon to each Storybook's package, which is the deepest workspace package holding it that has a `package.json`, else the root;
   - at a root that is a workspace, pnpm adds with `-w` and Yarn 1 with `-W`. npm adds to a listed package from the root with `--workspace <dir>`; the others add from the package's folder;
   - a package only Nx or Lerna lists gets its add in its own folder, where npm leaves a nested lockfile and Yarn 2 and later refuse;

@@ -80,9 +80,16 @@ export interface InitTools {
    */
   cliVersion: string
   /**
-   * The range of `@visual-check/chromium` the CLI works with, which the browser package is added at.
+   * The range of `@visual-check/chromium` the CLI works with, which the browser package is added at when
+   * `browserVersion` is `undefined`.
    */
   browserRange: string
+  /**
+   * The exact version of `@visual-check/chromium` this CLI release was packed with, the newest it was tested on: its
+   * `devDependencies` entry, which `pnpm pack` writes over `workspace:*`. `undefined` when that entry isn't a plain
+   * version, as in this repository's workspace.
+   */
+  browserVersion: string | undefined
   /**
    * Asks the questions and shows the notes that come before and between them: the terminal UI, or with `--yes` outside
    * a terminal the defaults prompter. A prompter that collects its notes in `notes`, as the defaults prompter does, has
@@ -370,6 +377,7 @@ function installPlanOf(cwd: string, project: DetectedProject, setup: Setup, tool
     addons,
     cliVersion,
     browserRange: tools.browserRange,
+    browserVersion: tools.browserVersion,
   })
   const addonSteps = addonStepsOf({ addons, packageManager, yarnBerry, cliVersion, root })
   const context = { packageManager, yarnBerry, root, packageManagerLists: workspace.packageManagerLists }

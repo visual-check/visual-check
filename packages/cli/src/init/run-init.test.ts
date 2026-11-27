@@ -5,7 +5,7 @@ import { skillSourcePaths, skillVersionOf } from '../agent-skill/skill-markdown.
 import { ContainerError, DockerMissingError } from '../container/container-error.js'
 import { closingMessageTextOf } from './closing-message.js'
 import {
-  browserRange,
+  browserVersion,
   cliVersion,
   commandsIn,
   gitignore,
@@ -803,7 +803,7 @@ To run visual-check in CI, see https://visual-check.vercel.app/docs/ci.
         commandsIn(
           root,
           { command: 'yarn', args: ['add', '--dev', '--exact', ...pnpmAdd.args.slice(3)] },
-          { command: 'yarn', args: ['add', '--dev', ...pnpmAddBrowser.args.slice(2)] },
+          { command: 'yarn', args: ['add', '--dev', '--exact', ...pnpmAddBrowser.args.slice(3)] },
           { command: 'npx', args: ['--no-install', ...pnpmAddon.args.slice(1)] },
         ),
       )
@@ -915,7 +915,11 @@ describe('runInit in a workspace', () => {
         args: ['add', '--save-dev', '--save-exact', '-w', `@visual-check/cli@${cliVersion}`],
         cwd: root,
       },
-      { command: 'pnpm', args: ['add', '--save-dev', '-w', `@visual-check/chromium@${browserRange}`], cwd: root },
+      {
+        command: 'pnpm',
+        args: ['add', '--save-dev', '--save-exact', '-w', `@visual-check/chromium@${browserVersion}`],
+        cwd: root,
+      },
       {
         command: 'pnpm',
         args: ['add', '--save-dev', '--save-exact', `@visual-check/storybook@${cliVersion}`],
@@ -1109,7 +1113,11 @@ export default defineConfig({
         args: ['add', '--save-dev', '--save-exact', '-w', `@visual-check/cli@${cliVersion}`],
         cwd: root,
       },
-      { command: 'pnpm', args: ['add', '--save-dev', '-w', `@visual-check/chromium@${browserRange}`], cwd: root },
+      {
+        command: 'pnpm',
+        args: ['add', '--save-dev', '--save-exact', '-w', `@visual-check/chromium@${browserVersion}`],
+        cwd: root,
+      },
       {
         command: 'pnpm',
         args: ['add', '--save-dev', '--save-exact', ...storybookSpecs],
@@ -1162,7 +1170,11 @@ export default defineConfig({
     expect(result.exitCode).toBe(0)
     expect(record.commands).toEqual([
       { command: 'npm', args: ['install', '--save-dev', '--save-exact', `@visual-check/cli@${cliVersion}`], cwd: root },
-      { command: 'npm', args: ['install', '--save-dev', `@visual-check/chromium@${browserRange}`], cwd: root },
+      {
+        command: 'npm',
+        args: ['install', '--save-dev', '--save-exact', `@visual-check/chromium@${browserVersion}`],
+        cwd: root,
+      },
       {
         command: 'npm',
         args: ['install', '--save-dev', '--save-exact', ...storybookSpecs],
@@ -1204,7 +1216,7 @@ export default defineConfig({
       commands: [
         `cd libs/ui && pnpm exec storybook add @visual-check/storybook-addon@${cliVersion} --yes --skip-install`,
         `pnpm add --save-dev --save-exact @visual-check/cli@${cliVersion}`,
-        `pnpm add --save-dev "@visual-check/chromium@${browserRange}"`,
+        `pnpm add --save-dev --save-exact @visual-check/chromium@${browserVersion}`,
         `cd libs/ui && rush add --dev --exact --skip-update -p @visual-check/storybook@${cliVersion} ` +
           `-p @visual-check/storybook-addon@${cliVersion}`,
         'rush update',

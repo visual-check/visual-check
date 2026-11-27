@@ -909,18 +909,38 @@ interface CliManifest {
    * The range of `@visual-check/chromium` the CLI takes as a peer.
    */
   browserRange: string
+  /**
+   * The exact version of `@visual-check/chromium` this CLI release was packed with, the newest it was tested on: its
+   * `devDependencies` entry, which `pnpm pack` writes over `workspace:*`. `undefined` when that entry isn't a plain
+   * version, as in this repository's workspace.
+   */
+  browserVersion: string | undefined
 }
 
 /**
- * Reads the version and the browser package's peer range from the CLI's `package.json`.
+ * Gives a dependency spec when it's a plain version, such as `157.0.0`, else `undefined`: for a range, a prerelease, a
+ * `workspace:` spec or no spec.
+ */
+export function plainVersionOf(spec: string | undefined): string | undefined {
+  return spec !== undefined && /^\d+\.\d+\.\d+$/.test(spec) ? spec : undefined
+}
+
+/**
+ * Reads the version, the browser package's peer range and the browser version it was packed with from the CLI's
+ * `package.json`.
  */
 function readCliManifest(): CliManifest {
   const manifest = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
     version: string
     peerDependencies: { '@visual-check/chromium': string }
+    devDependencies?: { '@visual-check/chromium'?: string }
   }
 
-  return { version: manifest.version, browserRange: manifest.peerDependencies['@visual-check/chromium'] }
+  return {
+    version: manifest.version,
+    browserRange: manifest.peerDependencies['@visual-check/chromium'],
+    browserVersion: plainVersionOf(manifest.devDependencies?.['@visual-check/chromium']),
+  }
 }
 
 /**
@@ -992,7 +1012,7 @@ function isTerminal(environment: Record<string, string | undefined>): boolean {
  * Gives `init` what it runs with: how it talks to the person, then what the CLI's caller gives, else the defaults.
  */
 function initToolsOf(yes: boolean, io: InitIo, cliOptions: RunCliOptions): InitTools {
-  const { version, browserRange } = readCliManifest()
+  const { version, browserRange, browserVersion } = readCliManifest()
 
   return {
     yes,
@@ -1001,6 +1021,7 @@ function initToolsOf(yes: boolean, io: InitIo, cliOptions: RunCliOptions): InitT
     os: cliOptions.os ?? process.platform,
     cliVersion: version,
     browserRange,
+    browserVersion,
     ...initAdaptersOf(cliOptions, io.progress),
   }
 }
