@@ -150,7 +150,7 @@ function createInitProject(): string {
 
 /**
  * The fakes `init` reaches outside the process with: Node 22 on Linux, a running Docker, no git files, commands that
- * succeed and a Fallow that finds nothing.
+ * succeed, a Fallow that finds nothing and a git that ignores nothing.
  */
 function initFakes(): RunCliOptions {
   return {
@@ -160,6 +160,7 @@ function initFakes(): RunCliOptions {
     listFiles: async () => [],
     runCommand: async () => 0,
     findUnlistedDependencies: async () => [],
+    findIgnoredPaths: async () => [],
   }
 }
 

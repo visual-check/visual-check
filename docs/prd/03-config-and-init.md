@@ -217,6 +217,7 @@ It warns and still writes when:
 - no Docker is found on Windows. The warning adds that if Docker runs inside WSL, visual-check should run from inside WSL too;
 - two Storybooks share a port;
 - a URL's port doesn't match its start command;
+- git ignores the agent skill's folder or its link: it names each path and the rule that ignores it, and leaves `.gitignore` alone;
 - Fallow finds unlisted dependencies, because a missed `viteFinal` alias shows up as one;
 - `storybook add` fails.
 

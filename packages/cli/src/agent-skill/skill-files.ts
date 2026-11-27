@@ -4,11 +4,15 @@ import { skillMarkdownOf, skillSourcePaths } from './skill-markdown.js'
 
 /**
  * Where `init` installs the agent skill, relative to the workspace root.
+ *
+ * @public
  */
 export const skillFolder = join('.agents', 'skills', 'visual-check')
 
 /**
  * Where Claude Code reads the skill, relative to the workspace root: a link to `skillFolder`, or a copy on Windows.
+ *
+ * @public
  */
 export const claudeSkillFolder = join('.claude', 'skills', 'visual-check')
 

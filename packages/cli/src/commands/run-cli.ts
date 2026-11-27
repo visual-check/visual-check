@@ -14,6 +14,7 @@ import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config
 import { probeDocker } from '../container/docker-probe.js'
 import { isInsideContainer } from '../container/inside-container.js'
 import { type ListFiles, listProjectFiles } from '../init/find-storybooks.js'
+import { type FindIgnoredPaths, findIgnoredPaths } from '../init/ignored-skill.js'
 import { defaultsPrompter } from '../init/prompter.js'
 import { createRunCommand, type RunCommand } from '../init/run-command.js'
 import { type InitResult, type InitTools, runInit } from '../init/run-init.js'
@@ -179,6 +180,11 @@ export interface RunCliOptions extends PlaceBrowserOptions {
    * Fallow. A test gives a fake.
    */
   findUnlistedDependencies?: FindUnlistedDependencies
+  /**
+   * Asks git which of the agent skill's paths it ignores, which `init` warns about. By default it runs
+   * `git check-ignore`. A test gives a fake.
+   */
+  findIgnoredPaths?: FindIgnoredPaths
   /**
    * Finds the files the changed files reach, which a run that covers the affected stories asks once. By default it
    * runs Fallow. A test gives a fake.
@@ -1033,11 +1039,12 @@ function initToolsOf(yes: boolean, io: InitIo, cliOptions: RunCliOptions): InitT
 function initAdaptersOf(
   cliOptions: RunCliOptions,
   progress: SetupProgress,
-): Pick<InitTools, 'probeDocker' | 'listFiles' | 'runCommand' | 'findUnlistedDependencies'> {
+): Pick<InitTools, 'probeDocker' | 'listFiles' | 'runCommand' | 'findUnlistedDependencies' | 'findIgnoredPaths'> {
   return {
     probeDocker: cliOptions.probeDocker ?? probeDocker,
     listFiles: cliOptions.listFiles ?? listProjectFiles,
     runCommand: cliOptions.runCommand ?? createRunCommand((text) => progress.output(text)),
     findUnlistedDependencies: cliOptions.findUnlistedDependencies ?? findUnlistedDependencies,
+    findIgnoredPaths: cliOptions.findIgnoredPaths ?? findIgnoredPaths,
   }
 }

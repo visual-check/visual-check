@@ -595,6 +595,7 @@ type InitOnlyOption =
   | 'listFiles'
   | 'runCommand'
   | 'findUnlistedDependencies'
+  | 'findIgnoredPaths'
 
 /**
  * Builds options whose every launch writes pull progress and gives a fresh fake driver of the given version, answering

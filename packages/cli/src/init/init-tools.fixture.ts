@@ -308,6 +308,7 @@ export function toolsOf(
         ? Promise.reject(behaviour.fallow)
         : Promise.resolve(behaviour.fallow ?? [])
     },
+    findIgnoredPaths: async () => [],
     prompter: defaultsPrompter(),
     progress: recording.progress,
     ...overrides,
