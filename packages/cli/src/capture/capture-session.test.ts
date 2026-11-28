@@ -74,6 +74,11 @@ function pass(ms: number): void {
   vi.advanceTimersByTime(ms)
 }
 
+/**
+ * The answer of a wait hook that ran and settled well.
+ */
+const ran = { outcome: 'done' }
+
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['performance'] })
 })
@@ -391,11 +396,6 @@ describe('a capture', () => {
 })
 
 describe("the story's wait hook", () => {
-  /**
-   * The answer of a wait hook that ran and settled well.
-   */
-  const ran = { outcome: 'done' }
-
   it('runs after images and fonts, and captures straight away when the story has none', async () => {
     const driver = new FakeDriver()
 
@@ -413,7 +413,7 @@ describe("the story's wait hook", () => {
     ])
   })
 
-  it('checks images and fonts again once it ran, then captures', async () => {
+  it('checks images and fonts again once it ran, measures the page again, then captures', async () => {
     const driver = new FakeDriver({ pages: [{ waitHook: async () => ran }] })
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
@@ -424,6 +424,10 @@ describe("the story's wait hook", () => {
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
       { page: 1, method: 'growViewportToContent', args: [] },
       { page: 1, method: 'evaluate', args: [waitHookExpression('button--primary', 10_000), 11_000] },
+      { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
+      { page: 1, method: 'setViewport', args: [primary.viewport] },
+      { page: 1, method: 'growViewportToContent', args: [] },
+      { page: 1, method: 'evaluate', args: [framesAfterGrowthExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [endStateExpression(10_000), 11_000] },
       { page: 1, method: 'evaluate', args: [plainPrepExpression(10_000), 11_000] },
@@ -566,6 +570,7 @@ describe("the story's wait hook", () => {
 
     expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({ broken, console: [] })
     expect(driver.methods()).not.toContain('1:capture')
+    expect(driver.methods().filter((method) => method === '1:setViewport')).toHaveLength(1)
   })
 
   it("makes a broken story, timeout, of a page that doesn't answer while it runs, naming that step", async () => {
@@ -841,6 +846,405 @@ describe('growing the viewport to the page', () => {
     })
     expect(driver.methods().at(-1)).toBe('1:close')
   })
+})
+
+describe('measuring the page again after the wait hook', () => {
+  /**
+   * A `growViewportToContent` answer that gives `grown[n]` on its n-th call, and false after them.
+   */
+  const growing = (...grown: boolean[]): (() => Promise<boolean>) => {
+    let calls = 0
+
+    return async () => {
+      calls += 1
+
+      return grown[calls - 1] ?? false
+    }
+  }
+
+  /**
+   * A page call that succeeds the first time and does as `second` says after that.
+   */
+  const failingSecond = <T>(first: T, second: () => Promise<T>): (() => Promise<T>) => {
+    let calls = 0
+
+    return async () => {
+      calls += 1
+
+      return calls === 1 ? first : await second()
+    }
+  }
+
+  /**
+   * A page whose story's wait hook runs, and whose third check of images and fonts, the one once the viewport was set
+   * again after the hook, answers as `third` says. The two before it find everything ready.
+   */
+  const checkedAfterRegrowth = (third: (timeoutMs: number) => Promise<unknown>): FakePageBehaviour => {
+    let checks = 0
+
+    return {
+      assetsWait: async (timeoutMs) => {
+        checks += 1
+
+        return checks <= 2 ? readyAnswer() : await third(timeoutMs)
+      },
+      waitHook: async () => ran,
+    }
+  }
+
+  it("sets the story's viewport again once the hook ran, grows it to the page, lets two frames pass and checks images and fonts again, before the end state", async () => {
+    const driver = new FakeDriver({
+      pages: [{ waitHook: async () => ran, growViewportToContent: growing(false, true) }],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      snapshot: defaultSnapshot,
+      console: [],
+    })
+    expect(driver.calls.slice(3)).toEqual([
+      { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
+      { page: 1, method: 'growViewportToContent', args: [] },
+      { page: 1, method: 'evaluate', args: [waitHookExpression('button--primary', 10_000), 11_000] },
+      { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
+      { page: 1, method: 'setViewport', args: [{ width: 1280, height: 720, deviceScaleFactor: 2, touch: false }] },
+      { page: 1, method: 'growViewportToContent', args: [] },
+      { page: 1, method: 'evaluate', args: [framesAfterGrowthExpression(10_000), 11_000] },
+      { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
+      { page: 1, method: 'evaluate', args: [endStateExpression(10_000), 11_000] },
+      { page: 1, method: 'evaluate', args: [plainPrepExpression(10_000), 11_000] },
+      { page: 1, method: 'capture', args: ['full-page'] },
+    ])
+  })
+
+  it('measures again after a first growth too', async () => {
+    const driver = new FakeDriver({
+      pages: [{ waitHook: async () => ran, growViewportToContent: growing(true, true) }],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      snapshot: defaultSnapshot,
+      console: [],
+    })
+    expect(driver.calls.slice(3)).toEqual([
+      { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
+      { page: 1, method: 'growViewportToContent', args: [] },
+      { page: 1, method: 'evaluate', args: [framesAfterGrowthExpression(10_000), 11_000] },
+      { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
+      { page: 1, method: 'evaluate', args: [waitHookExpression('button--primary', 10_000), 11_000] },
+      { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
+      { page: 1, method: 'setViewport', args: [primary.viewport] },
+      { page: 1, method: 'growViewportToContent', args: [] },
+      { page: 1, method: 'evaluate', args: [framesAfterGrowthExpression(10_000), 11_000] },
+      { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
+      { page: 1, method: 'evaluate', args: [endStateExpression(10_000), 11_000] },
+      { page: 1, method: 'evaluate', args: [plainPrepExpression(10_000), 11_000] },
+      { page: 1, method: 'capture', args: ['full-page'] },
+    ])
+  })
+
+  it("lets two frames pass and checks images and fonts again even when the page fits the story's viewport", async () => {
+    const driver = new FakeDriver({ pages: [{ waitHook: async () => ran }] })
+
+    await openCaptureSession(driver, settings).capture(primary)
+    expect(driver.calls.slice(7, 11)).toEqual([
+      { page: 1, method: 'setViewport', args: [primary.viewport] },
+      { page: 1, method: 'growViewportToContent', args: [] },
+      { page: 1, method: 'evaluate', args: [framesAfterGrowthExpression(10_000), 11_000] },
+      { page: 1, method: 'evaluate', args: [assetsReadyExpression(10_000), 11_000] },
+    ])
+  })
+
+  it("sets the snapshot's own viewport again, a touch mode's included", async () => {
+    const driver = new FakeDriver({ pages: [{ waitHook: async () => ran }] })
+
+    await openCaptureSession(driver, settings).capture(secondary)
+    expect(driver.calls.filter((call) => call.method === 'setViewport').map((call) => call.args)).toEqual([
+      [secondary.viewport],
+      [secondary.viewport],
+    ])
+  })
+
+  it.each([
+    ['has no wait hook', primary, {}, 1],
+    ['captures an element', { ...primary, element: '#card' }, { waitHook: async () => ran }, 0],
+    ['turns the growth off', { ...primary, growViewport: false }, { waitHook: async () => ran }, 0],
+  ])('neither sets the viewport again nor grows it for a story that %s', async (_what, story, page, grows) => {
+    const driver = new FakeDriver({ pages: [page] })
+
+    await openCaptureSession(driver, settings).capture(story)
+
+    const methods = driver.methods()
+
+    expect(methods.filter((method) => method === '1:setViewport')).toHaveLength(1)
+    expect(methods.filter((method) => method === '1:growViewportToContent')).toHaveLength(grows)
+    expect(driver.calls.some((call) => String(call.args[0]).includes('.letFramesPass('))).toBe(false)
+    expect(methods).toContain('1:capture')
+  })
+
+  it("keeps the story's viewport for a page too tall to capture after the hook, so its capture is too-tall", async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          waitHook: async () => ran,
+          growViewportToContent: growing(true, false),
+          capture: async () => {
+            throw new CaptureTooLargeError(2560, 40_000)
+          },
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'too-tall',
+        message:
+          'The capture is 2560 × 40000 device pixels, over 32,767 on a side. Set element to capture part of the story, or use a smaller viewport.',
+        size: { width: 2560, height: 40_000 },
+      },
+      console: [],
+    })
+    expect(driver.calls.filter((call) => call.method === 'setViewport').map((call) => call.args)).toEqual([
+      [primary.viewport],
+      [primary.viewport],
+    ])
+  })
+
+  it('gives the frames and the check after it only the time readyTimeout has left', async () => {
+    let viewports = 0
+    const driver = new FakeDriver({
+      pages: [
+        {
+          goto: async () => pass(3000),
+          waitHook: async () => {
+            pass(4000)
+
+            return ran
+          },
+          setViewport: async () => {
+            viewports += 1
+
+            if (viewports === 2) {
+              pass(1000)
+            }
+          },
+        },
+      ],
+    })
+
+    await openCaptureSession(driver, settings).capture(primary)
+    expect(driver.calls[9]?.args).toEqual([framesAfterGrowthExpression(2000), 3000])
+    expect(driver.calls[10]?.args).toEqual([assetsReadyExpression(2000), 3000])
+    expect(driver.calls[11]?.args).toEqual([endStateExpression(2000), 3000])
+  })
+
+  it.each([
+    [
+      'setting the viewport again',
+      (fail: () => Promise<never>): FakePageBehaviour => ({ setViewport: failingSecond(undefined, fail) }),
+    ],
+    [
+      'growing it again',
+      (fail: () => Promise<never>): FakePageBehaviour => ({ growViewportToContent: failingSecond(false, fail) }),
+    ],
+  ])('makes a broken story, error, of a page that failed %s, naming that step', async (_what, failing) => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          waitHook: async () => ran,
+          ...failing(async () => {
+            throw new Error('The browser said no.')
+          }),
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'error',
+        message: 'Growing the viewport to the page again after its wait hook failed: The browser said no.',
+      },
+      console: [],
+    })
+    expect(driver.methods().at(-1)).toBe('1:close')
+  })
+
+  it("makes a broken story, error, of the driver's own limit running out while it set the viewport again", async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          waitHook: async () => ran,
+          setViewport: failingSecond(undefined, async () => {
+            throw new PageTimeoutError("The page didn't set its viewport within 30 s.", 30_000)
+          }),
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'error',
+        message:
+          "Growing the viewport to the page again after its wait hook failed: The page didn't set its viewport within 30 s.",
+      },
+      console: [],
+    })
+  })
+
+  it('makes a broken story, crashed, of a page that crashed while it set the viewport again', async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          waitHook: async () => ran,
+          setViewport: failingSecond(undefined, async () => {
+            throw new PageCrashedError()
+          }),
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'crashed',
+        message:
+          'The page crashed while growing the viewport to the page again after its wait hook, usually because it ran out of memory. Fewer workers leave each page more memory.',
+      },
+      console: [],
+    })
+  })
+
+  it.each([
+    [
+      'frames that never passed',
+      async () => ({ outcome: 'timed-out' }),
+      {
+        reason: 'timeout',
+        message:
+          "The story wasn't ready within readyTimeout (10000 ms): visual-check was still letting the page react to the viewport set again after its wait hook.",
+        readyTimeoutMs: 10000,
+      },
+    ],
+    [
+      'a page without the page script',
+      async () => ({ outcome: 'script-missing' }),
+      {
+        reason: 'error',
+        message:
+          "visual-check's page script didn't run in the story's page, so it couldn't let the page react to the viewport set again after its wait hook.",
+      },
+    ],
+    [
+      'a page that stopped answering',
+      async (timeoutMs: number) => {
+        throw new PageTimeoutError("The expression evaluated in the page didn't finish within 11 s.", timeoutMs)
+      },
+      {
+        reason: 'timeout',
+        message:
+          "The story wasn't ready within readyTimeout (10000 ms): its page stopped answering while visual-check let it react to the viewport set again after its wait hook.",
+        readyTimeoutMs: 10000,
+      },
+    ],
+    [
+      "an answer visual-check doesn't know",
+      async () => 42,
+      {
+        reason: 'error',
+        message:
+          "Letting the page react to the viewport set again after its wait hook failed: Letting frames pass in the page gave an answer visual-check doesn't know: 42.",
+      },
+    ],
+  ])(
+    'makes a broken story of %s while the page reacted to the viewport set again after the hook',
+    async (_what, framesWait, broken) => {
+      const driver = new FakeDriver({ pages: [{ waitHook: async () => ran, framesWait }] })
+
+      expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({ broken, console: [] })
+      expect(driver.methods()).not.toContain('1:capture')
+    },
+  )
+
+  it.each([
+    [
+      'images still loading',
+      async () => imagesTimedOutAnswer(1),
+      {
+        reason: 'timeout',
+        message:
+          "The story wasn't ready within readyTimeout (10000 ms): 1 of its images was still loading once the viewport was set again after its wait hook.",
+        readyTimeoutMs: 10000,
+      },
+    ],
+    [
+      'document.fonts.ready unresolved',
+      async () => fontsTimedOutAnswer([]),
+      {
+        reason: 'timeout',
+        message:
+          "The story wasn't ready within readyTimeout (10000 ms): document.fonts.ready hadn't resolved once the viewport was set again after its wait hook.",
+        readyTimeoutMs: 10000,
+      },
+    ],
+    [
+      'fonts still loading',
+      async () => fontsTimedOutAnswer(['Inter 400 normal']),
+      {
+        reason: 'fonts-not-loaded',
+        message:
+          "The story's fonts hadn't loaded within readyTimeout (10000 ms) once the viewport was set again after its wait hook. Still loading: Inter 400 normal.",
+        faces: ['Inter 400 normal'],
+        readyTimeoutMs: 10000,
+      },
+    ],
+    [
+      'no page script',
+      async () => ({ outcome: 'script-missing' }),
+      {
+        reason: 'error',
+        message:
+          "visual-check's page script didn't run in the story's page, so it couldn't wait for its images and fonts once the viewport was set again after its wait hook.",
+      },
+    ],
+    [
+      'a page that stopped answering',
+      async (timeoutMs: number) => {
+        throw new PageTimeoutError("The expression evaluated in the page didn't finish within 11 s.", timeoutMs)
+      },
+      {
+        reason: 'timeout',
+        message:
+          "The story wasn't ready within readyTimeout (10000 ms): its page stopped answering while visual-check waited for its images and fonts once the viewport was set again after its wait hook.",
+        readyTimeoutMs: 10000,
+      },
+    ],
+    [
+      'a page that crashed',
+      async () => {
+        throw new PageCrashedError()
+      },
+      {
+        reason: 'crashed',
+        message:
+          'The page crashed while waiting for images and fonts once the viewport was set again after its wait hook, usually because it ran out of memory. Fewer workers leave each page more memory.',
+      },
+    ],
+    [
+      "an answer visual-check doesn't know",
+      async () => 42,
+      {
+        reason: 'error',
+        message:
+          "Waiting for images and fonts once the viewport was set again after its wait hook failed: The wait for images and fonts in the page gave an answer visual-check doesn't know: 42.",
+      },
+    ],
+  ])(
+    'makes a broken story of %s at the check of images and fonts once the viewport was set again after the hook',
+    async (_what, third, broken) => {
+      const driver = new FakeDriver({ pages: [checkedAfterRegrowth(third)] })
+
+      expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({ broken, console: [] })
+      expect(driver.methods()).not.toContain('1:capture')
+    },
+  )
 })
 
 describe('the masks', () => {

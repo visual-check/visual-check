@@ -589,6 +589,51 @@ describe('Page.setViewport', () => {
     await flushUntil(() => browser.timesReceived('Emulation.setTouchEmulationEnabled') === 1)
     expect(await hasSettled(setting)).toBe(false)
   })
+
+  it('turns touch emulation on or off only when the touch changes, so setting a viewport again on a loaded page keeps its hover', async () => {
+    const { browser, page } = await openPage()
+
+    await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1, touch: false })
+    await page.setViewport({ width: 1280, height: 900, deviceScaleFactor: 1, touch: false })
+    await page.setViewport(touchViewport)
+    await page.setViewport(touchViewport)
+    await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1, touch: false })
+    expect(sentOf(browser, 'Emulation.setTouchEmulationEnabled').map(({ params }) => params)).toEqual([
+      { enabled: false },
+      { enabled: true, maxTouchPoints: 5 },
+      { enabled: false },
+    ])
+    expect(sentOf(browser, 'Emulation.setDeviceMetricsOverride')).toHaveLength(5)
+  })
+
+  it('forgets the kept viewport when setting one fails, so the next one turns touch emulation on or off again', async () => {
+    const { browser, page } = await openPage({
+      handlers: {
+        'Emulation.setTouchEmulationEnabled': (command: ReceivedCommand, fake: FakeBrowser) => {
+          if (command.params?.enabled === false) {
+            fake.reply(command, {})
+          }
+        },
+      },
+    })
+
+    await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1, touch: false })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+
+    const setting = page.setViewport(touchViewport)
+    const failure = expect(setting).rejects.toBeInstanceOf(PageTimeoutError)
+
+    await flushUntil(() => browser.timesReceived('Emulation.setTouchEmulationEnabled') === 2)
+    await vi.advanceTimersByTimeAsync(30_000)
+    await failure
+    vi.useRealTimers()
+    await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1, touch: false })
+    expect(sentOf(browser, 'Emulation.setTouchEmulationEnabled').map(({ params }) => params)).toEqual([
+      { enabled: false },
+      { enabled: true, maxTouchPoints: 5 },
+      { enabled: false },
+    ])
+  })
 })
 
 describe('the 30 s limit on a page call', () => {

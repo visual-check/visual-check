@@ -16,9 +16,9 @@ import { readyAnswer } from './page-script.fixture.js'
 /**
  * How a fake page answers the waits, the end state, the capture preparation and the options read evaluated in it. One
  * left out answers as on a story that's ready: the story wait gives `finishedAnswer()`, the wait for images and fonts
- * gives `readyAnswer()`, the frames after the viewport grew pass, the wait hook finds none to run, the end state gives `settledAnswer()`, changing nothing, the
- * capture preparation is ready for the full page, and the options read finds every file loaded and no story with
- * options.
+ * gives `readyAnswer()`, the frames after the viewport grew or was set again pass, the wait hook finds none to run, the
+ * end state gives `settledAnswer()`, changing nothing, the capture preparation is ready for the full page, and the
+ * options read finds every file loaded and no story with options.
  */
 interface FakeEvaluation {
   /**
@@ -30,7 +30,8 @@ interface FakeEvaluation {
    */
   assetsWait?: (timeoutMs: number) => Promise<unknown>
   /**
-   * Answers letting frames pass once the viewport grew, given the driver's time limit for it.
+   * Answers letting frames pass once the viewport grew or was set again after the wait hook, given the driver's time
+   * limit for it.
    */
   framesWait?: (timeoutMs: number) => Promise<unknown>
   /**
@@ -68,9 +69,10 @@ const evaluationAnswers: [string, keyof FakeEvaluation, (expression: string) => 
 /**
  * Answers an expression evaluated in a fake page as `evaluation` says. It tells the waits apart by the function each
  * calls in the page: `waitForStory` for the story wait, `waitForAssets` for the wait for images and fonts,
- * `letFramesPass` for the frames after the viewport grew, `runWait` for the wait hook, `bringToEndState` for the end
- * state, `prepareCapture` for the capture preparation and `readOptions` for the options read. Throws on any other
- * expression, so one the fake doesn't know, such as a wait whose function was renamed, fails clearly.
+ * `letFramesPass` for the frames after the viewport grew or was set again, `runWait` for the wait hook,
+ * `bringToEndState` for the end state, `prepareCapture` for the capture preparation and `readOptions` for the options
+ * read. Throws on any other expression, so one the fake doesn't know, such as a wait whose function was renamed, fails
+ * clearly.
  *
  * @public
  */

@@ -51,12 +51,13 @@ export interface CaptureSettings {
   /**
    * The config's `readyTimeout`, in ms, per attempt: a story that navigates away is captured again, up to 2 more times,
    * each with the whole of it. It's counted from just before the viewport is set. Loading the story (`goto`), waiting
-   * for Storybook to report it finished, waiting for its images and fonts, running its wait hook, checking its images
-   * and fonts again after the hook, bringing it to its end state, checking its images and fonts again after that and
-   * painting its masks share it, each getting what's left, in whole ms rounded up. Each wait in the page gives up when
-   * it runs out, and the driver allows up to 1 s more for the page's answer. Setting the viewport, the capture and
-   * capturing the snapshot again are bound by the driver's own fixed limits instead. Nothing limits a story's
-   * `captureAgainIf`.
+   * for Storybook to report it finished, waiting for its images and fonts, letting frames pass once the viewport grew
+   * and checking its images and fonts again, running its wait hook, checking its images and fonts again after the hook,
+   * letting frames pass and checking its images and fonts again once the viewport was set again after the hook,
+   * bringing it to its end state, checking its images and fonts again after that and painting its masks share it, each
+   * getting what's left, in whole ms rounded up. Each wait in the page gives up when it runs out, and the driver allows
+   * up to 1 s more for the page's answer. Setting the viewport, growing it, the capture and capturing the snapshot
+   * again are bound by the driver's own fixed limits instead. Nothing limits a story's `captureAgainIf`.
    */
   readyTimeoutMs: number
   /**
@@ -120,7 +121,8 @@ export interface StoryToCapture {
   element?: string
   /**
    * Whether a full-page capture first grows the viewport's height to the page's, so fixed and sticky elements sit
-   * where they would on a screen as tall as the page. `false` captures the full page beyond the viewport at the
+   * where they would on a screen as tall as the page, and, once the story's wait hook ran, sets the story's viewport
+   * again and grows it to the page measured then. `false` captures the full page beyond the viewport at the
    * viewport's height, so `100vh` stays the viewport's height. Without it, the viewport grows. An element's capture
    * never grows it.
    */
@@ -507,6 +509,9 @@ type Step =
   | 'assets-after-grow'
   | 'wait'
   | 'assets-after-wait'
+  | 'regrow-viewport'
+  | 'frames-after-regrow'
+  | 'assets-after-regrow'
   | 'end-state'
   | 'assets-after-end-state'
   | 'masks'
@@ -514,10 +519,28 @@ type Step =
   | 'capture-again'
 
 /**
- * A check of the story's images and fonts: the one once the story finished, the one after its wait hook ran, or the one
- * after its end state changed the page.
+ * A check of the story's images and fonts: the one once the story finished, the one once the viewport grew, the one
+ * after its wait hook ran, the one once the viewport was set again after its wait hook, or the one after its end state
+ * changed the page.
  */
-type AssetsStep = Extract<Step, 'assets' | 'assets-after-grow' | 'assets-after-wait' | 'assets-after-end-state'>
+type AssetsStep = Extract<
+  Step,
+  'assets' | 'assets-after-grow' | 'assets-after-wait' | 'assets-after-regrow' | 'assets-after-end-state'
+>
+
+/**
+ * A wait for frames to pass so the page reacts to its viewport: once it grew, or once it was set again after the wait
+ * hook.
+ */
+type FramesStep = Extract<Step, 'frames-after-grow' | 'frames-after-regrow'>
+
+/**
+ * What the page reacts to in each wait for frames, as the messages name it.
+ */
+const framesTargets: Record<FramesStep, string> = {
+  'frames-after-grow': 'the grown viewport',
+  'frames-after-regrow': 'the viewport set again after its wait hook',
+}
 
 /**
  * What each step does, as a phrase that follows "while".
@@ -532,6 +555,9 @@ const stepNames: Record<Step, string> = {
   'assets-after-grow': 'waiting for images and fonts after growing the viewport',
   wait: "running the story's wait hook",
   'assets-after-wait': 'waiting for images and fonts after its wait hook',
+  'regrow-viewport': 'growing the viewport to the page again after its wait hook',
+  'frames-after-regrow': 'letting the page react to the viewport set again after its wait hook',
+  'assets-after-regrow': 'waiting for images and fonts once the viewport was set again after its wait hook',
   'end-state': 'bringing the story to its end state',
   'assets-after-end-state': 'waiting for images and fonts after its end state',
   masks: 'painting its masks and hiding the caret',
@@ -552,6 +578,10 @@ const stepTimeouts: Partial<Record<Step, string>> = {
   wait: 'its page stopped answering while its wait hook ran',
   'assets-after-wait':
     'its page stopped answering while visual-check waited for its images and fonts after its wait hook',
+  'frames-after-regrow':
+    'its page stopped answering while visual-check let it react to the viewport set again after its wait hook',
+  'assets-after-regrow':
+    'its page stopped answering while visual-check waited for its images and fonts once the viewport was set again after its wait hook',
   'end-state': 'its page stopped answering while visual-check brought it to its end state',
   'assets-after-end-state':
     'its page stopped answering while visual-check waited for its images and fonts after its end state',
@@ -565,6 +595,7 @@ const assetsCheckSuffixes: Record<AssetsStep, string> = {
   assets: '',
   'assets-after-grow': ' after growing the viewport',
   'assets-after-wait': ' after its wait hook',
+  'assets-after-regrow': ' once the viewport was set again after its wait hook',
   'assets-after-end-state': ' after its end state',
 }
 
@@ -729,21 +760,22 @@ function describeAssetsWait(
 }
 
 /**
- * Says why a story isn't ready to capture, from what letting frames pass once the viewport grew found.
+ * Says why a story isn't ready to capture, from what letting frames pass found in the wait `framesStep` names: once the
+ * viewport grew, or once it was set again after the wait hook.
  */
-function describeFramesAfterGrowth(
+function describeFrames(
   frames: Exclude<FramesPassed, { outcome: 'passed' }>,
   readyTimeoutMs: number,
+  framesStep: FramesStep,
 ): BrokenStory {
   if (frames.outcome === 'script-missing') {
     return {
       reason: 'error',
-      message:
-        "visual-check's page script didn't run in the story's page, so it couldn't let the page react to the grown viewport.",
+      message: `visual-check's page script didn't run in the story's page, so it couldn't let the page react to ${framesTargets[framesStep]}.`,
     }
   }
 
-  return notReady(readyTimeoutMs, 'visual-check was still letting the page react to the grown viewport')
+  return notReady(readyTimeoutMs, `visual-check was still letting the page react to ${framesTargets[framesStep]}`)
 }
 
 /**
@@ -1025,10 +1057,12 @@ interface CapturedSnapshot {
 /**
  * Captures a story on an open page: sets the story's viewport, loads the story, waits until Storybook reports it
  * finished with nothing gone wrong, waits for its images and fonts, grows the viewport to the page for a full-page
- * capture, runs its wait hook, brings it to its end state, measures its element, paints its masks, hides the caret and
- * captures the element's box, or the full page when the story has no element. When the viewport grew, two frames pass
- * so the page reacts to the new size, then its images and fonts are checked again, when the story has a wait hook,
- * they're checked again after it, and when the end state changed anything, they're checked again before the masks.
+ * capture, runs its wait hook, measures the page again for a full-page capture once its wait hook ran, brings it to its
+ * end state, measures its element, paints its masks, hides the caret and captures the element's box, or the full page
+ * when the story has no element. When the viewport grew, two frames pass so the page reacts to the new size, then its
+ * images and fonts are checked again. When the story's wait hook ran, they're checked again after it, then, for a
+ * full-page capture, the story's viewport is set again and grows to the page, two frames pass whether it grew or not,
+ * and they're checked again. When the end state changed anything, they're checked again before the masks.
  * Loading, the waits, the frames, the hook, the end state, those checks and the masks share readyTimeout, each getting
  * only what's left of it. When the story asks for it with `findRemoteContent`, the snapshot comes with the remote content it shows, unless the search didn't answer in time.
  * When the settings ask to list hosts, it also gives the hosts the page sent requests to, read once the capture is
@@ -1084,15 +1118,22 @@ async function captureOnPage(
   }
 
   /**
-   * Lets two frames pass once the viewport grew, so the page reacts to the new size: its observers and `resize`
-   * listeners call back and the render they cause is done. Gives why the story isn't ready, or nothing when it is.
+   * Whether the capture is of the full page with the viewport's growth on: the viewport grows to the page before the
+   * wait hook and is measured again after a hook that ran.
    */
-  const letPageReactToGrowth = async (): Promise<BrokenStory | undefined> => {
-    step = 'frames-after-grow'
+  const growsViewport = story.element === undefined && story.growViewport !== false
+
+  /**
+   * Lets two frames pass once the viewport grew or was set again, as `framesStep` names, so the page reacts to its
+   * size: its observers and `resize` listeners call back and the render they cause is done. Gives why the story isn't
+   * ready, or nothing when it is.
+   */
+  const letPageReact = async (framesStep: FramesStep): Promise<BrokenStory | undefined> => {
+    step = framesStep
 
     const frames = readFramesPassed(await waitInPage(framesAfterGrowthExpression))
 
-    return frames.outcome === 'passed' ? undefined : describeFramesAfterGrowth(frames, settings.readyTimeoutMs)
+    return frames.outcome === 'passed' ? undefined : describeFrames(frames, settings.readyTimeoutMs, framesStep)
   }
 
   /**
@@ -1101,7 +1142,7 @@ async function captureOnPage(
    * nothing when it is.
    */
   const growViewport = async (): Promise<BrokenStory | undefined> => {
-    if (story.element !== undefined || story.growViewport === false) {
+    if (!growsViewport) {
       return undefined
     }
 
@@ -1111,12 +1152,32 @@ async function captureOnPage(
       return undefined
     }
 
-    return (await letPageReactToGrowth()) ?? (await checkAssets('assets-after-grow'))
+    return (await letPageReact('frames-after-grow')) ?? (await checkAssets('assets-after-grow'))
   }
 
   /**
-   * Runs the story's wait hook, if it has one, and checks its images and fonts again once it ran. Gives why the story
-   * isn't ready, or nothing when it is.
+   * Measures the page again once the story's wait hook ran, for a full-page capture with the growth on: sets the
+   * story's own viewport again, so a `min-height: 100vh` page doesn't keep its last growth, and grows it to the
+   * page's height when the page is taller. A page the hook made shorter shrinks back, and one too tall to capture
+   * stays at the story's viewport. Then lets two frames pass, whether it grew or not, since setting the viewport
+   * fires `resize` too, and checks the images and fonts again. Gives why the story isn't ready, or nothing when it
+   * is.
+   */
+  const regrowViewport = async (): Promise<BrokenStory | undefined> => {
+    if (!growsViewport) {
+      return undefined
+    }
+
+    step = 'regrow-viewport'
+    await page.setViewport(story.viewport)
+    await page.growViewportToContent()
+
+    return (await letPageReact('frames-after-regrow')) ?? (await checkAssets('assets-after-regrow'))
+  }
+
+  /**
+   * Runs the story's wait hook, if it has one. Once it ran, checks its images and fonts again, then measures the page
+   * again for a full-page capture. Gives why the story isn't ready, or nothing when it is.
    */
   const runWaitHook = async (): Promise<BrokenStory | undefined> => {
     step = 'wait'
@@ -1127,9 +1188,11 @@ async function captureOnPage(
       return undefined
     }
 
-    return run.outcome === 'done'
-      ? await checkAssets('assets-after-wait')
-      : describeWaitHookRun(run, settings.readyTimeoutMs)
+    if (run.outcome !== 'done') {
+      return describeWaitHookRun(run, settings.readyTimeoutMs)
+    }
+
+    return (await checkAssets('assets-after-wait')) ?? (await regrowViewport())
   }
 
   /**
@@ -1150,8 +1213,8 @@ async function captureOnPage(
 
   /**
    * Gets the finished story ready to capture: waits for its images and fonts, grows the viewport, runs its wait hook
-   * and brings it to its end state, stopping at the first that leaves it not ready. Gives why the story isn't ready,
-   * or nothing when it is.
+   * and measures the page again after it, and brings it to its end state, stopping at the first that leaves it not
+   * ready. Gives why the story isn't ready, or nothing when it is.
    */
   const getReady = async (): Promise<BrokenStory | undefined> =>
     (await checkAssets('assets')) ?? (await growViewport()) ?? (await runWaitHook()) ?? (await bringToEndState())

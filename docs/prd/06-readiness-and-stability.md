@@ -43,7 +43,7 @@ A story runs under visual-check as it does in plain Storybook. visual-check wait
 2. Wait for `storyFinished`, which comes after `play` and `afterEach`. The four error events are watched too, because `storyFinished` can report success when `play` threw.
 3. In the page: make lazy images eager, decode every image, and wait for `document.fonts.ready`.
 4. For a full-page capture, grow the viewport's height to the page's ([Per-story options](07-per-story-options.md#capture-area)). When it grew, let two frames pass, so what the page does in reaction to the new size (its `IntersectionObserver`, `ResizeObserver` and `resize` callbacks, and the render they cause) is done, then check images and fonts again.
-5. Run the `wait` hook, if the story has one. Then check images and fonts again.
+5. Run the `wait` hook, if the story has one. When it ran, check images and fonts again, then, for a full-page capture that grows the viewport, measure the page again ([ADR 0012](../adr/0012-full-page-capture-grows-the-viewport.md)): set the story's own viewport again, grow its height to the page's when the page is taller, let two frames pass whether it grew or not, and check images and fonts again. So a page the hook made shorter has no blank band, and one it made taller has its fixed and sticky elements at its bottom. It happens once, with no loop.
 6. Bring the page to its end state.
 7. Paint the masks and hide the caret, after the end state and its check of images and fonts. The caret is hidden in every document, shadow root and same-origin frame.
 8. Capture once.
@@ -59,6 +59,7 @@ Rules:
 
 - `parameters.visualCheck.wait` is a function, set in `preview`, in a stories file's meta or on a story. The most specific one wins, and `wait: null` turns an inherited hook off.
 - It runs in the browser, only under visual-check, after images and fonts and before the end state.
+- When it ran, a full-page capture measures the page again after it (step 5 above), so the content it waited for sets the snapshot's height.
 - It gets the story's context and `canvasElement`, like `play`. Its type is `(context: StoryContext) => void | Promise<void>`, with the project's own Storybook `StoryContext`.
 - It counts toward `readyTimeout`. A throw makes a broken story.
 - v1 ships no ready-made wait helpers, and visual-check never detects particular libraries.

@@ -78,9 +78,9 @@ Every story's merged options are checked before any capture. Each of these exits
 
 ## Capture area
 
-- **Full page** is the default. The whole document is captured at the viewport's width. Once the story's images and fonts are ready, the viewport's height grows to the page's, once, so fixed and sticky elements sit where they would on a screen as tall as the page, such as a sticky save bar at the page's bottom ([ADR 0012](../adr/0012-full-page-capture-grows-the-viewport.md)).
+- **Full page** is the default. The whole document is captured at the viewport's width. Once the story's images and fonts are ready, the viewport's height grows to the page's, so fixed and sticky elements sit where they would on a screen as tall as the page, such as a sticky save bar at the page's bottom. When the story's `wait` hook ran, the page is measured again after it at the story's own viewport, so content the hook waited for sets the height: a page that got shorter shrinks back, and one that got taller grows ([ADR 0012](../adr/0012-full-page-capture-grows-the-viewport.md)).
   - The screen's size stays the viewport's, and the width, scale and touch don't change.
-  - `100vh` becomes the page's height, as it was measured before the growth. Content that grows with the viewport isn't chased: what lies below the grown viewport is captured beyond it.
+  - `100vh` becomes the page's height, as it was measured at the story's own viewport. Content that grows with the viewport isn't chased: what lies below the grown viewport is captured beyond it.
   - A page over 32,767 device pixels tall keeps its viewport, and its capture is `too-tall`.
   - `growViewport: false` turns the growth off: the full page is captured beyond the viewport's height, `100vh` stays the viewport's height, and fixed elements are painted once, where they sit in the viewport.
   - Dialogs and drawers portaled outside the story are included.

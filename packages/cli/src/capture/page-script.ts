@@ -41,9 +41,10 @@ const stateGlobal = '__visualCheck'
  *   decoded again. Then it forces layout, so the fonts the layout needs start loading, and waits for
  *   `document.fonts.ready`. One time limit covers both. A page without an API it uses, such as `document.fonts`, has
  *   nothing to wait for there;
- * - gives `letFramesPass`, which the frames expression calls once the viewport grew, so the page reacts to the new
- *   size before anything goes on: an `IntersectionObserver`, a `ResizeObserver` or a `resize` listener calls back,
- *   and the render it causes is done. It lets the frames pass as `framesFunction` says, within a time limit;
+ * - gives `letFramesPass`, which the frames expression calls once the viewport grew, and once it was set again after
+ *   the wait hook, so the page reacts to the new size before anything goes on: an `IntersectionObserver`, a
+ *   `ResizeObserver` or a `resize` listener calls back, and the render it causes is done. It lets the frames pass as
+ *   `framesFunction` says, within a time limit;
  * - gives `bringToEndState`, which the end state expression calls at capture. It brings every animation in the
  *   document and in every shadow root to its end state, then freezes their videos, SVGs, inline or as CSS images, and
  *   GIFs, then brings the animations that freezing them started to their end state too, as `endStateFunction` says,
@@ -298,7 +299,7 @@ ${storybookPageScript};
     }
   }
 
-  // Letting frames pass, so the page reacts to a viewport that grew.
+  // Letting frames pass, so the page reacts to a viewport that grew or was set again.
 
   const framesPassedBefore = (${framesFunction})({ setTimer, requestFrame })
 
@@ -426,8 +427,8 @@ export function assetsReadyExpression(timeoutMs: number): string {
 }
 
 /**
- * How many frames pass once the viewport grew: the first runs the rendering update that calls the page's observers
- * back, the second paints what their render changed.
+ * How many frames pass once the viewport grew, or was set again after the wait hook: the first runs the rendering
+ * update that calls the page's observers back, the second paints what their render changed.
  */
 const framesAfterGrowth = 2
 
@@ -455,9 +456,9 @@ export type FramesPassed =
     }
 
 /**
- * Builds the expression that lets two frames pass in the page once the viewport grew, so the page reacts to the new
- * size, or gives up once `timeoutMs` passes, rounded up to whole ms. Its value is the page's answer, which
- * `readFramesPassed` reads.
+ * Builds the expression that lets two frames pass in the page once the viewport grew, or was set again after the wait
+ * hook, so the page reacts to the new size, or gives up once `timeoutMs` passes, rounded up to whole ms. Its value is
+ * the page's answer, which `readFramesPassed` reads.
  */
 export function framesAfterGrowthExpression(timeoutMs: number): string {
   const limit = Math.max(0, Math.ceil(timeoutMs))
