@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.2.0](https://github.com/visual-check/visual-check/compare/storybook-v0.1.2...storybook-v0.2.0) (2026-11-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **cli:** test fails on page errors that aren't expected ([#190](https://github.com/visual-check/visual-check/issues/190))
+
+### Features
+
+* a story with defaultCapture false is captured in its modes only ([#198](https://github.com/visual-check/visual-check/issues/198)) ([5b42b71](https://github.com/visual-check/visual-check/commit/5b42b71c8c2ab998d3d2eaa07c5fb6fae6307964)), closes [#180](https://github.com/visual-check/visual-check/issues/180)
+* **cli:** a story whose capture would cut its content is broken as overflows ([#189](https://github.com/visual-check/visual-check/issues/189)) ([46c8df3](https://github.com/visual-check/visual-check/commit/46c8df3d2239800087c20b8ab0c4e2d8276a99bb)), closes [#179](https://github.com/visual-check/visual-check/issues/179)
+* **cli:** test fails on page errors that aren't expected ([#190](https://github.com/visual-check/visual-check/issues/190)) ([a1526a6](https://github.com/visual-check/visual-check/commit/a1526a6e019f43f3680a279b6869e29a8b50294a)), closes [#177](https://github.com/visual-check/visual-check/issues/177)
+
+
+### Bug Fixes
+
+* the storybook and cli packages' types resolve under moduleResolution node10 ([#188](https://github.com/visual-check/visual-check/issues/188)) ([ad1416b](https://github.com/visual-check/visual-check/commit/ad1416b51114d5983007002b351f90610b5c3bd6)), closes [#175](https://github.com/visual-check/visual-check/issues/175)
+
 ## [0.1.2](https://github.com/visual-check/visual-check/compare/storybook-v0.1.1...storybook-v0.1.2) (2026-11-27)
 
 

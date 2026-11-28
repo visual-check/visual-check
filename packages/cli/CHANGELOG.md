@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.2.0](https://github.com/visual-check/visual-check/compare/cli-v0.1.2...cli-v0.2.0) (2026-11-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **cli:** test fails on page errors that aren't expected ([#190](https://github.com/visual-check/visual-check/issues/190))
+
+### Features
+
+* a story with defaultCapture false is captured in its modes only ([#198](https://github.com/visual-check/visual-check/issues/198)) ([5b42b71](https://github.com/visual-check/visual-check/commit/5b42b71c8c2ab998d3d2eaa07c5fb6fae6307964)), closes [#180](https://github.com/visual-check/visual-check/issues/180)
+* **cli:** a broken story whose page couldn't load Storybook's files says so, with a hint about the server ([611a42e](https://github.com/visual-check/visual-check/commit/611a42ede6606d216554f4e3a46ec92c3f990adc))
+* **cli:** a story whose capture would cut its content is broken as overflows ([#189](https://github.com/visual-check/visual-check/issues/189)) ([46c8df3](https://github.com/visual-check/visual-check/commit/46c8df3d2239800087c20b8ab0c4e2d8276a99bb)), closes [#179](https://github.com/visual-check/visual-check/issues/179)
+* **cli:** a test's step summary says how to update the baselines locally ([8e571a7](https://github.com/visual-check/visual-check/commit/8e571a74ce8c434b7cacafa9c0f46ca719ea57af))
+* **cli:** init pins the browser exactly and warns about an ignored skill, and a test's results explain failed loads and how to update ([#184](https://github.com/visual-check/visual-check/issues/184)) ([8ec8ac8](https://github.com/visual-check/visual-check/commit/8ec8ac88319983cd8660e6f27e8de9f1ea5f12fa)), closes [#173](https://github.com/visual-check/visual-check/issues/173)
+* **cli:** init warns when git ignores the agent skill ([a802ae6](https://github.com/visual-check/visual-check/commit/a802ae670ba2e3c9b2b0d633215705ebef0caae5))
+* **cli:** test fails on page errors that aren't expected ([#190](https://github.com/visual-check/visual-check/issues/190)) ([a1526a6](https://github.com/visual-check/visual-check/commit/a1526a6e019f43f3680a279b6869e29a8b50294a)), closes [#177](https://github.com/visual-check/visual-check/issues/177)
+* **cli:** update keeps the images of a story it marks broken ([#200](https://github.com/visual-check/visual-check/issues/200)) ([aaf17fe](https://github.com/visual-check/visual-check/commit/aaf17fed99745c2e503120ee1c11fcc188be2b09))
+
+
+### Bug Fixes
+
+* **cli:** a full-page capture measures the page again after its wait hook ([0fd376d](https://github.com/visual-check/visual-check/commit/0fd376dca323e631c74333bb7b63e5b27f7a625c))
+* **cli:** a full-page capture measures the page again after its wait hook ([#187](https://github.com/visual-check/visual-check/issues/187)) ([a7f2209](https://github.com/visual-check/visual-check/commit/a7f220953f3126bd6889ab23e5e967c8d5907c4a)), closes [#174](https://github.com/visual-check/visual-check/issues/174)
+* **cli:** a text that gets shorter no longer leaves a pixel of the old one in the snapshot ([#186](https://github.com/visual-check/visual-check/issues/186)) ([36bae94](https://github.com/visual-check/visual-check/commit/36bae946df1a4c96d8689c95a21b89100c582835))
+* **cli:** init adds @visual-check/chromium at the exact version the CLI was released with ([f0c26f5](https://github.com/visual-check/visual-check/commit/f0c26f587ab5c3c6a580f48275f29b5511289906))
+* the storybook and cli packages' types resolve under moduleResolution node10 ([#188](https://github.com/visual-check/visual-check/issues/188)) ([ad1416b](https://github.com/visual-check/visual-check/commit/ad1416b51114d5983007002b351f90610b5c3bd6)), closes [#175](https://github.com/visual-check/visual-check/issues/175)
+
 ## [0.1.2](https://github.com/visual-check/visual-check/compare/cli-v0.1.1...cli-v0.1.2) (2026-11-27)
 
 
