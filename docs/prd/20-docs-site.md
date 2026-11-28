@@ -34,6 +34,7 @@ All under `/docs`.
 - Linters and visual-check's own files. Biome lints the agent skill's runner script, and Fallow reports `visual-check.config.ts`, and maybe the runner script, as unused. The page shows the exclusions, and says the skill's files are rewritten on every upgrade, so they aren't to be reformatted:
   - Biome: `"!.agents/skills/visual-check"` and `"!.claude/skills/visual-check"` (the copy on Windows) added to `files.includes`;
   - Fallow: `"supportEntry": ["visual-check.config.ts"]`, which keeps the config's import of `@visual-check/cli` counted, and `"ignorePatterns": [".agents/skills/visual-check/**", ".claude/skills/visual-check/**"]`.
+- Jest in CommonJS mode. `@visual-check/storybook` ships ES modules only, as Storybook 10 does, so Jest has to transform it. Add `@visual-check` to the `transformIgnorePatterns` exception the project already has for `storybook` and `@storybook`. `'/node_modules/(?!(\\.pnpm/)?(storybook|@storybook|@visual-check))'` covers npm and pnpm. Pair it with a transform that handles ES modules: `babel-jest` with `@babel/preset-env`, or `ts-jest` with `allowJs`. `@visual-check/storybook/angular` follows the same rule as `@angular/*` under `jest-preset-angular`. Vitest and Jest in ESM mode need nothing.
 - It says up front that readiness never waits for the network. A failure on the first `test` means a story needs tuning: a `wait` hook, a mask or its animations.
 
 **Config**
