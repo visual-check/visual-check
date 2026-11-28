@@ -61,7 +61,9 @@ function itemOf(storybook: ResolvedStorybook, id: string): SnapshotToCapture {
   }
 }
 
-const passed: SnapshotResult = { status: 'passed', detail: '12 ms', attempts: 1 }
+const passed: SnapshotResult = { status: 'passed', detail: '12 ms', attempts: 1, gatheredPageErrors: [] }
+
+const missing: SnapshotResult = { ...missingResultOf(), gatheredPageErrors: [] }
 
 function factsOf(project: string, storybook: ResolvedStorybook, findings: RunFindings): TestReportFacts {
   return {
@@ -96,7 +98,7 @@ describe('testReportFor', () => {
         storybook,
         findingsOf({
           items: [itemOf(storybook, 'a'), itemOf(storybook, 'b'), itemOf(storybook, 'c')],
-          results: [passed, missingResultOf(), undefined],
+          results: [passed, missing, undefined],
           baselines: noOrphans(storybook),
         }),
       ),
@@ -133,7 +135,7 @@ describe('testReportFor', () => {
         storybook,
         findingsOf({
           items: [itemOf(storybook, 'a')],
-          results: [missingResultOf()],
+          results: [missing],
           baselines: [{ storybook, paths: [orphan], orphans: [orphan], expected: [] }],
         }),
       ),
@@ -257,12 +259,27 @@ function updateFactsOf(findings: Partial<RunFindings>): UpdateReportFacts {
 
 describe('updateReportFor', () => {
   const hosts = { requests: ['api.test'], remoteContent: ['cdn.test'] }
-  const written: SnapshotResult = { status: 'written', detail: '', attempts: 2, writtenFor: 'missing', hosts }
-  const kept: SnapshotResult = { status: 'kept', detail: 'kept · flaky', attempts: 2, flaky: true, hosts }
+  const written: SnapshotResult = {
+    status: 'written',
+    detail: '',
+    attempts: 2,
+    gatheredPageErrors: [],
+    writtenFor: 'missing',
+    hosts,
+  }
+  const kept: SnapshotResult = {
+    status: 'kept',
+    detail: 'kept · flaky',
+    attempts: 2,
+    gatheredPageErrors: [],
+    flaky: true,
+    hosts,
+  }
   const broken: SnapshotResult = {
     status: 'broken',
     detail: '',
     attempts: 3,
+    gatheredPageErrors: [],
     broken: { reason: 'unstable', message: "No two of the story's 3 loads agreed." },
   }
 

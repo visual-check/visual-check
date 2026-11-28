@@ -83,10 +83,10 @@ export function orphanLinesOf(cwd: string, storybooks: readonly StorybookBaselin
 export function consistencyOutputOf({ version, cwd, planned, check }: CheckedPlan): ConsistencyOutput {
   const findings = planned.flatMap((item): { item: PlannedSnapshot; result: SnapshotResult }[] => {
     if ('broken' in item) {
-      return [{ item, result: brokenResultOf(item.broken, { attempts: 0 }) }]
+      return [{ item, result: { ...brokenResultOf(item.broken, { attempts: 0 }), gatheredPageErrors: [] } }]
     }
 
-    return check.missing.has(item) ? [{ item, result: missingResultOf() }] : []
+    return check.missing.has(item) ? [{ item, result: { ...missingResultOf(), gatheredPageErrors: [] } }] : []
   })
   const results = findings.map(({ result }) => result)
   const orphanLines = orphanLinesOf(cwd, check.storybooks)

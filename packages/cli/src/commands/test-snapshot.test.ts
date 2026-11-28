@@ -148,7 +148,7 @@ function captureStoryOf(captures: readonly StoryCapture[]): CaptureStory {
  * A capture of `snapshot`, with `console` as its console messages, none when not given.
  */
 function captureOf(snapshot: Uint8Array, console: ConsoleMessage[] = []): StoryCapture {
-  return { snapshot, completingMs: undefined, console }
+  return { snapshot, completingMs: undefined, console, pageErrors: [] }
 }
 
 /**
@@ -190,7 +190,9 @@ describe('testSnapshot', () => {
 
   it('gives a missing baseline whose capture is broken as broken, with the image of its page', async () => {
     const { item, reportFolder, tools } = setupOf(undefined, 2)
-    const captures: StoryCapture[] = [{ broken: brokenStory, console: firstConsole, image: brokenImage }]
+    const captures: StoryCapture[] = [
+      { broken: brokenStory, console: firstConsole, pageErrors: [], image: brokenImage },
+    ]
     const result = await testSnapshot(item, captureStoryOf(captures), { ...tools, captureMissing: true })
 
     expect(result).toStrictEqual({
@@ -272,7 +274,11 @@ describe('testSnapshot', () => {
 
   it('counts a retry that broke, keeping the first capture as the one listed', async () => {
     const { item, tools } = setupOf(black, 3)
-    const captures: StoryCapture[] = [captureOf(white, firstConsole), captureOf(white), { broken: brokenStory }]
+    const captures: StoryCapture[] = [
+      captureOf(white, firstConsole),
+      captureOf(white),
+      { broken: brokenStory, pageErrors: [] },
+    ]
     const result = await testSnapshot(item, captureStoryOf(captures), tools)
 
     expect(result).toMatchObject({ status: 'differs', attempts: 3, console: firstConsole })
@@ -290,7 +296,9 @@ describe('testSnapshot', () => {
 
   it("leaves a broken story's image of its page as its snapshot, with its broken story and console", async () => {
     const { item, reportFolder, tools } = setupOf(black, 2)
-    const captures: StoryCapture[] = [{ broken: brokenStory, console: firstConsole, image: brokenImage }]
+    const captures: StoryCapture[] = [
+      { broken: brokenStory, console: firstConsole, pageErrors: [], image: brokenImage },
+    ]
     const result = await testSnapshot(item, captureStoryOf(captures), tools)
 
     expect(result).toStrictEqual({
@@ -306,7 +314,7 @@ describe('testSnapshot', () => {
 
   it('writes nothing for a broken story with no image and no page', async () => {
     const { item, reportFolder, tools } = setupOf(black, 2)
-    const result = await testSnapshot(item, captureStoryOf([{ broken: brokenStory }]), tools)
+    const result = await testSnapshot(item, captureStoryOf([{ broken: brokenStory, pageErrors: [] }]), tools)
 
     expect(result).toStrictEqual({
       status: 'broken',

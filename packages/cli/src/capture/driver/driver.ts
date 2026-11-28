@@ -322,6 +322,8 @@ function isSamePageError(one: PageError, other: PageError): boolean {
 /**
  * Gives the page errors of every list, each once, in the order first seen: a page error the same as one before it, in
  * its kind, text and load error, is left out.
+ *
+ * @public
  */
 export function eachPageErrorOnce(...lists: readonly (readonly PageError[])[]): PageError[] {
   const once: PageError[] = []
