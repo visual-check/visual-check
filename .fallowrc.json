@@ -30,6 +30,9 @@
       "test-storybooks/storybook-11-vue": { "ignoreDependencies": ["@visual-check/storybook", "vue"] },
       "test-storybooks/storybook-9-angular": { "ignoreDependencies": ["@visual-check/storybook"] },
       "test-storybooks/storybook-11-angular": { "ignoreDependencies": ["@visual-check/storybook"] },
+      "packages/repo-checks": {
+        "ignoreDependencies": ["@visual-check/cli", "@visual-check/storybook"]
+      },
       "test-storybooks/setup": {
         "ignoreDependencies": [
           "@visual-check/chromium",
@@ -104,6 +107,7 @@
       { "name": "repo-checks/chromium-checksums", "patterns": ["packages/repo-checks/src/chromium-checksums/**"] },
       { "name": "repo-checks/chromium-bump", "patterns": ["packages/repo-checks/src/chromium-bump/**"] },
       { "name": "repo-checks/no-playwright", "patterns": ["packages/repo-checks/src/no-playwright/**"] },
+      { "name": "repo-checks/public-types", "patterns": ["packages/repo-checks/src/public-types/**"] },
       { "name": "repo-checks/source-layout", "patterns": ["packages/repo-checks/src/source-layout/**"] }
     ],
     "rules": [
@@ -190,6 +194,7 @@
       { "from": "repo-checks/chromium-checksums", "allow": ["repo-checks/workspace"] },
       { "from": "repo-checks/chromium-bump", "allow": ["repo-checks/chromium-checksums", "repo-checks/workspace"] },
       { "from": "repo-checks/no-playwright", "allow": ["repo-checks/workspace"] },
+      { "from": "repo-checks/public-types", "allow": ["repo-checks/workspace"] },
       { "from": "repo-checks/source-layout", "allow": ["repo-checks/workspace"] }
     ],
     "coverage": {
