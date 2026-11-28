@@ -347,7 +347,8 @@ function brokenSnapshotsOf({ items, results }: PlannedSnapshots): UpdateBrokenSn
 
 /**
  * Gives the exit code: 1 when any snapshot has a failing status for the command, or for `test` when any Storybook's
- * baselines hold an orphan or any snapshot has a page error that fails, whatever its status, else 0.
+ * baselines hold an orphan or any snapshot has a page error or a real network request that fails, whatever its status,
+ * else 0.
  */
 function exitCodeOf(
   command: SnapshotRun['command'],
@@ -361,8 +362,11 @@ function exitCodeOf(
   const pageErrorsFailed =
     command === 'test' &&
     snapshots.results.some((result) => result?.pageErrors.some((error) => error.severity === 'fail') === true)
+  const realRequestsFailed =
+    command === 'test' &&
+    snapshots.results.some((result) => result?.realRequests.some((request) => request.severity === 'fail') === true)
 
-  return failed || orphaned || pageErrorsFailed ? 1 : 0
+  return failed || orphaned || pageErrorsFailed || realRequestsFailed ? 1 : 0
 }
 
 /**
@@ -571,8 +575,10 @@ async function takeSnapshots(
  * its stories sent real network requests to, then a line for each host whose remote content they show, each kind
  * sorted by host name, with the count and the first three IDs of the stories that reach it. A story whose snapshot was
  * written or kept counts once however many modes it has, and a broken one counts for nothing. The config's
- * `silenceHosts` leaves both kinds of host out. Only `update` watches requests: `test` never does and prints no such
- * block. The warnings never change the exit code.
+ * `silenceHosts` leaves both kinds of host out, whatever `realRequests` says. The warnings never change the exit code.
+ * `test` prints no such block: it watches the requests of the snapshots whose `realRequests` isn't `'off'`, lists
+ * their hosts that `silenceHosts` doesn't match in its end block and report, and exits 1 on one under `'fail'`. A run
+ * whose every snapshot has `'off'` watches no request.
  *
  * Any other error, an error that is a bug, stops the run with exit 2 too, after closing the sessions and the browsers,
  * with its stack trace on stderr after the lines emitted so far.

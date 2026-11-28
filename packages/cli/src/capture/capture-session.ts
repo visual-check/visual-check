@@ -154,6 +154,13 @@ export interface StoryToCapture {
    */
   imageWhenBroken?: boolean
   /**
+   * Whether the capture gives the hosts of the real network requests its page made, as `requestHosts`, from every
+   * attempt. Its page then watches its requests: the session replaces a page that doesn't with one that does. Without
+   * it, the capture gives none, and a page is opened to watch requests only when the settings list hosts, though a page
+   * already watching is kept.
+   */
+  watchRequests?: boolean
+  /**
    * Decides whether to capture the same page again. It's called with the snapshot as soon as it's captured and what
    * the snapshot comes with is read, with the page left as it is. Each attempt that captured a snapshot calls it once,
    * and an attempt that's broken before its snapshot is captured never calls it. A second capture that navigates away
@@ -506,6 +513,12 @@ export type StoryCapture =
        */
       pageErrors: PageError[]
       /**
+       * The hosts of the real network requests the story's pages made in every attempt of the capture, each once, in
+       * the order first seen: read once each attempt is done, after the story's `captureAgainIf` too. Present exactly
+       * when the story asked for them with `watchRequests`.
+       */
+      requestHosts?: string[]
+      /**
        * The remote content the snapshot shows, when the story asked for it with `findRemoteContent` and the search
        * answered in time. Without it, the remote content is unknown.
        */
@@ -538,6 +551,12 @@ export type StoryCapture =
        * from an attempt that had no page: a page that couldn't be opened, or a browser that exited.
        */
       pageErrors: PageError[]
+      /**
+       * The hosts of the real network requests the story's pages made in every attempt of the capture, each once, in
+       * the order first seen: read before each page is closed. None from an attempt that had no page. Present exactly
+       * when the story asked for them with `watchRequests`.
+       */
+      requestHosts?: string[]
       /**
        * The full page as it was when the story broke, as PNG bytes exactly as the browser made them. Present only when
        * the story asked for it with `imageWhenBroken`, broke for a reason whose page still shows something, and the
@@ -1187,15 +1206,26 @@ function capturedExtrasOf(
 }
 
 /**
+ * What an attempt reads of its page's loads once it's done: the page errors, and the hosts of the real network requests
+ * when the story asks for them with `watchRequests`.
+ */
+function loadsReadOf(page: Page, story: StoryToCapture): { pageErrors: PageError[]; requestHosts?: string[] } {
+  return {
+    pageErrors: page.pageErrors(),
+    ...(story.watchRequests === true ? { requestHosts: page.requestHosts() } : {}),
+  }
+}
+
+/**
  * A snapshot captured on a page: what capturing the story gave, and the area it was captured from, so the same area
  * can be captured again.
  */
 interface CapturedSnapshot {
   /**
    * What capturing the story gave: its snapshot and what it comes with, without a second capture and without its page
-   * errors, which are read once the story's `captureAgainIf` ran.
+   * errors and request hosts, which are read once the story's `captureAgainIf` ran.
    */
-  result: Omit<Extract<StoryCapture, { snapshot: Uint8Array }>, 'capturedAgain' | 'pageErrors'>
+  result: Omit<Extract<StoryCapture, { snapshot: Uint8Array }>, 'capturedAgain' | 'pageErrors' | 'requestHosts'>
   /**
    * What the snapshot was captured from: the element's box, or the full page.
    */
@@ -1239,7 +1269,7 @@ async function captureOnPage(
   const brokenBy = (broken: BrokenStory): Extract<StoryCapture, { broken: BrokenStory }> => ({
     broken: withFailedLoads(broken, page.failedLoads(), story.url),
     console: page.consoleMessages(),
-    pageErrors: page.pageErrors(),
+    ...loadsReadOf(page, story),
   })
 
   /**
@@ -1534,13 +1564,13 @@ async function captureAgainIfAsked(
   const again = await story.captureAgainIf?.(captured.result.snapshot)
 
   if (again !== true) {
-    return { ...captured.result, pageErrors: page.pageErrors() }
+    return { ...captured.result, ...loadsReadOf(page, story) }
   }
 
   try {
     const capturedAgain = await page.capture(captured.area)
 
-    return { ...captured.result, pageErrors: page.pageErrors(), capturedAgain }
+    return { ...captured.result, ...loadsReadOf(page, story), capturedAgain }
   } catch (error) {
     if (error instanceof BrowserExitedError) {
       throw error
@@ -1553,7 +1583,7 @@ async function captureAgainIfAsked(
         story.url,
       ),
       console: page.consoleMessages(),
-      pageErrors: page.pageErrors(),
+      ...loadsReadOf(page, story),
     }
   }
 }
@@ -1592,6 +1622,11 @@ export function pageSetupOf(settings: CaptureSettings): PageSetup {
  * capture, set up with the settings, a user agent ending in `StorybookTestRunner` and the page script. After a broken
  * story, it closes the page and opens a fresh one, in a fresh browser context, for the next story.
  *
+ * A page watches its real network requests when the settings list hosts, or when the story it opens for asks with
+ * `watchRequests`. A story that asks, on a page that doesn't watch, gets a fresh page that does, the old one closed
+ * first. A page that watches is kept for the stories after it, since watching costs less than a fresh page, but only
+ * a story that asks gets the hosts of its real network requests, from every attempt, each once.
+ *
  * Before each later capture on that page, it clears the cookies, `localStorage`, `sessionStorage` and IndexedDB the
  * previous story left, keeping Cache Storage and service workers. The previous story's document stays loaded until the
  * next story's commits, so a timer or handler of it can still write storage after the clearing. When the clearing
@@ -1627,6 +1662,7 @@ export function pageSetupOf(settings: CaptureSettings): PageSetup {
 export function openCaptureSession(driver: Driver, settings: CaptureSettings): CaptureSession {
   const setup = pageSetupOf(settings)
   let page: Page | undefined
+  let pageWatchesRequests = false
 
   const closePage = async (): Promise<void> => {
     const closing = page
@@ -1663,7 +1699,12 @@ export function openCaptureSession(driver: Driver, settings: CaptureSettings): C
    */
   const captureOnOpenPage = async (story: StoryToCapture): Promise<StoryCapture> => {
     try {
-      page ??= await driver.newPage(setup)
+      if (page === undefined) {
+        const watchRequests = setup.watchRequests || story.watchRequests === true
+
+        page = await driver.newPage({ ...setup, watchRequests })
+        pageWatchesRequests = watchRequests
+      }
     } catch (error) {
       if (error instanceof BrowserExitedError) {
         throw error
@@ -1703,17 +1744,27 @@ export function openCaptureSession(driver: Driver, settings: CaptureSettings): C
 
   return {
     capture: async (story) => {
+      if (story.watchRequests === true && !pageWatchesRequests) {
+        await closePage()
+      }
+
       await clearOpenPage()
 
       let capture = await captureOnOpenPage(story)
-      const pageErrors = [capture.pageErrors]
+      const attempts = [capture]
 
       for (let retry = 0; retry < navigatedAwayRetries && navigatedAway(capture); retry += 1) {
         capture = await captureOnOpenPage(story)
-        pageErrors.push(capture.pageErrors)
+        attempts.push(capture)
       }
 
-      return { ...capture, pageErrors: eachPageErrorOnce(...pageErrors) }
+      return {
+        ...capture,
+        pageErrors: eachPageErrorOnce(...attempts.map(({ pageErrors }) => pageErrors)),
+        ...(story.watchRequests === true
+          ? { requestHosts: [...new Set(attempts.flatMap(({ requestHosts }) => requestHosts ?? []))] }
+          : {}),
+      }
     },
     close: closePage,
   }

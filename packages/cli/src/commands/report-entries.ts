@@ -118,13 +118,18 @@ const noImages: ReportImages = { baseline: null, snapshot: null, diff: null, com
 
 /**
  * Whether the report lists a snapshot: anything but a plain pass and a baseline `update` kept. A pass is listed when
- * it's flaky, has page errors or has stale expected page errors. A kept baseline never is, since `update`'s document
- * has no status for it.
+ * it's flaky, has page errors, has stale expected page errors or has real network requests. A kept baseline never is,
+ * since `update`'s document has no status for it.
  */
 export function isListed(result: SnapshotResult): boolean {
   switch (result.status) {
     case 'passed':
-      return result.flaky === true || result.pageErrors.length > 0 || result.staleExpectedPageErrors.length > 0
+      return (
+        result.flaky === true ||
+        result.pageErrors.length > 0 ||
+        result.staleExpectedPageErrors.length > 0 ||
+        result.realRequests.length > 0
+      )
     case 'kept':
       return false
     default:
@@ -418,14 +423,20 @@ function storyUpdateVerdictOf(result: SnapshotResult): [VerdictOf<StoryUpdateEnt
 }
 
 /**
- * Gives a `test` snapshot's entry, with its baseline's path relative to `configFolder`.
+ * Gives a `test` snapshot's entry, with its baseline's path relative to `configFolder` and the hosts of its real network
+ * requests.
  *
  * @throws {Error} When the result is `update`'s, or lacks what its status carries.
  */
 export function testEntryOf(item: PlannedSnapshot, result: SnapshotResult, configFolder: string): TestReportEntry {
   const [verdict, message] = testVerdictOf(result)
 
-  return { ...headOf(item), ...verdict, ...tailOf(item, result, configFolder, message) }
+  return {
+    ...headOf(item),
+    ...verdict,
+    ...tailOf(item, result, configFolder, message),
+    realRequests: result.realRequests.map(({ host, severity }) => ({ host, severity })),
+  }
 }
 
 /**
@@ -446,6 +457,7 @@ export function orphanEntryOf(
     status: 'orphan',
     reason: null,
     ...baselineTailOf(path, configFolder, message, { ...noImages, baseline: image }),
+    realRequests: [],
   }
 }
 

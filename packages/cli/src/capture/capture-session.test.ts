@@ -233,6 +233,118 @@ describe('the hosts of a capture', () => {
   })
 })
 
+describe('the real network requests of a capture', () => {
+  const watching = { ...primary, watchRequests: true }
+
+  it("opens a page that watches requests for a story that asks, and gives the page's request hosts, read once captureAgainIf ran", async () => {
+    let asked = false
+    const driver = new FakeDriver({
+      pages: [{ requestHosts: () => (asked ? ['api.example.com', 'late.example.com'] : ['api.example.com']) }],
+    })
+    const captureAgainIf = async () => {
+      asked = true
+
+      return false
+    }
+
+    expect(await openCaptureSession(driver, settings).capture({ ...watching, captureAgainIf })).toStrictEqual({
+      snapshot: defaultSnapshot,
+      completingMs: undefined,
+      console: [],
+      pageErrors: [],
+      requestHosts: ['api.example.com', 'late.example.com'],
+    })
+    expect(driver.setups.map(({ watchRequests }) => watchRequests)).toEqual([true])
+  })
+
+  it("gives a broken story's request hosts, read before its page is closed", async () => {
+    let closed = false
+    const driver = new FakeDriver({
+      pages: [
+        {
+          storyWait: async () => finishedAnswer({ status: 'error' }),
+          requestHosts: () => (closed ? [] : ['api.example.com']),
+          close: async () => {
+            closed = true
+          },
+        },
+      ],
+    })
+    const capture = await openCaptureSession(driver, settings).capture(watching)
+
+    expect(capture).toHaveProperty('broken.reason', 'error')
+    expect(capture).toHaveProperty('requestHosts', ['api.example.com'])
+  })
+
+  it('gives the request hosts of every attempt of a story that navigated away, each once, in the order first seen', async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          goto: async () => {
+            throw new PageNavigatedAwayError('http://localhost:6006/one', 'The page navigated to /one.')
+          },
+          requestHosts: () => ['first.example.com', 'both.example.com'],
+        },
+        { requestHosts: () => ['both.example.com', 'second.example.com'] },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(watching)).toHaveProperty('requestHosts', [
+      'first.example.com',
+      'both.example.com',
+      'second.example.com',
+    ])
+    expect(driver.setups.map(({ watchRequests }) => watchRequests)).toEqual([true, true])
+  })
+
+  it('gives no request hosts for a story whose page could not be opened', async () => {
+    const driver = new FakeDriver({
+      newPage: async () => {
+        throw new Error("The browser didn't open a page within 30 s.")
+      },
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(watching)).toHaveProperty('requestHosts', [])
+  })
+
+  it("gives no request hosts, and doesn't watch, for a story that doesn't ask", async () => {
+    const driver = new FakeDriver({ pages: [{ requestHosts: () => ['api.example.com'] }] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).not.toHaveProperty('requestHosts')
+    expect(driver.setups.map(({ watchRequests }) => watchRequests)).toEqual([false])
+  })
+
+  it('replaces a page that watches no requests with one that does for a story that asks', async () => {
+    const driver = new FakeDriver()
+    const session = openCaptureSession(driver, settings)
+
+    await session.capture(secondary)
+    await session.capture(watching)
+    expect(driver.setups.map(({ watchRequests }) => watchRequests)).toEqual([false, true])
+    expect(driver.methods()).toContain('1:close')
+    expect(driver.methods()).not.toContain('1:clearStorage')
+  })
+
+  it("keeps a page that watches requests for a story that doesn't ask, giving it no request hosts", async () => {
+    const driver = new FakeDriver({ pages: [{ requestHosts: () => ['api.example.com'] }] })
+    const session = openCaptureSession(driver, settings)
+
+    await session.capture(watching)
+    expect(await session.capture(secondary)).not.toHaveProperty('requestHosts')
+    expect(driver.setups.map(({ watchRequests }) => watchRequests)).toEqual([true])
+  })
+
+  it('gives both the hosts and the request hosts on the page it lists hosts on, when the settings list hosts', async () => {
+    const driver = new FakeDriver({ pages: [{ requestHosts: () => ['api.example.com'] }] })
+
+    expect(await openCaptureSession(driver, { ...settings, listHosts: true }).capture(watching)).toMatchObject({
+      hosts: { requests: ['api.example.com'], remoteContent: [] },
+      requestHosts: ['api.example.com'],
+    })
+    expect(driver.setups.map(({ watchRequests }) => watchRequests)).toEqual([true])
+  })
+})
+
 describe('remoteHostsOf', () => {
   it('lists each host once, in the order found', () => {
     const remote = [

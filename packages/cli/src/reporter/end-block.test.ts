@@ -237,6 +237,43 @@ describe('testEndLinesOf', () => {
       '1 passed · 0 ms',
     ])
   })
+
+  it('lists the snapshots with real network requests after the page errors and before the flaky ones, whatever their status', () => {
+    const entries = [
+      testEntryWith({
+        id: 'a',
+        status: 'broken',
+        reason: 'error',
+        message: 'Boom.',
+        realRequests: [{ host: 'api.example.com', severity: 'warn' }],
+      }),
+      testEntryWith({ id: 'b', status: 'passed', reason: null, flaky: true }),
+      testEntryWith({
+        id: 'c',
+        status: 'passed',
+        reason: null,
+        pageErrors: [{ kind: 'console.error', text: 'Failed to fetch', severity: 'warn' }],
+        realRequests: [{ host: 'localhost:6007', severity: 'fail' }],
+      }),
+    ]
+
+    expect(testEndLinesOf(testReportWith(entries), { ...atConfig, elapsedMs: 0 })).toEqual([
+      '── 1 failure ──',
+      'web  a',
+      '  broken: Boom.',
+      '── 1 snapshot with page errors ──',
+      'web  c',
+      '  page error (warn): console.error Failed to fetch',
+      '── 2 snapshots with real network requests, 1 of which fails the run ──',
+      'web  a',
+      '  real network request (warn): api.example.com',
+      'web  c',
+      '  real network request (fail): localhost:6007',
+      'Flaky snapshots, which passed on a retry:',
+      '  web  b',
+      '2 passed (1 flaky) · 1 broken · 0 ms',
+    ])
+  })
 })
 
 describe('updateBrokenLinesOf', () => {

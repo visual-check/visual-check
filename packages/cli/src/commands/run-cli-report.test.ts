@@ -138,6 +138,7 @@ describe('runCli test report', () => {
         diff: 'images/web/b.diff.png',
         compared: null,
       },
+      realRequests: [],
     })
     expect(readImage(project, entry.images.baseline)).toEqual(defaultRunSnapshot)
     expect(readImage(project, entry.images.snapshot)).toEqual(otherSnapshot)

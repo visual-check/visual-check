@@ -11,7 +11,7 @@ const newerHint = ' If a newer @visual-check/storybook wrote it, install @visual
  * The known keys an unknown-key issue lists at the top level.
  */
 const topKeys =
-  'modes, defaultCapture, viewport, element, growViewport, allowOverflow, masks, tolerance, disable, pageErrors, expectedPageErrors, wait'
+  'modes, defaultCapture, viewport, element, growViewport, allowOverflow, masks, tolerance, disable, pageErrors, expectedPageErrors, realRequests, wait'
 
 /**
  * The issue of a story that sets `defaultCapture: false` and lists no mode.
@@ -436,6 +436,18 @@ describe('checkStoryOptions', () => {
     })
   })
 
+  describe('realRequests', () => {
+    it.each(['fail', 'warn', 'off'])('takes %s', (realRequests) => {
+      expect(optionsOf({ realRequests })).toStrictEqual({ realRequests })
+    })
+
+    it.each([null, 'error', true, []])('rejects %j', (realRequests) => {
+      expect(issuesOf({ realRequests })).toStrictEqual([
+        expect.stringMatching(/^visualCheck\.realRequests: must be 'fail', 'warn' or 'off'\. Got /),
+      ])
+    })
+  })
+
   describe('expectedPageErrors', () => {
     it('takes strings and regular expressions, keeping each as it is, and an empty array', () => {
       const pattern = /\/api\/orders/i
@@ -522,6 +534,7 @@ describe('checkStoryOptions', () => {
         disable: false,
         pageErrors: 'warn',
         expectedPageErrors: ['Failed to fetch', /timeout/],
+        realRequests: 'off',
         wait: () => undefined,
         retired: undefined,
       }
@@ -538,6 +551,7 @@ describe('checkStoryOptions', () => {
         disable: false,
         pageErrors: 'warn',
         expectedPageErrors: ['Failed to fetch', /timeout/],
+        realRequests: 'off',
       })
     })
 

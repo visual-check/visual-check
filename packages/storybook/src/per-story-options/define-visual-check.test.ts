@@ -31,6 +31,7 @@ describe('defineVisualCheck', () => {
       disable: true,
       pageErrors: 'warn',
       expectedPageErrors: ['Failed to fetch', /\/api\/orders/],
+      realRequests: 'fail',
       wait,
     })
 
@@ -50,6 +51,7 @@ describe('defineVisualCheck', () => {
         disable: true,
         pageErrors: 'warn',
         expectedPageErrors: ['Failed to fetch', /\/api\/orders/],
+        realRequests: 'fail',
         wait,
       },
     })
@@ -132,6 +134,12 @@ describe('defineVisualCheck', () => {
     visualCheck({ expectedPageErrors: [404] })
     // @ts-expect-error expectedPageErrors is a list.
     visualCheck({ expectedPageErrors: 'Failed to fetch' })
+  })
+
+  it('types realRequests', () => {
+    visualCheck({ realRequests: 'warn' })
+    // @ts-expect-error realRequests is 'fail', 'warn' or 'off'.
+    visualCheck({ realRequests: true })
   })
 })
 
@@ -281,6 +289,13 @@ describe('merging through Storybook', () => {
 
     expect(merge(preview, visualCheck({ pageErrors: 'off' })).pageErrors).toBe('off')
     expect(merge(preview, visualCheck({ disable: false })).pageErrors).toBe('warn')
+  })
+
+  it('lets the most specific realRequests win', () => {
+    const preview = visualCheck({ realRequests: 'fail' })
+
+    expect(merge(preview, visualCheck({ realRequests: 'off' })).realRequests).toBe('off')
+    expect(merge(preview, visualCheck({ disable: false })).realRequests).toBe('fail')
   })
 
   it('lets the most specific expectedPageErrors list replace the inherited one', () => {

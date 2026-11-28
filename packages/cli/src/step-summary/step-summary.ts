@@ -3,6 +3,7 @@ import type { Report, ReportEntryFields } from '../report/report-document.js'
 import { countsLineOf } from '../reporter/counts-line.js'
 import { failureStatuses, testCountsLineOf } from '../reporter/end-block.js'
 import { pageErrorCountsOf, pageErrorTextOf } from '../reporter/page-errors-block.js'
+import { realRequestCountsOf } from '../reporter/real-requests-block.js'
 import { systemReasonOf } from '../system-error/system-reason.js'
 
 /**
@@ -24,6 +25,16 @@ const listedFlakyCount = 100
  * The most snapshots with page errors the summary names.
  */
 const listedPageErrorSnapshotCount = 5
+
+/**
+ * The most snapshots with real network requests the summary names.
+ */
+const listedRealRequestSnapshotCount = 5
+
+/**
+ * The most hosts the summary names for one snapshot with real network requests.
+ */
+const listedHostCount = 3
 
 /**
  * What starts a summary appended after what the file already holds: a blank line, so its heading is one.
@@ -108,7 +119,8 @@ export class StepSummaryError extends Error {
 /**
  * Builds the run's step summary in Markdown, under `budgetBytes` in UTF-8: a heading naming the version, the command,
  * the shard and whether only the consistency check ran, then the counts, the flaky snapshots, at most 100, the
- * snapshots with page errors, how many and the first 5 with the first of each, then, for a `test` with a snapshot that
+ * snapshots with page errors, how many and the first 5 with the first of each, for `test` the snapshots with real
+ * network requests, how many and the first 5 with their first 3 hosts, then, for a `test` with a snapshot that
  * differs, a missing baseline or an orphan and a `localUpdate` given, how to update the baselines locally, and a table
  * of the failures in the report's order, the names and cells escaped. The table keeps its first rows that fit, and a
  * note says how many it leaves out. A run that exited 2 gives the heading and its error instead, cut to fit with a note
@@ -124,7 +136,13 @@ export function stepSummaryOf(report: Report, budgetBytes: number, localUpdate?:
     return errorSummaryOf(heading, report.error.message, budgetBytes)
   }
 
-  const blocks = [heading, countsOf(report), ...flakyBlockOf(report), ...pageErrorSnapshotsBlockOf(report)]
+  const blocks = [
+    heading,
+    countsOf(report),
+    ...flakyBlockOf(report),
+    ...pageErrorSnapshotsBlockOf(report),
+    ...realRequestSnapshotsBlockOf(report),
+  ]
   const failures = failuresOf(report)
 
   if (failures.length === 0) {
@@ -275,6 +293,32 @@ function pageErrorSnapshotsBlockOf(report: Report): string[] {
     listed.length > listedPageErrorSnapshotCount ? [`- …and ${listed.length - listedPageErrorSnapshotCount} more`] : []
 
   return ['**Page errors**', pageErrorCountsOf(entries, report.command), [...items, ...more].join('\n')]
+}
+
+/**
+ * Gives the real network requests block of a `test`: how many snapshots have real network requests and how many of
+ * them fail the run, then the first 5, whatever their status, each with its first 3 hosts, then how many more there
+ * are. Gives no block when no snapshot has any, and none for `update`, which lists hosts as warnings instead.
+ */
+function realRequestSnapshotsBlockOf(report: Report): string[] {
+  const listed = report.command === 'test' ? report.snapshots.filter((entry) => entry.realRequests.length > 0) : []
+
+  if (listed.length === 0) {
+    return []
+  }
+
+  const items = listed.slice(0, listedRealRequestSnapshotCount).map((entry) => {
+    const hosts = entry.realRequests.slice(0, listedHostCount).map(({ host }) => host)
+    const more = entry.realRequests.length > listedHostCount ? ', …' : ''
+
+    return `- ${entryNameOf(entry)}: ${inlineTextOf(hosts.join(', '))}${more}`
+  })
+  const more =
+    listed.length > listedRealRequestSnapshotCount
+      ? [`- …and ${listed.length - listedRealRequestSnapshotCount} more`]
+      : []
+
+  return ['**Real network requests**', realRequestCountsOf(listed), [...items, ...more].join('\n')]
 }
 
 /**

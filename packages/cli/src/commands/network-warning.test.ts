@@ -123,41 +123,6 @@ describe('warningsTextOf of networkWarningsOf', () => {
     )
     expect(networkWarningOf(taken, ['api.example.com', 'keep.example.com'])).toBe('')
   })
-
-  describe('silence entries', () => {
-    /**
-     * Whether the entries silence a request to the host.
-     */
-    function isSilenced(host: string, entries: string[]): boolean {
-      return networkWarningOf([reaching('web', 'a--a', { requests: [host] })], entries) === ''
-    }
-
-    it('silences the exact host, with its port', () => {
-      expect(isSilenced('api.example.com', ['api.example.com'])).toBe(true)
-      expect(isSilenced('localhost:6006', ['localhost:6006'])).toBe(true)
-      expect(isSilenced('api.example.com', ['other.example.com'])).toBe(false)
-    })
-
-    it('silences a host with a port by its hostname', () => {
-      expect(isSilenced('localhost:6006', ['localhost'])).toBe(true)
-      expect(isSilenced('localhost:6006', ['localhost:7007'])).toBe(false)
-    })
-
-    it('ignores case', () => {
-      expect(isSilenced('api.example.com', ['API.Example.com'])).toBe(true)
-      expect(isSilenced('a.example.com', ['*.EXAMPLE.com'])).toBe(true)
-    })
-
-    it('silences the subdomains of a wildcard entry, at any depth, but not the domain itself', () => {
-      expect(isSilenced('a.example.com', ['*.example.com'])).toBe(true)
-      expect(isSilenced('a.b.example.com', ['*.example.com'])).toBe(true)
-      expect(isSilenced('a.example.com:8443', ['*.example.com'])).toBe(true)
-      expect(isSilenced('a.example.com:8443', ['*.example.com:8443'])).toBe(true)
-      expect(isSilenced('a.example.com:9000', ['*.example.com:8443'])).toBe(false)
-      expect(isSilenced('example.com', ['*.example.com'])).toBe(false)
-      expect(isSilenced('badexample.com', ['*.example.com'])).toBe(false)
-    })
-  })
 })
 
 describe('networkWarningsOf', () => {

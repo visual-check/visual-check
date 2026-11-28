@@ -7,6 +7,7 @@ import type {
   LocalAndCi,
   PageErrorCheck,
   Platform,
+  RealRequestCheck,
   StorybookSettings,
   Tolerance,
   Viewport,
@@ -106,7 +107,7 @@ export interface ResolvedConfig {
    */
   retries: number
   /**
-   * Hosts whose requests `update`'s warnings skip.
+   * Hosts whose requests `update`'s warnings skip, and whose real network requests `test` neither fails on nor lists.
    */
   silenceHosts: string[]
   /**
@@ -117,6 +118,11 @@ export interface ResolvedConfig {
    * The page errors every story raises on purpose, which each snapshot expects besides its story's own.
    */
   expectedPageErrors: (string | RegExp)[]
+  /**
+   * What a real network request to a host `silenceHosts` doesn't match does to a snapshot in `test`, unless the story's
+   * options say otherwise.
+   */
+  realRequests: RealRequestCheck
   /**
    * The globs that select every story or none, as written: relative to the config file's folder.
    */
@@ -167,6 +173,7 @@ const configDefaults = {
   silenceHosts: [],
   pageErrors: 'fail',
   expectedPageErrors: [],
+  realRequests: 'off',
   affected: { selectAll: [], ignore: [] },
 } as const satisfies Omit<ResolvedConfig, 'path' | 'storybooks' | 'baselinesFolders' | 'image'>
 
@@ -369,6 +376,7 @@ export function resolveConfig(config: Config, options: ResolveOptions): Resolved
     silenceHosts: [...(config.silenceHosts ?? configDefaults.silenceHosts)],
     pageErrors: config.pageErrors ?? configDefaults.pageErrors,
     expectedPageErrors: [...(config.expectedPageErrors ?? configDefaults.expectedPageErrors)],
+    realRequests: config.realRequests ?? configDefaults.realRequests,
     affected: {
       selectAll: [...(config.affected?.selectAll ?? configDefaults.affected.selectAll)],
       ignore: [...(config.affected?.ignore ?? configDefaults.affected.ignore)],

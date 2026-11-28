@@ -2,10 +2,11 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
-import type { BrokenStory, StoryCapture } from '../capture/capture-session.js'
+import type { BrokenStory, StoryCapture, StoryToCapture } from '../capture/capture-session.js'
 import type { PageError } from '../capture/driver/driver.js'
 import type { JudgedPageError } from '../page-errors/judge-page-errors.js'
 import type { PageErrorPolicy } from '../page-errors/page-error-policy.js'
+import type { RealRequestPolicy } from '../real-network-requests/real-request-policy.js'
 import { greyPng, whitePixels } from '../visual-diff/images.fixture.js'
 import { createVisualDiff } from '../visual-diff/visual-diff.js'
 import type { SnapshotToCapture } from './plan-snapshots.js'
@@ -85,10 +86,20 @@ afterEach(() => {
 const failOnAll: PageErrorPolicy = { check: 'fail', expected: [], storyExpected: [] }
 
 /**
- * Builds the snapshot of story `a`, with a baselines folder of its own holding `baseline` as its baseline when given
- * and nothing when not, judging its page errors by `pageErrorPolicy`.
+ * The real network request policy of a story that sets no `realRequests` under the default config.
  */
-function snapshotOf(baseline?: Uint8Array, pageErrorPolicy = failOnAll): SnapshotToCapture {
+const unchecked: RealRequestPolicy = { check: 'off', silenceHosts: [] }
+
+/**
+ * Builds the snapshot of story `a`, with a baselines folder of its own holding `baseline` as its baseline when given
+ * and nothing when not, judging its page errors by `pageErrorPolicy` and its real network requests by
+ * `realRequestPolicy`.
+ */
+function snapshotOf(
+  baseline?: Uint8Array,
+  pageErrorPolicy = failOnAll,
+  realRequestPolicy = unchecked,
+): SnapshotToCapture {
   const folder = mkdtempSync(join(tmpdir(), 'visual-check-take-'))
 
   folders.push(folder)
@@ -106,6 +117,7 @@ function snapshotOf(baseline?: Uint8Array, pageErrorPolicy = failOnAll): Snapsho
     options: {},
     tolerance: { color: 0.01, pixels: 20 },
     pageErrorPolicy,
+    realRequestPolicy,
     viewport: { width: 10, height: 10, deviceScaleFactor: 1, touch: false },
     globals: {},
   }
@@ -143,6 +155,11 @@ type FakeCapture =
        * The page errors its page raised.
        */
       pageErrors: PageError[]
+      /**
+       * The hosts of the real network requests its page made, given only when the story asks for them. None when not
+       * given.
+       */
+      requestHosts?: string[]
     }
   | {
       /**
@@ -153,22 +170,33 @@ type FakeCapture =
        * The page errors its page raised.
        */
       pageErrors: PageError[]
+      /**
+       * The hosts of the real network requests its page made, given only when the story asks for them. None when not
+       * given.
+       */
+      requestHosts?: string[]
     }
 
 /**
  * A fake `CaptureStory` that gives `captures` in order, one per call, and throws when asked for more. Like a capture
- * session, it calls the story's `captureAgainIf` with a snapshot, and gives the same page captured again when it
- * resolves true.
+ * session, it gives a capture's request hosts only when the story asks for them with `watchRequests`, calls the story's
+ * `captureAgainIf` with a snapshot, and gives the same page captured again when it resolves true. Each story it was
+ * asked to capture is kept in `asked`, when given.
  */
-function captureStoryOf(captures: readonly FakeCapture[]): CaptureStory {
+function captureStoryOf(captures: readonly FakeCapture[], asked: StoryToCapture[] = []): CaptureStory {
   const queue = [...captures]
 
   return async (story): Promise<StoryCapture> => {
-    const capture = queue.shift()
+    asked.push(story)
 
-    if (capture === undefined) {
+    const next = queue.shift()
+
+    if (next === undefined) {
       throw new Error('The test gave too few captures.')
     }
+
+    const { requestHosts = [], ...rest } = next
+    const capture = story.watchRequests === true ? { ...rest, requestHosts } : rest
 
     if ('broken' in capture) {
       return capture
@@ -358,6 +386,82 @@ describe('takeSnapshot', () => {
       status: 'written',
       pageErrors: [],
       staleExpectedPageErrors: [],
+    })
+  })
+
+  describe('real network requests', () => {
+    /**
+     * The policy of a story that fails `test` on its real network requests and silences `silenced.test`.
+     */
+    const failing: RealRequestPolicy = { check: 'fail', silenceHosts: ['silenced.test'] }
+
+    it("asks test's every capture to watch requests and lists each host of every capture once, a broken retry's included", async () => {
+      const asked: StoryToCapture[] = []
+      const captures: FakeCapture[] = [
+        { snapshot: white, pageErrors: [], requestHosts: ['api.test'] },
+        { broken: brokenStory, pageErrors: [], requestHosts: ['api.test', 'silenced.test:8443', 'ws.test'] },
+      ]
+      const result = await takeSnapshot(
+        snapshotOf(black, failOnAll, failing),
+        captureStoryOf(captures, asked),
+        testTools(2),
+      )
+
+      expect(result).toMatchObject({
+        status: 'differs',
+        attempts: 2,
+        realRequests: [
+          { host: 'api.test', severity: 'fail' },
+          { host: 'ws.test', severity: 'fail' },
+        ],
+      })
+      expect(asked.map(({ watchRequests }) => watchRequests)).toEqual([true, true])
+    })
+
+    it("lists them by 'warn' without changing the status of a broken capture", async () => {
+      const captures = [{ broken: brokenStory, pageErrors: [], requestHosts: ['api.test'] }]
+      const result = await takeSnapshot(
+        snapshotOf(black, failOnAll, { check: 'warn', silenceHosts: [] }),
+        captureStoryOf(captures),
+        testTools(2),
+      )
+
+      expect(result).toMatchObject({ status: 'broken', realRequests: [{ host: 'api.test', severity: 'warn' }] })
+    })
+
+    it("doesn't ask to watch requests and lists none by the policy's 'off'", async () => {
+      const asked: StoryToCapture[] = []
+      const captures = [{ snapshot: threeWhite, pageErrors: [], requestHosts: ['api.test'] }]
+      const result = await takeSnapshot(snapshotOf(black), captureStoryOf(captures, asked), testTools(2))
+
+      expect(result).toMatchObject({ status: 'passed', realRequests: [] })
+      expect(asked[0]).not.toHaveProperty('watchRequests')
+    })
+
+    it("never asks update's loads to watch requests, and lists none, whatever the policy", async () => {
+      const asked: StoryToCapture[] = []
+      const captures = [
+        { snapshot: black, pageErrors: [], requestHosts: ['api.test'] },
+        { snapshot: black, pageErrors: [], requestHosts: ['api.test'] },
+      ]
+      const result = await takeSnapshot(
+        snapshotOf(undefined, failOnAll, failing),
+        captureStoryOf(captures, asked),
+        updateTools,
+      )
+
+      expect(result).toMatchObject({ status: 'written', realRequests: [] })
+      expect(asked.map((story) => 'watchRequests' in story)).toEqual([false, false])
+    })
+
+    it('lists none for a snapshot it took no capture of', async () => {
+      const { storybook, story, key } = snapshotOf()
+      const item = { storybook, story, mode: undefined, key, selected: true, broken: brokenStory }
+
+      expect(await takeSnapshot(item, captureStoryOf([]), testTools(2))).toMatchObject({ realRequests: [] })
+      expect(
+        await takeSnapshot(snapshotOf(undefined, failOnAll, failing), captureStoryOf([]), testTools(2)),
+      ).toMatchObject({ status: 'missing', realRequests: [] })
     })
   })
 })

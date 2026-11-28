@@ -5,6 +5,8 @@ import type { StoryMask } from '../capture/prepare-capture.js'
 import type { StoryOptions } from '../config/story-options.js'
 import { type JudgedPageError, judgePageErrors } from '../page-errors/judge-page-errors.js'
 import type { PageErrorPolicy } from '../page-errors/page-error-policy.js'
+import { type JudgedRealRequest, judgeRealRequests } from '../real-network-requests/judge-real-requests.js'
+import type { RealRequestPolicy } from '../real-network-requests/real-request-policy.js'
 import type { ReportImages } from '../report/report-document.js'
 import { storyUrlOf } from '../storybook/read-stories.js'
 import {
@@ -35,7 +37,8 @@ export type ReportedComparison = Pick<
  * Storybook's `completing` render step took and, for `update`, the hosts its story reaches. It also carries what the
  * report lists of it: the comparison that differed, why it broke, the hosts a hint names, the console messages and the
  * images of the listed capture, and why `update` wrote it. It also lists the page errors of every load of it that aren't
- * expected, and the story's expected page errors that went stale.
+ * expected, the story's expected page errors that went stale, and for `test` the hosts its loads sent real network
+ * requests to.
  */
 export interface SnapshotResult {
   /**
@@ -65,6 +68,13 @@ export interface SnapshotResult {
    * is `'off'`.
    */
   staleExpectedPageErrors: string[]
+  /**
+   * The hosts of the real network requests of every load of the snapshot in `test`, its first capture and retries,
+   * broken or not, and the capture session's own retries of a story that navigates away, each once, in the order first
+   * seen, with the severity its `realRequests` gives them, apart from the hosts `silenceHosts` matches. None for a
+   * snapshot that wasn't captured, whose `realRequests` is `'off'`, or of `update`. They never change its status.
+   */
+  realRequests: JudgedRealRequest[]
   /**
    * How long Storybook's `completing` render step took for the story, in ms, on its first load for `update`.
    * `undefined` for a story that wasn't captured, or whose page didn't see the step.
@@ -113,9 +123,23 @@ export interface SnapshotResult {
 }
 
 /**
- * A snapshot's result before the page errors of its loads are gathered and judged onto it.
+ * A snapshot's result before the page errors and real network requests of its loads are gathered and judged onto it.
  */
-export type UnjudgedResult = Omit<SnapshotResult, 'pageErrors' | 'staleExpectedPageErrors'>
+export type UnjudgedResult = Omit<SnapshotResult, 'pageErrors' | 'staleExpectedPageErrors' | 'realRequests'>
+
+/**
+ * How a snapshot's loads are judged: its page errors and its real network requests.
+ */
+export interface LoadPolicies {
+  /**
+   * How its page errors are judged.
+   */
+  pageErrors: PageErrorPolicy
+  /**
+   * How its real network requests are judged. With `check: 'off'`, its captures don't watch requests.
+   */
+  realRequests: RealRequestPolicy
+}
 
 /**
  * What a broken snapshot's result keeps besides its broken story: how many captures it took and the console messages
@@ -175,38 +199,44 @@ export class SnapshotDecodeError extends Error {
 export type CaptureStory = (story: StoryToCapture, started?: () => void) => Promise<StoryCapture>
 
 /**
- * Gives the result of a snapshot that took no capture: no page errors, and no expected page error gone stale.
+ * Gives the result of a snapshot that took no capture: no page errors, no expected page error gone stale, and no real
+ * network request.
  */
-export function withNoPageErrors(result: UnjudgedResult): SnapshotResult {
-  return { ...result, pageErrors: [], staleExpectedPageErrors: [] }
+export function withNothingJudged(result: UnjudgedResult): SnapshotResult {
+  return { ...result, pageErrors: [], staleExpectedPageErrors: [], realRequests: [] }
 }
 
 /**
- * Takes a snapshot with `take`, handing it a capture that keeps the page errors of every capture made through it, and
- * gives the result with those page errors judged by `policy`: every load of the snapshot, each once, in the order
- * first seen. A broken snapshot's expected page errors don't go stale, and one that took no capture has nothing judged.
+ * Takes a snapshot with `take`, handing it a capture that keeps the page errors and the real network requests' hosts
+ * of every capture made through it, and gives the result with them judged by `policies`: every load of the snapshot,
+ * each once, in the order first seen. Each capture asks to watch requests when the real network request policy checks
+ * them. A broken snapshot's expected page errors don't go stale, and one that took no capture has nothing judged.
  */
-export async function withJudgedPageErrors(
+export async function withJudgedLoads(
   captureStory: CaptureStory,
-  policy: PageErrorPolicy,
+  policies: LoadPolicies,
   take: (captureStory: CaptureStory) => Promise<UnjudgedResult>,
 ): Promise<SnapshotResult> {
-  const loads: PageError[][] = []
+  const watchRequests = policies.realRequests.check !== 'off'
+  const pageErrors: PageError[][] = []
+  const requestHosts: string[][] = []
   const result = await take(async (story, started) => {
-    const capture = await captureStory(story, started)
+    const capture = await captureStory(watchRequests ? { ...story, watchRequests } : story, started)
 
-    loads.push(capture.pageErrors)
+    pageErrors.push(capture.pageErrors)
+    requestHosts.push(capture.requestHosts ?? [])
 
     return capture
   })
 
-  if (loads.length === 0) {
-    return withNoPageErrors(result)
+  if (pageErrors.length === 0) {
+    return withNothingJudged(result)
   }
 
   return {
     ...result,
-    ...judgePageErrors(eachPageErrorOnce(...loads), policy, { broken: result.status === 'broken' }),
+    ...judgePageErrors(eachPageErrorOnce(...pageErrors), policies.pageErrors, { broken: result.status === 'broken' }),
+    realRequests: judgeRealRequests(requestHosts, policies.realRequests),
   }
 }
 

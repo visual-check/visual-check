@@ -35,6 +35,7 @@ function differingSnapshot(stem: string): AddonSnapshot {
       diff: null,
       compared: null,
     },
+    realRequests: [],
   }
 }
 

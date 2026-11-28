@@ -6,22 +6,22 @@ Everything a project sets for a Storybook, a stories file or a story lives in `p
 
 ## Where options live
 
-- **Keys:** `modes`, `defaultCapture`, `viewport`, `element`, `growViewport`, `allowOverflow`, `masks`, `tolerance`, `pageErrors`, `expectedPageErrors`, `wait` and `disable`. Any other key exits 2.
+- **Keys:** `modes`, `defaultCapture`, `viewport`, `element`, `growViewport`, `allowOverflow`, `masks`, `tolerance`, `pageErrors`, `expectedPageErrors`, `realRequests`, `wait` and `disable`. Any other key exits 2.
 - **Levels:** `preview` for every story of a Storybook, a stories file's meta for that file, and the story.
-- The project's config sits beneath `preview`, with defaults for `tolerance`, `viewport`, `maskColor` and `pageErrors` only, and an `expectedPageErrors` list added to every story's. It holds no masks and no modes.
+- The project's config sits beneath `preview`, with defaults for `tolerance`, `viewport`, `maskColor`, `pageErrors` and `realRequests` only, and an `expectedPageErrors` list added to every story's. It holds no masks and no modes.
 - visual-check reads no tags, not even Storybook's `!test`.
 - `play` gets no option. It finishes before the story is ready.
 
 How levels merge, through Storybook's own merging:
 
-| Key                                                                                           | Merge                                                                |
-| --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `modes`                                                                                       | The most specific level's list wins                                  |
-| `viewport`                                                                                    | Deep-merges, so a story can set `{ width: 375 }` alone               |
-| `tolerance`                                                                                   | Deep-merges, so a level can set only `color` or only `pixels`        |
-| `masks`                                                                                       | Merges by name                                                       |
-| `defaultCapture`, `wait`, `element`, `growViewport`, `allowOverflow`, `disable`, `pageErrors` | The most specific level wins                                         |
-| `expectedPageErrors`                                                                          | The most specific level's list wins, then the config's list is added |
+| Key                                                                                                           | Merge                                                                |
+| ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `modes`                                                                                                       | The most specific level's list wins                                  |
+| `viewport`                                                                                                    | Deep-merges, so a story can set `{ width: 375 }` alone               |
+| `tolerance`                                                                                                   | Deep-merges, so a level can set only `color` or only `pixels`        |
+| `masks`                                                                                                       | Merges by name                                                       |
+| `defaultCapture`, `wait`, `element`, `growViewport`, `allowOverflow`, `disable`, `pageErrors`, `realRequests` | The most specific level wins                                         |
+| `expectedPageErrors`                                                                                          | The most specific level's list wins, then the config's list is added |
 
 ## The helper
 
@@ -188,6 +188,32 @@ export const LoadFailed = {
 - The browser reports the mocked 500 as a failed load whose text is its URL, so `/\/api\/orders/` matches it.
 - When the app logs the failure with `console.error`, that message is a page error too. The second entry matches it.
 - If the story stops erroring, both entries go stale, and the report says so.
+
+## Real network requests
+
+`test` can check the [real network requests](../../GLOSSARY.md) a snapshot's page makes, with the same semantics as page errors ([ADR 0013](../adr/0013-page-errors-fail-test-without-breaking-the-story.md)). A story that reaches the network can render differently on another machine, so CI should know about it.
+
+- **What counts:** a `fetch`, XHR, EventSource or WebSocket request to an origin other than the story's document's, another loopback port included, that went over the network, the HTTP cache included, or that a service worker passed on there.
+  - A response a service worker built itself, such as MSW's, doesn't count.
+  - Fonts, stylesheets, images and scripts never count. They're remote content, which only `update` warns about ([Baselines and update](10-baselines-and-update.md#warnings-at-the-end-of-update)).
+- **The allow list** is the config's `silenceHosts`: a host it matches is neither failed on nor listed. An exact entry matches the host with or without its port, so `localhost` allows `localhost:6007`, and `*.example.com` the subdomains of `example.com` at any depth, but not `example.com` itself. There's no per-story list: a story that reaches a host on purpose sets `realRequests: 'warn'` or `'off'`.
+- **Which loads:** every load of the snapshot in `test`, retries included, each host once. Each mode is its own snapshot, with its own hosts.
+- **Outcome:** real network requests never change a snapshot's status, and aren't a broken reason. A broken story keeps its reason, and its entry lists its hosts too.
+- **`update`** is unchanged: it watches every story and warns about each host at the end, whatever `realRequests` says.
+
+### `realRequests`
+
+- `'off'`, the default: `test` doesn't watch the snapshot's requests or list them. A run whose every snapshot is `'off'` turns no request watching on, so it costs what it did before.
+- `'fail'`: listed, and `test` exits 1 when any snapshot made a real network request to a host `silenceHosts` doesn't match, even when every snapshot passed.
+- `'warn'`: listed, never fails a run.
+- The config sets the default. `preview`, a meta or a story overrides it, and the most specific level wins.
+- **Cost:** a page that watches has the browser report every request and attaches to the service workers of its browser context. On the test Storybook, `test` of its 116 snapshots took a median of 43.5 s with `realRequests: 'fail'` and 42.7 s with `'off'`, over 3 runs of each (2 workers, the amd64 image under emulation on an arm64 Mac): about 2 %.
+
+### Blind spots
+
+- Requests a dedicated worker sends, and those of an out-of-process iframe, such as a cross-site one, aren't watched.
+- A service worker that starts while the story loads can pass a request on before it's watched. Its response then says it came through a service worker, so it doesn't count.
+- A request still pending, or one that failed, counts only while no service worker of the page's context is watched, since a worker may have answered it itself.
 
 ## `wait`
 

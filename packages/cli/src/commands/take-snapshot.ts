@@ -1,10 +1,11 @@
+import type { RealRequestPolicy } from '../real-network-requests/real-request-policy.js'
 import type { PlannedSnapshot } from './plan-snapshots.js'
 import {
   brokenResultOf,
   type CaptureStory,
   type SnapshotResult,
-  withJudgedPageErrors,
-  withNoPageErrors,
+  withJudgedLoads,
+  withNothingJudged,
 } from './snapshot-result.js'
 import { type TestTools, testSnapshot } from './test-snapshot.js'
 import { type UpdateTools, updateSnapshot } from './update-snapshot.js'
@@ -31,9 +32,16 @@ export type SnapshotTools =
     })
 
 /**
+ * The real network request policy of `update`, which checks none: it warns about the hosts of every story instead,
+ * whatever `realRequests` says.
+ */
+const unchecked: RealRequestPolicy = { check: 'off', silenceHosts: [] }
+
+/**
  * Takes one snapshot: tests it for `test`, else updates its baseline, gathering the page errors of every capture it
- * asked for and judging them by the snapshot's page error policy. A story whose stories file didn't load is broken,
- * with no capture, no baseline read and no page errors.
+ * asked for and judging them by the snapshot's page error policy, and for `test` the hosts of their real network
+ * requests, judged by its real network request policy. A story whose stories file didn't load is broken, with no
+ * capture, no baseline read and nothing judged.
  */
 export async function takeSnapshot(
   item: PlannedSnapshot,
@@ -41,10 +49,15 @@ export async function takeSnapshot(
   tools: SnapshotTools,
 ): Promise<SnapshotResult> {
   if ('broken' in item) {
-    return withNoPageErrors(brokenResultOf(item.broken, { attempts: 0 }))
+    return withNothingJudged(brokenResultOf(item.broken, { attempts: 0 }))
   }
 
-  return await withJudgedPageErrors(captureStory, item.pageErrorPolicy, (gathering) =>
+  const policies = {
+    pageErrors: item.pageErrorPolicy,
+    realRequests: tools.command === 'test' ? item.realRequestPolicy : unchecked,
+  }
+
+  return await withJudgedLoads(captureStory, policies, (gathering) =>
     tools.command === 'test' ? testSnapshot(item, gathering, tools) : updateSnapshot(item, gathering, tools),
   )
 }

@@ -60,6 +60,7 @@ import type {
   ReportFailedLoad,
   ReportImages,
   ReportPageError,
+  ReportRealRequest,
   ReportSize,
   TestReport,
   TestReportCounts,
@@ -1855,6 +1856,14 @@ interface ConfigOptions {
    * The project's expected page errors, which every story's are added to. The config's default when not given.
    */
   expectedPageErrors?: (string | RegExp)[]
+  /**
+   * What a real network request does to a snapshot in `test`. The config's default when not given.
+   */
+  realRequests?: 'fail' | 'warn' | 'off'
+  /**
+   * The hosts a story may reach. The config's default when not given.
+   */
+  silenceHosts?: string[]
 }
 
 /**
@@ -3508,6 +3517,106 @@ async function checkPageErrorsUpdate(): Promise<string[]> {
           ),
         ]),
         ...onlyCommittedBaselineProblems(baselines, `${storyId}.png`, join(diagnosticsDir, 'page-errors-update')),
+      ]
+    }),
+  )
+}
+
+/**
+ * The real network requests stories and what their cases run: see the README's section on them.
+ */
+const realRequests = {
+  /**
+   * Matches the keys of the network, remote content and real network requests stories: one real network request, a
+   * service worker's mocked answers, remote images, an iframe and a font, and the stories with a `realRequests` of
+   * their own.
+   */
+  filter: /^(network|remote-content|real-requests)--/,
+  /**
+   * The script, added to every `iframe.html`, that makes each real network requests story fetch the remote origin.
+   * Without it, none fetches, so every other case sees no real network request from them.
+   */
+  script: '<script>globalThis.__visualCheckE2eRealRequests = true</script>',
+}
+
+/**
+ * A real network requests case: the config's `realRequests` and `silenceHosts`, what `test` exits with, the snapshots
+ * its report lists with their real network requests' severity, and the heading of its end block's real network
+ * requests block, when it has one.
+ */
+interface RealRequestsRun {
+  /**
+   * The options the case's config sets.
+   */
+  config: Pick<ConfigOptions, 'realRequests' | 'silenceHosts'>
+  /**
+   * What `test` exits with.
+   */
+  exitCode: number
+  /**
+   * The keys of the snapshots listed with a real network request to the remote origin, each with its severity.
+   */
+  listed: Record<string, ReportRealRequest['severity']>
+  /**
+   * The heading of the end block's real network requests block, or `undefined` when it has none.
+   */
+  heading: string | undefined
+}
+
+/**
+ * Lists how the report's entries' real network requests differ from `listed`: each listed key's entry holds exactly
+ * one real network request, to the remote origin's host on the server's port, with its severity, and every other
+ * entry holds none.
+ */
+function realRequestsEntriesProblems(
+  entries: readonly TestReportEntry[],
+  listed: Record<string, ReportRealRequest['severity']>,
+  url: string,
+): string[] {
+  const host = `localhost:${new URL(url).port}`
+  const missing = Object.keys(listed).filter((key) => !entries.some(({ id }) => id === key))
+
+  return [
+    ...missing.map((key) => `${key} isn't listed, expected with a real network request to ${host}`),
+    ...entries.flatMap(({ id, realRequests: actual }) => {
+      const severity = listed[id]
+      const expected = severity === undefined ? [] : [{ host, severity }]
+
+      return isDeepStrictEqual(actual, expected)
+        ? []
+        : [`${id}'s realRequests are ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`]
+    }),
+  ]
+}
+
+/**
+ * With the real network requests script in every page and a config setting the run's `realRequests` and
+ * `silenceHosts`, `test` of the network, remote content and real network requests stories exits as the run says with
+ * every snapshot passed. Its report lists exactly the snapshots the run says, each with its one real network request,
+ * to the remote origin, and its end block heads them as the run says. A mocked answer, a remote image, iframe or font,
+ * a snapshot whose story's `realRequests` is `'off'` and the default capture of the story that fetches only in its
+ * `dark` mode are never listed.
+ */
+async function checkRealRequests(expected: Outcomes, run: RealRequestsRun): Promise<string[]> {
+  const outcomes = outcomesMatching(expected, realRequests.filter)
+
+  return await withStorybookServer({ injectIntoIframe: realRequests.script }, (server) =>
+    withTemporaryFolder(async (folder) => {
+      const config = writeConfig(folder, server.url, committedBaselines, run.config)
+      const result = await runCli(['test', '--filter', realRequests.filter.source, '--config', config])
+
+      return [
+        ...exitCodeProblems('test', result, run.exitCode),
+        ...outcomeProblems('test', result.outcomes, outcomes),
+        ...(run.heading === undefined
+          ? result.stdout.includes('with real network requests')
+            ? [`test's output has a real network requests block${outputOf(result.stdout)}`]
+            : []
+          : stdoutSaysProblems(result, [run.heading])),
+        ...reportProblems(folder, (report) => [
+          ...reportCountsProblems(report, outcomes, 0),
+          ...realRequestsEntriesProblems(report.snapshots, run.listed, server.url),
+        ]),
       ]
     }),
   )
@@ -5425,6 +5534,54 @@ if (setupProblems.length > 0) {
     {
       name: 'page errors with update: with the page errors script, update --reporter json of a story with a page error writes its baseline, byte-identical to the committed one, exits 0, lists it in its page errors block and its document lists it written with its page error',
       run: checkPageErrorsUpdate,
+    },
+    {
+      name: "real network requests fail: with the real network requests script and realRequests: 'fail', test of the network, remote content and real network requests stories exits 1 though each passes, its report lists the real fetch and the dark mode's fetch failing and the story with realRequests: 'warn' warning, and nothing mocked, remote content, or under realRequests: 'off'",
+      run: () =>
+        checkRealRequests(expected, {
+          config: { realRequests: 'fail' },
+          exitCode: 1,
+          listed: {
+            'network--real-fetch': 'fail',
+            'real-requests--two-modes.dark': 'fail',
+            'real-requests--warn': 'warn',
+          },
+          heading: '── 3 snapshots with real network requests, 2 of which fail the run ──',
+        }),
+    },
+    {
+      name: "real network requests silenced: with the real network requests script, realRequests: 'fail' and silenceHosts: ['localhost'], test exits 0 and lists nothing",
+      run: () =>
+        checkRealRequests(expected, {
+          config: { realRequests: 'fail', silenceHosts: ['localhost'] },
+          exitCode: 0,
+          listed: {},
+          heading: undefined,
+        }),
+    },
+    {
+      name: "real network requests warn: with the real network requests script and realRequests: 'warn', test exits 0 and lists the same snapshots, warning",
+      run: () =>
+        checkRealRequests(expected, {
+          config: { realRequests: 'warn' },
+          exitCode: 0,
+          listed: {
+            'network--real-fetch': 'warn',
+            'real-requests--two-modes.dark': 'warn',
+            'real-requests--warn': 'warn',
+          },
+          heading: '── 3 snapshots with real network requests ──',
+        }),
+    },
+    {
+      name: "real network requests off: with the real network requests script and the default realRequests: 'off', test exits 0 and lists only the story whose own realRequests is 'warn'",
+      run: () =>
+        checkRealRequests(expected, {
+          config: {},
+          exitCode: 0,
+          listed: { 'real-requests--warn': 'warn' },
+          heading: '── 1 snapshot with real network requests ──',
+        }),
     },
     ...(insideImage ? insideImageCases(expected) : outsideImageCases(expected)),
   ])

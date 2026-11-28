@@ -12,6 +12,7 @@ import {
   optional,
   pageErrorsRequirement,
   type Requirement,
+  realRequestsRequirement,
   toleranceExample,
   toleranceRequirements,
   unknownKeyIssues,
@@ -19,7 +20,7 @@ import {
   viewportRequirements,
   withoutUndefined,
 } from './checks.js'
-import type { PageErrorCheck, Tolerance, Viewport } from './define-config.js'
+import type { PageErrorCheck, RealRequestCheck, Tolerance, Viewport } from './define-config.js'
 
 /**
  * A mode's definition: the globals and the viewport it sets.
@@ -94,6 +95,11 @@ export interface StoryOptions {
    * The page errors the story raises on purpose, besides the config's.
    */
   expectedPageErrors?: (string | RegExp)[]
+  /**
+   * What a real network request to a host the config's `silenceHosts` doesn't match does to the story's snapshots in
+   * `test`, in place of the config's.
+   */
+  realRequests?: RealRequestCheck
 }
 
 /**
@@ -254,6 +260,7 @@ const storyKeys = {
   disable: optionalKey({ text: 'true or false', accepts: (value) => typeof value === 'boolean' }),
   pageErrors: optionalKey(pageErrorsRequirement),
   expectedPageErrors: optional(checkExpectedPageErrors),
+  realRequests: optionalKey(realRequestsRequirement),
   wait: orNull({
     text: "a function that takes the story's context, or null to turn an inherited one off",
     accepts: (value) => typeof value === 'function',

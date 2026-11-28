@@ -91,7 +91,8 @@ One block on stderr, grouped by host. Nothing fails on either warning, and `sile
 
 How they're found:
 
-- Only `update` turns on the Network domain and attaches to service workers. Its cost was within noise on the test Storybook (`update` into an empty folder, 30.4 s with it and 30.5 s without), and `test` never pays it.
+- `update` turns on the Network domain and attaches to service workers for every story. Its cost was within noise on the test Storybook (`update` into an empty folder, 30.4 s with it and 30.5 s without). `test` pays it only for the snapshots whose `realRequests` isn't `'off'`, the default ([Real network requests](07-per-story-options.md#real-network-requests)).
+- `update`'s warnings are the same whatever `realRequests` says. `silenceHosts` also allows its hosts in `test`.
 
 ## Output
 

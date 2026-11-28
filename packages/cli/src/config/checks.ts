@@ -1,5 +1,5 @@
 import { isRegExp } from 'node:util/types'
-import type { PageErrorCheck, Tolerance, Viewport } from './define-config.js'
+import type { PageErrorCheck, RealRequestCheck, Tolerance, Viewport } from './define-config.js'
 import { mayHoldLogin } from './find-storybook-url-problem.js'
 import { UnrunnableRegExp } from './unrunnable-regexp.js'
 
@@ -279,6 +279,11 @@ export const viewportRequirements: Record<keyof Viewport, Requirement> = {
  * What `pageErrors` must be. The config and a story's options share it.
  */
 export const pageErrorsRequirement: Requirement = oneOf<PageErrorCheck>({ fail: true, warn: true, off: true })
+
+/**
+ * What `realRequests` must be. The config and a story's options share it.
+ */
+export const realRequestsRequirement: Requirement = oneOf<RealRequestCheck>({ fail: true, warn: true, off: true })
 
 /**
  * What one entry of `expectedPageErrors` must be: a string that isn't empty, since an empty one would match every page

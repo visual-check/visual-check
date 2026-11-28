@@ -186,6 +186,12 @@ export interface VisualCheckOptions<ModeName extends string> {
    */
   expectedPageErrors?: readonly (string | RegExp)[] | undefined
   /**
+   * What a real network request to a host the config's `silenceHosts` doesn't match does to these stories' snapshots in
+   * `test`, in place of the config's: `'fail'` lists it and fails `test`, `'warn'` lists it without failing, and
+   * `'off'` doesn't watch their requests. A story that reaches a host on purpose sets `'warn'` or `'off'`.
+   */
+  realRequests?: 'fail' | 'warn' | 'off' | undefined
+  /**
    * A hook to wait for before the capture. `null` turns an inherited hook off.
    */
   wait?: WaitHook | null | undefined
@@ -244,6 +250,10 @@ export interface VisualCheckParameter {
    */
   expectedPageErrors?: readonly (string | RegExp)[]
   /**
+   * What a real network request does to the snapshots in `test`.
+   */
+  realRequests?: 'fail' | 'warn' | 'off'
+  /**
    * A hook to wait for before the capture, or `null` for none.
    */
   wait?: WaitHook | null
@@ -272,8 +282,8 @@ export type VisualCheck<ModeName extends string> = (options: VisualCheckOptions<
  * - `modes`: the most specific list.
  * - `viewport` and `tolerance`: merged key by key.
  * - `masks`: merged by name. A name set to `null` drops one mask, and `masks: null` drops all of them.
- * - `defaultCapture`, `wait`, `element`, `growViewport`, `allowOverflow`, `disable` and `pageErrors`: the most specific
- *   value.
+ * - `defaultCapture`, `wait`, `element`, `growViewport`, `allowOverflow`, `disable`, `pageErrors` and `realRequests`: the
+ *   most specific value.
  * - `expectedPageErrors`: the most specific list, since Storybook replaces arrays: a story's list replaces its meta's or
  *   `preview`'s. The config's list is then added to it, so put the entries every story needs in the config.
  *

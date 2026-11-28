@@ -1,4 +1,5 @@
 import type { StoryHosts } from '../capture/capture-session.js'
+import { isSilenced } from '../real-network-requests/silenced-hosts.js'
 import type { ReportStoryRef, ReportWarning } from '../report/report-document.js'
 
 /**
@@ -23,27 +24,6 @@ interface TakenHosts {
    * The hosts the snapshot reached.
    */
   hosts: StoryHosts
-}
-
-/**
- * Whether the entry silences the host. Both are compared in lower case. An exact entry silences the host it names, with
- * or without a port: it matches the host as a page reports it, such as `localhost:6006`, and its hostname, such as
- * `localhost`. `*.example.com` silences the subdomains of `example.com` at any depth, by the host or its hostname, so
- * `*.example.com:8443` works too, but not `example.com` itself or a host that only ends the same, such as
- * `badexample.com`.
- */
-function silences(entry: string, host: string): boolean {
-  const lowerEntry = entry.toLowerCase()
-  const lowerHost = host.toLowerCase()
-  const hostname = lowerHost.replace(/:\d+$/, '')
-
-  if (lowerEntry.startsWith('*.')) {
-    const suffix = lowerEntry.slice(1)
-
-    return lowerHost.endsWith(suffix) || hostname.endsWith(suffix)
-  }
-
-  return lowerEntry === lowerHost || lowerEntry === hostname
 }
 
 /**
@@ -74,7 +54,7 @@ function storiesByHostOf(
 
   for (const { storybook, storyId, hosts } of taken) {
     for (const host of hostsOf(hosts)) {
-      if (silenceHosts.some((entry) => silences(entry, host))) {
+      if (isSilenced(host, silenceHosts)) {
         continue
       }
 

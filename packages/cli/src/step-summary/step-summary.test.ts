@@ -518,6 +518,61 @@ describe('stepSummaryOf page errors', () => {
   })
 })
 
+describe('stepSummaryOf real network requests', () => {
+  it('counts the snapshots with real network requests and names the first 5 with their hosts, after the page errors', () => {
+    const report = testReportWith([
+      testEntryWith({
+        id: 'a',
+        status: 'passed',
+        reason: null,
+        pageErrors: [loggedError('A')],
+        realRequests: ['a.test', 'b.test', 'c.test', 'd.test'].map((host) => ({ host, severity: 'fail' as const })),
+      }),
+      ...Array.from({ length: 6 }, (_, index) =>
+        testEntryWith({
+          id: `s${index}`,
+          mode: index === 0 ? 'dark' : null,
+          status: 'passed',
+          reason: null,
+          realRequests: [{ host: `api${index}.test:8080`, severity: 'warn' }],
+        }),
+      ),
+    ])
+
+    expect(stepSummaryOf(report, roomy)).toBe(
+      [
+        '### visual-check 0.1.0 · test',
+        '',
+        '7 passed',
+        '',
+        '**Page errors**',
+        '',
+        '1 snapshot with page errors, which fails the run',
+        '',
+        '- web · a: console.error A',
+        '',
+        '**Real network requests**',
+        '',
+        '7 snapshots with real network requests, 1 of which fails the run',
+        '',
+        '- web · a: a.test, b.test, c.test, …',
+        '- web · s0 · dark: api0.test:8080',
+        '- web · s1: api1.test:8080',
+        '- web · s2: api2.test:8080',
+        '- web · s3: api3.test:8080',
+        '- …and 2 more',
+        '',
+      ].join('\n'),
+    )
+  })
+
+  it('gives no block when no snapshot has real network requests', () => {
+    const report = testReportWith([testEntryWith({ id: 'a', status: 'passed', reason: null })])
+
+    expect(stepSummaryOf(report, roomy)).not.toContain('Real network requests')
+  })
+})
+
 describe('stepSummaryOf with a local update', () => {
   /**
    * The update of a project with a `visual:update` script, whose browser runs in Docker.

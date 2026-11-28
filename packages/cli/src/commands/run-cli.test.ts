@@ -3021,6 +3021,7 @@ describe('runCli modes', () => {
         'deleted .visual-check/baselines/a.png',
       ),
       stderr: '',
+      reportLine: reportOnStdout,
     })
     expect(readdirSync(folder)).toEqual(['a.dark.png'])
     expect(record.urls.slice(1)).toEqual([expect.stringMatching(/\?id=a&viewMode=story&globals=theme%3Adark$/)])

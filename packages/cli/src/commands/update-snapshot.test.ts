@@ -332,6 +332,7 @@ function snapshotOf(baseline?: Uint8Array, tolerance: Required<Tolerance> = defa
       options: {},
       tolerance,
       pageErrorPolicy: { check: 'fail', expected: [], storyExpected: [] },
+      realRequestPolicy: { check: 'off', silenceHosts: [] },
       viewport: { width: 10, height: 10, deviceScaleFactor: 1, touch: false },
       globals: {},
     },
