@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Service worker orders frame</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 8px;
+        font: 14px sans-serif;
+      }
+
+      p {
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <p>Orders</p>
+    <script>
+      // Fetches the orders URL of this page's own origin with the status parameter set to this page's own `status`
+      // query parameter. The service worker answers it with a JSON response of that status, as a mocking library's
+      // error response is. The page sets `data-status` on the body to the status that came back, or `failed`, which
+      // the story's `play` waits for. Its text stays the same whatever came back.
+      const status = new URLSearchParams(location.search).get('status')
+
+      fetch(`/visual-check-e2e/orders?visual-check-e2e-status=${status}`).then(
+        (response) => {
+          document.body.dataset.status = String(response.status)
+        },
+        () => {
+          document.body.dataset.status = 'failed'
+        },
+      )
+    </script>
+  </body>
+</html>

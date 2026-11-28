@@ -220,6 +220,7 @@
         "test-storybooks/storybook-10-react/stories/*.stories.tsx",
         "test-storybooks/storybook-10-react/stories/grid-parts.ts",
         "test-storybooks/storybook-10-react/stories/mocking-worker.ts",
+        "test-storybooks/storybook-10-react/stories/network-parts.tsx",
         "test-storybooks/storybook-10-react/stories/remote-origin.ts",
         "test-storybooks/storybook-10-react/e2e.ts",
         "test-storybooks/storybook-10-react/e2e-support.ts",
