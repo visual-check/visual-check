@@ -54,7 +54,11 @@ export interface StoryOptions {
    */
   modes?: Record<string, ModeDefinition | null>
   /**
-   * The default capture's viewport.
+   * Whether the story is captured without a mode too. `false` captures its listed modes only.
+   */
+  defaultCapture?: boolean
+  /**
+   * The default capture's viewport, which each mode's viewport merges over.
    */
   viewport?: Viewport
   /**
@@ -240,6 +244,7 @@ const checkMasks: Check = optional((value, path) => {
  */
 const storyKeys = {
   modes: checkModes,
+  defaultCapture: optionalKey({ text: 'true or false', accepts: (value) => typeof value === 'boolean' }),
   viewport: checkViewport,
   element: orNull({ ...nonEmptyString, text: 'a non-empty string, or null' }),
   growViewport: optionalKey({ text: 'true or false', accepts: (value) => typeof value === 'boolean' }),
@@ -288,8 +293,25 @@ function toOptions(value: Record<string, unknown>): StoryOptions {
 }
 
 /**
+ * Gives the issue of options that would leave a story with no snapshot: `defaultCapture: false` on a story that isn't
+ * disabled and lists no mode. None otherwise.
+ */
+function noSnapshotIssues({ defaultCapture, disable, modes = {} }: StoryOptions): string[] {
+  const listsMode = Object.values(modes).some((definition) => definition !== null)
+
+  if (defaultCapture !== false || disable === true || listsMode) {
+    return []
+  }
+
+  return [
+    `${join(rootPath, 'defaultCapture')}: false leaves the story with no snapshot, since it lists no mode. List a mode in its modes, or set disable: true to leave it out.`,
+  ]
+}
+
+/**
  * Checks one story's merged `parameters.visualCheck` and returns its options, or every issue. Each issue starts with
- * its key path, which starts at `visualCheck`. The caller adds the story.
+ * its key path, which starts at `visualCheck`. The caller adds the story. Once every type is right, options that would
+ * leave the story with no snapshot are an issue too.
  *
  * @public
  */
@@ -304,7 +326,14 @@ export function checkStoryOptions(value: unknown): { options: StoryOptions } | {
     return { issues: [mustBe(rootPath, text, value)] }
   }
 
-  const issues = checkKeys(storyKeys, value, rootPath, newerHelperHint)
+  const typeIssues = checkKeys(storyKeys, value, rootPath, newerHelperHint)
 
-  return issues.length > 0 ? { issues } : { options: toOptions(value) }
+  if (typeIssues.length > 0) {
+    return { issues: typeIssues }
+  }
+
+  const options = toOptions(value)
+  const issues = noSnapshotIssues(options)
+
+  return issues.length > 0 ? { issues } : { options }
 }

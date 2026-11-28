@@ -803,6 +803,43 @@ describe('planSnapshots modes', () => {
     ])
   })
 
+  it('plans only the listed modes of a story with defaultCapture false, with the keys they have beside it', async () => {
+    const snapshots = await snapshotsOf([storyOf('a'), storyOf('b')], {
+      a: {
+        defaultCapture: false,
+        viewport: { width: 1024 },
+        modes: { dark, mobile: null, narrow: { viewport: { width: 320 } } },
+      },
+      b: { defaultCapture: true, modes: { dark } },
+    })
+
+    expect(
+      snapshots.map(({ key, mode, ...snapshot }) => [
+        key,
+        mode,
+        'viewport' in snapshot ? snapshot.viewport.width : null,
+      ]),
+    ).toEqual([
+      ['a.dark', 'dark', 1024],
+      ['a.narrow', 'narrow', 320],
+      ['b', undefined, 1280],
+      ['b.dark', 'dark', 1280],
+    ])
+  })
+
+  it('stops a story with defaultCapture false and no listed mode with an issue naming it and the key', async () => {
+    const reader = readerOf({
+      a: { defaultCapture: false, modes: { dark: null } },
+      b: { defaultCapture: false, disable: true },
+    })
+
+    expect(await problemLinesOf([storyOf('a'), storyOf('b')], reader)).toEqual([
+      'Storybook web has invalid per-story options:',
+      '  - a: visualCheck.defaultCapture: false leaves the story with no snapshot, since it lists no mode. List a mode in its modes, or set disable: true to leave it out.',
+      fixLine,
+    ])
+  })
+
   it('plans no snapshot of a disabled story, whatever modes it lists', async () => {
     expect(await snapshotsOf([storyOf('a')], { a: { disable: true, modes: { dark, mobile } } })).toEqual([])
   })

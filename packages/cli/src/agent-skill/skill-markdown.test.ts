@@ -73,6 +73,7 @@ describe('the SKILL.md template', () => {
     'allowOverflow: true,',
     'One with `severity: "fail"` makes `test` exit 1 even when every snapshot passed.',
     'an `expectedPageErrors` entry on that story',
+    "`null` for the default capture, which a story with `defaultCapture: false` doesn't have",
     "Never set `pageErrors` to `'warn'` or `'off'`, or declare an expected page error the story doesn't raise on purpose, to make a failure pass without the user's explicit OK.",
   ])('tells the agent: %s', (text) => {
     expect(frontmatter.body).toContain(text)
