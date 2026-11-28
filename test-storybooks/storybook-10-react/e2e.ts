@@ -2896,7 +2896,7 @@ async function checkUpdateStability(stabilityRun: StabilityRun): Promise<string[
       return [
         ...expectedRunProblems('update', lines, { [storyId]: outcome }),
         ...lineMatchesProblems(lines, storyId, detail),
-        ...updateFlakyProblems(lines, storyId, flaky),
+        ...updateFlakyProblems(lines, storyId, flaky, folder),
         ...updateDocumentProblems(run.stdout, (document) => [
           ...updateCountsProblems(document.counts, counts),
           ...stabilityEntryProblems(document.snapshots, storyId, entry),
@@ -2980,11 +2980,11 @@ function lineMatchesProblems(run: CliRun, storyId: string, detail: RegExp): stri
 
 /**
  * Gives the problem with a run of `update` with the Storybook `react` when a flaky story isn't listed alone under the
- * flaky heading at the end of its standard output, or, for a story that isn't flaky, when the run lists flaky
- * snapshots at all, or none.
+ * flaky heading at the end of its standard output, just before the report line of the report beside the config in
+ * `configFolder`, or, for a story that isn't flaky, when the run lists flaky snapshots at all, or none.
  */
-function updateFlakyProblems(run: CliRun, storyId: string, flaky: boolean): string[] {
-  const listed = `${updateFlakyHeading}\n  react  ${storyId}\n`
+function updateFlakyProblems(run: CliRun, storyId: string, flaky: boolean, configFolder: string): string[] {
+  const listed = `${updateFlakyHeading}\n  react  ${storyId}\n${reportLineOf(configFolder)}\n`
 
   if (flaky) {
     return run.stdout.endsWith(listed)
