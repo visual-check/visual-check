@@ -8,6 +8,7 @@ const imagesOfDiff: SnapshotRow['images'] = {
   baseline: 'snapshots/web/a.dark.baseline.png',
   snapshot: 'snapshots/web/a.dark.snapshot.png',
   diff: 'diffs/web/a.dark.png',
+  compared: null,
 }
 
 /**
@@ -100,7 +101,7 @@ describe('ImageViewer', () => {
   })
 
   it('shows nothing without a snapshot', () => {
-    expect(render({ baseline: null, snapshot: null, diff: null })).toBe('')
+    expect(render({ baseline: null, snapshot: null, diff: null, compared: null })).toBe('')
   })
 })
 

@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { displayPathOf } from '../report/display-path.js'
 import {
   type ReportConsoleLevel,
+  type ReportImages,
   reportDir,
   type TestReport,
   type TestReportCounts,
@@ -27,6 +28,27 @@ interface EndBlockContext {
    * How long the run took so far, in ms.
    */
   elapsedMs: number
+}
+
+/**
+ * Where an end block's paths are relative to.
+ */
+type PathContext = Pick<EndBlockContext, 'cwd' | 'configFolder'>
+
+/**
+ * What `update`'s end block shows of a broken snapshot: its name and the images it keeps.
+ *
+ * @public
+ */
+export interface UpdateBrokenSnapshot {
+  /**
+   * The snapshot's name: its Storybook, its story ID and its mode when it has one, two spaces apart.
+   */
+  name: string
+  /**
+   * The images it keeps in the report folder, relative to that folder. `undefined` when it keeps none.
+   */
+  images: ReportImages | undefined
 }
 
 /**
@@ -91,13 +113,19 @@ function consoleLinesOf(entry: TestReportEntry): string[] {
 }
 
 /**
+ * Gives the path of an image in the report folder, relative to the folder the CLI runs in.
+ */
+function reportImagePathOf(context: PathContext, image: string): string {
+  return displayPathOf(context.cwd, join(context.configFolder, reportDir, image))
+}
+
+/**
  * Gives a failure's lines: its name, then indented by two spaces its detail, the path of its visual diff when it has
  * one, its hints, and for a broken story its last console errors and warnings.
  */
 function failureLinesOf(entry: TestReportEntry, context: EndBlockContext): string[] {
   const { diff } = entry.images
-  const diffLines =
-    diff === null ? [] : [`diff: ${displayPathOf(context.cwd, join(context.configFolder, reportDir, diff))}`]
+  const diffLines = diff === null ? [] : [`diff: ${reportImagePathOf(context, diff)}`]
   const details = [
     detailOf(entry, context),
     ...diffLines,
@@ -178,4 +206,34 @@ export function testEndLinesOf(report: TestReport, context: EndBlockContext): st
     ...flakyBlockOf(report),
     `${testCountsLineOf(report.counts)} · ${durationOf(context.elapsedMs)}`,
   ]
+}
+
+/**
+ * Gives the line of a broken snapshot's image: the path of its visual diff or, with none, of its snapshot. Gives none
+ * when it has neither.
+ */
+function brokenImageLinesOf(images: ReportImages | undefined, context: PathContext): string[] {
+  if (images === undefined) {
+    return []
+  }
+
+  if (images.diff !== null) {
+    return [`diff: ${reportImagePathOf(context, images.diff)}`]
+  }
+
+  return images.snapshot === null ? [] : [`snapshot: ${reportImagePathOf(context, images.snapshot)}`]
+}
+
+/**
+ * Builds the lines of `update`'s broken snapshots, in the order given: `broken` and its name, then indented by two
+ * spaces the path of its visual diff or, with none, of its snapshot, relative to the folder the CLI runs in. A broken
+ * snapshot that keeps neither has its name alone. Gives no line when none is broken.
+ *
+ * @public
+ */
+export function updateBrokenLinesOf(broken: readonly UpdateBrokenSnapshot[], context: PathContext): string[] {
+  return broken.flatMap(({ name, images }) => [
+    `broken ${name}`,
+    ...brokenImageLinesOf(images, context).map((line) => `  ${line}`),
+  ])
 }

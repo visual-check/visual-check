@@ -140,6 +140,7 @@ function checkOf(
           baseline: pathOf(name, stem, 'baseline', images),
           snapshot: pathOf(name, stem, 'snapshot', images),
           diff: pathOf(name, stem, 'diff', images),
+          compared: null,
         }),
         replace: async ({ name }, storyId, images) => {
           replaced.push({ story: `${name} ${storyId}`, images: Object.fromEntries(images) })
@@ -298,7 +299,7 @@ describe('checkStory', () => {
         pageErrors: [{ kind: 'console.error', text: 'boom', severity: 'fail' }],
         staleExpectedPageErrors: [],
         baseline: '.visual-check/baselines/a.png',
-        images: { baseline: null, snapshot: 'images/web/a.snapshot.png', diff: null },
+        images: { baseline: null, snapshot: 'images/web/a.snapshot.png', diff: null, compared: null },
       },
     ])
   })

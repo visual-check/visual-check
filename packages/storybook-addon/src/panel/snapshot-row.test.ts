@@ -5,7 +5,7 @@ import { detailLinesOf, rowOf, selectedRowOf } from './snapshot-row.js'
 
 describe('rowOf', () => {
   it('gives the whole row of a pass', () => {
-    const images = { baseline: 'a.baseline.png', snapshot: 'a.snapshot.png', diff: null }
+    const images = { baseline: 'a.baseline.png', snapshot: 'a.snapshot.png', diff: null, compared: null }
 
     expect(rowOf(snapshotWith({ images }))).toEqual({
       key: 'card--default',

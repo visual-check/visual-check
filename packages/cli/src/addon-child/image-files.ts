@@ -141,7 +141,7 @@ export function createImageFiles(): CheckImages {
   return {
     folderOf,
     pathsOf: (storybook, stem, images) => {
-      const paths: ReportImages = { baseline: null, snapshot: null, diff: null }
+      const paths: ReportImages = { baseline: null, snapshot: null, diff: null, compared: null }
 
       for (const kind of imageKinds) {
         if (images[kind] !== undefined) {

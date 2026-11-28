@@ -255,7 +255,7 @@ export type UpdateReportFacts = Omit<TestReportFacts, 'consistencyOnly' | 'shard
 /**
  * Builds the report of an `update` that exits 0 or 1: an entry for each written or broken snapshot, in planned order,
  * then one for each deleted baseline, the counts of every finished snapshot and deleted baseline, and the warnings.
- * Kept baselines are only counted. It has no report folder, since `update` never writes one.
+ * Kept baselines are only counted. It names the report folder, where it's written.
  */
 export function updateReportFor(facts: UpdateReportFacts): UpdateReport {
   const { findings } = facts
@@ -267,6 +267,7 @@ export function updateReportFor(facts: UpdateReportFacts): UpdateReport {
     visualCheck: facts.version,
     exitCode: facts.exitCode,
     selection: facts.selection,
+    reportDir,
     storybooks: facts.storybooks.map(({ name, url }) => ({ name, url })),
     counts: updateCountsOf(results, deleted.length),
     snapshots: [...entries, ...deleted],
@@ -278,17 +279,18 @@ export function updateReportFor(facts: UpdateReportFacts): UpdateReport {
 /**
  * What the report of an `update` that exits 2 is built from.
  */
-export type UpdateErrorReportFacts = Omit<TestErrorReportFacts, 'consistencyOnly' | 'shard' | 'written'>
+export type UpdateErrorReportFacts = Omit<TestErrorReportFacts, 'consistencyOnly' | 'shard'>
 
 /**
  * Builds the report of an `update` that exits 2: the error, its message trimmed, with the unreachable Storybooks, and
- * no results or warnings.
+ * no results or warnings. Its `reportDir` is `null` when it isn't written.
  */
 export function updateErrorReportOf(facts: UpdateErrorReportFacts): UpdateReport {
   return updateReportOf({
     visualCheck: facts.version,
     exitCode: 2,
     selection: facts.selection,
+    reportDir: facts.written ? reportDir : null,
     storybooks: facts.storybooks.map(({ name, url }) => ({ name, url })),
     counts: emptyUpdateCounts(),
     snapshots: [],

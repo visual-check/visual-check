@@ -6,6 +6,8 @@ import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import type { BrokenStory, StoryCapture, StoryHosts, StoryToCapture } from '../capture/capture-session.js'
 import type { ConsoleMessage } from '../capture/driver/driver.js'
 import type { Tolerance } from '../config/define-config.js'
+import type { ReportImages } from '../report/report-document.js'
+import type { ReportImageBytes } from '../report/report-folder.js'
 import { greyPng, type PixelChange, whitePixels } from '../visual-diff/images.fixture.js'
 import { createVisualDiff, type VisualDiff } from '../visual-diff/visual-diff.js'
 import type { SnapshotToCapture } from './plan-snapshots.js'
@@ -201,6 +203,10 @@ type FakeLoad =
        * The console messages of the load's page. Left out when not given, as for a load with no page.
        */
       console?: ConsoleMessage[]
+      /**
+       * The image of the load's page as it was when the story broke. None when not given.
+       */
+      image?: Uint8Array
     }
 
 /**
@@ -958,4 +964,199 @@ describe('updateSnapshot with a capture that cannot be decoded', () => {
       })
     },
   )
+})
+
+/**
+ * A fake `writeImages` and what it was given.
+ */
+interface FakeImages {
+  /**
+   * The images of each call, in order.
+   */
+  written: Partial<ReportImageBytes>[]
+  /**
+   * Keeps the images it's given and gives a path for each, as the report folder names it.
+   */
+  writeImages: NonNullable<UpdateTools['writeImages']>
+}
+
+/**
+ * Builds a fake `writeImages` that keeps the images of each call and gives `images/web/a.<kind>.png` for each image
+ * given, `null` for the rest.
+ */
+function fakeImagesOf(): FakeImages {
+  const fake: FakeImages = {
+    written: [],
+    writeImages: async (_item, images) => {
+      // A baseline read from its file is a Buffer: kept as plain bytes, it compares with the images the tests give.
+      fake.written.push(
+        Object.fromEntries(Object.entries(images).map(([kind, bytes]) => [kind, new Uint8Array(bytes)])),
+      )
+
+      const pathOf = (kind: keyof ReportImages): string | null =>
+        images[kind] === undefined ? null : `images/web/a.${kind}.png`
+
+      return {
+        baseline: pathOf('baseline'),
+        snapshot: pathOf('snapshot'),
+        diff: pathOf('diff'),
+        compared: pathOf('compared'),
+      }
+    },
+  }
+
+  return fake
+}
+
+/**
+ * Gives the visual diff of a later capture against an earlier one, by the default tolerance.
+ */
+async function diffOf(earlier: Uint8Array, later: Uint8Array): Promise<Uint8Array> {
+  const result = await visualDiff.compare({ baseline: earlier, snapshot: later, tolerance: defaultTolerance, scale: 1 })
+
+  if (result.outcome === 'passed') {
+    throw new Error('The captures agree.')
+  }
+
+  return result.diff
+}
+
+describe('updateSnapshot with writeImages', () => {
+  it('keeps the first capture, the page captured again and their diff of a story that changed after its capture', async () => {
+    const { item } = snapshotOf()
+    const fake = fakeCapturesOf([{ snapshot: black, later: white }])
+    const images = fakeImagesOf()
+
+    expect(await updateSnapshot(item, fake.captureStory, { ...tools, writeImages: images.writeImages })).toStrictEqual({
+      ...changedResult,
+      images: {
+        baseline: null,
+        snapshot: 'images/web/a.snapshot.png',
+        diff: 'images/web/a.diff.png',
+        compared: 'images/web/a.compared.png',
+      },
+    })
+    expect(images.written).toEqual([{ compared: black, snapshot: white, diff: await diffOf(black, white) }])
+  })
+
+  it('keeps a copy of the baseline of a story that changed after its capture', async () => {
+    const { item, path } = snapshotOf(grey)
+    const fake = fakeCapturesOf([{ snapshot: black, later: white }])
+    const images = fakeImagesOf()
+
+    const result = await updateSnapshot(item, fake.captureStory, { ...tools, writeImages: images.writeImages })
+
+    expect(result.images?.baseline).toBe('images/web/a.baseline.png')
+    expect(images.written).toEqual([
+      { baseline: grey, compared: black, snapshot: white, diff: await diffOf(black, white) },
+    ])
+    expect(bytesAt(path)).toEqual(grey)
+  })
+
+  it('keeps the first load, the third and their diff of a story none of whose loads agree, not the second', async () => {
+    const { item } = snapshotOf(darkGrey)
+    const fake = fakeCapturesOf([{ snapshot: black }, { snapshot: white }, { snapshot: grey }])
+    const images = fakeImagesOf()
+
+    expect(await updateSnapshot(item, fake.captureStory, { ...tools, writeImages: images.writeImages })).toStrictEqual({
+      ...unstableResult,
+      images: {
+        baseline: 'images/web/a.baseline.png',
+        snapshot: 'images/web/a.snapshot.png',
+        diff: 'images/web/a.diff.png',
+        compared: 'images/web/a.compared.png',
+      },
+    })
+    expect(images.written).toEqual([
+      { baseline: darkGrey, compared: black, snapshot: grey, diff: await diffOf(black, grey) },
+    ])
+  })
+
+  it('asks every load for an image of its page should it break', async () => {
+    const { item } = snapshotOf()
+    const fake = fakeCapturesOf([{ snapshot: black }, { snapshot: white }, { snapshot: grey }])
+
+    await updateSnapshot(item, fake.captureStory, { ...tools, writeImages: fakeImagesOf().writeImages })
+
+    expect(fake.stories.map((story) => story.imageWhenBroken)).toEqual([true, true, true])
+  })
+
+  it.each([1, 2, 3])(
+    'keeps the image of the page of a load %i that broke, with a copy of the baseline',
+    async (load) => {
+      const { item } = snapshotOf(darkGrey)
+      const captured = [{ snapshot: black }, { snapshot: white }].slice(0, load - 1)
+      const fake = fakeCapturesOf([...captured, { broken: brokenStory, console: [], image: grey }])
+      const images = fakeImagesOf()
+
+      expect(
+        await updateSnapshot(item, fake.captureStory, { ...tools, writeImages: images.writeImages }),
+      ).toStrictEqual({
+        status: 'broken',
+        detail: `broken: ${brokenStory.message}`,
+        attempts: load,
+        broken: brokenStory,
+        console: [],
+        images: {
+          baseline: 'images/web/a.baseline.png',
+          snapshot: 'images/web/a.snapshot.png',
+          diff: null,
+          compared: null,
+        },
+      })
+      expect(images.written).toEqual([{ baseline: darkGrey, snapshot: grey }])
+    },
+  )
+
+  it('keeps only a copy of the baseline of a load that broke with no image of its page', async () => {
+    const { item } = snapshotOf(darkGrey)
+    const fake = fakeCapturesOf([{ broken: brokenStory }])
+    const images = fakeImagesOf()
+
+    const result = await updateSnapshot(item, fake.captureStory, { ...tools, writeImages: images.writeImages })
+
+    expect(result.images).toEqual({ baseline: 'images/web/a.baseline.png', snapshot: null, diff: null, compared: null })
+    expect(images.written).toEqual([{ baseline: darkGrey }])
+  })
+
+  it('keeps no image of a load that broke with no image of its page and no baseline', async () => {
+    const { item } = snapshotOf()
+    const fake = fakeCapturesOf([{ broken: brokenStory }])
+    const images = fakeImagesOf()
+
+    const result = await updateSnapshot(item, fake.captureStory, { ...tools, writeImages: images.writeImages })
+
+    expect(result.images).toBeUndefined()
+    expect(images.written).toEqual([])
+  })
+
+  it('keeps no image of a snapshot it writes or keeps', async () => {
+    const written = snapshotOf()
+    const kept = snapshotOf(black)
+    const images = fakeImagesOf()
+    const withImages = { ...tools, writeImages: images.writeImages }
+
+    const results = [
+      await updateSnapshot(
+        written.item,
+        fakeCapturesOf([{ snapshot: black }, { snapshot: black }]).captureStory,
+        withImages,
+      ),
+      await updateSnapshot(kept.item, fakeCapturesOf([{ snapshot: black }]).captureStory, withImages),
+    ]
+
+    expect(results.map(({ status, images }) => ({ status, images }))).toEqual([
+      { status: 'written', images: undefined },
+      { status: 'kept', images: undefined },
+    ])
+    expect(images.written).toEqual([])
+  })
+
+  it('asks for no image of a broken page and keeps none without writeImages', async () => {
+    const { item } = snapshotOf(darkGrey)
+    const fake = fakeCapturesOf([{ snapshot: black }, { snapshot: white }, { snapshot: grey }])
+
+    expect(await updateSnapshot(item, fake.captureStory, tools)).toStrictEqual(unstableResult)
+    expect(fake.stories.map((story) => story.imageWhenBroken)).toEqual([undefined, undefined, undefined])
+  })
 })

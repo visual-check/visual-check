@@ -182,7 +182,7 @@ describe('testSnapshot', () => {
       attempts: 1,
       completingMs: 7,
       console: firstConsole,
-      images: { baseline: null, snapshot: 'images/web/a.snapshot.png', diff: null },
+      images: { baseline: null, snapshot: 'images/web/a.snapshot.png', diff: null, compared: null },
     })
     expect(asked).toMatchObject([{ id: 'a', imageWhenBroken: true }])
     expect(reportImageAt(reportFolder, 'images/web/a.snapshot.png')).toEqual(white)
@@ -202,7 +202,7 @@ describe('testSnapshot', () => {
       attempts: 1,
       broken: brokenStory,
       console: firstConsole,
-      images: { baseline: null, snapshot: 'images/web/a.snapshot.png', diff: null },
+      images: { baseline: null, snapshot: 'images/web/a.snapshot.png', diff: null, compared: null },
     })
     expect(reportImageAt(reportFolder, 'images/web/a.snapshot.png')).toEqual(brokenImage)
   })
@@ -239,6 +239,7 @@ describe('testSnapshot', () => {
         baseline: 'images/web/a.baseline.png',
         snapshot: 'images/web/a.snapshot.png',
         diff: 'images/web/a.diff.png',
+        compared: null,
       },
     })
     expect(reportImageAt(reportFolder, 'images/web/a.baseline.png')).toEqual(black)
@@ -308,7 +309,7 @@ describe('testSnapshot', () => {
       attempts: 1,
       broken: brokenStory,
       console: firstConsole,
-      images: { baseline: null, snapshot: 'images/web/a.snapshot.png', diff: null },
+      images: { baseline: null, snapshot: 'images/web/a.snapshot.png', diff: null, compared: null },
     })
     expect(reportImageAt(reportFolder, 'images/web/a.snapshot.png')).toEqual(brokenImage)
   })

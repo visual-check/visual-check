@@ -27,7 +27,7 @@ export function snapshotWith(fields: Partial<AddonSnapshot> = {}): AddonSnapshot
     pageErrors: [],
     staleExpectedPageErrors: [],
     baseline: '.visual-check/baselines/card--default.png',
-    images: { baseline: null, snapshot: null, diff: null },
+    images: { baseline: null, snapshot: null, diff: null, compared: null },
     ...fields,
   } as AddonSnapshot
 }
@@ -100,7 +100,7 @@ export function updateSnapshotWith(
     pageErrors: [],
     staleExpectedPageErrors: [],
     baseline: '.visual-check/baselines/card--default.png',
-    images: { baseline: null, snapshot: null, diff: null },
+    images: { baseline: null, snapshot: null, diff: null, compared: null },
     realRequestHosts: [],
     remoteContentHosts: [],
     ...fields,

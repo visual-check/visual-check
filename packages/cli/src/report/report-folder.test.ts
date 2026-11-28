@@ -45,6 +45,7 @@ const images = {
   baseline: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1]),
   snapshot: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 2]),
   diff: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 3]),
+  compared: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 4]),
 }
 
 afterEach(() => {
@@ -107,6 +108,7 @@ describe('writeReportImages', () => {
 
     expect(readdirSync(imagesFolder).sort()).toEqual([
       'button--primary.dark.baseline.png',
+      'button--primary.dark.compared.png',
       'button--primary.dark.diff.png',
       'button--primary.dark.snapshot.png',
     ])
@@ -117,6 +119,9 @@ describe('writeReportImages', () => {
       images.snapshot,
     )
     expect(new Uint8Array(readFileSync(join(imagesFolder, 'button--primary.dark.diff.png')))).toEqual(images.diff)
+    expect(new Uint8Array(readFileSync(join(imagesFolder, 'button--primary.dark.compared.png')))).toEqual(
+      images.compared,
+    )
   })
 
   it('keeps the images of other snapshots and Storybooks', async () => {
@@ -127,7 +132,7 @@ describe('writeReportImages', () => {
     await writeReportImages(folder, 'docs', 'a', images)
 
     expect(readdirSync(join(folder, 'images')).sort()).toEqual(['docs', 'web'])
-    expect(readdirSync(join(folder, 'images', 'web'))).toHaveLength(6)
+    expect(readdirSync(join(folder, 'images', 'web'))).toHaveLength(8)
   })
 
   it("throws a ReportError when the images folder can't be made", async () => {
@@ -163,20 +168,21 @@ describe('writeReportImages returning paths', () => {
 
     const paths = await writeReportImages(folder, 'web', 'a', { snapshot: images.snapshot })
 
-    expect(paths).toEqual({ baseline: null, snapshot: 'images/web/a.snapshot.png', diff: null })
+    expect(paths).toEqual({ baseline: null, snapshot: 'images/web/a.snapshot.png', diff: null, compared: null })
     expect(readdirSync(join(folder, 'images', 'web'))).toEqual(['a.snapshot.png'])
   })
 
-  it('returns all three paths in the order baseline, snapshot, diff', async () => {
+  it('returns all four paths in the order baseline, snapshot, diff, compared', async () => {
     const folder = join(createFolder(), 'report')
 
     const paths = await writeReportImages(folder, 'web', 'a', images)
 
-    expect(Object.keys(paths)).toEqual(['baseline', 'snapshot', 'diff'])
+    expect(Object.keys(paths)).toEqual(['baseline', 'snapshot', 'diff', 'compared'])
     expect(paths).toEqual({
       baseline: 'images/web/a.baseline.png',
       snapshot: 'images/web/a.snapshot.png',
       diff: 'images/web/a.diff.png',
+      compared: 'images/web/a.compared.png',
     })
   })
 })

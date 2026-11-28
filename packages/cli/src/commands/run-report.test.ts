@@ -157,6 +157,7 @@ describe('testReportFor', () => {
       baseline: 'images/web/gone.baseline.png',
       snapshot: null,
       diff: null,
+      compared: null,
     })
     expect(readFileSync(join(project, '.visual-check', 'report', 'images', 'web', 'gone.baseline.png'), 'utf8')).toBe(
       'old bytes',
@@ -284,6 +285,12 @@ describe('updateReportFor', () => {
     flaky: true,
     hosts,
   }
+  const unstableImages = {
+    baseline: 'images/web/a.baseline.png',
+    snapshot: 'images/web/a.snapshot.png',
+    diff: 'images/web/a.diff.png',
+    compared: 'images/web/a.compared.png',
+  }
   const broken: SnapshotResult = {
     status: 'broken',
     detail: '',
@@ -291,6 +298,7 @@ describe('updateReportFor', () => {
     pageErrors: [],
     staleExpectedPageErrors: [],
     broken: { reason: 'unstable', message: "No two of the story's 3 loads agreed." },
+    images: unstableImages,
   }
 
   it('lists the written and broken snapshots in planned order, then the deleted baselines, leaving out kept ones', () => {
@@ -317,7 +325,7 @@ describe('updateReportFor', () => {
       exitCode: 1,
       shard: null,
       selection: { by: 'all', base: null, changedFiles: null, fallback: null },
-      reportDir: null,
+      reportDir: '.visual-check/report',
       storybooks: [{ name: 'web', url: 'http://web.test' }],
       counts: { written: 1, deleted: 1, kept: 1, broken: 1, flaky: 1 },
       warnings: [warning],
@@ -337,6 +345,21 @@ describe('updateReportFor', () => {
     expect(report.snapshots[2]).toMatchObject({ baseline: 'baselines/gone.png', story: null })
   })
 
+  it("lists a broken snapshot's images, the compared capture included, and none for the others", () => {
+    const report = updateReportFor(
+      updateFactsOf({
+        items: ['a', 'c'].map((id) => itemOf(updateStorybook, id)),
+        results: [broken, written],
+      }),
+    )
+    const noImages = { baseline: null, snapshot: null, diff: null, compared: null }
+
+    expect(report.snapshots.map(({ id, images }) => [id, images])).toEqual([
+      ['a', unstableImages],
+      ['c', noImages],
+    ])
+  })
+
   it('gives empty counts and no entries when nothing was taken', () => {
     expect(updateReportFor({ ...updateFactsOf({}), exitCode: 0 })).toMatchObject({
       exitCode: 0,
@@ -348,7 +371,7 @@ describe('updateReportFor', () => {
 })
 
 describe('updateErrorReportOf', () => {
-  it('holds the error, trimmed, with the unreachable Storybooks, no results and no report folder', () => {
+  it('names the report folder when the report is written', () => {
     expect(
       updateErrorReportOf({
         version: errorFacts.version,
@@ -356,6 +379,20 @@ describe('updateErrorReportOf', () => {
         storybooks: errorFacts.storybooks,
         message: errorFacts.message,
         unreachable: errorFacts.unreachable,
+        written: true,
+      }).reportDir,
+    ).toBe('.visual-check/report')
+  })
+
+  it("holds the error, trimmed, with the unreachable Storybooks, no results and no report folder when it isn't written", () => {
+    expect(
+      updateErrorReportOf({
+        version: errorFacts.version,
+        selection: errorFacts.selection,
+        storybooks: errorFacts.storybooks,
+        message: errorFacts.message,
+        unreachable: errorFacts.unreachable,
+        written: false,
       }),
     ).toEqual({
       version: 1,
