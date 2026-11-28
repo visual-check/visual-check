@@ -95,7 +95,7 @@ How they're found:
 
 ## Output
 
-- **Terminal:** counts of written, deleted and kept baselines, every written and deleted path, then the flaky snapshots and the warnings.
+- **Terminal:** counts of written, deleted and kept baselines, every written and deleted path, then the snapshots with page errors, kept ones included, the flaky snapshots and the warnings. `update` writes a baseline whatever its page errors, and never fails on them.
 - **JSON:** `update`'s document is in [Report and output](13-report-and-output.md). `update` writes no images and never touches the report folder.
 
 ## Special cases
