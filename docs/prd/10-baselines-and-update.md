@@ -95,8 +95,13 @@ How they're found:
 
 ## Output
 
-- **Terminal:** counts of written, deleted and kept baselines, every written and deleted path, then the snapshots with page errors, kept ones included, the flaky snapshots and the warnings. `update` writes a baseline whatever its page errors, and never fails on them.
-- **JSON:** `update`'s document is in [Report and output](13-report-and-output.md). `update` writes no images and never touches the report folder.
+- **Terminal:** counts of written, deleted and kept baselines, every written and deleted path, every broken snapshot with its `diff:` path, or its `snapshot:` path when it has no visual diff, then the snapshots with page errors, kept ones included, the flaky snapshots and the warnings. The last line is the report's path. `update` writes a baseline whatever its page errors, and never fails on them.
+- **JSON:** `update`'s document is in [Report and output](13-report-and-output.md). It's written to the report folder as `test`'s is, with the images of its broken stories:
+  - `changed-after-capture`: the first capture as `images.compared`, the capture a second later as `images.snapshot`, and their visual diff.
+  - `unstable`: load 1 as `images.compared`, load 3 as `images.snapshot`, and their visual diff. Load 2 isn't kept.
+  - Any other reason: the image of the page as `images.snapshot`, when the page still shows something.
+  - In every case, a copy of the baseline as `images.baseline` when there is one.
+- Snapshots written or kept get no images. The Storybook addon's Update writes no report folder.
 
 ## Special cases
 
