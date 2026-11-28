@@ -255,7 +255,7 @@ describe('readOptionsAnswer', () => {
 
   it.each([
     ['a source', '(', ''],
-    ['a group syntax', '(?i:timeout)', ''],
+    ['a Unicode property', String.raw`\p{Unknown}`, 'u'],
     ['flags', 'x', 'q'],
   ])('gives back a regular expression with %s Node.js cannot build as an UnrunnableRegExp', (_what, source, flags) => {
     const value = firstOptions(readOptionsAnswer(loadedWith({ kind: 'regexp', source, flags })))
