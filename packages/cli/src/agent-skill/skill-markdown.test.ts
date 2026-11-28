@@ -69,6 +69,9 @@ describe('the SKILL.md template', () => {
     'serve the image from Storybook, then mock it with MSW, then mask it by host',
     'Propose each fix with its snippet, and apply it only once the user agrees.',
     "Never raise tolerance, disable a story or run `update` to make a failure pass without the user's explicit OK.",
+    'One with `severity: "fail"` makes `test` exit 1 even when every snapshot passed.',
+    'an `expectedPageErrors` entry on that story',
+    "Never set `pageErrors` to `'warn'` or `'off'`, or declare an expected page error the story doesn't raise on purpose, to make a failure pass without the user's explicit OK.",
   ])('tells the agent: %s', (text) => {
     expect(frontmatter.body).toContain(text)
   })
@@ -77,8 +80,9 @@ describe('the SKILL.md template', () => {
     const positions = [
       '1. **Exit 2:**',
       '2. **A broken story',
-      '3. **The remote-content hint',
-      '4. **A flaky snapshot',
+      '3. **A page error',
+      '4. **The remote-content hint',
+      '5. **A flaky snapshot',
     ].map((text) => frontmatter.body.indexOf(text))
 
     expect(positions.every((position) => position >= 0)).toBe(true)

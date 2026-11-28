@@ -61,7 +61,7 @@ A named set of globals and viewport, declared once per Storybook, that a story c
 _Avoid_: Variant, configuration, breakpoint, extra shot
 
 **Per-story options**:
-What a project sets for a Storybook, a stories file or a story in `parameters.visualCheck`: modes, viewport, capture element, `growViewport`, masks, tolerance, `wait` and `disable`. Storybook merges the levels, and visual-check reads the result before it captures.
+What a project sets for a Storybook, a stories file or a story in `parameters.visualCheck`: modes, viewport, capture element, `growViewport`, masks, tolerance, `pageErrors`, `expectedPageErrors`, `wait` and `disable`. Storybook merges the levels, and visual-check reads the result before it captures.
 _Avoid_: Story config, story settings, visual-check parameters
 
 **Visual diff**:

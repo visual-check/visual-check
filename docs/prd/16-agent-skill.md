@@ -86,6 +86,7 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
 - The pass and fail counts.
 - For each failing snapshot: the story, the mode, the number of differing pixels and the visual diff's path, which is `reportDir` joined with `images.diff`.
 - Missing baselines, orphans and flaky snapshots.
+- Page errors, whatever the snapshot's status: each one's kind, text, load error and severity, and the stale expected page errors. One that fails makes `test` exit 1 even when every snapshot passed.
 - After `update`: every written and deleted path.
 - On exit 2: the error as printed.
 - Any Storybook it reused.
@@ -97,6 +98,7 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
 **When to troubleshoot**
 
 - Always for broken stories.
+- Always for page errors that fail the run.
 - For visual diffs, only when the agent's own change can't explain them. Otherwise it reports them for the user to judge.
 
 **Fixes to offer, in this order**
@@ -109,14 +111,20 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
    - `too-tall`: `element`, or a smaller viewport;
    - a grid that's too wide or too tall: the story to fix, for example by splitting the grid.
 
-   The agent reads the entry's console messages while it troubleshoots.
-3. **The remote-content hint, or `update`'s remote-content warning:** serve the image from Storybook, then mock it with MSW, then mask it by host.
-4. **A flaky snapshot, or a story that moves:** a mask by selector for timers, spinners and skeletons, or a `wait` hook.
+   The agent reads the entry's console messages and page errors while it troubleshoots.
+3. **A page error,** by kind and text:
+   - a `console.error`, an uncaught error or an unhandled rejection: the project's code to fix;
+   - a failed load: the file or the request to fix, or a mock for a request the story needs;
+   - one the story raises on purpose, such as an error-state story's mocked error response: an `expectedPageErrors` entry on that story;
+   - a stale expected page error: the entry to remove, or the story to fix when it should still raise it.
+4. **The remote-content hint, or `update`'s remote-content warning:** serve the image from Storybook, then mock it with MSW, then mask it by host.
+5. **A flaky snapshot, or a story that moves:** a mask by selector for timers, spinners and skeletons, or a `wait` hook.
 
 **Rules**
 
 - The agent proposes each fix with its snippet and applies it only once the user agrees.
 - It never raises tolerance, disables a story or runs `update` to make a failure pass without the user's explicit OK.
+- It never sets `pageErrors` to `'warn'` or `'off'`, or declares an expected page error the story doesn't raise on purpose, to make a failure pass without the user's explicit OK.
 
 ## Checks by hand
 
