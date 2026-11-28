@@ -6,6 +6,7 @@ import { testEntryWith, testReportWith } from '../report/report-document.fixture
 import {
   emptyUpdateCounts,
   type ReportEntryFields,
+  type ReportPageError,
   type UpdateReport,
   type UpdateReportEntry,
   updateReportOf,
@@ -355,6 +356,164 @@ describe('stepSummaryOf', () => {
     expect(stepSummaryOf(report, 100)).toBe('')
     expect(stepSummaryOf(testReportWith([]), 10)).toBe('')
     expect(stepSummaryOf(testReportWith([]), -5)).toBe('')
+  })
+})
+
+/**
+ * A `console.error` with the text given and the severity, `fail` unless given.
+ */
+function loggedError(text: string, severity: 'fail' | 'warn' = 'fail'): ReportPageError {
+  return { kind: 'console.error', text, severity }
+}
+
+describe('stepSummaryOf page errors', () => {
+  it('counts the snapshots with page errors and the stale entries, and names the first of each, before the failures', () => {
+    const report = testReportWith([
+      testEntryWith({ id: 'a', status: 'passed', reason: null, flaky: true }),
+      testEntryWith({
+        id: 'b',
+        mode: 'dark',
+        status: 'passed',
+        reason: null,
+        pageErrors: [
+          {
+            kind: 'load',
+            text: 'http://localhost:6006/api/orders',
+            loadError: 'HTTP 500',
+            severity: 'fail',
+          },
+          loggedError('Second'),
+        ],
+      }),
+      testEntryWith({ id: 'c', status: 'passed', reason: null, staleExpectedPageErrors: ['"Not raised"', '/x/'] }),
+      testEntryWith({
+        id: 'd',
+        status: 'broken',
+        reason: 'error',
+        message: 'Boom.',
+        pageErrors: [{ kind: 'error', text: 'Uncaught Error: boom\n    at a.tsx:1:1', severity: 'warn' }],
+      }),
+    ])
+
+    expect(stepSummaryOf(report, roomy)).toBe(
+      [
+        '### visual-check 0.1.0 · test',
+        '',
+        '3 passed (1 flaky) · 1 broken',
+        '',
+        '**Flaky snapshots**',
+        '',
+        '- web · a',
+        '',
+        '**Page errors**',
+        '',
+        '2 snapshots have page errors, 1 of which fail the run · 2 stale expected page errors',
+        '',
+        '- web · b · dark: failed load http://localhost:6006/api/orders · HTTP 500',
+        '- web · c: stale expected page error "Not raised"',
+        '- web · d: uncaught error Uncaught Error: boom',
+        '',
+        '**Failures**',
+        '',
+        '| Storybook | Story | Mode | Status | Message |',
+        '| --- | --- | --- | --- | --- |',
+        '| web | d |  | broken | Boom. |',
+        '',
+      ].join('\n'),
+    )
+  })
+
+  it.each([
+    ['1 snapshot has page errors, which fail the run', [loggedError('A')]],
+    ['1 snapshot has page errors', [loggedError('A', 'warn')]],
+  ])('says %s', (counts, pageErrors) => {
+    const report = testReportWith([testEntryWith({ id: 'a', status: 'passed', reason: null, pageErrors })])
+
+    expect(stepSummaryOf(report, roomy)).toContain(`\n\n**Page errors**\n\n${counts}\n\n- web · a: console.error A\n`)
+  })
+
+  it('names the first 5 snapshots, then how many more there are', () => {
+    const report = testReportWith(
+      Array.from({ length: 7 }, (_, index) =>
+        testEntryWith({ id: `s${index}`, status: 'passed', reason: null, pageErrors: [loggedError(`E${index}`)] }),
+      ),
+    )
+    const lines = stepSummaryOf(report, roomy).split('\n')
+
+    expect(lines).toContain('7 snapshots have page errors, which fail the run')
+    expect(lines.filter((line) => line.startsWith('- '))).toEqual([
+      '- web · s0: console.error E0',
+      '- web · s1: console.error E1',
+      '- web · s2: console.error E2',
+      '- web · s3: console.error E3',
+      '- web · s4: console.error E4',
+      '- …and 2 more',
+    ])
+  })
+
+  it("never says an update's page errors fail the run", () => {
+    const report = updateReportWith(
+      [updateEntryWith({ id: 'a', status: 'written', reason: 'missing', pageErrors: [loggedError('A')] })],
+      { written: 1 },
+    )
+
+    expect(stepSummaryOf(report, roomy)).toBe(
+      [
+        '### visual-check 0.1.0 · update',
+        '',
+        '1 written',
+        '',
+        '**Page errors**',
+        '',
+        '1 snapshot has page errors',
+        '',
+        '- web · a: console.error A',
+        '',
+      ].join('\n'),
+    )
+  })
+
+  it('escapes the names and the page error, so their markup shows as written', () => {
+    const report = testReportWith([
+      testEntryWith({
+        storybook: '#web',
+        id: 'a',
+        story: '*a*',
+        status: 'passed',
+        reason: null,
+        pageErrors: [loggedError('<b>|_x_ `y` [l](u)')],
+      }),
+    ])
+
+    expect(stepSummaryOf(report, roomy)).toContain(
+      '\n- \\#web · \\*a\\*: console.error &lt;b>\\|\\_x\\_ \\`y\\` \\[l\\](u)\n',
+    )
+  })
+
+  it('counts in the part before the table that must fit', () => {
+    const report = testReportWith([
+      testEntryWith({ id: 'a', status: 'passed', reason: null, pageErrors: [loggedError('x'.repeat(400))] }),
+      testEntryWith({ id: 'b', status: 'broken', reason: 'error', message: 'y'.repeat(500) }),
+    ])
+    const whole = stepSummaryOf(report, roomy)
+    const head = whole.slice(0, whole.indexOf('\n| web |'))
+    const cutNote =
+      "\n\n_1 more failure isn't shown, to keep this summary under GitHub's 1 MiB. report.json lists them all._\n"
+    const fitting = Buffer.byteLength(`${head}${cutNote}`, 'utf8') + 1
+
+    expect(head).toContain('x'.repeat(400))
+    expect(stepSummaryOf(report, fitting)).toBe(`${head}${cutNote}`)
+    expect(stepSummaryOf(report, fitting - 1)).toBe('')
+  })
+
+  it("gives nothing when a passing run's page errors don't fit", () => {
+    const report = testReportWith([
+      testEntryWith({ id: 'a', status: 'passed', reason: null, pageErrors: [loggedError('x'.repeat(400))] }),
+    ])
+    const whole = stepSummaryOf(report, roomy)
+
+    expect(stepSummaryOf(report, Buffer.byteLength(whole, 'utf8') + 1)).toBe(whole)
+    expect(stepSummaryOf(report, Buffer.byteLength(whole, 'utf8'))).toBe('')
   })
 })
 

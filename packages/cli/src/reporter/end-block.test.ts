@@ -178,4 +178,62 @@ describe('testEndLinesOf', () => {
       '0 passed · 1 differs · 1 orphan · 0 ms',
     ])
   })
+
+  it("lists the snapshots with page errors after the failures and before the flaky ones, a failure's too", () => {
+    const entries = [
+      testEntryWith({
+        id: 'a',
+        status: 'differs',
+        reason: 'pixels',
+        message: '5 differ, 0 allowed',
+        pageErrors: [{ kind: 'error', text: 'Uncaught Error: boom\n    at a.tsx:1:1', severity: 'fail' }],
+      }),
+      testEntryWith({ id: 'b', status: 'passed', reason: null, flaky: true }),
+      testEntryWith({
+        id: 'c',
+        mode: 'dark',
+        status: 'passed',
+        reason: null,
+        pageErrors: [
+          {
+            kind: 'load',
+            text: 'http://localhost:6006/api/orders',
+            loadError: 'HTTP 500',
+            severity: 'fail',
+          },
+        ],
+        staleExpectedPageErrors: ['/timeout/i'],
+      }),
+    ]
+
+    expect(testEndLinesOf(testReportWith(entries), { ...atConfig, elapsedMs: 0 })).toEqual([
+      '── 1 failure ──',
+      'web  a',
+      '  differs: 5 differ, 0 allowed',
+      '── 2 snapshots with page errors ──',
+      'web  a',
+      '  page error (fail): uncaught error Uncaught Error: boom',
+      'web  c  dark',
+      '  page error (fail): failed load http://localhost:6006/api/orders · HTTP 500',
+      '  stale expected page error: /timeout/i',
+      'Flaky snapshots, which passed on a retry:',
+      '  web  b',
+      '2 passed (1 flaky) · 1 differs · 0 ms',
+    ])
+  })
+
+  it('says why a run whose snapshots all passed fails on page errors', () => {
+    const entry = testEntryWith({
+      status: 'passed',
+      reason: null,
+      pageErrors: [{ kind: 'console.error', text: 'TypeError: Failed to fetch', severity: 'fail' }],
+    })
+
+    expect(testEndLinesOf(testReportWith([entry]), { ...atConfig, elapsedMs: 0 })).toEqual([
+      '── 1 snapshot with page errors ──',
+      'web  a',
+      '  page error (fail): console.error TypeError: Failed to fetch',
+      '1 passed · 0 ms',
+    ])
+  })
 })

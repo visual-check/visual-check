@@ -218,4 +218,44 @@ describe('runCli page errors', () => {
     expect(report.counts).toMatchObject({ written: 0, kept: 1 })
     expect(report.snapshots).toEqual([])
   })
+
+  it("prints a passed snapshot's page errors at the end of test, which says why it failed", async () => {
+    const { project } = await createRun(['a'], { a: defaultRunSnapshot })
+    const result = await runCli(['test', '--all'], {}, project, fakeBrowser({ a: { pageErrors: [logged] } }).options)
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toContain(
+      [
+        '── 1 snapshot with page errors ──',
+        'web  a',
+        '  page error (fail): console.error TypeError: Failed to fetch',
+        '1 passed · ',
+      ].join('\n'),
+    )
+  })
+
+  it("prints the page errors of the snapshots update wrote and kept, which its report can't list", async () => {
+    const { project } = await createRun(['a', 'b', 'c'], { a: defaultRunSnapshot, c: defaultRunSnapshot })
+    const { options } = fakeBrowser(
+      { a: { pageErrors: [logged] }, b: { pageErrors: [thrown] } },
+      { read: { options: { c: { expectedPageErrors: ['Not raised'] } } } },
+    )
+    const result = await runCli(['update', '--all'], {}, project, options)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain(
+      [
+        '1 written · 2 kept',
+        'written .visual-check/baselines/b.png',
+        '── 3 snapshots with page errors ──',
+        'web  a',
+        '  page error (fail): console.error TypeError: Failed to fetch',
+        'web  b',
+        '  page error (fail): uncaught error Uncaught Error: Request timeout',
+        'web  c',
+        '  stale expected page error: "Not raised"',
+        '',
+      ].join('\n'),
+    )
+  })
 })
