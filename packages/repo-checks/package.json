@@ -9,8 +9,11 @@
   },
   "devDependencies": {
     "@types/node": "22.20.5",
+    "@visual-check/cli": "workspace:*",
+    "@visual-check/storybook": "workspace:*",
     "@visual-check/typescript-config": "workspace:*",
     "typescript": "7.0.2",
+    "typescript5": "npm:typescript@5.9.3",
     "vitest": "5.1.0"
   }
 }
