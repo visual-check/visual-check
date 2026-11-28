@@ -68,9 +68,24 @@ describe('the SKILL.md template', () => {
     '`MemoryRouter` with `useTransitions={false}`',
     'serve the image from Storybook, then mock it with MSW, then mask it by host',
     'Propose each fix with its snippet, and apply it only once the user agrees.',
-    "Never raise tolerance, disable a story or run `update` to make a failure pass without the user's explicit OK.",
+    "Never raise tolerance, disable a story, set `allowOverflow` or run `update` to make a failure pass without the user's explicit OK.",
+    'only when the user says the cut is intended, `allowOverflow: true`',
+    'allowOverflow: true,',
   ])('tells the agent: %s', (text) => {
     expect(frontmatter.body).toContain(text)
+  })
+
+  it('offers allowOverflow for overflows only after fixing the layout and the viewport or element', () => {
+    const positions = [
+      '`overflows`',
+      'first the layout',
+      'a wider `viewport`',
+      'an element that holds the content',
+    ].map((text) => frontmatter.body.indexOf(text))
+
+    expect(positions.every((position) => position >= 0)).toBe(true)
+    expect(positions).toEqual([...positions].sort((left, right) => left - right))
+    expect(frontmatter.body.indexOf('`allowOverflow: true`.')).toBeGreaterThan(positions[3] ?? Number.POSITIVE_INFINITY)
   })
 
   it('lists the fixes in order', () => {

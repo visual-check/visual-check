@@ -61,7 +61,8 @@ While you troubleshoot a broken story, read its entry's console messages (`conso
    - `navigated-away`, `play-threw` or `load-failed`: the project's code to fix. For a story that navigates away, await the new page before clicking, or render `MemoryRouter` with `useTransitions={false}`;
    - `too-tall`: `element`, or a smaller viewport;
    - a full-page snapshot whose `100vh` sections stretch to the page's height: `growViewport: false`, which keeps the viewport's height and paints fixed elements where they sit in it;
-   - a grid that's too wide (`grid-too-wide`) or too tall: the story to fix, for example by splitting the grid into several stories.
+   - a grid that's too wide (`grid-too-wide`) or too tall: the story to fix, for example by splitting the grid into several stories;
+   - `overflows`, content the capture would cut (`details.overflow` says how far past each side): first the layout, so the content fits; then, for the full page, a wider `viewport` or modes without the narrow ones, and for `element`, an element that holds the content; last, and only when the user says the cut is intended, `allowOverflow: true`.
 3. **The remote-content hint** (a `hints` entry of kind `remote-content`), **or `update`'s remote-content warning:** serve the image from Storybook, then mock it with MSW, then mask it by host.
 4. **A flaky snapshot, or a story that moves:** a mask by selector for timers, spinners and skeletons, or a `wait` hook.
 
@@ -83,6 +84,8 @@ export const Default = {
       element: '#storybook-root > *',
       // A smaller viewport, in CSS pixels.
       viewport: { width: 375, height: 667 },
+      // Lets the capture cut content past the viewport or the element, which otherwise breaks the story. Only when the cut is intended.
+      allowOverflow: true,
     }),
   },
 }
@@ -91,4 +94,4 @@ export const Default = {
 ## Rules
 
 - Propose each fix with its snippet, and apply it only once the user agrees.
-- Never raise tolerance, disable a story or run `update` to make a failure pass without the user's explicit OK.
+- Never raise tolerance, disable a story, set `allowOverflow` or run `update` to make a failure pass without the user's explicit OK.

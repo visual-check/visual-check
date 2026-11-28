@@ -4,7 +4,8 @@ A story whose capture would cut content its page shows, past the viewport's righ
 
 ## Consequences
 
-- Content the page clips itself, by `overflow` other than `visible` on the root, on `body` or on the element, isn't overflow. One whole CSS pixel past the capture, after rounding as the capture box is rounded, is.
+- Content the page clips itself, by `overflow-x` of `hidden` or `clip` on the root or `body`, or by `overflow` other than `visible` on the element, isn't overflow. Content reaching one whole CSS pixel past the capture is, and each side is reported rounded up: Chromium rounds `scrollWidth` and `clientWidth` to whole pixels, so less than one is noise.
+- An element's spill is read from its scrollable overflow, which reaches only right and down, so content spilling left or up out of the element isn't measured.
 - A full-page capture is never cut at the bottom, since it takes the content's height, so only its right edge counts.
 - Other reasons win over `overflows`: `element-missing`, `grid-too-wide` and a grid's `too-tall`, whose fixes are more specific.
 - It ships as a feature, not a breaking change: it writes no baseline and changes no snapshot. A story it breaks was already being cut; the fix is the layout, a wider viewport or element, or `allowOverflow: true` when the cut is intended.
