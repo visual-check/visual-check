@@ -759,12 +759,13 @@ const invalidModes = {
 
 /**
  * What the committed-baselines case checks of the modes stories beyond their outcomes: the story that lists `dark` and
- * `mobile` has exactly 3 lines, its default capture and one per mode, and the story with its own list of modes has no
- * line for the meta's `dark`.
+ * `mobile` has exactly 3 lines, its default capture and one per mode, the story with its own list of modes has no
+ * line for the meta's `dark`, and the story with `defaultCapture: false` has exactly 2 lines, one per mode it lists.
  */
 const modeLines = {
   darkAndMobile: { storyId: 'modes--dark-and-mobile', count: 3 },
   ownModesOnly: { storyId: 'modes--own-modes-only', absentMode: 'dark' },
+  modesOnly: { storyId: 'modes--modes-only', count: 2 },
 }
 
 /**
@@ -2376,6 +2377,7 @@ function committedBaselinesProblems(run: CliRun, expected: Outcomes, configFolde
     ...headerCountProblems(run, Object.keys(expected).length),
     ...lineCountProblems(run, modeLines.darkAndMobile.storyId, modeLines.darkAndMobile.count),
     ...absentModeProblems(run, modeLines.ownModesOnly.storyId, modeLines.ownModesOnly.absentMode),
+    ...lineCountProblems(run, modeLines.modesOnly.storyId, modeLines.modesOnly.count),
   ]
 }
 
@@ -5410,7 +5412,7 @@ if (setupProblems.length > 0) {
   const expected = withoutLoadFails(everyOutcome)
   const passed = await runCases([
     {
-      name: "committed baselines: test gives the expected outcomes, each broken readiness, per-story options, capture area and grid story's line says why, no line for a disabled story, the header counts the expected outcomes, a story listing two modes has 3 lines, a story's own modes leave out the meta's, no test-path warning, the animation baselines are byte-identical to storybook-10-react's",
+      name: "committed baselines: test gives the expected outcomes, each broken readiness, per-story options, capture area and grid story's line says why, no line for a disabled story, the header counts the expected outcomes, a story listing two modes has 3 lines, a story's own modes leave out the meta's, a story with defaultCapture false has only its 2 modes' lines, no test-path warning, the animation baselines are byte-identical to storybook-10-react's",
       run: () => checkCommittedBaselines(everyOutcome),
     },
     {

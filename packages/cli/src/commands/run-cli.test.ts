@@ -2949,6 +2949,45 @@ describe('runCli modes', () => {
     expect(new Uint8Array(readFileSync(join(folder, 'a.png')))).toEqual(defaultRunSnapshot)
   })
 
+  it("reports the default capture's baseline of a story with defaultCapture false as an orphan in the consistency check", async () => {
+    const { project } = await createRun(['a'], { a: defaultRunSnapshot, 'a.dark': darkSnapshot })
+    const { options, record } = fakeBrowser(
+      { a: darkStory },
+      { read: { options: { a: { defaultCapture: false, modes: { dark: twoModes.modes.dark } } } } },
+    )
+    const result = await runCli(['test', '--consistency'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: printed(consistencyHeaderOf(1), orphanLineOf('web', 'a'), '0 missing · 1 orphan'),
+      stderr: '',
+      reportLine: reportOnStdout,
+    })
+    expectNothingCaptured(record)
+  })
+
+  it("captures only the modes of a story with defaultCapture false, and update deletes its default capture's baseline", async () => {
+    const { project, folder } = await createRun(['a'], { a: defaultRunSnapshot, 'a.dark': darkSnapshot }, oneWorker)
+    const { options, record } = fakeBrowser(
+      { a: darkStory },
+      { read: { options: { a: { defaultCapture: false, modes: { dark: twoModes.modes.dark } } } } },
+    )
+    const result = await runCli(['update', '--all'], {}, project, options)
+
+    expect(result).toEqual({
+      exitCode: 0,
+      stdout: printed(
+        headerOf('update', 1, 1),
+        '✓ web  a  dark  kept',
+        '0 written · 1 deleted · 1 kept',
+        'deleted .visual-check/baselines/a.png',
+      ),
+      stderr: '',
+    })
+    expect(readdirSync(folder)).toEqual(['a.dark.png'])
+    expect(record.urls.slice(1)).toEqual([expect.stringMatching(/\?id=a&viewMode=story&globals=theme%3Adark$/)])
+  })
+
   it('takes every snapshot of a story --filter selects', async () => {
     const { project } = await createRun(
       ['a', 'b'],

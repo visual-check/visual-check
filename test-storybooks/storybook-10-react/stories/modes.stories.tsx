@@ -151,6 +151,14 @@ export const ViewportPrecedence: Story = {
 }
 
 /**
+ * Sets `defaultCapture: false` and lists `dark` and `narrow`, so it has only those two snapshots: `.dark` at the meta's
+ * 640 px on the dark surface, and `.narrow` at 375 px. No default capture is taken, and the modes keep their keys.
+ */
+export const ModesOnly: Story = {
+  parameters: { ...visualCheck({ defaultCapture: false, modes: ['dark', 'narrow'] }) },
+}
+
+/**
  * About 3000 px tall, with the environment panel at the top and again at the bottom. Its `.mobile` capture is the full
  * page at scale 2, and both panels show no hover, a coarse pointer, 5 touch points and no hover style.
  */

@@ -135,7 +135,13 @@ export interface VisualCheckOptions<ModeName extends string> {
    */
   modes?: readonly ModeName[] | undefined
   /**
-   * The default capture's viewport. Deep-merges over the inherited one.
+   * Whether to take the default capture, the story with no mode. `false` captures the listed modes only, for a story
+   * that exists to show them. Their viewport still merges over `viewport`, and their baselines keep their names.
+   * Defaults to `true`. With `false`, list at least one mode, or set `disable: true`.
+   */
+  defaultCapture?: boolean | undefined
+  /**
+   * The default capture's viewport, which each mode's viewport merges over. Deep-merges over the inherited one.
    */
   viewport?: Viewport | undefined
   /**
@@ -203,6 +209,10 @@ export interface VisualCheckParameter {
    * One entry per declared mode, in the declaration's key order.
    */
   modes?: Record<string, ModeDefinition | null>
+  /**
+   * Whether to take the default capture.
+   */
+  defaultCapture?: boolean
   /**
    * The default capture's viewport.
    */
@@ -272,8 +282,8 @@ export type VisualCheck<ModeName extends string> = (options: VisualCheckOptions<
  * - `modes`: the most specific list.
  * - `viewport` and `tolerance`: merged key by key.
  * - `masks`: merged by name. A name set to `null` drops one mask, and `masks: null` drops all of them.
- * - `wait`, `element`, `growViewport`, `allowOverflow`, `disable`, `pageErrors` and `realRequests`: the most specific
- *   value.
+ * - `defaultCapture`, `wait`, `element`, `growViewport`, `allowOverflow`, `disable`, `pageErrors` and `realRequests`: the
+ *   most specific value.
  * - `expectedPageErrors`: the most specific list, since Storybook replaces arrays: a story's list replaces its meta's or
  *   `preview`'s. The config's list is then added to it, so put the entries every story needs in the config.
  *

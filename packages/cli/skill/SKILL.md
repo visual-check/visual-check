@@ -35,7 +35,7 @@ The script prints the run's JSON report on stdout, and its own lines and the CLI
 Read the JSON report on stdout and report:
 
 - The pass and fail counts, from `counts`.
-- For each failing snapshot, an entry of `snapshots` whose `status` is `differs` or `broken`: its story (`story`), its mode (`mode`, `null` for the default capture), the number of differing pixels (`pixels.differ`) and the visual diff's path, which is `reportDir` joined with `images.diff`. Both are relative to the folder that holds the config.
+- For each failing snapshot, an entry of `snapshots` whose `status` is `differs` or `broken`: its story (`story`), its mode (`mode`, `null` for the default capture, which a story with `defaultCapture: false` doesn't have), the number of differing pixels (`pixels.differ`) and the visual diff's path, which is `reportDir` joined with `images.diff`. Both are relative to the folder that holds the config.
 - Missing baselines (`status: "missing"`), orphans (`status: "orphan"`) and flaky snapshots (`flaky: true`).
 - Page errors, whatever the entry's `status`: for each entry with a non-empty `pageErrors`, its story, its mode, and each page error's `kind`, `text` (the message, or a load's URL), `loadError` and `severity`. One with `severity: "fail"` makes `test` exit 1 even when every snapshot passed. Also each entry's `staleExpectedPageErrors`, which are warnings.
 - Real network requests, whatever the entry's `status`: for each entry with a non-empty `realRequests`, its story, its mode, and each `host` with its `severity`. One with `severity: "fail"` makes `test` exit 1 even when every snapshot passed.

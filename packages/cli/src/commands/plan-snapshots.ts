@@ -384,7 +384,8 @@ function checkSelectionListed(stories: readonly Story[], allStories: readonly St
  * the story's, key by key, with no globals, then each mode it lists, in the order its options hold them, at the default
  * capture's viewport under the mode's, with the mode's globals. Each has the config's tolerance under the story's, key
  * by key, and the story's page error and real network request policies. A mode the story leaves out, `null`, isn't
- * planned. A story whose stories file didn't load gives one broken snapshot with no mode, since its modes are unknown.
+ * planned. With `defaultCapture: false`, the default capture isn't planned, and its modes keep its viewport and their
+ * keys. A story whose stories file didn't load gives one broken snapshot with no mode, since its modes are unknown.
  */
 function storySnapshotsOf(
   storybook: ResolvedStorybook,
@@ -425,7 +426,7 @@ function storySnapshotsOf(
         ],
   )
 
-  return [defaultCapture, ...modes]
+  return options.defaultCapture === false ? modes : [defaultCapture, ...modes]
 }
 
 /**
@@ -529,11 +530,12 @@ function baselineClashProblemOf(clashes: readonly StorybookClash[]): string | un
  * Storybook with stories, in the order given. A read covers every story the Storybook's `index.json` lists whatever the
  * selection, and every story's options are checked. Gives the snapshots of every story, selected or not, in the order
  * given and then `index.json` order, each marked selected when its story is in the selection. Each story that isn't
- * disabled gives its default capture, then one snapshot per mode it lists, in the order its options hold them, each
- * with its key, its options, its tolerance and viewport over the config's and its globals. When its stories file failed
- * to load or didn't load within readyTimeout, it gives one snapshot, the broken story it makes, `load-failed`, with no
- * mode. A read's problem stops the planning at once, and the Storybooks after it aren't read. Invalid options stop it
- * once every Storybook is read, with one block of issues per Storybook: each story's type issues, then the mode rules'
+ * disabled gives its default capture, unless it sets `defaultCapture: false`, then one snapshot per mode it lists, in
+ * the order its options hold them, each with its key, its options, its tolerance and viewport over the config's and its
+ * globals. When its stories file failed to load or didn't load within readyTimeout, it gives one snapshot, the broken
+ * story it makes, `load-failed`, with no mode. A read's problem stops the planning at once, and the Storybooks after it
+ * aren't read. Invalid options stop it once every Storybook is read, with one block of issues per Storybook: each
+ * story's type issues, a story with `defaultCapture: false` and no listed mode among them, then the mode rules'
  * issues of the stories whose options are valid, checked against the globals the Storybook declares and the globals
  * each story pins. With valid options, two snapshots of one Storybook whose baselines would be one file stop it, with
  * one block per Storybook that has them, naming its first two. Every planned snapshot counts, selected or not, broken
