@@ -121,7 +121,7 @@ export type UnjudgedResult = Omit<SnapshotResult, 'pageErrors' | 'staleExpectedP
  * What a broken snapshot's result keeps besides its broken story: how many captures it took and the console messages
  * of the capture that broke, when it had a page.
  */
-interface BrokenAttempts {
+export interface BrokenAttempts {
   /**
    * How many captures visual-check asked for, the one that broke included.
    */

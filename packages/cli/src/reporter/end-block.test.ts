@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { testEntryWith, testReportWith } from '../report/report-document.fixture.js'
-import { testEndLinesOf } from './end-block.js'
+import { testEndLinesOf, updateBrokenLinesOf } from './end-block.js'
 
 const project = join('/', 'project')
 const atConfig = { cwd: project, configFolder: project }
@@ -37,6 +37,7 @@ describe('testEndLinesOf', () => {
           baseline: 'images/web/button--primary.dark.baseline.png',
           snapshot: 'images/web/button--primary.dark.snapshot.png',
           diff: 'images/web/button--primary.dark.diff.png',
+          compared: null,
         },
       }),
       testEntryWith({ id: 'button--secondary', status: 'passed', reason: null, flaky: true }),
@@ -162,7 +163,7 @@ describe('testEndLinesOf', () => {
         status: 'differs',
         reason: 'pixels',
         message: '5 differ, 0 allowed',
-        images: { baseline: null, snapshot: null, diff: 'images/web/a.diff.png' },
+        images: { baseline: null, snapshot: null, diff: 'images/web/a.diff.png', compared: null },
       }),
       testEntryWith({ id: 'b', story: null, status: 'orphan', reason: null }),
     ]
@@ -235,5 +236,56 @@ describe('testEndLinesOf', () => {
       '  page error (fail): console.error TypeError: Failed to fetch',
       '1 passed · 0 ms',
     ])
+  })
+})
+
+describe('updateBrokenLinesOf', () => {
+  /**
+   * The images of a broken snapshot that keeps the ones given, `null` for the rest.
+   */
+  const imagesWith = (images: Partial<Record<'baseline' | 'snapshot' | 'diff' | 'compared', string>>) => ({
+    baseline: null,
+    snapshot: null,
+    diff: null,
+    compared: null,
+    ...images,
+  })
+
+  it('gives each broken snapshot with the path of its visual diff, relative to the folder the CLI runs in', () => {
+    const broken = [
+      {
+        name: 'web  card--default',
+        images: imagesWith({
+          baseline: 'images/web/card--default.baseline.png',
+          snapshot: 'images/web/card--default.snapshot.png',
+          diff: 'images/web/card--default.diff.png',
+          compared: 'images/web/card--default.compared.png',
+        }),
+      },
+    ]
+
+    expect(updateBrokenLinesOf(broken, { cwd: project, configFolder: join(project, 'app') })).toEqual([
+      'broken web  card--default',
+      `  diff: ${join('app', '.visual-check', 'report', 'images', 'web', 'card--default.diff.png')}`,
+    ])
+  })
+
+  it('gives the path of the snapshot when there is no visual diff, and the name alone with neither', () => {
+    const broken = [
+      { name: 'web  a  dark', images: imagesWith({ snapshot: 'images/web/a.dark.snapshot.png' }) },
+      { name: 'web  b', images: imagesWith({ baseline: 'images/web/b.baseline.png' }) },
+      { name: 'web  c', images: undefined },
+    ]
+
+    expect(updateBrokenLinesOf(broken, atConfig)).toEqual([
+      'broken web  a  dark',
+      `  snapshot: ${join('.visual-check', 'report', 'images', 'web', 'a.dark.snapshot.png')}`,
+      'broken web  b',
+      'broken web  c',
+    ])
+  })
+
+  it('gives no line when nothing is broken', () => {
+    expect(updateBrokenLinesOf([], atConfig)).toEqual([])
   })
 })

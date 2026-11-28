@@ -831,9 +831,11 @@ describe('runCli visual diff', () => {
     expect(readdirSync(reportFolderIn(project))).toEqual(['report.json'])
   })
 
-  it('leaves the report folder alone in update', async () => {
+  it("replaces the report folder in update, with update's report", async () => {
     const { project } = await createRun(['a'], { a: defaultRunSnapshot })
-    const image = writeStaleReport(project)
+
+    writeStaleReport(project)
+
     const result = await runCli(
       ['update', '--all'],
       {},
@@ -842,8 +844,12 @@ describe('runCli visual diff', () => {
     )
 
     expect(result.exitCode).toBe(0)
-    expect(readdirSync(join(reportFolderIn(project), 'images', 'web'))).toEqual(['old.diff.png'])
-    expect(new Uint8Array(readFileSync(image))).toEqual(defaultRunSnapshot)
+    expect(result.reportLine).toEqual(reportOnStdout)
+    expect(readdirSync(reportFolderIn(project))).toEqual(['report.json'])
+    expect(JSON.parse(readFileSync(join(reportFolderIn(project), 'report.json'), 'utf8'))).toMatchObject({
+      command: 'update',
+      reportDir: '.visual-check/report',
+    })
   })
 
   it("compares by the story's tolerance over the config's", async () => {
@@ -1678,15 +1684,16 @@ describe('runCli test --shard', () => {
     })
   })
 
-  it('exits 2 for update --shard, writing no report', async () => {
+  it('exits 2 for update --shard, writing its error report', async () => {
     const { project } = await createShardedRun()
 
     expect(await runCli(['update', '--shard', '1/2'], {}, project, noLaunch)).toEqual({
       exitCode: 2,
       stdout: '',
       stderr: `--shard applies only to test.\n${usageHint}`,
+      reportLine: reportOnStderr,
     })
-    expect(existsSync(reportFolderIn(project))).toBe(false)
+    expect(readdirSync(reportFolderIn(project))).toEqual(['report.json'])
   })
 
   it("exits 2 when the Storybook doesn't answer", async () => {
@@ -1752,6 +1759,7 @@ describe('runCli update', () => {
         'written .visual-check/baselines/d.png',
       ),
       stderr: '',
+      reportLine: reportOnStdout,
     })
     expect(new Uint8Array(readFileSync(join(folder, 'a.png')))).toEqual(defaultRunSnapshot)
     expect(new Uint8Array(readFileSync(join(folder, 'b.png')))).toEqual(defaultRunSnapshot)
@@ -1809,6 +1817,7 @@ describe('runCli update', () => {
       stderr:
         "visual-check couldn't decode the baseline .visual-check/baselines/a.png: Input buffer contains unsupported " +
         'image format. Delete it or restore it from git, then run visual-check again.\n',
+      reportLine: reportOnStderr,
     })
     expect(new Uint8Array(readFileSync(join(folder, 'a.png')))).toEqual(notPng)
   })
@@ -1827,8 +1836,13 @@ describe('runCli update', () => {
         '✓ web  c  written: missing',
         '1 written · 2 broken',
         'written .visual-check/baselines/c.png',
+        'broken web  a',
+        '  snapshot: .visual-check/report/images/web/a.snapshot.png',
+        'broken web  b',
+        '  snapshot: .visual-check/report/images/web/b.snapshot.png',
       ),
       stderr: '',
+      reportLine: reportOnStdout,
     })
     expect(new Uint8Array(readFileSync(join(folder, 'a.png')))).toEqual(otherSnapshot)
     expect(existsSync(join(folder, 'b.png'))).toBe(false)
@@ -1878,6 +1892,7 @@ describe('runCli update', () => {
         'deleted .visual-check/baselines/gone.png',
       ),
       stderr: '',
+      reportLine: reportOnStdout,
     })
     // Every baseline written takes two loads, and a kept one takes one.
     expect(storyIdsOf(record.urls).sort()).toEqual(['a', 'a', 'b', 'b', 'e', 'e', 'f'])
@@ -1899,6 +1914,7 @@ describe('runCli update', () => {
         'deleted .visual-check/baselines/gone.png',
       ),
       stderr: '',
+      reportLine: reportOnStdout,
     })
     expect(readdirSync(folder)).toEqual(['a.png'])
   })
@@ -1932,6 +1948,7 @@ describe('runCli update', () => {
       exitCode: 0,
       stdout: printed(headerOf('update', 1), '✓ web  a  kept', '0 written · 1 kept'),
       stderr: '',
+      reportLine: reportOnStdout,
     })
     expect(readdirSync(folder).sort()).toEqual(['.visual-check-0a1b2c.tmp', 'a.png', 'notes.txt', 'old.png'])
   })
@@ -1962,6 +1979,7 @@ describe('runCli update', () => {
         'deleted .visual-check/baselines/b-group.png',
       ),
       stderr: '',
+      reportLine: reportOnStdout,
     })
     expect(storyIdsOf(record.urls)).toEqual(['a'])
     expect(readdirSync(folder).sort()).toEqual(['a.png', 'b.dark.png', `${shortenedStemOf(longMode)}.png`, 'b.png'])
@@ -1987,8 +2005,10 @@ describe('runCli update', () => {
         '✓ web  a  kept',
         '! web  b  broken: Its stories file ./b.stories.tsx failed to load: SyntaxError.',
         '0 written · 1 kept · 1 broken',
+        'broken web  b',
       ),
       stderr: '',
+      reportLine: reportOnStdout,
     })
     expect(storyIdsOf(record.urls)).toEqual(['a'])
     expect(readdirSync(folder).sort()).toEqual(['a.png', 'b.dark.png'])
@@ -2019,6 +2039,7 @@ describe('runCli update', () => {
         'deleted web/.visual-check/baselines/gone.png',
       ),
       stderr: '',
+      reportLine: reportOnStdout,
     })
     expect(storyIdsOf(record.urls)).toEqual(['a', 'a'])
     expect(readdirSync(docsFolder).sort()).toEqual(['e.png', 'gone.png'])
@@ -2057,6 +2078,7 @@ describe('runCli update', () => {
       stderr:
         "visual-check couldn't decode the baseline .visual-check/baselines/zz.png: Input buffer contains unsupported " +
         'image format. Delete it or restore it from git, then run visual-check again.\n',
+      reportLine: reportOnStderr,
     })
     expect(storyIdsOf(record.urls)).toEqual([])
     expect(readdirSync(folder).sort()).toEqual(['a.png', 'gone.png', 'zz.png'])
@@ -2083,6 +2105,7 @@ describe('runCli update', () => {
       stderr:
         "visual-check couldn't decode the baseline web/.visual-check/baselines/b.png: Input buffer contains " +
         'unsupported image format. Delete it or restore it from git, then run visual-check again.\n',
+      reportLine: reportOnStderr,
     })
     expect(storyIdsOf(record.urls)).toEqual([])
   })
@@ -2115,6 +2138,7 @@ describe('runCli update', () => {
             'deleted .visual-check/baselines/A.png',
           ),
       stderr: '',
+      reportLine: reportOnStdout,
     })
     expect(readdirSync(folder)).toHaveLength(1)
     expect(new Uint8Array(readFileSync(join(folder, 'a.png')))).toEqual(defaultRunSnapshot)
@@ -2157,6 +2181,7 @@ describe('runCli update', () => {
       stderr:
         "visual-check couldn't list the baselines folder .visual-check/baselines: ENOTDIR: not a directory. Check " +
         "that it's a folder visual-check can read.\n",
+      reportLine: reportOnStderr,
     })
     expect(storyIdsOf(record.urls)).toEqual([])
   })
@@ -2177,6 +2202,7 @@ describe('runCli update', () => {
           stderr:
             "visual-check couldn't delete the baseline .visual-check/baselines/gone.png: EACCES: permission denied. " +
             'Check that its folder is writable.\n',
+          reportLine: reportOnStderr,
         })
       } finally {
         chmodSync(folder, 0o755)
@@ -2251,6 +2277,7 @@ describe('runCli warning about baseline paths over 260 characters', () => {
         `written ${deepFolder}/b.png`,
       ),
       stderr: printed(warningHead, `  ${deepFolder}/a.png`, `  ${deepFolder}/b.png`),
+      reportLine: reportOnStdout,
     })
     expect(join(project, deepFolder, 'a.png').length).toBeGreaterThan(260)
   })
@@ -2374,7 +2401,7 @@ describe('runCli warning about real network requests and remote content', () => 
     expect(result.exitCode).toBe(0)
   })
 
-  it('counts a broken story for nothing, and never captures its page', async () => {
+  it('counts a broken story for nothing, and captures only the image of its page', async () => {
     const { project } = await createRun(['a'])
     const { options, record } = fakeBrowser({
       a: { broken: true, requestHosts: ['api.example.com'], remote: shown('x.test') },
@@ -2383,7 +2410,7 @@ describe('runCli warning about real network requests and remote content', () => 
 
     expect(result.exitCode).toBe(1)
     expect(result.stderr).toBe('')
-    expect(record.captures).toEqual([])
+    expect(record.captures.map(({ id, onLoad }) => ({ id, onLoad }))).toEqual([{ id: 'a', onLoad: 1 }])
   })
 
   it('never lists hosts in test, and sets up every page without watching requests', async () => {
@@ -2566,6 +2593,7 @@ describe('runCli per-story options', () => {
         `Storybook web's preview never started at ${previewOf(web)} within readyTimeout (4000 ms). Open it to see ` +
           'why, or raise readyTimeout.',
       ),
+      reportLine: reportOnStderr,
     })
     expect(record.reads.map(({ url }) => url)).toEqual([previewOf(web)])
     expect(storyIdsOf(record.urls)).toEqual([])
@@ -2688,6 +2716,7 @@ describe('runCli per-story options', () => {
         'written .visual-check/baselines/a.png',
       ),
       stderr: '',
+      reportLine: reportOnStdout,
     })
     expect(existsSync(join(folder, 'b.png'))).toBe(false)
   })
@@ -2791,8 +2820,16 @@ describe('runCli per-story options', () => {
 
     expect(result).toEqual({
       exitCode: 1,
-      stdout: printed(headerOf('update', 2, 1), `! web  a  ${broken}`, `! web  b  ${broken}`, '0 written · 2 broken'),
+      stdout: printed(
+        headerOf('update', 2, 1),
+        `! web  a  ${broken}`,
+        `! web  b  ${broken}`,
+        '0 written · 2 broken',
+        'broken web  a',
+        'broken web  b',
+      ),
       stderr: '',
+      reportLine: reportOnStdout,
     })
     expect(new Uint8Array(readFileSync(join(folder, 'a.png')))).toEqual(otherSnapshot)
     expect(existsSync(join(folder, 'b.png'))).toBe(false)
@@ -2943,6 +2980,7 @@ describe('runCli modes', () => {
         'written .visual-check/baselines/a.mobile.png',
       ),
       stderr: '',
+      reportLine: reportOnStdout,
     })
     expect(readdirSync(folder).sort()).toEqual(['a.dark.png', 'a.mobile.png', 'a.png'])
     expect(new Uint8Array(readFileSync(join(folder, 'a.dark.png')))).toEqual(darkSnapshot)
@@ -3382,6 +3420,7 @@ describe('runCli update stability checks', () => {
         '  web  b',
       ),
       stderr: '',
+      reportLine: reportOnStdout,
     })
     expect(new Uint8Array(readFileSync(join(folder, 'a.png')))).toEqual(defaultRunSnapshot)
     expect(new Uint8Array(readFileSync(join(folder, 'b.png')))).toEqual(otherSnapshot)
@@ -3405,9 +3444,35 @@ describe('runCli update stability checks', () => {
         `! web  b  ${unstableDetail}`,
         `! web  c  ${unstableDetail}`,
         '0 written · 3 broken',
+        'broken web  a',
+        '  diff: .visual-check/report/images/web/a.diff.png',
+        'broken web  b',
+        '  diff: .visual-check/report/images/web/b.diff.png',
+        'broken web  c',
+        '  diff: .visual-check/report/images/web/c.diff.png',
       ),
       stderr: '',
+      reportLine: reportOnStdout,
     })
+    expect(readdirSync(join(reportFolderIn(project), 'images', 'web')).sort()).toEqual([
+      'a.baseline.png',
+      'a.compared.png',
+      'a.diff.png',
+      'a.snapshot.png',
+      'b.compared.png',
+      'b.diff.png',
+      'b.snapshot.png',
+      'c.baseline.png',
+      'c.compared.png',
+      'c.diff.png',
+      'c.snapshot.png',
+    ])
+    expect(new Uint8Array(readFileSync(join(reportFolderIn(project), 'images', 'web', 'a.snapshot.png')))).toEqual(
+      greySnapshot,
+    )
+    expect(new Uint8Array(readFileSync(join(reportFolderIn(project), 'images', 'web', 'b.snapshot.png')))).toEqual(
+      greySnapshot,
+    )
     expect(readdirSync(folder).sort()).toEqual(['a.png', 'c.png'])
     expect(new Uint8Array(readFileSync(join(folder, 'a.png')))).toEqual(otherSnapshot)
     expect(new Uint8Array(readFileSync(join(folder, 'c.png')))).toEqual(otherSnapshot)
@@ -3421,7 +3486,15 @@ describe('runCli update stability checks', () => {
     })
     const result = await runCli(['update', '--all'], {}, project, options)
 
-    expect(result.stdout).toBe(printed(headerOf('update', 1), `! web  a  ${unstableDetail}`, '0 written · 1 broken'))
+    expect(result.stdout).toBe(
+      printed(
+        headerOf('update', 1),
+        `! web  a  ${unstableDetail}`,
+        '0 written · 1 broken',
+        'broken web  a',
+        '  diff: .visual-check/report/images/web/a.diff.png',
+      ),
+    )
     expect(storyIdsOf(record.urls)).toEqual(['a', 'a', 'a'])
   })
 
@@ -3781,6 +3854,7 @@ describe('runCli baseline file names', () => {
       exitCode: 2,
       stdout: '',
       stderr: printed(clashLineOf('web', `${composedId}.png`, composedId, decomposedId), foldedNamesNote, clashFix),
+      reportLine: reportOnStderr,
     })
     expect(storyIdsOf(record.urls)).toEqual([])
     expect(existsSync(folder)).toBe(false)
@@ -3795,6 +3869,7 @@ describe('runCli baseline file names', () => {
       exitCode: 2,
       stdout: '',
       stderr: printed(clashLineOf('web', 'a.dark.png', 'a in mode dark', 'a.dark'), clashFix),
+      reportLine: reportOnStderr,
     })
     expect(storyIdsOf(record.urls)).toEqual([])
   })
@@ -3878,6 +3953,7 @@ describe('runCli baseline file names', () => {
         `written .visual-check/baselines/${shortened}`,
       ),
       stderr: '',
+      reportLine: reportOnStdout,
     })
     expect(readdirSync(folder)).toEqual([shortened])
     expect(new Uint8Array(readFileSync(join(folder, shortened)))).toEqual(defaultRunSnapshot)
@@ -4217,6 +4293,7 @@ describe('runCli launching the browser', () => {
           `@visual-check/chromium ${browserPackage.packageVersion} names Chromium ${browserPackage.chromium}.`,
         'Reinstall the browser package @visual-check/chromium, then run visual-check again.',
       ),
+      reportLine: reportOnStderr,
     })
     expect(record.launches).toHaveLength(1)
     expect(record.urls).toEqual([])
@@ -4371,6 +4448,7 @@ describe('runCli launching the browser', () => {
         'docker pull of example.com/chromium for linux/amd64 failed with exit code 1.',
         "Start or install Docker, or set platform: 'host' in the config.",
       ),
+      reportLine: reportOnStderr,
     })
   })
 
@@ -4383,6 +4461,7 @@ describe('runCli launching the browser', () => {
       exitCode: 2,
       stdout: '',
       stderr: `${message}\n`,
+      reportLine: reportOnStderr,
     })
   })
 
@@ -4483,6 +4562,9 @@ describe('runCli launching the browser', () => {
         'written .visual-check/baselines/d.png',
         'written .visual-check/baselines/e.png',
         'written .visual-check/baselines/f.png',
+        'broken web  a',
+        'broken web  b',
+        'broken web  c',
       ),
     )
     expect(record.launches).toHaveLength(2)
@@ -4966,6 +5048,7 @@ describe('runCli launching the browser', () => {
       exitCode: 2,
       stdout: '',
       stderr: printed(error.message),
+      reportLine: reportOnStderr,
     })
   })
 
@@ -5208,6 +5291,7 @@ describe('runCli launching the browser', () => {
       exitCode: 2,
       stdout: '',
       stderr: expect.stringMatching(/^Error: A bug in the driver\.\n {4}at /),
+      reportLine: reportOnStderr,
     })
     expect(record.closed).toBe(true)
   })

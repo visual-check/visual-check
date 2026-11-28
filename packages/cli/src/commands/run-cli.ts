@@ -208,11 +208,11 @@ export interface RunCliOptions extends PlaceBrowserOptions {
  * Runs the CLI with the given arguments, environment and folder, and returns what it prints on each stream. Progress is
  * written as it happens, through `options.progress`, and so are a `test` or `update` run's header and snapshot lines,
  * through `options.write`, or drawn on stdout by the `live` reporter; the result holds the rest, which comes after
- * them. `update` also writes and deletes baselines, `test` writes the report folder, and `init` writes the setup files
- * and runs the package manager. Problems with the command line, the config, the run's setup or the browser exit with
- * code 2. A usage error of a `test` command line, even one whose flags fail to parse, writes its error report beside
- * the config the run would load. Once a `test` or `update` has loaded its config, an error that is a bug exits 2 too,
- * with its stack trace on stderr, as an error report for `test` and an error document with `--reporter json`. Other
+ * them. `update` also writes and deletes baselines, `test` and `update` write the report folder, and `init` writes the
+ * setup files and runs the package manager. Problems with the command line, the config, the run's setup or the browser
+ * exit with code 2. A usage error of a `test` or `update` command line, even one whose flags fail to parse, writes its
+ * error report beside the config the run would load. Once a `test` or `update` has loaded its config, an error that is
+ * a bug exits 2 too, with its stack trace on stderr, as an error report and an error document with `--reporter json`. Other
  * errors are thrown. Whenever `GITHUB_STEP_SUMMARY` is set, every `test` and `update` run, a usage error that names one
  * included, appends its step summary to the file it names, whatever the reporter.
  *
@@ -285,16 +285,17 @@ export async function runCli(
  * each. The config's `silenceHosts` leaves hosts out. `test` never watches requests. The warning never changes the exit
  * code.
  *
- * Right after the config loads, `test` clears the report folder, `.visual-check/report` beside the config file; one it
- * can't clear exits 2. Every `test` that exits 0 or 1, `test --consistency`, a CI stop and each shard included, then
- * writes `report.json` there and gives the report's path, relative to the folder the CLI runs in, as the report line
- * for stdout. Each of them that captured, so neither `test --consistency` nor a CI stop, ends stdout with its end
- * block, built from the report: its failures, its snapshots with page errors, its flaky snapshots, and its counts with
- * how long the run took, counted from the start of the run by `now`. A `test` that exits 2 with its config found, or named by the config error,
- * replaces the folder with a `report.json` holding only the error, naming the Storybooks where nothing answers, and
- * gives the report line for stderr; with no config found, or when the report folder itself is what failed, nothing is
- * written. With `--reporter json`, stdout then holds the error document alone. `update` never touches the report
- * folder. With `--reporter json`, its stdout holds its own document alone, the error document when it exits 2. Whatever
+ * Right after the config loads, `test` and `update` clear the report folder, `.visual-check/report` beside the config
+ * file; one they can't clear exits 2. Every `test` or `update` that exits 0 or 1, `test --consistency`, a CI stop and
+ * each shard included, then writes `report.json` there and gives the report's path, relative to the folder the CLI
+ * runs in, as the report line for stdout. Each `test` that captured, so neither `test --consistency` nor a CI stop,
+ * ends stdout with its end block, built from the report: its failures, its snapshots with page errors, its flaky
+ * snapshots, and its counts with how long the run took, counted from the start of the run by `now`. `update`'s end
+ * block, before the report line, names each broken snapshot with the path of its images. A `test` or `update` that
+ * exits 2 with its config found, or named by the config error, replaces the folder with a `report.json` holding only
+ * the error, naming the Storybooks where nothing answers, and gives the report line for stderr; with no config found,
+ * or when the report folder itself is what failed, nothing is written. An `update` refused in CI touches nothing. With
+ * `--reporter json`, stdout then holds the error document alone, `update`'s own when it ran `update`. Whatever
  * the command and exit code, `--reporter json` moves the human lines to stderr, before what the run prints there. An
  * error that is a bug, once the config loads, ends the run as a problem would, with its stack trace and its message.
  *
@@ -339,7 +340,7 @@ async function runTestOrUpdate(
   }
 
   if (command === 'update') {
-    return withKept(kept, stoppedUpdateOf(outcome.stopped, { version: readCliManifest().version, options }))
+    return withKept(kept, await stoppedUpdateOf(outcome.stopped, { version: readCliManifest().version, cwd, options }))
   }
 
   return withKept(kept, await stoppedTestOf(outcome.stopped, { version: readCliManifest().version, cwd, options }))
@@ -391,7 +392,7 @@ async function withStepSummary(
 }
 
 /**
- * How a `test` or `update` ended: finished with exit 0 or 1, its report written for `test`, or stopped with exit 2.
+ * How a `test` or `update` ended: finished with exit 0 or 1, its report written, or stopped with exit 2.
  */
 type RunOutcome = { finished: RunResult } | { stopped: RunStop }
 
@@ -516,7 +517,7 @@ async function loadedConfigOf(context: RunContext): Promise<{ config: ResolvedCo
 }
 
 /**
- * Runs `test` or `update` once its config is loaded: clears the report folder for `test`, places the browser, works
+ * Runs `test` or `update` once its config is loaded: clears the report folder, places the browser, works
  * out the Storybooks the run requires and checks them, then takes the snapshots.
  *
  * @throws {Error} Any error besides the problems that stop the run with exit 2.
@@ -527,7 +528,7 @@ async function configuredOutcomeOf(
   browserPackage: BrowserPackage,
 ): Promise<RunOutcome> {
   const inRun = { configPath: config.path, storybooks: config.storybooks }
-  const clearProblem = await clearReportProblemOf(context.command, config, context.cwd)
+  const clearProblem = await clearReportProblemOf(config, context.cwd)
 
   if (clearProblem !== undefined) {
     return stoppedBy(clearProblem, { ...inRun, configPath: undefined })
@@ -678,8 +679,8 @@ async function snapshotsOutcomeOf(
 
 /**
  * Takes the snapshots of the stories the run takes, with the run's reporter showing their progress as it happens and
- * ended once they are taken, then for `test` writes the report of a run that exits 0 or 1, and for `update` prints its
- * document with `--reporter json`. Gives the stop of a run that stopped with exit 2.
+ * ended once they are taken, then writes the report of a run that exits 0 or 1. Gives the stop of a run that stopped
+ * with exit 2.
  *
  * @throws {Error} Any error besides the problems that stop the run with exit 2.
  */
@@ -750,20 +751,30 @@ async function selectedOutcomeOf(
   }
 
   if (command === 'update') {
-    // update writes no report.json: its document is for --reporter json and the step summary.
-    return {
-      finished: {
-        exitCode: result.exitCode,
-        ...runOutputOf(output, updateReportFor(facts), options.reporter, undefined),
-      },
-    }
+    // update's end block is already in its stdout.
+    return await withReport({ exitCode: result.exitCode, ...output }, context, facts, () =>
+      Promise.resolve({ report: updateReportFor(facts), endLines: [] }),
+    )
   }
 
-  return await withTestReport(
+  const testFacts = { ...facts, consistencyOnly: options.consistency, shard: options.shard }
+
+  return await withReport(
     { exitCode: result.exitCode, ...output, localUpdate: localUpdateOf(config.path, config.platform) },
     context,
-    { ...facts, consistencyOnly: options.consistency, shard: options.shard },
-    result.checkedOnly,
+    testFacts,
+    async () => {
+      const report = await testReportFor(testFacts)
+      const endLines = result.checkedOnly
+        ? []
+        : testEndLinesOf(report, {
+            cwd: context.cwd,
+            configFolder: dirname(facts.configPath),
+            elapsedMs: context.elapsedMs(),
+          })
+
+      return { report, endLines }
+    },
   )
 }
 
@@ -786,20 +797,11 @@ async function runReporterOf(context: RunContext): Promise<RunReporter> {
 }
 
 /**
- * Clears the report folder beside the config for `test`, so an old report never lingers. Gives what to print when it
- * can't. `update` never touches the folder.
+ * Clears the report folder beside the config, so an old report never lingers. Gives what to print when it can't.
  *
  * @throws {Error} Any error besides a `ReportError`.
  */
-async function clearReportProblemOf(
-  command: 'test' | 'update',
-  config: ResolvedConfig,
-  cwd: string,
-): Promise<string | undefined> {
-  if (command === 'update') {
-    return undefined
-  }
-
+async function clearReportProblemOf(config: ResolvedConfig, cwd: string): Promise<string | undefined> {
   try {
     await clearReport(reportFolderOf(config.path))
   } catch (error) {
@@ -814,30 +816,28 @@ async function clearReportProblemOf(
 }
 
 /**
- * Writes the report of a `test` that exits 0 or 1, then, unless the run stopped after its consistency check, ends
- * stdout with the end block built from the report: the failures, the snapshots with page errors, the flaky snapshots,
- * and the counts with how long the run took. It gives the report's path as the report line for stdout. With `--reporter json` stdout holds the report's
- * JSON document alone, the human lines, the end block included, move to stderr, and the report line is for stderr.
- * When the report can't be written, the run stops with exit 2 with what went wrong after its stderr, and no error
- * report is written. An error that is a bug stops it too, after what it printed.
+ * Writes the report of a `test` or `update` that exits 0 or 1, which `build` gives with the lines that end stdout:
+ * for `test`, unless the run stopped after its consistency check, the end block built from the report, the failures,
+ * the snapshots with page errors, the flaky snapshots, and the counts with how long the run took; for `update`, none,
+ * since its end block is already in its stdout. It gives the report's path as the report line for stdout. With
+ * `--reporter json` stdout holds the report's JSON document alone, the human lines, the end block included, move to
+ * stderr, and the report line is for stderr. When the report can't be written, the run stops with exit 2 with what went
+ * wrong after its stderr, and no error report is written. An error that is a bug stops it too, after what it printed.
  */
-async function withTestReport(
+async function withReport(
   result: RunResult,
   context: RunContext,
-  facts: TestReportFacts,
-  checkedOnly: boolean,
+  facts: Pick<TestReportFacts, 'configPath' | 'storybooks' | 'selection'>,
+  build: () => Promise<{ report: Report; endLines: string[] }>,
 ): Promise<RunOutcome> {
   const { cwd } = context
   const folder = reportFolderOf(facts.configPath)
 
   try {
-    const report = await testReportFor(facts)
+    const { report, endLines } = await build()
 
     await writeReportJson(folder, report)
 
-    const endLines = checkedOnly
-      ? []
-      : testEndLinesOf(report, { cwd, configFolder: dirname(facts.configPath), elapsedMs: context.elapsedMs() })
     const output = { stdout: `${result.stdout}${endLines.map((line) => `${line}\n`).join('')}`, stderr: result.stderr }
 
     return {

@@ -2,24 +2,23 @@
 
 Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.md).
 
-Every `test` leaves a report folder: one JSON document and the images of every snapshot that didn't plainly pass. There's no HTML report, in v1 or later. Reviewing in a browser is the job of the UI planned for after v1.
+Every `test` and `update` leaves a report folder: one JSON document and the images of every snapshot that didn't plainly pass, or for `update` of every broken story. There's no HTML report, in v1 or later. Reviewing in a browser is the job of the UI planned for after v1.
 
 ## The report folder
 
 - **Place:** `<config folder>/.visual-check/report/`, fixed in v1. In a monorepo that's the workspace root, so one report covers every Storybook of the run.
 - **Contents:**
   - `report.json`, the same document `--reporter json` prints;
-  - `images/<storybook>/<key>.baseline.png`, `.snapshot.png` and `.diff.png` for every listed snapshot.
+  - `images/<storybook>/<key>.baseline.png`, `.snapshot.png` and `.diff.png` for every listed snapshot, and `.compared.png` for an `update` broken story whose captures disagreed.
 - A snapshot is stored exactly as the browser returned it.
 - Image paths in the JSON are relative to the folder, so it uploads as one artifact.
 - It's the only place a CLI run writes snapshots and visual diffs.
 
 When it's written:
 
-- Every `test` replaces the whole folder: passing runs, `test --consistency` and every shard included. An old failing report never lingers.
+- Every `test` and `update` replaces the whole folder: passing runs, `test --consistency` and every shard included. An old failing report never lingers.
 - On exit 2 it holds the error and no results.
-- `update` never writes or touches it.
-- With no config found, nothing is written.
+- With no config found, nothing is written. Neither is it for an `update` refused in CI.
 - Nothing opens and no server starts. The run's last line is the report's path.
 
 ## What the report lists
@@ -67,7 +66,7 @@ Top level:
 | `exitCode`        |                                                                                                                                                                 |
 | `shard`           | `{ index, total }`, or `null`                                                                                                                                   |
 | `selection`       | How stories were picked: `{ by, base, changedFiles, fallback }`, where `by` is `"affected"`, `"all"` or `"filter"` ([Affected stories](11-affected-stories.md)) |
-| `reportDir`       | Relative to the config folder                                                                                                                                   |
+| `reportDir`       | Relative to the config folder, or `null` when the folder isn't written: no config found, or the folder itself failed                                            |
 | `storybooks`      | `[{ name, url }]`. In a local affected run, only its required Storybooks ([Affected stories](11-affected-stories.md#required-storybooks))                       |
 | `counts`          | For `test`: `{ passed, flaky, differs, broken, missing, orphan }`. For `update`: `{ written, deleted, kept, broken, flaky }`                                    |
 | `snapshots`       | The entries                                                                                                                                                     |
@@ -96,7 +95,7 @@ Each entry:
 | `pageErrors`                             | `[{ kind, text, loadError, severity }]`, with `kind` one of `console.error`, `error`, `unhandledrejection` and `load`, `loadError` only on a load, such as `HTTP 404` or `net::ERR_EMPTY_RESPONSE`, and `severity` `fail` or `warn`. Empty for an orphan, a deleted baseline and `pageErrors: 'off'` |
 | `staleExpectedPageErrors`                | The story's own expected page errors that matched none of its page errors, as written: a string as JSON, `"Failed to fetch"`, and a regular expression as its literal, `/timeout/i`. Empty for a broken snapshot, an orphan and a deleted baseline                                                   |
 | `baseline`                               | The baseline's path, relative to the config folder                                                                                                                                                                                                                                                   |
-| `images`                                 | `{ baseline, snapshot, diff }`, relative to the report folder. A broken story's image is `images.snapshot`                                                                                                                                                                                           |
+| `images`                                 | `{ baseline, snapshot, diff, compared }`, relative to the report folder. A broken story's image is `images.snapshot`. `compared` is the capture the snapshot was compared with, for an `update` broken story whose captures disagreed, and `null` everywhere else                                    |
 | `realRequestHosts`, `remoteContentHosts` | In `update` only                                                                                                                                                                                                                                                                                     |
 
 Rules:
@@ -155,7 +154,7 @@ Both `log` and `live` end with the same block:
 - Durations read `142 ms` under a second, `12.3s` under a minute, then `3m 12s`.
 - `test --consistency` and a CI `test` stopped by its consistency check print the consistency output instead, with no block. A run that exits 2 gets none either.
 
-`update` ends with its own block, which has no report line ([Baselines and update](10-baselines-and-update.md)). It lists page errors the same way, for written, kept and broken snapshots, and shows one that would fail `test` as `fails test`.
+`update` ends with its own block ([Baselines and update](10-baselines-and-update.md)), then the report line. Each broken snapshot is `broken <name>`, then indented two spaces its `diff:` path, or its `snapshot:` path when it has no visual diff. It lists page errors the same way, for written, kept and broken snapshots, and shows one that would fail `test` as `fails test`.
 
 ## Hints and warnings
 

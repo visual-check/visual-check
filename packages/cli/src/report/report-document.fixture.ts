@@ -45,7 +45,7 @@ export function testEntryWith(fields: Partial<ReportEntryFields> & TestEntryStat
     pageErrors: [],
     staleExpectedPageErrors: [],
     baseline: `.visual-check/baselines/${id}.png`,
-    images: { baseline: null, snapshot: null, diff: null },
+    images: { baseline: null, snapshot: null, diff: null, compared: null },
     ...fields,
   }
 }

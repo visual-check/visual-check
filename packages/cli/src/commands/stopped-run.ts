@@ -1,5 +1,5 @@
 import { locateConfig } from '../config/find-config.js'
-import type { ReportSelection, ReportStorybook } from '../report/report-document.js'
+import type { Report, ReportSelection, ReportStorybook } from '../report/report-document.js'
 import { ReportError, reportFolderOf, writeErrorReport } from '../report/report-folder.js'
 import type { RunOptions, UsageError } from './parse-command-line.js'
 import { type RunOutput, reportLineOf, runOutputOf } from './run-output.js'
@@ -75,6 +75,10 @@ export interface StoppedUpdate {
    */
   version: string
   /**
+   * The folder the CLI runs in. Printed paths are relative to it.
+   */
+  cwd: string
+  /**
    * The run's options the error document reads.
    */
   options: Pick<RunOptions, 'selection' | 'reporter'>
@@ -121,7 +125,7 @@ export function crashedBy(
  * @throws {Error} Any error besides a `ReportError` while writing the report.
  */
 export async function stoppedTestOf(stop: RunStop, test: StoppedTest): Promise<StoppedOutput> {
-  const { options, cwd } = test
+  const { options } = test
   const report = testErrorReportOf({
     version: test.version,
     consistencyOnly: options.consistency,
@@ -133,8 +137,42 @@ export async function stoppedTestOf(stop: RunStop, test: StoppedTest): Promise<S
     written: stop.configPath !== undefined,
   })
 
+  return await withErrorReport(stop, report, test.cwd, options.reporter)
+}
+
+/**
+ * Ends an `update` that exits 2 as `stoppedTestOf` ends a `test`, with `update`'s error document as the report.
+ *
+ * @throws {Error} Any error besides a `ReportError` while writing the report.
+ */
+export async function stoppedUpdateOf(stop: RunStop, update: StoppedUpdate): Promise<StoppedOutput> {
+  const report = updateErrorReportOf({
+    version: update.version,
+    selection: stop.selection ?? reportSelectionOf(update.options.selection),
+    storybooks: stop.storybooks,
+    message: stop.message,
+    unreachable: stop.unreachable,
+    written: stop.configPath !== undefined,
+  })
+
+  return await withErrorReport(stop, report, update.cwd, update.options.reporter)
+}
+
+/**
+ * Ends a run that exits 2 with its error report. When the stop names a config, the report folder beside it is replaced
+ * with the report, and the report's path is the report line, for stderr; a report folder that can't be written adds
+ * its problem to stderr instead, and the report's `reportDir` is then `null`.
+ *
+ * @throws {Error} Any error besides a `ReportError` while writing the report.
+ */
+async function withErrorReport(
+  stop: RunStop,
+  report: Report,
+  cwd: string,
+  reporter: RunOptions['reporter'],
+): Promise<StoppedOutput> {
   if (stop.configPath === undefined) {
-    return { exitCode: 2, ...runOutputOf(stop, report, options.reporter, undefined) }
+    return { exitCode: 2, ...runOutputOf(stop, report, reporter, undefined) }
   }
 
   const folder = reportFolderOf(stop.configPath)
@@ -148,7 +186,7 @@ export async function stoppedTestOf(stop: RunStop, test: StoppedTest): Promise<S
         ...runOutputOf(
           { stdout: stop.stdout, stderr: `${stop.stderr}${reportProblemOf(error, cwd)}` },
           { ...report, reportDir: null },
-          options.reporter,
+          reporter,
           undefined,
         ),
       }
@@ -159,30 +197,14 @@ export async function stoppedTestOf(stop: RunStop, test: StoppedTest): Promise<S
 
   return {
     exitCode: 2,
-    ...runOutputOf(stop, report, options.reporter, { stream: 'stderr', text: reportLineOf(cwd, folder) }),
+    ...runOutputOf(stop, report, reporter, { stream: 'stderr', text: reportLineOf(cwd, folder) }),
   }
 }
 
 /**
- * Ends an `update` that exits 2 with what it printed. It never touches the report folder. With `--reporter json`,
- * stdout holds `update`'s error document alone, with no report folder.
- */
-export function stoppedUpdateOf(stop: RunStop, update: StoppedUpdate): StoppedOutput {
-  const report = updateErrorReportOf({
-    version: update.version,
-    selection: stop.selection ?? reportSelectionOf(update.options.selection),
-    storybooks: stop.storybooks,
-    message: stop.message,
-    unreachable: stop.unreachable,
-  })
-
-  return { exitCode: 2, ...runOutputOf(stop, report, update.options.reporter, undefined) }
-}
-
-/**
  * Ends a run whose command line has a usage error: the message and the hint on stderr, exit code 2. For an error that
- * names its `test` run, the report folder beside the config the run would load is replaced with a report holding the
- * error, as `stoppedTestOf` says. For one that names its `update` run, it ends as `stoppedUpdateOf` says.
+ * names its `test` or `update` run, the report folder beside the config the run would load is replaced with a report
+ * holding the error, as `stoppedTestOf` and `stoppedUpdateOf` say.
  *
  * @throws {Error} Any error besides a `ReportError` while writing the report.
  */
@@ -194,15 +216,17 @@ export async function usageFailureOf(error: UsageError, cwd: string, version: st
     return { exitCode: 2, stdout: '', stderr }
   }
 
+  const configPath = locateConfig(cwd, error.run.config)
+
   if (error.run.command === 'update') {
-    return stoppedUpdateOf(
-      { ...stop, configPath: undefined },
-      { version, options: { selection: { kind: 'default' }, reporter: error.run.reporter } },
+    return await stoppedUpdateOf(
+      { ...stop, configPath },
+      { version, cwd, options: { selection: { kind: 'default' }, reporter: error.run.reporter } },
     )
   }
 
   return await stoppedTestOf(
-    { ...stop, configPath: locateConfig(cwd, error.run.config) },
+    { ...stop, configPath },
     {
       version,
       cwd,

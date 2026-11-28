@@ -38,7 +38,7 @@ Read the JSON report on stdout and report:
 - For each failing snapshot, an entry of `snapshots` whose `status` is `differs` or `broken`: its story (`story`), its mode (`mode`, `null` for the default capture, which a story with `defaultCapture: false` doesn't have), the number of differing pixels (`pixels.differ`) and the visual diff's path, which is `reportDir` joined with `images.diff`. Both are relative to the folder that holds the config.
 - Missing baselines (`status: "missing"`), orphans (`status: "orphan"`) and flaky snapshots (`flaky: true`).
 - Page errors, whatever the entry's `status`: for each entry with a non-empty `pageErrors`, its story, its mode, and each page error's `kind`, `text` (the message, or a load's URL), `loadError` and `severity`. One with `severity: "fail"` makes `test` exit 1 even when every snapshot passed. Also each entry's `staleExpectedPageErrors`, which are warnings.
-- After `update`: every written and deleted path, the `baseline` of each entry whose `status` is `written` or `deleted`.
+- After `update`: every written and deleted path, the `baseline` of each entry whose `status` is `written` or `deleted`. For each `broken` entry, its images' paths, each `reportDir` joined with the image: `images.snapshot`, `images.diff` and, for `changed-after-capture` and `unstable`, `images.compared`, the capture the snapshot disagreed with.
 - On exit 2: the error as printed, `error.message` in the report, or the script's own message on stderr when stdout is empty.
 - Any Storybook the script reused, from its `Reused Storybook` line on stderr.
 

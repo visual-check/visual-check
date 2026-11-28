@@ -87,7 +87,7 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
 - For each failing snapshot: the story, the mode, the number of differing pixels and the visual diff's path, which is `reportDir` joined with `images.diff`.
 - Missing baselines, orphans and flaky snapshots.
 - Page errors, whatever the snapshot's status: each one's kind, text, load error and severity, and the stale expected page errors. One that fails makes `test` exit 1 even when every snapshot passed.
-- After `update`: every written and deleted path.
+- After `update`: every written and deleted path, and for each broken story its images' paths, each `reportDir` joined with the image, `images.compared` included for `changed-after-capture` and `unstable`.
 - On exit 2: the error as printed.
 - Any Storybook it reused.
 

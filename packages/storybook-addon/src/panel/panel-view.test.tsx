@@ -28,6 +28,7 @@ const differs = snapshotWith({
     baseline: 'snapshots/web/a.dark.baseline.png',
     snapshot: 'snapshots/web/a.dark.snapshot.png',
     diff: 'diffs/web/a.dark.png',
+    compared: null,
   },
 })
 const missing = snapshotWith({
@@ -35,7 +36,7 @@ const missing = snapshotWith({
   mode: 'mobile',
   status: 'missing',
   message: 'No baseline yet.',
-  images: { baseline: null, snapshot: 'snapshots/web/a.mobile.snapshot.png', diff: null },
+  images: { baseline: null, snapshot: 'snapshots/web/a.mobile.snapshot.png', diff: null, compared: null },
 })
 
 /**
@@ -153,7 +154,7 @@ describe('PanelView', () => {
         reason: 'play-threw',
         message: "The story's play function threw.",
         details: { play: { message: 'Error: Boom', stack: ['at play (a.ts:1:1)'] } },
-        images: { baseline: null, snapshot: 'snapshots/web/a.snapshot.png', diff: null },
+        images: { baseline: null, snapshot: 'snapshots/web/a.snapshot.png', diff: null, compared: null },
       }),
     ])
 

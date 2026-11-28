@@ -112,11 +112,13 @@ describe('createImageFiles', () => {
       baseline: 'snapshots/web/a.dark.baseline.png',
       snapshot: 'snapshots/web/a.dark.snapshot.png',
       diff: 'diffs/web/a.dark.png',
+      compared: null,
     })
     expect(images.pathsOf(storybook, 'a', { snapshot: bytes.snapshot })).toEqual({
       baseline: null,
       snapshot: 'snapshots/web/a.snapshot.png',
       diff: null,
+      compared: null,
     })
   })
 

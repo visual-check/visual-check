@@ -33,6 +33,7 @@ function differingSnapshot(stem: string): AddonSnapshot {
       baseline: `snapshots/web/${stem}.baseline.png`,
       snapshot: `snapshots/web/${stem}.snapshot.png`,
       diff: null,
+      compared: null,
     },
   }
 }

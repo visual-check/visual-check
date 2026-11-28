@@ -114,7 +114,7 @@ export type StoryUpdateEntry = ReportEntryFields &
 /**
  * No images.
  */
-const noImages: ReportImages = { baseline: null, snapshot: null, diff: null }
+const noImages: ReportImages = { baseline: null, snapshot: null, diff: null, compared: null }
 
 /**
  * Whether the report lists a snapshot: anything but a plain pass and a baseline `update` kept. A pass is listed when

@@ -59,6 +59,7 @@ describe('updateReportOf', () => {
     selection,
     storybooks,
     counts: emptyUpdateCounts(),
+    reportDir: '.visual-check/report',
     snapshots: [],
     warnings: [],
     error: null,
@@ -88,8 +89,11 @@ describe('updateReportOf', () => {
       command: 'update',
       consistencyOnly: false,
       shard: null,
-      reportDir: null,
     })
+  })
+
+  it('keeps the report folder it is given', () => {
+    expect(report.reportDir).toBe('.visual-check/report')
   })
 
   it('keeps the counts in the order of the document', () => {
@@ -104,6 +108,7 @@ describe('reportJsonOf', () => {
       exitCode: 0,
       selection,
       storybooks,
+      reportDir: null,
       counts: emptyUpdateCounts(),
       snapshots: [],
       warnings: [],
@@ -118,5 +123,9 @@ describe('reportJsonOf', () => {
 describe('reportImagePathOf', () => {
   it('gives a path with / in the Storybook folder', () => {
     expect(reportImagePathOf('web', 'a.dark', 'diff')).toBe('images/web/a.dark.diff.png')
+  })
+
+  it('names the compared capture compared', () => {
+    expect(reportImagePathOf('web', 'a', 'compared')).toBe('images/web/a.compared.png')
   })
 })

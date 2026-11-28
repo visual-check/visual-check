@@ -458,7 +458,7 @@ const reportJson = {
 /**
  * What a report entry lists when it has no image.
  */
-const noImages: ReportImages = { baseline: null, snapshot: null, diff: null }
+const noImages: ReportImages = { baseline: null, snapshot: null, diff: null, compared: null }
 
 /**
  * How many workers every case that captures in parallel uses, through `--workers` or the config it writes, so each
@@ -2099,23 +2099,8 @@ function differingImagesOf(key: string): ReportImages {
     baseline: `images/react/${key}.baseline.png`,
     snapshot: `images/react/${key}.snapshot.png`,
     diff: `images/react/${key}.diff.png`,
+    compared: null,
   }
-}
-
-/**
- * Lists every file in a folder and its subfolders, by its path relative to the folder, with its bytes in base64.
- * Nothing when there's no folder.
- */
-function folderContentsOf(folder: string): string[] {
-  if (!existsSync(folder)) {
-    return []
-  }
-
-  return readdirSync(folder, { recursive: true })
-    .map(String)
-    .filter((path) => isFile(join(folder, path)))
-    .sort()
-    .map((path) => `${path}: ${readFileSync(join(folder, path)).toString('base64')}`)
 }
 
 /**
@@ -2913,15 +2898,31 @@ async function checkUpdateStability(stabilityRun: StabilityRun): Promise<string[
       return [
         ...expectedRunProblems('update', lines, { [storyId]: outcome }),
         ...lineMatchesProblems(lines, storyId, detail),
-        ...updateFlakyProblems(lines, storyId, flaky),
+        ...updateFlakyProblems(lines, storyId, flaky, folder),
         ...updateDocumentProblems(run.stdout, (document) => [
           ...updateCountsProblems(document.counts, counts),
           ...stabilityEntryProblems(document.snapshots, storyId, entry),
         ]),
         ...storyPageCountProblems(server, storyId, storyPages),
         ...onlyCommittedBaselineProblems(baselines, baselineName, join(diagnosticsDir, 'update-stability', name)),
+        ...stabilityReportProblems(folder, storyId, outcome === 'broken' ? hasBaseline : undefined),
       ]
     }),
+  )
+}
+
+/**
+ * Lists what is missing from the report folder a stability case's `update` leaves beside its config in
+ * `configFolder`: its `report.json`, and for a broken story, its `.compared`, `.snapshot` and `.diff` images, with the
+ * copy of its baseline when `hasBaseline`. `hasBaseline` is `undefined` for a story that isn't broken, which keeps no
+ * image.
+ */
+function stabilityReportProblems(configFolder: string, storyId: string, hasBaseline: boolean | undefined): string[] {
+  const kinds = hasBaseline === undefined ? [] : ['compared', 'snapshot', 'diff', ...(hasBaseline ? ['baseline'] : [])]
+  const files = ['report.json', ...kinds.map((kind) => join('images', 'react', `${storyId}.${kind}.png`))]
+
+  return files.flatMap((file) =>
+    isFile(join(reportFolderOf(configFolder), file)) ? [] : [`update left no ${file} in its report folder`],
   )
 }
 
@@ -2981,11 +2982,11 @@ function lineMatchesProblems(run: CliRun, storyId: string, detail: RegExp): stri
 
 /**
  * Gives the problem with a run of `update` with the Storybook `react` when a flaky story isn't listed alone under the
- * flaky heading at the end of its standard output, or, for a story that isn't flaky, when the run lists flaky
- * snapshots at all, or none.
+ * flaky heading at the end of its standard output, just before the report line of the report beside the config in
+ * `configFolder`, or, for a story that isn't flaky, when the run lists flaky snapshots at all, or none.
  */
-function updateFlakyProblems(run: CliRun, storyId: string, flaky: boolean): string[] {
-  const listed = `${updateFlakyHeading}\n  react  ${storyId}\n`
+function updateFlakyProblems(run: CliRun, storyId: string, flaky: boolean, configFolder: string): string[] {
+  const listed = `${updateFlakyHeading}\n  react  ${storyId}\n${reportLineOf(configFolder)}\n`
 
   if (flaky) {
     return run.stdout.endsWith(listed)
@@ -3737,7 +3738,7 @@ function errorReportProblems(report: TestReport, url: string, imagesFolder: stri
  * story alone, into a baselines folder that holds the baseline of another size as the card story's and a stray
  * baseline, exits 0. Its stdout is one `update` document on one line that counts and lists the story written because it
  * differed and the stray baseline deleted, with no story. The baselines folder then holds the card story's committed
- * baseline alone, byte for byte, and the report folder is left exactly as it was.
+ * baseline alone, byte for byte, and the report folder is replaced: it holds `report.json` alone, the same document.
  */
 async function updateJsonProblems(folder: string): Promise<string[]> {
   const { storyId, filter, orphan, otherSizeBaseline } = reportJson
@@ -3750,8 +3751,6 @@ async function updateJsonProblems(folder: string): Promise<string[]> {
   mkdirSync(baselines)
   cpSync(join(committedBaselines, `${otherSizeBaseline}.png`), join(baselines, baselineName))
   cpSync(join(committedBaselines, baselineName), join(baselines, `${orphan}.png`))
-
-  const before = folderContentsOf(reportFolder)
 
   return await withStorybookServer({ onlyStory: storyId }, async (server) => {
     const config = writeConfig(folder, server.url, baselines)
@@ -3775,13 +3774,13 @@ async function updateJsonProblems(folder: string): Promise<string[]> {
         ]
       }),
       ...onlyCommittedBaselineProblems(baselines, baselineName, join(diagnosticsDir, 'update-json')),
-      ...(isDeepStrictEqual(folderContentsOf(reportFolder), before) ? [] : ['update changed the report folder']),
+      ...updateReportFolderProblems(reportFolder, run.stdout),
     ]
   })
 }
 
 /**
- * Gives the problems with `update`'s stdout when it isn't one `update` document on one line, with no report folder,
+ * Gives the problems with `update`'s stdout when it isn't one `update` document on one line, naming the report folder,
  * then what `check` finds wrong with the document, or none.
  */
 function updateDocumentProblems(stdout: string, check: (document: UpdateReport) => string[]): string[] {
@@ -3799,10 +3798,27 @@ function updateDocumentProblems(stdout: string, check: (document: UpdateReport) 
   return [
     ...problemUnless(rest.join('\n') === '', `stdout has more than one line${outputOf(stdout)}`),
     ...problemUnless(
-      command === 'update' && reportDir === null,
+      command === 'update' && reportDir === '.visual-check/report',
       `the document's command is ${command} and its reportDir ${reportDir}`,
     ),
     ...check(document),
+  ]
+}
+
+/**
+ * Gives the problem when the report folder `update` leaves doesn't hold its `report.json` alone, the document it
+ * printed, or none.
+ */
+function updateReportFolderProblems(reportFolder: string, stdout: string): string[] {
+  const files = readdirSync(reportFolder)
+  const reportJson = join(reportFolder, 'report.json')
+
+  return [
+    ...problemUnless(isDeepStrictEqual(files, ['report.json']), `the report folder holds ${files.join(', ')}`),
+    ...problemUnless(
+      isFile(reportJson) && readFileSync(reportJson, 'utf8') === stdout,
+      "the report folder's report.json isn't the document update printed",
+    ),
   ]
 }
 
@@ -5359,11 +5375,11 @@ if (setupProblems.length > 0) {
       run: () => checkUpdateStability(updateStability.writtenFlaky),
     },
     {
-      name: `update unstable: with ${updateStability.storyId}'s baseline there and a different card background in each of its page loads, update on it alone exits 1 after 3 page loads, it's broken saying no two loads agreed, its JSON document lists it broken, unstable, with the third load's console message, its baseline is untouched, nothing else is written`,
+      name: `update unstable: with ${updateStability.storyId}'s baseline there and a different card background in each of its page loads, update on it alone exits 1 after 3 page loads, it's broken saying no two loads agreed, its JSON document lists it broken, unstable, with the third load's console message, its baseline is untouched, nothing else is written, and its report folder holds report.json with the story's .compared, .snapshot, .diff and .baseline images`,
       run: () => checkUpdateStability(updateStability.unstable),
     },
     {
-      name: `update changed after capture: with a clock ticking in ${updateStability.storyId}'s page, update on it alone exits 1 after 1 page load, it's broken saying the story changed by pixels in the second after its capture and to use its wait hook, its JSON document lists it broken, changed-after-capture, with the page's warning, its baseline is untouched, nothing else is written`,
+      name: `update changed after capture: with a clock ticking in ${updateStability.storyId}'s page, update on it alone exits 1 after 1 page load, it's broken saying the story changed by pixels in the second after its capture and to use its wait hook, its JSON document lists it broken, changed-after-capture, with the page's warning, its baseline is untouched, nothing else is written, and its report folder holds report.json with the story's .compared, .snapshot, .diff and .baseline images`,
       run: () => checkUpdateStability(updateStability.changedAfterCapture),
     },
     {
@@ -5387,7 +5403,7 @@ if (setupProblems.length > 0) {
       run: checkInvalidModes,
     },
     {
-      name: 'report json and errors: test --reporter json prints report.json alone, lists a snapshot that differs by size with both sizes and its three images, and an orphan with its baseline; with the server stopped, test exits 2 leaving a report of the error naming react and its URL, with no image; update --reporter json prints its own document listing a baseline written because it differed and an orphan deleted, and leaves the report folder alone',
+      name: 'report json and errors: test --reporter json prints report.json alone, lists a snapshot that differs by size with both sizes and its three images, and an orphan with its baseline; with the server stopped, test exits 2 leaving a report of the error naming react and its URL, with no image; update --reporter json prints its own document listing a baseline written because it differed and an orphan deleted, and replaces the report folder with it',
       run: checkReportJsonAndErrors,
     },
     {

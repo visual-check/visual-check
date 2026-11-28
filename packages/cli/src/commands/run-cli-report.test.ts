@@ -72,7 +72,7 @@ function onlyEntryOf(report: TestReport): TestReportEntry {
 /**
  * The images of an entry that has none.
  */
-const noImages = { baseline: null, snapshot: null, diff: null }
+const noImages = { baseline: null, snapshot: null, diff: null, compared: null }
 
 describe('runCli test report', () => {
   it('replaces a stale report with report.json alone when every snapshot passes, counting them', async () => {
@@ -136,6 +136,7 @@ describe('runCli test report', () => {
         baseline: 'images/web/b.baseline.png',
         snapshot: 'images/web/b.snapshot.png',
         diff: 'images/web/b.diff.png',
+        compared: null,
       },
     })
     expect(readImage(project, entry.images.baseline)).toEqual(defaultRunSnapshot)
@@ -187,7 +188,7 @@ describe('runCli test report', () => {
       story: null,
       importPath: null,
       baseline: '.visual-check/baselines/gone.png',
-      images: { baseline: 'images/web/gone.baseline.png', snapshot: null, diff: null },
+      images: { baseline: 'images/web/gone.baseline.png', snapshot: null, diff: null, compared: null },
     })
     expect(readImage(project, entry.images.baseline)).toEqual(otherSnapshot)
   })
@@ -222,7 +223,7 @@ describe('runCli test report', () => {
       attempts: 1,
       details: {},
       console: [{ level: 'error', text: 'boom' }],
-      images: { baseline: null, snapshot: 'images/web/a.snapshot.png', diff: null },
+      images: { baseline: null, snapshot: 'images/web/a.snapshot.png', diff: null, compared: null },
     })
     expect(existsSync(join(reportFolderIn(project), 'images', 'web', 'a.snapshot.png'))).toBe(true)
   })
@@ -282,15 +283,21 @@ describe('runCli test report', () => {
     expect(readReport(project).reportDir).toBe('.visual-check/report')
   })
 
-  it('leaves the report folder untouched in update', async () => {
+  it("replaces a stale report with update's in update, giving the report line for stdout", async () => {
     const { project } = await createRun(['a'])
-    const image = writeStaleReport(project)
+
+    writeStaleReport(project)
+
     const result = await runCli(['update', '--all'], {}, project, fakeBrowser().options)
 
     expect(result.exitCode).toBe(0)
-    expect(result.reportLine).toBeUndefined()
-    expect(readdirSync(reportFolderIn(project))).toEqual(['images'])
-    expect(existsSync(image)).toBe(true)
+    expect(result.reportLine).toEqual(reportOnStdout)
+    expect(readdirSync(reportFolderIn(project))).toEqual(['report.json'])
+    expect(readReport(project)).toMatchObject({
+      command: 'update',
+      reportDir: '.visual-check/report',
+      snapshots: [{ id: 'a', status: 'written' }],
+    })
   })
 })
 
@@ -526,7 +533,7 @@ describe('runCli test report on exit 2', () => {
     expect(result.reportLine).toEqual(reportOnStderr)
   })
 
-  it("prints update's error document of an error that is a bug with --reporter json, writing no report", async () => {
+  it("writes and prints update's error report of an error that is a bug with --reporter json", async () => {
     const { project } = await createRun(['a'])
     const result = await runCli(['update', '--all', '--reporter', 'json'], {}, project, buggyBrowserOptions())
 
@@ -534,11 +541,12 @@ describe('runCli test report on exit 2', () => {
     expect(JSON.parse(result.stdout)).toMatchObject({
       command: 'update',
       exitCode: 2,
+      reportDir: '.visual-check/report',
       error: { message: 'A bug in the driver.' },
     })
+    expect(result.stdout).toBe(readFileSync(join(reportFolderIn(project), 'report.json'), 'utf8'))
     expect(result.stderr).toMatch(/^Error: A bug in the driver\.\n {4}at /)
-    expect(result.reportLine).toBeUndefined()
-    expect(existsSync(reportFolderIn(project))).toBe(false)
+    expect(result.reportLine).toEqual(reportOnStderr)
   })
 
   it('replaces a stale report with one holding the config error, giving the report line for stderr', async () => {
@@ -712,15 +720,22 @@ describe('runCli test report on exit 2', () => {
     expect(readReport(project)).toEqual(errorReportOf({ message: unknownFlagMessage, storybooks: [] }))
   })
 
-  it('leaves the report folder untouched when update exits 2', async () => {
+  it('replaces a stale report with one holding the error when update exits 2', async () => {
     const { project } = await createRun(['a'], {}, "colour: 'red'")
-    const image = writeStaleReport(project)
+
+    writeStaleReport(project)
+
     const result = await runCli(['update', '--all'], {}, project, fakeBrowser().options)
 
     expect(result.exitCode).toBe(2)
-    expect(result.reportLine).toBeUndefined()
-    expect(existsSync(image)).toBe(true)
-    expect(readdirSync(reportFolderIn(project))).toEqual(['images'])
+    expect(result.reportLine).toEqual(reportOnStderr)
+    expect(readdirSync(reportFolderIn(project))).toEqual(['report.json'])
+    expect(readReport(project)).toMatchObject({
+      command: 'update',
+      exitCode: 2,
+      snapshots: [],
+      error: { message: result.stderr.trim() },
+    })
   })
 
   it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
@@ -834,27 +849,12 @@ describe('runCli test report on exit 2', () => {
 })
 
 /**
- * Reads every file under a folder, by its path relative to it, so two reads tell whether anything changed.
- */
-function filesIn(folder: string): Record<string, string> {
-  return Object.fromEntries(
-    readdirSync(folder, { recursive: true, withFileTypes: true })
-      .filter((entry) => entry.isFile())
-      .map((entry) => {
-        const path = join(entry.parentPath, entry.name)
-
-        return [path.slice(folder.length), readFileSync(path, 'base64')]
-      }),
-  )
-}
-
-/**
  * The broken story's page that changed in the second after its capture, and the third load of an unstable story.
  */
 const greySnapshot = new Uint8Array(await greyPng(10, 10, 128))
 
 describe('runCli update --reporter json', () => {
-  it("prints update's document alone, its lines and warnings on stderr, and never touches the report folder", async () => {
+  it("prints update's document alone, its lines and warnings on stderr, and writes it as the report", async () => {
     const { project, url } = await createRun(
       ['a', 'b', 'c'],
       { b: defaultRunSnapshot, c: defaultRunSnapshot, gone: defaultRunSnapshot },
@@ -863,7 +863,6 @@ describe('runCli update --reporter json', () => {
 
     writeStaleReport(project)
 
-    const before = filesIn(reportFolderIn(project))
     const { options } = fakeBrowser({
       a: {
         requestHosts: ['api.test', 'x.silenced.test'],
@@ -882,7 +881,9 @@ describe('runCli update --reporter json', () => {
     expect(result.stdout.trimEnd().split('\n')).toHaveLength(1)
     expect(result.stderr.startsWith(headerOf('update', 3))).toBe(true)
     expect(result.stderr.endsWith(`\n${warnings}`)).toBe(true)
-    expect(filesIn(reportFolderIn(project))).toEqual(before)
+    expect(result.reportLine).toEqual(reportOnStderr)
+    expect(readdirSync(reportFolderIn(project))).toEqual(['report.json'])
+    expect(result.stdout).toBe(readFileSync(join(reportFolderIn(project), 'report.json'), 'utf8'))
     expect(report).toMatchObject({
       version: 1,
       visualCheck: version,
@@ -891,7 +892,7 @@ describe('runCli update --reporter json', () => {
       exitCode: 0,
       shard: null,
       selection: { by: 'all', base: null, changedFiles: null, fallback: null },
-      reportDir: null,
+      reportDir: '.visual-check/report',
       storybooks: [{ name: 'web', url }],
       counts: { written: 2, deleted: 1, kept: 1, broken: 0, flaky: 1 },
       error: null,
@@ -938,12 +939,11 @@ describe('runCli update --reporter json', () => {
     })
   })
 
-  it('lists the broken stories with their reasons and details, exits 1, and never touches the report folder', async () => {
+  it('lists the broken stories with their reasons, details and images, and exits 1', async () => {
     const { project } = await createRun(['a', 'b'], { a: otherSnapshot })
 
     writeStaleReport(project)
 
-    const before = filesIn(reportFolderIn(project))
     const { options } = fakeBrowser({
       a: { snapshotLater: greySnapshot },
       b: { captures: [{}, { snapshot: otherSnapshot }, { snapshot: greySnapshot }] },
@@ -952,7 +952,6 @@ describe('runCli update --reporter json', () => {
     const report = JSON.parse(result.stdout) as UpdateReport
 
     expect(result.exitCode).toBe(1)
-    expect(filesIn(reportFolderIn(project))).toEqual(before)
     expect(report).toMatchObject({ exitCode: 1, counts: { written: 0, deleted: 0, kept: 0, broken: 2, flaky: 0 } })
     expect(report.snapshots).toMatchObject([
       { id: 'a', status: 'broken', reason: 'changed-after-capture', attempts: 1 },
@@ -965,6 +964,34 @@ describe('runCli update --reporter json', () => {
       },
     ])
     expect(report.snapshots.map(({ details }) => details)).toStrictEqual([{}, {}])
+    expect(report.snapshots.map(({ images }) => images)).toEqual([
+      {
+        baseline: 'images/web/a.baseline.png',
+        snapshot: 'images/web/a.snapshot.png',
+        diff: 'images/web/a.diff.png',
+        compared: 'images/web/a.compared.png',
+      },
+      {
+        baseline: null,
+        snapshot: 'images/web/b.snapshot.png',
+        diff: 'images/web/b.diff.png',
+        compared: 'images/web/b.compared.png',
+      },
+    ])
+    expect(readImage(project, report.snapshots[0]?.images.baseline ?? null)).toEqual(otherSnapshot)
+    expect(readImage(project, report.snapshots[0]?.images.compared ?? null)).toEqual(defaultRunSnapshot)
+    expect(readImage(project, report.snapshots[0]?.images.snapshot ?? null)).toEqual(greySnapshot)
+    expect(readImage(project, report.snapshots[1]?.images.compared ?? null)).toEqual(defaultRunSnapshot)
+    expect(readImage(project, report.snapshots[1]?.images.snapshot ?? null)).toEqual(greySnapshot)
+    expect(readdirSync(join(reportFolderIn(project), 'images', 'web')).sort()).toEqual([
+      'a.baseline.png',
+      'a.compared.png',
+      'a.diff.png',
+      'a.snapshot.png',
+      'b.compared.png',
+      'b.diff.png',
+      'b.snapshot.png',
+    ])
   })
 
   it('prints the human lines on stderr with --reporter json, before its warnings', async () => {
@@ -1017,7 +1044,7 @@ describe('runCli update --reporter json', () => {
     expect(existsSync(join(project, '.visual-check'))).toBe(false)
   })
 
-  it('names the unreachable Storybook in the error document, writing nothing', async () => {
+  it('names the unreachable Storybook in the error document, writing it as the report', async () => {
     const url = await takeUnusedUrl()
     const project = createProject({
       'visual-check.config.mjs': `export default { storybooks: { web: { url: '${url}' } } }\n`,
@@ -1029,48 +1056,46 @@ describe('runCli update --reporter json', () => {
     expect(report).toMatchObject({
       command: 'update',
       exitCode: 2,
-      reportDir: null,
+      reportDir: '.visual-check/report',
       storybooks: [{ name: 'web', url }],
       snapshots: [],
       error: { message: result.stderr.trim(), storybooks: [{ name: 'web', url }] },
     })
-    expect(existsSync(join(project, '.visual-check'))).toBe(false)
+    expect(readdirSync(reportFolderIn(project))).toEqual(['report.json'])
   })
 
-  it('prints the error document of an unknown flag, leaving the report folder untouched', async () => {
+  it('prints the error document of an unknown flag, replacing the report folder with it', async () => {
     const { project } = await createRun(['a'])
 
     writeStaleReport(project)
 
-    const before = filesIn(reportFolderIn(project))
     const result = await runCli(['update', '--reporter', 'json', '--nope'], {}, project)
 
     expect(result.exitCode).toBe(2)
     expect(result.stderr).toBe(`${unknownFlagMessage}\n${usageHint}`)
-    expect(result.reportLine).toBeUndefined()
+    expect(result.reportLine).toEqual(reportOnStderr)
     expect(JSON.parse(result.stdout)).toMatchObject({
       command: 'update',
       exitCode: 2,
-      reportDir: null,
+      reportDir: '.visual-check/report',
       error: { message: unknownFlagMessage, storybooks: [] },
     })
-    expect(filesIn(reportFolderIn(project))).toEqual(before)
+    expect(readdirSync(reportFolderIn(project))).toEqual(['report.json'])
   })
 
-  it('prints the error document of an invalid config, leaving the report folder untouched', async () => {
+  it('prints the error document of an invalid config, replacing the report folder with it', async () => {
     const { project } = await createRun(['a'], {}, "colour: 'red'")
 
     writeStaleReport(project)
 
-    const before = filesIn(reportFolderIn(project))
     const result = await runCli(['update', '--all', '--reporter', 'json'], {}, project, fakeBrowser().options)
 
     expect(result.exitCode).toBe(2)
     expect(JSON.parse(result.stdout)).toMatchObject({
       command: 'update',
-      reportDir: null,
+      reportDir: '.visual-check/report',
       error: { message: result.stderr.trim() },
     })
-    expect(filesIn(reportFolderIn(project))).toEqual(before)
+    expect(readdirSync(reportFolderIn(project))).toEqual(['report.json'])
   })
 })

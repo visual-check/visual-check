@@ -10,9 +10,9 @@ import { type TestTools, testSnapshot } from './test-snapshot.js'
 import { type UpdateTools, updateSnapshot } from './update-snapshot.js'
 
 /**
- * What each snapshot of a run is taken with, by command: the visual diff both commands compare snapshots with, for
- * `test` alone how many more times it captures a snapshot that differs, whether it captures one with no baseline and
- * what writes a snapshot's images, and for `update` alone how long it waits before it captures a snapshot's page again.
+ * What each snapshot of a run is taken with, by command: the visual diff both commands compare snapshots with and what
+ * writes a snapshot's images, for `test` alone how many more times it captures a snapshot that differs and whether it
+ * captures one with no baseline, and for `update` alone how long it waits before it captures a snapshot's page again.
  */
 export type SnapshotTools =
   | (TestTools & {
@@ -24,7 +24,8 @@ export type SnapshotTools =
   | (UpdateTools & {
       /**
        * The command, `update`, which compares each snapshot and writes the baselines that are missing or differ, once
-       * the story renders the same way twice. It never touches the report folder.
+       * the story renders the same way twice. A broken snapshot's images go to the report folder when it's given
+       * `writeImages`, as `update` is; the addon's Update isn't.
        */
       command: 'update'
     })

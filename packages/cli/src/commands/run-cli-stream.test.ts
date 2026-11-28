@@ -138,6 +138,7 @@ describe('runCli streaming the progress', () => {
       exitCode: 0,
       stdout: printed('1 written', 'written .visual-check/baselines/a.png'),
       stderr: '',
+      reportLine: reportOnStdout,
     })
   })
 })

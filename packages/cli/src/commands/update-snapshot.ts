@@ -1,10 +1,12 @@
 import { setTimeout as sleep } from 'node:timers/promises'
 import { baselinePathOf, readBaseline, writeBaseline } from '../baselines/baseline-files.js'
-import type { BrokenStory, StoryCapture } from '../capture/capture-session.js'
-import type { ConsoleMessage } from '../capture/driver/driver.js'
+import type { BrokenStory, StoryCapture, StoryToCapture } from '../capture/capture-session.js'
+import type { ReportImages } from '../report/report-document.js'
+import type { ReportImageBytes } from '../report/report-folder.js'
 import type { VisualDiff, VisualDiffResult } from '../visual-diff/visual-diff.js'
 import type { SnapshotToCapture } from './plan-snapshots.js'
 import {
+  type BrokenAttempts,
   brokenResultOf,
   type CaptureStory,
   compareCaptures,
@@ -16,8 +18,8 @@ import {
 } from './snapshot-result.js'
 
 /**
- * What `update` needs besides the run: the visual diff it compares snapshots with, and how long it waits before it
- * captures a snapshot's page again.
+ * What `update` needs besides the run: the visual diff it compares snapshots with, how long it waits before it
+ * captures a snapshot's page again, and what writes a broken snapshot's images.
  */
 export interface UpdateTools {
   /**
@@ -40,6 +42,14 @@ export interface UpdateTools {
    * snapshot is taken.
    */
   writeBaseline?: (path: string, bytes: Uint8Array) => Promise<void>
+  /**
+   * Writes a broken snapshot's images and gives their paths, as the report lists them. When given, every load asks for
+   * an image of the story's page should it break. `update` gives one. The addon's Update gives none, so it keeps no
+   * images.
+   *
+   * @throws {ReportError} When an image can't be written.
+   */
+  writeImages?: (item: SnapshotToCapture, images: Partial<ReportImageBytes>) => Promise<ReportImages>
 }
 
 /**
@@ -52,6 +62,26 @@ export const defaultRecaptureDelayMs = 1_000
  * hosts it reaches and, when asked for, the same page captured again.
  */
 type CapturedStory = Extract<StoryCapture, { snapshot: Uint8Array }>
+
+/**
+ * A capture that came back as a broken story, with the console messages of its load and, when asked for and its page
+ * still showed something, an image of that page.
+ */
+type BrokenCapture = Extract<StoryCapture, { broken: BrokenStory }>
+
+/**
+ * Why a story is broken, with the visual diff of the two of its captures that disagreed.
+ */
+interface Disagreement {
+  /**
+   * Why the story is broken.
+   */
+  broken: BrokenStory
+  /**
+   * The visual diff of the later capture against the earlier one.
+   */
+  diff: Uint8Array
+}
 
 /**
  * A snapshot's baseline: its bytes and the path they were read from.
@@ -72,16 +102,7 @@ interface Baseline {
  * or a snapshot that needs the stability checks, with its page captured again and how it compares with the baseline.
  */
 type FirstLoad =
-  | {
-      /**
-       * Why the story can't be captured.
-       */
-      broken: BrokenStory
-      /**
-       * The console messages and errors of the load that broke, left out when it had no page.
-       */
-      console?: ConsoleMessage[]
-    }
+  | BrokenCapture
   | {
       /**
        * Marks a snapshot within tolerance of its baseline.
@@ -119,6 +140,14 @@ interface LatestCheck {
 }
 
 /**
+ * Gives the story to capture for one load of a snapshot: with `writeImages`, it asks for an image of the story's page
+ * should it break.
+ */
+function storyOf(item: SnapshotToCapture, { writeImages }: UpdateTools): StoryToCapture {
+  return { ...storyToCaptureOf(item), ...(writeImages === undefined ? {} : { imageWhenBroken: true }) }
+}
+
+/**
  * Captures a snapshot's first load, asking the capture session to capture the same page again unless the snapshot is
  * within tolerance of the baseline and `rewrite` isn't set. The session asks right after the first capture and the
  * reading of its hosts. The snapshot is then compared with the baseline, when there is one. When they agree and
@@ -135,9 +164,10 @@ interface LatestCheck {
 async function firstLoadOf(
   item: SnapshotToCapture,
   captureStory: CaptureStory,
-  { visualDiff, recaptureDelayMs, rewrite = false }: UpdateTools,
+  tools: UpdateTools,
   baseline: Baseline | undefined,
 ): Promise<FirstLoad> {
+  const { visualDiff, recaptureDelayMs, rewrite = false } = tools
   const latest: LatestCheck = { comparison: undefined }
 
   /**
@@ -161,7 +191,7 @@ async function firstLoadOf(
 
     return true
   }
-  const capture = await captureStory({ ...storyToCaptureOf(item), captureAgainIf })
+  const capture = await captureStory({ ...storyOf(item, tools), captureAgainIf })
 
   if ('broken' in capture) {
     return capture
@@ -197,8 +227,8 @@ async function capturesAgree(
 }
 
 /**
- * Gives the broken story of a first load whose page changed after its capture: the page captured again disagrees with
- * the snapshot. Gives `undefined` when they agree.
+ * Gives the broken story of a first load whose page changed after its capture, with the visual diff of the page
+ * captured again against the snapshot, when the two disagree. Gives `undefined` when they agree.
  *
  * @throws {SnapshotDecodeError} When either capture can't be decoded, which the browser's PNG files rule out.
  * @throws {VisualDiffError} When sharp can't be loaded, or a visual diff thread stops mid-comparison.
@@ -208,7 +238,7 @@ async function changedAfterCaptureOf(
   item: SnapshotToCapture,
   snapshot: Uint8Array,
   capturedAgain: Uint8Array,
-): Promise<BrokenStory | undefined> {
+): Promise<Disagreement | undefined> {
   const result = await compareCaptures(visualDiff, item, snapshot, capturedAgain)
 
   if (result.outcome === 'passed') {
@@ -216,10 +246,13 @@ async function changedAfterCaptureOf(
   }
 
   return {
-    reason: 'changed-after-capture',
-    message:
-      `The story changed in the second after its capture: ${result.message}. ` +
-      'Use its wait hook to wait until it settles.',
+    broken: {
+      reason: 'changed-after-capture',
+      message:
+        `The story changed in the second after its capture: ${result.message}. ` +
+        'Use its wait hook to wait until it settles.',
+    },
+    diff: result.diff,
   }
 }
 
@@ -229,6 +262,87 @@ async function changedAfterCaptureOf(
 const unstableStory: BrokenStory = {
   reason: 'unstable',
   message: "No two of the story's 3 loads agreed, so its baseline wasn't written.",
+}
+
+/**
+ * Gives the broken story of a snapshot none of whose 3 loads agreed, with the visual diff of the third load against
+ * the first, when the third agrees with neither of the first two, which disagree. Gives `undefined` when it agrees with
+ * either.
+ *
+ * @throws {SnapshotDecodeError} When a capture can't be decoded, which the browser's PNG files rule out.
+ * @throws {VisualDiffError} When sharp can't be loaded, or a visual diff thread stops mid-comparison.
+ */
+async function unstableOf(
+  visualDiff: VisualDiff,
+  item: SnapshotToCapture,
+  [first, second, third]: readonly [Uint8Array, Uint8Array, Uint8Array],
+): Promise<Disagreement | undefined> {
+  if (await capturesAgree(visualDiff, item, second, third)) {
+    return undefined
+  }
+
+  const result = await compareCaptures(visualDiff, item, first, third)
+
+  return result.outcome === 'passed' ? undefined : { broken: unstableStory, diff: result.diff }
+}
+
+/**
+ * What a broken snapshot's images are written with: its baseline, copied into them when there is one, and what writes
+ * them, `undefined` when nothing does.
+ */
+interface BrokenImages {
+  /**
+   * The snapshot's baseline, `undefined` when it's missing.
+   */
+  baseline: Baseline | undefined
+  /**
+   * Writes the images, `undefined` when no image is kept.
+   */
+  writeImages: UpdateTools['writeImages']
+}
+
+/**
+ * Gives a broken snapshot's result. With `writeImages`, it carries the images written of it: a copy of the baseline,
+ * when there is one, and `images`. It has none without `writeImages`, or with no image to write.
+ *
+ * @throws {ReportError} When an image can't be written.
+ */
+async function brokenWithImagesOf(
+  item: SnapshotToCapture,
+  broken: BrokenStory,
+  attempts: BrokenAttempts,
+  images: Partial<ReportImageBytes>,
+  { baseline, writeImages }: BrokenImages,
+): Promise<UnjudgedResult> {
+  const result = brokenResultOf(broken, attempts)
+  const all = { ...(baseline === undefined ? {} : { baseline: baseline.bytes }), ...images }
+
+  if (writeImages === undefined || Object.keys(all).length === 0) {
+    return result
+  }
+
+  return { ...result, images: await writeImages(item, all) }
+}
+
+/**
+ * Gives the result of a snapshot whose load came back broken, with the image of its page as its snapshot, when one
+ * came with it.
+ *
+ * @throws {ReportError} When an image can't be written.
+ */
+async function brokenLoadResultOf(
+  item: SnapshotToCapture,
+  capture: BrokenCapture,
+  attempts: number,
+  written: BrokenImages,
+): Promise<UnjudgedResult> {
+  return await brokenWithImagesOf(
+    item,
+    capture.broken,
+    { attempts, console: capture.console },
+    capture.image === undefined ? {} : { snapshot: capture.image },
+    written,
+  )
 }
 
 /**
@@ -315,7 +429,15 @@ function writtenReasonOf(
  * snapshot to write whose bytes equal the baseline's leaves the file untouched, `kept: identical`, which only
  * `rewrite` reaches in practice. Baselines are written by `tools.writeBaseline`, `writeBaseline` when not given.
  *
+ * With `tools.writeImages`, as `update` runs it, every load asks for an image of the story's page should it break, and
+ * a broken snapshot keeps images, each with a copy of the baseline when there is one. A story that changed after its
+ * capture keeps its first capture as the one compared, the page captured again as its snapshot, and their visual
+ * diff. One none of whose loads agreed keeps the first load as the one compared, the third as its snapshot, and their
+ * visual diff; the second isn't kept. A load that broke keeps the image of its page, when one came, as its snapshot.
+ * Snapshots written or kept keep no images.
+ *
  * @throws {BaselineError} When the baseline can't be read, decoded or written.
+ * @throws {ReportError} When a broken snapshot's image can't be written.
  * @throws {SnapshotDecodeError} When a snapshot can't be decoded, which the browser's PNG files rule out.
  * @throws {VisualDiffError} When sharp can't be loaded, or a visual diff thread stops mid-comparison.
  * @throws {Error} When the first load's page wasn't captured again, which the capture session rules out.
@@ -325,14 +447,15 @@ export async function updateSnapshot(
   captureStory: CaptureStory,
   tools: UpdateTools,
 ): Promise<UnjudgedResult> {
-  const { visualDiff, rewrite = false, writeBaseline: write = writeBaseline } = tools
+  const { visualDiff, rewrite = false, writeBaseline: write = writeBaseline, writeImages } = tools
   const path = baselinePathOf(item.storybook.baselines, item.key)
   const bytes = await readBaseline(path)
   const baseline = bytes === undefined ? undefined : { bytes, path }
+  const imaged: BrokenImages = { baseline, writeImages }
   const first = await firstLoadOf(item, captureStory, tools, baseline)
 
   if ('broken' in first) {
-    return brokenResultOf(first.broken, { attempts: 1, console: first.console })
+    return await brokenLoadResultOf(item, first, 1, imaged)
   }
 
   const { completingMs, hosts } = first.capture
@@ -345,13 +468,19 @@ export async function updateSnapshot(
   const changed = await changedAfterCaptureOf(visualDiff, item, firstCapture.snapshot, capturedAgain)
 
   if (changed !== undefined) {
-    return brokenResultOf(changed, { attempts: 1, console: firstCapture.console })
+    return await brokenWithImagesOf(
+      item,
+      changed.broken,
+      { attempts: 1, console: firstCapture.console },
+      { compared: firstCapture.snapshot, snapshot: capturedAgain, diff: changed.diff },
+      imaged,
+    )
   }
 
-  const secondCapture = await captureStory(storyToCaptureOf(item))
+  const secondCapture = await captureStory(storyOf(item, tools))
 
   if ('broken' in secondCapture) {
-    return brokenResultOf(secondCapture.broken, { attempts: 2, console: secondCapture.console })
+    return await brokenLoadResultOf(item, secondCapture, 2, imaged)
   }
 
   const keptByBaseline =
@@ -375,17 +504,19 @@ export async function updateSnapshot(
     )
   }
 
-  const thirdCapture = await captureStory(storyToCaptureOf(item))
+  const thirdCapture = await captureStory(storyOf(item, tools))
 
   if ('broken' in thirdCapture) {
-    return brokenResultOf(thirdCapture.broken, { attempts: 3, console: thirdCapture.console })
+    return await brokenLoadResultOf(item, thirdCapture, 3, imaged)
   }
 
-  const thirdAgrees =
-    (await capturesAgree(visualDiff, item, secondCapture.snapshot, thirdCapture.snapshot)) ||
-    (await capturesAgree(visualDiff, item, firstCapture.snapshot, thirdCapture.snapshot))
+  const unstable = await unstableOf(visualDiff, item, [
+    firstCapture.snapshot,
+    secondCapture.snapshot,
+    thirdCapture.snapshot,
+  ])
 
-  if (thirdAgrees) {
+  if (unstable === undefined) {
     return await writtenOrKeptOf(
       baseline,
       path,
@@ -404,5 +535,11 @@ export async function updateSnapshot(
     )
   }
 
-  return brokenResultOf(unstableStory, { attempts: 3, console: thirdCapture.console })
+  return await brokenWithImagesOf(
+    item,
+    unstable.broken,
+    { attempts: 3, console: thirdCapture.console },
+    { compared: firstCapture.snapshot, snapshot: thirdCapture.snapshot, diff: unstable.diff },
+    imaged,
+  )
 }
