@@ -27,6 +27,8 @@ describe('defineVisualCheck', () => {
       masks: { clock: { selector: '.clock' }, ad: { host: 'ads.example.com' }, gone: null },
       tolerance: { color: 0.1, pixels: '1%' },
       disable: true,
+      pageErrors: 'warn',
+      expectedPageErrors: ['Failed to fetch', /\/api\/orders/],
       wait,
     })
 
@@ -42,6 +44,8 @@ describe('defineVisualCheck', () => {
         },
         tolerance: { color: 0.1, pixels: '1%' },
         disable: true,
+        pageErrors: 'warn',
+        expectedPageErrors: ['Failed to fetch', /\/api\/orders/],
         wait,
       },
     })
@@ -114,6 +118,16 @@ describe('defineVisualCheck', () => {
     visualCheck({ masks: { ad: { selector: '.a', host: 'x' } } })
     // @ts-expect-error The hook gets a StoryContext, not a number.
     visualCheck({ wait: (context: number) => void context })
+  })
+
+  it('types pageErrors and expectedPageErrors', () => {
+    visualCheck({ pageErrors: 'off', expectedPageErrors: ['Failed to fetch', /timeout/] as const })
+    // @ts-expect-error pageErrors is 'fail', 'warn' or 'off'.
+    visualCheck({ pageErrors: 'error' })
+    // @ts-expect-error An expected page error is a string or a regular expression.
+    visualCheck({ expectedPageErrors: [404] })
+    // @ts-expect-error expectedPageErrors is a list.
+    visualCheck({ expectedPageErrors: 'Failed to fetch' })
   })
 })
 
@@ -249,6 +263,22 @@ describe('merging through Storybook', () => {
       element: '#story',
       disable: true,
     })
+  })
+
+  it('lets the most specific pageErrors win', () => {
+    const preview = visualCheck({ pageErrors: 'warn' })
+
+    expect(merge(preview, visualCheck({ pageErrors: 'off' })).pageErrors).toBe('off')
+    expect(merge(preview, visualCheck({ disable: false })).pageErrors).toBe('warn')
+  })
+
+  it('lets the most specific expectedPageErrors list replace the inherited one', () => {
+    const preview = visualCheck({ expectedPageErrors: ['ResizeObserver', /timeout/] })
+    const story = visualCheck({ expectedPageErrors: [/\/api\/orders/] })
+
+    expect(merge(preview, story).expectedPageErrors).toEqual([/\/api\/orders/])
+    expect(merge(preview, visualCheck({ expectedPageErrors: [] })).expectedPageErrors).toEqual([])
+    expect(merge(preview, visualCheck({ disable: false })).expectedPageErrors).toEqual(['ResizeObserver', /timeout/])
   })
 
   it('keeps an inherited value hidden behind undefined', () => {

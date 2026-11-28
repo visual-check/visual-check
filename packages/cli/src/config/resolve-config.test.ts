@@ -66,6 +66,8 @@ describe('resolveConfig defaults', () => {
       readyTimeout: 10_000,
       retries: 1,
       silenceHosts: [],
+      pageErrors: 'fail',
+      expectedPageErrors: [],
       affected: { selectAll: [], ignore: [] },
     })
   })
@@ -81,6 +83,8 @@ describe('resolveConfig defaults', () => {
       colorScheme: 'dark',
       retries: 3,
       silenceHosts: ['*.example.com'],
+      pageErrors: 'off',
+      expectedPageErrors: ['Failed to fetch', /timeout/i],
     })
 
     expect(resolved).toMatchObject({
@@ -92,6 +96,8 @@ describe('resolveConfig defaults', () => {
       colorScheme: 'dark',
       retries: 3,
       silenceHosts: ['*.example.com'],
+      pageErrors: 'off',
+      expectedPageErrors: ['Failed to fetch', /timeout/i],
     })
   })
 
@@ -116,10 +122,13 @@ describe('resolveConfig defaults', () => {
 
   it('does not let the result change the config', () => {
     const silenceHosts = ['a.example.com']
-    const resolved = resolve({ storybooks: { web: { url } }, silenceHosts })
+    const expectedPageErrors = ['Failed to fetch']
+    const resolved = resolve({ storybooks: { web: { url } }, silenceHosts, expectedPageErrors })
 
     resolved.silenceHosts.push('b.example.com')
+    resolved.expectedPageErrors.push(/timeout/)
     expect(silenceHosts).toStrictEqual(['a.example.com'])
+    expect(expectedPageErrors).toStrictEqual(['Failed to fetch'])
   })
 
   it('does not share default arrays between calls', () => {
@@ -127,9 +136,11 @@ describe('resolveConfig defaults', () => {
     const second = resolve({ storybooks: { web: { url } } })
 
     first.silenceHosts.push('example.com')
+    first.expectedPageErrors.push('Failed to fetch')
     first.affected.selectAll.push('a')
     first.affected.ignore.push('b')
     expect(second.silenceHosts).toStrictEqual([])
+    expect(second.expectedPageErrors).toStrictEqual([])
     expect(second.affected).toStrictEqual({ selectAll: [], ignore: [] })
     expect(resolve({ storybooks: { web: { url } } }).silenceHosts).toStrictEqual([])
   })

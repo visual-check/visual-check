@@ -61,7 +61,7 @@ A named set of globals and viewport, declared once per Storybook, that a story c
 _Avoid_: Variant, configuration, breakpoint, extra shot
 
 **Per-story options**:
-What a project sets for a Storybook, a stories file or a story in `parameters.visualCheck`: modes, viewport, capture element, `growViewport`, masks, tolerance, `wait` and `disable`. Storybook merges the levels, and visual-check reads the result before it captures.
+What a project sets for a Storybook, a stories file or a story in `parameters.visualCheck`: modes, viewport, capture element, `growViewport`, masks, tolerance, `pageErrors`, `expectedPageErrors`, `wait` and `disable`. Storybook merges the levels, and visual-check reads the result before it captures.
 _Avoid_: Story config, story settings, visual-check parameters
 
 **Visual diff**:
@@ -95,6 +95,14 @@ _Avoid_: Unstable snapshot, intermittent, passed on recapture
 **Console message**:
 What a story's page logged to its console, or an uncaught error or unhandled rejection it raised, kept with the snapshot for review.
 _Avoid_: Page message, log, console output
+
+**Page error**:
+A `console.error`, uncaught error or unhandled rejection a story's page raised, or a load from its Storybook's origin that failed or got an error status. It doesn't make the story broken: the snapshot is still compared or written, and has page errors besides.
+_Avoid_: Page problem, page issue, runtime error
+
+**Expected page error**:
+A page error a project or story declares it raises on purpose, such as an error-state story's mocked error response, so it doesn't count against the snapshot.
+_Avoid_: Ignored error, allowed error, silenced error
 
 **Report**:
 A run's account of its snapshots: the counts, and every snapshot that needs a look, with its outcome and reason. Every `test` leaves one in the report folder, each shard its own, and `update` prints its own on request. After a run error it holds only the error.

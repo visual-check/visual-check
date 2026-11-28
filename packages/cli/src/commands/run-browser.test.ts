@@ -30,9 +30,9 @@ const browserPackage: BrowserPackage = {
 const snapshot = new Uint8Array([0x89, 0x50, 0x4e, 0x47])
 
 /**
- * What a capture of a story on a fake page gives: the snapshot, and no console message, since the page sent none.
+ * What a capture of a story on a fake page gives: the snapshot, and no console message or page error: the page sent none.
  */
-const captured = { snapshot, console: [] }
+const captured = { snapshot, console: [], pageErrors: [] }
 
 /**
  * A fake browser the test makes exit, which can hold a story's capture until the test lets it go.
@@ -115,6 +115,7 @@ function fakeBrowserOf(version: string = browserPackage.chromium): FakeBrowser {
       requestHosts: () => [],
       consoleMessages: () => [],
       failedLoads: () => [],
+      pageErrors: () => [],
     }
   }
   const fake: FakeBrowser = {
@@ -239,6 +240,7 @@ function brokenBy(error: BrowserExitedError): StoryCapture {
       reason: 'browser-exited',
       message: `The browser exited while visual-check captured this story: ${error.message}`,
     },
+    pageErrors: [],
   }
 }
 

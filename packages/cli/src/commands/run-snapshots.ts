@@ -5,6 +5,7 @@ import { runWorkerPool } from '../capture/worker-pool.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
 import type { ReportWarning } from '../report/report-document.js'
 import { ReportError, reportFolderOf, writeReportImages } from '../report/report-folder.js'
+import { pageErrorsBlockOf } from '../reporter/page-errors-block.js'
 import type { RunEvent } from '../reporter/run-event.js'
 import type { Shard } from '../sharding/shard.js'
 import type { Story } from '../storybook/read-stories.js'
@@ -312,7 +313,7 @@ function longPathWarningsOf(run: SnapshotRun, snapshots: PlannedSnapshots): stri
 /**
  * Builds the lines that end a finished `update`'s output: the counts of written, deleted and kept baselines and broken
  * snapshots, then the path of each baseline written, in the snapshots' order, and of each orphan deleted, then the
- * flaky snapshots under its heading, when there are any.
+ * snapshots with page errors, then the flaky snapshots under its heading, when there are any.
  */
 function updateEndOf(run: SnapshotRun, snapshots: PlannedSnapshots, deleted: readonly DeletedBaseline[]): string[] {
   const statuses = snapshots.results.flatMap((result) => (result === undefined ? [] : [result.status]))
@@ -323,12 +324,12 @@ function updateEndOf(run: SnapshotRun, snapshots: PlannedSnapshots, deleted: rea
     broken: countOf(statuses, 'broken'),
   }
 
-  return [...updateEndLinesOf(run.cwd, summary), ...updateFlakyLinesOf(snapshots)]
+  return [...updateEndLinesOf(run.cwd, summary), ...updatePageErrorLinesOf(snapshots), ...updateFlakyLinesOf(snapshots)]
 }
 
 /**
  * Gives the exit code: 1 when any snapshot has a failing status for the command, or for `test` when any Storybook's
- * baselines hold an orphan, else 0.
+ * baselines hold an orphan or any snapshot has a page error that fails, whatever its status, else 0.
  */
 function exitCodeOf(
   command: SnapshotRun['command'],
@@ -339,8 +340,11 @@ function exitCodeOf(
     (result) => result !== undefined && failingStatuses[command].includes(result.status),
   )
   const orphaned = command === 'test' && hasOrphans(baselines)
+  const pageErrorsFailed =
+    command === 'test' &&
+    snapshots.results.some((result) => result?.pageErrors.some((error) => error.severity === 'fail') === true)
 
-  return failed || orphaned ? 1 : 0
+  return failed || orphaned || pageErrorsFailed ? 1 : 0
 }
 
 /**
@@ -408,6 +412,23 @@ function plannedSnapshotsOf(run: SnapshotRun, share: RunShare | undefined, items
     items,
     results: items.map(() => undefined),
   }
+}
+
+/**
+ * Lists `update`'s snapshots that have page errors or stale expected page errors, written, kept or broken, in the
+ * snapshots' order, by name under a heading that counts them, each page error that would fail `test` marked
+ * `fails test`. A kept one is listed here only, as `update`'s report has no entry for it. Gives no line when none has
+ * either.
+ */
+function updatePageErrorLinesOf({ items, results }: PlannedSnapshots): string[] {
+  return pageErrorsBlockOf(
+    items.flatMap((item, index) => {
+      const result = results[index]
+
+      return result === undefined ? [] : [{ ...result, name: snapshotNameOf(item) }]
+    }),
+    'update',
+  )
 }
 
 /**

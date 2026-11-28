@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { checkStoryOptions } from './story-options.js'
+import { checkStoryOptions, type StoryOptions } from './story-options.js'
+import { UnrunnableRegExp } from './unrunnable-regexp.js'
 
 /**
  * The hint an unknown key directly under `visualCheck` ends with.
@@ -9,7 +10,8 @@ const newerHint = ' If a newer @visual-check/storybook wrote it, install @visual
 /**
  * The known keys an unknown-key issue lists at the top level.
  */
-const topKeys = 'modes, viewport, element, growViewport, masks, tolerance, disable, wait'
+const topKeys =
+  'modes, viewport, element, growViewport, masks, tolerance, disable, pageErrors, expectedPageErrors, wait'
 
 /**
  * Checks a value that must be valid and returns its options.
@@ -41,6 +43,11 @@ function issuesOf(value: unknown): string[] {
  * A class named like a built-in, so an issue renders it by name.
  */
 const FakeDate = { Date: class {} }.Date
+
+/**
+ * A class named like `RegExp` that isn't one, as the decoder builds for an instance the page encoded by its name.
+ */
+const FakeRegExp = { RegExp: class {} }.RegExp
 
 describe('checkStoryOptions', () => {
   describe('the value', () => {
@@ -360,6 +367,62 @@ describe('checkStoryOptions', () => {
     })
   })
 
+  describe('pageErrors', () => {
+    it.each(['fail', 'warn', 'off'])('takes %s', (pageErrors) => {
+      expect(optionsOf({ pageErrors })).toStrictEqual({ pageErrors })
+    })
+
+    it.each([null, 'error', true, []])('rejects %j', (pageErrors) => {
+      expect(issuesOf({ pageErrors })).toStrictEqual([
+        expect.stringMatching(/^visualCheck\.pageErrors: must be 'fail', 'warn' or 'off'\. Got /),
+      ])
+    })
+  })
+
+  describe('expectedPageErrors', () => {
+    it('takes strings and regular expressions, keeping each as it is, and an empty array', () => {
+      const pattern = /\/api\/orders/i
+      const options = optionsOf({ expectedPageErrors: ['Failed to fetch', pattern] }) as StoryOptions
+
+      expect(options).toStrictEqual({ expectedPageErrors: ['Failed to fetch', pattern] })
+      expect(options.expectedPageErrors?.[1]).toBe(pattern)
+      expect(optionsOf({ expectedPageErrors: [] })).toStrictEqual({ expectedPageErrors: [] })
+    })
+
+    it.each([
+      ['an empty string', ''],
+      ['a number', 1],
+      ['null', null],
+      ['a plain object', { source: 'x', flags: '' }],
+      ['an instance of a class named RegExp, as an instance the page encoded decodes', new FakeRegExp()],
+    ])('rejects %s as an entry, naming its index', (_label, entry) => {
+      expect(issuesOf({ expectedPageErrors: [/timeout/, entry] })).toStrictEqual([
+        expect.stringMatching(
+          /^visualCheck\.expectedPageErrors\[1\]: must be a non-empty string or a regular expression\. Got /,
+        ),
+      ])
+    })
+
+    it('rejects a regular expression from the page that Node.js could not build, as a literal', () => {
+      expect(
+        issuesOf({ expectedPageErrors: ['Failed to fetch', new UnrunnableRegExp('(?i:timeout)', 'g')] }),
+      ).toStrictEqual([
+        'visualCheck.expectedPageErrors[1]: must be a regular expression Node.js can run. Got /(?i:timeout)/g.',
+      ])
+    })
+
+    it.each(['Failed to fetch', /Failed/, null])(
+      'rejects expectedPageErrors %j that is not an array',
+      (expectedPageErrors) => {
+        expect(issuesOf({ expectedPageErrors })).toStrictEqual([
+          expect.stringMatching(
+            /^visualCheck\.expectedPageErrors: must be an array of strings or regular expressions, /,
+          ),
+        ])
+      },
+    )
+  })
+
   describe('wait', () => {
     it('takes a function and null, and leaves wait out', () => {
       expect(optionsOf({ wait: () => undefined })).toStrictEqual({})
@@ -398,6 +461,8 @@ describe('checkStoryOptions', () => {
         masks: { ad: { selector: '.ad', host: null }, old: null },
         tolerance: { color: 0.02, pixels: '1%' },
         disable: false,
+        pageErrors: 'warn',
+        expectedPageErrors: ['Failed to fetch', /timeout/],
         wait: () => undefined,
         retired: undefined,
       }
@@ -410,6 +475,8 @@ describe('checkStoryOptions', () => {
         masks: { ad: { selector: '.ad' }, old: null },
         tolerance: { color: 0.02, pixels: '1%' },
         disable: false,
+        pageErrors: 'warn',
+        expectedPageErrors: ['Failed to fetch', /timeout/],
       })
     })
 

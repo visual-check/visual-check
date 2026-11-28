@@ -3,11 +3,15 @@ import {
   BrowserExitedError,
   BrowserLaunchError,
   browserThatFailedToStart,
+  type ConsoleMessage,
   describeExit,
+  eachPageErrorOnce,
   PageCrashedError,
+  type PageError,
   PageLoadError,
   PageNavigatedAwayError,
   PageTimeoutError,
+  pageErrorOf,
   readConsoleMessage,
 } from './driver.js'
 
@@ -170,5 +174,50 @@ describe('readConsoleMessage', () => {
     ['a missing text', JSON.stringify({ kind: 'console.log' })],
   ])('rejects %s', (_case, payload) => {
     expect(readConsoleMessage(payload)).toBeUndefined()
+  })
+})
+
+describe('pageErrorOf', () => {
+  it.each([['console.error'], ['error'], ['unhandledrejection']] as const)(
+    'makes a %s message a page error',
+    (kind) => {
+      expect(pageErrorOf({ kind, text: 'Failed to fetch' })).toEqual({ kind, text: 'Failed to fetch' })
+    },
+  )
+
+  it.each([['console.debug'], ['console.info'], ['console.log'], ['console.warn']] as const)(
+    'makes no page error of a %s message',
+    (kind: ConsoleMessage['kind']) => {
+      expect(pageErrorOf({ kind, text: 'a line' })).toBeUndefined()
+    },
+  )
+})
+
+describe('eachPageErrorOnce', () => {
+  const thrown: PageError = { kind: 'error', text: 'Boom' }
+  const missing: PageError = { kind: 'load', text: 'http://storybook:6006/missing.json', loadError: 'HTTP 404' }
+
+  it('gives the page errors of every list, in the order first seen', () => {
+    expect(eachPageErrorOnce([thrown], [missing])).toEqual([thrown, missing])
+  })
+
+  it('gives each once: the same kind, text and load error', () => {
+    expect(eachPageErrorOnce([thrown, missing], [{ ...missing }, { ...thrown }, thrown])).toEqual([thrown, missing])
+  })
+
+  it('tells apart page errors of another kind, text or load error', () => {
+    const others: PageError[] = [
+      { kind: 'console.error', text: 'Boom' },
+      { kind: 'error', text: 'Bang' },
+      { ...missing, loadError: 'HTTP 500' },
+      { ...missing, loadError: 'net::ERR_EMPTY_RESPONSE' },
+    ]
+
+    expect(eachPageErrorOnce([thrown, missing], others)).toEqual([thrown, missing, ...others])
+  })
+
+  it('gives none of no lists', () => {
+    expect(eachPageErrorOnce()).toEqual([])
+    expect(eachPageErrorOnce([], [])).toEqual([])
   })
 })

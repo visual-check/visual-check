@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { BrokenStory } from '../capture/capture-session.js'
 import type { OptionsRequest, StorybookOptionsRead } from '../capture/read-options.js'
-import type { ResolvedStorybook } from '../config/resolve-config.js'
+import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
 import type { StoryOptions } from '../config/story-options.js'
+import { pageErrorPolicyOf } from '../page-errors/page-error-policy.js'
 import type { FileOptions } from '../storybook/options-read.js'
 import type { Story } from '../storybook/read-stories.js'
 import { type PlannedSnapshot, planSnapshots } from './plan-snapshots.js'
@@ -103,13 +104,20 @@ const fixLine =
 const disableIssue = 'visualCheck.disable: must be true or false. Got 1.'
 
 /**
- * The config most cases plan with: its readyTimeout, its viewport and its tolerance.
+ * The config most cases plan with: its readyTimeout, its viewport, its tolerance, and the defaults for page errors.
  */
 const config = {
   readyTimeout: 5_000,
   viewport: { width: 1280, height: 720, deviceScaleFactor: 1, touch: false },
   tolerance: { color: 0.01, pixels: 20 },
-}
+  pageErrors: 'fail',
+  expectedPageErrors: [],
+} satisfies Pick<ResolvedConfig, 'readyTimeout' | 'viewport' | 'tolerance' | 'pageErrors' | 'expectedPageErrors'>
+
+/**
+ * The page error policy of a story whose options set neither `pageErrors` nor `expectedPageErrors`, under `config`.
+ */
+const defaultPageErrorPolicy = { check: 'fail', expected: [], storyExpected: [] }
 
 /**
  * Builds the planned default capture of a story with the given options, at the config's tolerance under the story's,
@@ -128,7 +136,18 @@ function defaultCaptureOf(
 
   const tolerance = { ...config.tolerance, ...options.tolerance }
 
-  return { storybook, story, mode: undefined, key: story.id, selected, options, tolerance, viewport, globals: {} }
+  return {
+    storybook,
+    story,
+    mode: undefined,
+    key: story.id,
+    selected,
+    options,
+    tolerance,
+    pageErrorPolicy: pageErrorPolicyOf(config, options),
+    viewport,
+    globals: {},
+  }
 }
 
 /**
@@ -675,6 +694,7 @@ describe('planSnapshots modes', () => {
         selected: true,
         options,
         tolerance: config.tolerance,
+        pageErrorPolicy: defaultPageErrorPolicy,
         viewport: config.viewport,
         globals: { theme: 'dark', density: 2, animated: false },
       },
@@ -686,6 +706,7 @@ describe('planSnapshots modes', () => {
         selected: true,
         options,
         tolerance: config.tolerance,
+        pageErrorPolicy: defaultPageErrorPolicy,
         viewport: { width: 375, height: 667, deviceScaleFactor: 2, touch: true },
         globals: {},
       },
@@ -747,6 +768,39 @@ describe('planSnapshots modes', () => {
         ['c', { color: 0.01, pixels: 20 }],
       ],
     )
+  })
+
+  it("gives each snapshot the story's page error policy over the config's, a mode sharing the story's", async () => {
+    const plan = await planSnapshots(
+      [allSelected(web, [storyOf('a'), storyOf('b')])],
+      readerOf({
+        a: { pageErrors: 'warn', expectedPageErrors: ['Failed to fetch', /\/api\/orders/i], modes: { dark } },
+      }).read,
+      { ...config, pageErrors: 'off', expectedPageErrors: ['ResizeObserver', /timeout/] },
+    )
+    const snapshots = 'snapshots' in plan ? plan.snapshots : expect.fail(`The plan has a problem: ${plan.problem}`)
+
+    expect(
+      snapshots.map(({ key, ...snapshot }) => [key, 'pageErrorPolicy' in snapshot ? snapshot.pageErrorPolicy : null]),
+    ).toEqual([
+      [
+        'a',
+        {
+          check: 'warn',
+          expected: ['ResizeObserver', /timeout/, 'Failed to fetch', /\/api\/orders/i],
+          storyExpected: ['Failed to fetch', /\/api\/orders/i],
+        },
+      ],
+      [
+        'a.dark',
+        {
+          check: 'warn',
+          expected: ['ResizeObserver', /timeout/, 'Failed to fetch', /\/api\/orders/i],
+          storyExpected: ['Failed to fetch', /\/api\/orders/i],
+        },
+      ],
+      ['b', { check: 'off', expected: ['ResizeObserver', /timeout/], storyExpected: [] }],
+    ])
   })
 
   it('plans no snapshot of a disabled story, whatever modes it lists', async () => {

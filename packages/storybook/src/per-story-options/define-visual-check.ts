@@ -161,6 +161,19 @@ export interface VisualCheckOptions<ModeName extends string> {
    */
   disable?: boolean | undefined
   /**
+   * What a page error that isn't expected does to these stories' snapshots, in place of the config's: `'fail'` lists
+   * it and fails `test`, `'warn'` lists it without failing, and `'off'` doesn't check page errors.
+   */
+  pageErrors?: 'fail' | 'warn' | 'off' | undefined
+  /**
+   * The page errors these stories raise on purpose, such as a mocked error response. A string matches a page error
+   * whose text contains it, and a regular expression one whose text it matches. The text is the message, or the URL
+   * for a load. An error's message is its stack, whose first line is `Name: message`, so a regular expression anchored
+   * at the message's end with `$` doesn't match it. The list replaces the inherited one, and the config's list is always added to it. An entry that
+   * matches none of a snapshot's page errors is a warning.
+   */
+  expectedPageErrors?: readonly (string | RegExp)[] | undefined
+  /**
    * A hook to wait for before the capture. `null` turns an inherited hook off.
    */
   wait?: WaitHook | null | undefined
@@ -203,6 +216,14 @@ export interface VisualCheckParameter {
    */
   disable?: boolean
   /**
+   * What a page error that isn't expected does to the snapshots.
+   */
+  pageErrors?: 'fail' | 'warn' | 'off'
+  /**
+   * The page errors the stories raise on purpose, besides the config's.
+   */
+  expectedPageErrors?: readonly (string | RegExp)[]
+  /**
    * A hook to wait for before the capture, or `null` for none.
    */
   wait?: WaitHook | null
@@ -231,7 +252,9 @@ export type VisualCheck<ModeName extends string> = (options: VisualCheckOptions<
  * - `modes`: the most specific list.
  * - `viewport` and `tolerance`: merged key by key.
  * - `masks`: merged by name. A name set to `null` drops one mask, and `masks: null` drops all of them.
- * - `wait`, `element`, `growViewport` and `disable`: the most specific value.
+ * - `wait`, `element`, `growViewport`, `disable` and `pageErrors`: the most specific value.
+ * - `expectedPageErrors`: the most specific list, since Storybook replaces arrays: a story's list replaces its meta's or
+ *   `preview`'s. The config's list is then added to it, so put the entries every story needs in the config.
  *
  * A key set to `undefined` is left out, so it never hides an inherited value. `null` is kept, and turns one off. The
  * helper checks nothing at run time. visual-check validates the merged options before it captures.

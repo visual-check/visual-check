@@ -12,6 +12,7 @@ import {
   reportedComparisonOf,
   type SnapshotResult,
   storyToCaptureOf,
+  type UnjudgedResult,
 } from './snapshot-result.js'
 
 /**
@@ -241,9 +242,9 @@ async function writtenOrKeptOf(
   baseline: Baseline | undefined,
   path: string,
   snapshot: Uint8Array,
-  written: SnapshotResult,
+  written: UnjudgedResult,
   write: (path: string, bytes: Uint8Array) => Promise<void>,
-): Promise<SnapshotResult> {
+): Promise<UnjudgedResult> {
   if (baseline === undefined || Buffer.compare(baseline.bytes, snapshot) !== 0) {
     await write(path, snapshot)
 
@@ -323,7 +324,7 @@ export async function updateSnapshot(
   item: SnapshotToCapture,
   captureStory: CaptureStory,
   tools: UpdateTools,
-): Promise<SnapshotResult> {
+): Promise<UnjudgedResult> {
   const { visualDiff, rewrite = false, writeBaseline: write = writeBaseline } = tools
   const path = baselinePathOf(item.storybook.baselines, item.key)
   const bytes = await readBaseline(path)

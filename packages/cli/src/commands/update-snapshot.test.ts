@@ -247,7 +247,7 @@ function fakeCapturesOf(loads: readonly FakeLoad[]): FakeCaptures {
       }
 
       if ('broken' in load) {
-        return load
+        return { ...load, pageErrors: [] }
       }
 
       /**
@@ -273,7 +273,13 @@ function fakeCapturesOf(loads: readonly FakeLoad[]): FakeCaptures {
       }
 
       const { snapshot, later = snapshot, completingMs, hosts, console = [] } = load
-      const capture: StoryCapture = { snapshot, completingMs, console, ...(hosts === undefined ? {} : { hosts }) }
+      const capture: StoryCapture = {
+        snapshot,
+        completingMs,
+        console,
+        pageErrors: [],
+        ...(hosts === undefined ? {} : { hosts }),
+      }
 
       return (await ask(snapshot)) && load.ignoresAgain !== true ? { ...capture, capturedAgain: later } : capture
     },
@@ -319,6 +325,7 @@ function snapshotOf(baseline?: Uint8Array, tolerance: Required<Tolerance> = defa
       selected: true,
       options: {},
       tolerance,
+      pageErrorPolicy: { check: 'fail', expected: [], storyExpected: [] },
       viewport: { width: 10, height: 10, deviceScaleFactor: 1, touch: false },
       globals: {},
     },

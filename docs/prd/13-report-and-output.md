@@ -29,8 +29,9 @@ When it's written:
 - Missing baselines, with no image, because `test` never captures them.
 - Orphans, with their baseline.
 - Flaky snapshots, with the first attempt's images.
+- Snapshots with page errors or stale expected page errors, even when they passed.
 
-Plain passes are only counted. A passed entry has the same shape, so a later tool can list every snapshot without a new report version.
+Other plain passes are only counted. A passed entry has the same shape, so a later tool can list every snapshot without a new report version.
 
 A broken story also carries:
 
@@ -42,6 +43,14 @@ Console messages:
 - The in-page script collects them from document start: all levels, uncaught errors and unhandled rejections included.
 - Each listed entry that was captured keeps the last 50, each cut to 500 characters. They come from the attempt whose images are listed, and they survive a story that navigates away.
 - They never fail a run.
+
+Page errors ([Per-story options](07-per-story-options.md#page-errors)):
+
+- Each listed entry holds its snapshot's page errors that no expected page error matches, from every load of it in the run, each once, in the order first seen. A page keeps its first 50, in a list of their own, so console messages never push one out.
+- Each has its kind, its text (the message, cut to 500 characters, or the load's URL), a load's network error or HTTP status, and its severity: `fail` or `warn`, by the snapshot's `pageErrors`.
+- The entry also lists the story's stale expected page errors, as written.
+- A page error with severity `fail` makes `test` exit 1, whatever the snapshot's status. One with `warn`, and a stale entry, never fail a run, and `update` never fails on page errors.
+- `update`'s document lists written and broken snapshots that have them. A kept baseline has no entry, so its page errors show only in `update`'s end text.
 
 ## The JSON document
 
@@ -67,26 +76,28 @@ Top level:
 
 Each entry:
 
-| Field                                    | Holds                                                                                                                                                        |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `storybook`                              | The Storybook's name                                                                                                                                         |
-| `id`                                     | The snapshot's key, unique within a Storybook                                                                                                                |
-| `kind`                                   | `"story"`, the only value in v1                                                                                                                              |
-| `story`, `importPath`                    | The story's ID and its stories file                                                                                                                          |
-| `mode`                                   | `null` for the default capture                                                                                                                               |
-| `status`                                 | For `test`: `passed`, `differs`, `broken`, `missing`, `orphan`. For `update`: `written`, `deleted`, `broken`                                                 |
-| `reason`                                 | For `differs`: `pixels` or `size`. For `broken`: a code from [Readiness and stability](06-readiness-and-stability.md). For `written`: `missing` or `differs` |
-| `message`                                | One line for people                                                                                                                                          |
-| `flaky`                                  | `true` when it passed on a retry, or in `update` when another load decided                                                                                   |
-| `attempts`                               | How many captures it took                                                                                                                                    |
-| `pixels`                                 | `{ differ, allowed, budget, scale }`, with `budget` as written: `20` or `"0.1%"`                                                                             |
-| `size`                                   | `null`, or `{ baseline: [w, h], snapshot: [w, h] }` on a size difference                                                                                     |
-| `details`                                | `null`, or a broken story's details                                                                                                                          |
-| `hints`                                  | `[{ kind: "remote-content", hosts, message }]` or `[{ kind: "failed-loads", files: [{ url, error }], message }]`                                             |
-| `console`                                | `[{ level, text }]`                                                                                                                                          |
-| `baseline`                               | The baseline's path, relative to the config folder                                                                                                           |
-| `images`                                 | `{ baseline, snapshot, diff }`, relative to the report folder. A broken story's image is `images.snapshot`                                                   |
-| `realRequestHosts`, `remoteContentHosts` | In `update` only                                                                                                                                             |
+| Field                                    | Holds                                                                                                                                                                                                                                                                                                |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `storybook`                              | The Storybook's name                                                                                                                                                                                                                                                                                 |
+| `id`                                     | The snapshot's key, unique within a Storybook                                                                                                                                                                                                                                                        |
+| `kind`                                   | `"story"`, the only value in v1                                                                                                                                                                                                                                                                      |
+| `story`, `importPath`                    | The story's ID and its stories file                                                                                                                                                                                                                                                                  |
+| `mode`                                   | `null` for the default capture                                                                                                                                                                                                                                                                       |
+| `status`                                 | For `test`: `passed`, `differs`, `broken`, `missing`, `orphan`. For `update`: `written`, `deleted`, `broken`                                                                                                                                                                                         |
+| `reason`                                 | For `differs`: `pixels` or `size`. For `broken`: a code from [Readiness and stability](06-readiness-and-stability.md). For `written`: `missing` or `differs`                                                                                                                                         |
+| `message`                                | One line for people                                                                                                                                                                                                                                                                                  |
+| `flaky`                                  | `true` when it passed on a retry, or in `update` when another load decided                                                                                                                                                                                                                           |
+| `attempts`                               | How many captures it took                                                                                                                                                                                                                                                                            |
+| `pixels`                                 | `{ differ, allowed, budget, scale }`, with `budget` as written: `20` or `"0.1%"`                                                                                                                                                                                                                     |
+| `size`                                   | `null`, or `{ baseline: [w, h], snapshot: [w, h] }` on a size difference                                                                                                                                                                                                                             |
+| `details`                                | `null`, or a broken story's details                                                                                                                                                                                                                                                                  |
+| `hints`                                  | `[{ kind: "remote-content", hosts, message }]` or `[{ kind: "failed-loads", files: [{ url, error }], message }]`                                                                                                                                                                                     |
+| `console`                                | `[{ level, text }]`                                                                                                                                                                                                                                                                                  |
+| `pageErrors`                             | `[{ kind, text, loadError, severity }]`, with `kind` one of `console.error`, `error`, `unhandledrejection` and `load`, `loadError` only on a load, such as `HTTP 404` or `net::ERR_EMPTY_RESPONSE`, and `severity` `fail` or `warn`. Empty for an orphan, a deleted baseline and `pageErrors: 'off'` |
+| `staleExpectedPageErrors`                | The story's own expected page errors that matched none of its page errors, as written: a string as JSON, `"Failed to fetch"`, and a regular expression as its literal, `/timeout/i`. Empty for a broken snapshot, an orphan and a deleted baseline                                                   |
+| `baseline`                               | The baseline's path, relative to the config folder                                                                                                                                                                                                                                                   |
+| `images`                                 | `{ baseline, snapshot, diff }`, relative to the report folder. A broken story's image is `images.snapshot`                                                                                                                                                                                           |
+| `realRequestHosts`, `remoteContentHosts` | In `update` only                                                                                                                                                                                                                                                                                     |
 
 Rules:
 
@@ -134,15 +145,17 @@ One line per snapshot as it finishes:
 Both `log` and `live` end with the same block:
 
 1. `── N failures ──`, then for each failure: the Storybook, story and mode, then `differs: …` or `broken: …`. A visual diff adds its `diff:` path and any `hint:`. A broken story adds up to 5 console error and warning lines.
-2. The flaky snapshots, by name.
-3. The counts, for example `248 passed (2 flaky) · 1 differs · 1 broken · 3m 12s`.
-4. `Report: .visual-check/report/report.json`.
+2. The snapshots with page errors or stale expected page errors, whatever their status, under a heading that counts them and says how many fail the run.
+3. The flaky snapshots, by name.
+4. The counts, for example `248 passed (2 flaky) · 1 differs · 1 broken · 3m 12s`.
+5. `Report: .visual-check/report/report.json`.
 
 - A failure is its name line, `web  button--primary  dark`, then lines indented two spaces: `differs: <message>`, `broken: <message>`, `missing: no baseline yet; …` or `orphan: no story calls for <path>; …`, then `diff: <path>`, one `hint: <message>` per hint, and a broken story's last 5 `console error:` and `console warn:` messages, each by its first line. Failures follow the report's order. Paths are relative to the folder the CLI runs in.
+- A snapshot with page errors is its name line, then lines indented two spaces: its first 5 page errors, such as `page error (fail): failed load http://127.0.0.1:6006/api/orders · HTTP 500` or `page error (warn): console.error Could not load orders`, each by its first line, how many more it has, then one `stale expected page error: /timeout/i` per stale entry.
 - Durations read `142 ms` under a second, `12.3s` under a minute, then `3m 12s`.
 - `test --consistency` and a CI `test` stopped by its consistency check print the consistency output instead, with no block. A run that exits 2 gets none either.
 
-`update` ends with its own block, which has no report line ([Baselines and update](10-baselines-and-update.md)).
+`update` ends with its own block, which has no report line ([Baselines and update](10-baselines-and-update.md)). It lists page errors the same way, for written, kept and broken snapshots, and shows one that would fail `test` as `fails test`.
 
 ## Hints and warnings
 
@@ -158,8 +171,8 @@ Both `log` and `live` end with the same block:
 ## GitHub step summary
 
 - The CLI writes it whenever `GITHUB_STEP_SUMMARY` is set, under any reporter. It works from a plain `run:` step, the Action and the reusable workflow alike.
-- It holds the shard, the counts, the flaky snapshots and a table of failures: Storybook, story, mode, status and message. The table is cut to stay under GitHub's 1 MiB per step.
-- Layout: a heading with the version, command and shard, the counts, up to 100 flaky snapshots, then, in a `test` with a snapshot that differs, a missing baseline or an orphan, how to update the baselines locally, then the table. A cut table keeps its first rows and ends with a note counting the rest. 1 KiB stays free for the Action's artifact link.
+- It holds the shard, the counts, the flaky snapshots, the page errors and a table of failures: Storybook, story, mode, status and message. The table is cut to stay under GitHub's 1 MiB per step.
+- Layout: a heading with the version, command and shard, the counts, up to 100 flaky snapshots, then a **Page errors** block when any snapshot has page errors or stale expected page errors: how many, in `test` how many fail the run, and the first 5 such snapshots, each with its first page error. Then, in a `test` with a snapshot that differs, a missing baseline or an orphan, how to update the baselines locally, then the table. A cut table keeps its first rows and ends with a note counting the rest. 1 KiB stays free for the Action's artifact link.
 - The update note names the root script whose command is exactly `visual-check update`, else `visual-check update`, and says Docker must be up unless the platform is `host`.
 - A summary that can't be written adds a warning on stderr and never changes the exit code.
 - On a `test` or `update` run's exit 2, once the command line names one, it holds the error.

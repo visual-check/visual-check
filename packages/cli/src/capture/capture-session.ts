@@ -7,10 +7,12 @@ import {
   CaptureTooLargeError,
   type ConsoleMessage,
   type Driver,
+  eachPageErrorOnce,
   type FailedLoad,
   maxCaptureSide,
   type Page,
   PageCrashedError,
+  type PageError,
   PageNavigatedAwayError,
   type PageSetup,
   PageTimeoutError,
@@ -416,7 +418,8 @@ export interface StoryHosts {
  * What capturing a story gave: its snapshot, with how long Storybook's `completing` render step took, the console
  * messages and errors its page sent, the remote content it shows when the story asked for it, the hosts it reaches
  * when the session lists them and the same page captured again when the story's `captureAgainIf` asked for it, or, for
- * a broken story, why it can't be captured and, when it had a page, what its page sent.
+ * a broken story, why it can't be captured and, when it had a page, what its page sent. Either way it comes with the
+ * page errors of every attempt.
  *
  * @public
  */
@@ -437,6 +440,12 @@ export type StoryCapture =
        * called.
        */
       console: ConsoleMessage[]
+      /**
+       * The page errors the story's pages raised in every attempt of the capture, the hidden ones on fresh pages of a
+       * story that navigated away included, each once, in the order first seen: read once each attempt is done, after
+       * the story's `captureAgainIf` too.
+       */
+      pageErrors: PageError[]
       /**
        * The remote content the snapshot shows, when the story asked for it with `findRemoteContent` and the search
        * answered in time. Without it, the remote content is unknown.
@@ -464,6 +473,12 @@ export type StoryCapture =
        * story had no page: a page that couldn't be opened, or a browser that exited.
        */
       console?: ConsoleMessage[]
+      /**
+       * The page errors the story's pages raised in every attempt of the capture, the hidden ones on fresh pages of a
+       * story that navigated away included, each once, in the order first seen: read before each page is closed. None
+       * from an attempt that had no page: a page that couldn't be opened, or a browser that exited.
+       */
+      pageErrors: PageError[]
       /**
        * The full page as it was when the story broke, as PNG bytes exactly as the browser made them. Present only when
        * the story asked for it with `imageWhenBroken`, broke for a reason whose page still shows something, and the
@@ -1045,9 +1060,10 @@ function capturedExtrasOf(
  */
 interface CapturedSnapshot {
   /**
-   * What capturing the story gave: its snapshot and what it comes with, without a second capture.
+   * What capturing the story gave: its snapshot and what it comes with, without a second capture and without its page
+   * errors, which are read once the story's `captureAgainIf` ran.
    */
-  result: Omit<Extract<StoryCapture, { snapshot: Uint8Array }>, 'capturedAgain'>
+  result: Omit<Extract<StoryCapture, { snapshot: Uint8Array }>, 'capturedAgain' | 'pageErrors'>
   /**
    * What the snapshot was captured from: the element's box, or the full page.
    */
@@ -1071,7 +1087,8 @@ interface CapturedSnapshot {
  * `gridProblemOf` says. Gives the area the snapshot was captured from beside it, and leaves the story's
  * `captureAgainIf` to the caller. A story that can't be captured comes back as a broken story. Either way it comes with
  * the console messages and errors the page sent, read once the capture is done or the story broke, while the page is
- * still open, and a broken story with the loads of Storybook's files that failed on the page. Rejects only with a
+ * still open, and a broken story with the loads of Storybook's files that failed on the page and its page errors. A
+ * snapshot's page errors are left to the caller, read once `captureAgainIf` ran. Rejects only with a
  * `BrowserExitedError`.
  */
 async function captureOnPage(
@@ -1089,6 +1106,7 @@ async function captureOnPage(
   const brokenBy = (broken: BrokenStory): Extract<StoryCapture, { broken: BrokenStory }> => ({
     broken: withFailedLoads(broken, page.failedLoads(), story.url),
     console: page.consoleMessages(),
+    pageErrors: page.pageErrors(),
   })
 
   /**
@@ -1356,8 +1374,9 @@ async function withBrokenImage(
  * Calls the story's `captureAgainIf` with a snapshot just captured on the page, leaving the page as it is. When it
  * resolves true, captures the area the snapshot was captured from again at once, doing nothing to the page in between,
  * bound by the driver's own capture limit, and gives the snapshot with the second capture as `capturedAgain`. Gives the
- * snapshot as it is when the story has no `captureAgainIf` or it resolves false. A second capture that fails comes back
- * as a broken story, with the messages the page sent, read again, and the loads that failed on it. Rejects with a
+ * snapshot as it is when the story has no `captureAgainIf` or it resolves false. Either way the page errors are read
+ * again, so one the page raised during `captureAgainIf` counts. A second capture that fails comes back as a broken
+ * story, with the messages and page errors the page sent, read again, and the loads that failed on it. Rejects with a
  * `BrowserExitedError` when the browser exits during the second capture, and with whatever `captureAgainIf` rejects
  * with: it runs outside the handling that turns the page's failures into a broken story.
  */
@@ -1370,11 +1389,13 @@ async function captureAgainIfAsked(
   const again = await story.captureAgainIf?.(captured.result.snapshot)
 
   if (again !== true) {
-    return captured.result
+    return { ...captured.result, pageErrors: page.pageErrors() }
   }
 
   try {
-    return { ...captured.result, capturedAgain: await page.capture(captured.area) }
+    const capturedAgain = await page.capture(captured.area)
+
+    return { ...captured.result, pageErrors: page.pageErrors(), capturedAgain }
   } catch (error) {
     if (error instanceof BrowserExitedError) {
       throw error
@@ -1387,6 +1408,7 @@ async function captureAgainIfAsked(
         story.url,
       ),
       console: page.consoleMessages(),
+      pageErrors: page.pageErrors(),
     }
   }
 }
@@ -1434,7 +1456,8 @@ export function pageSetupOf(settings: CaptureSettings): PageSetup {
  * A story that navigates away is captured again at once, up to 2 more times, each on a fresh page in a fresh browser
  * context. When the third attempt navigates away too, the story is broken, with that attempt's message and URL. Any
  * other outcome of a retry, a snapshot or another broken reason, is the story's outcome, and no other reason is
- * retried.
+ * retried. The capture keeps the page errors of every attempt, each once, in the order first seen, though only the
+ * last attempt's outcome counts.
  *
  * A story whose page shows a grid wider than the viewport, or too tall to capture, is broken with `grid-too-wide` or
  * `too-tall` before anything is captured.
@@ -1505,6 +1528,7 @@ export function openCaptureSession(driver: Driver, settings: CaptureSettings): C
           reason: 'error',
           message: `visual-check couldn't open a page for the story: ${failureReasonOf(error)}`,
         },
+        pageErrors: [],
       }
     }
 
@@ -1536,12 +1560,14 @@ export function openCaptureSession(driver: Driver, settings: CaptureSettings): C
       await clearOpenPage()
 
       let capture = await captureOnOpenPage(story)
+      const pageErrors = [capture.pageErrors]
 
       for (let retry = 0; retry < navigatedAwayRetries && navigatedAway(capture); retry += 1) {
         capture = await captureOnOpenPage(story)
+        pageErrors.push(capture.pageErrors)
       }
 
-      return capture
+      return { ...capture, pageErrors: eachPageErrorOnce(...pageErrors) }
     },
     close: closePage,
   }

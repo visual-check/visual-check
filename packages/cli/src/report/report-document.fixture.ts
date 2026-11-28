@@ -19,7 +19,8 @@ type TestEntryStatus = TestReportEntry extends infer Entry
 /**
  * Builds a `test` report's entry with its status and reason, and the fields given. Every other field has a default: the
  * `web` Storybook, the ID `a`, a story of the same ID in `./button.stories.tsx`, no mode, no message, one capture, no
- * comparison, details, hints, console messages or images, and the baseline `.visual-check/baselines/<id>.png`.
+ * comparison, details, hints, console messages, page errors, stale expected page errors or images, and the baseline
+ * `.visual-check/baselines/<id>.png`.
  *
  * @public
  */
@@ -41,6 +42,8 @@ export function testEntryWith(fields: Partial<ReportEntryFields> & TestEntryStat
     details: null,
     hints: [],
     console: [],
+    pageErrors: [],
+    staleExpectedPageErrors: [],
     baseline: `.visual-check/baselines/${id}.png`,
     images: { baseline: null, snapshot: null, diff: null },
     ...fields,

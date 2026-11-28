@@ -1,5 +1,6 @@
 import {
   type Check,
+  checkExpectedPageErrors,
   checkKeys,
   checksOf,
   isPlainObject,
@@ -9,6 +10,7 @@ import {
   nonEmptyString,
   objectOf,
   optional,
+  pageErrorsRequirement,
   type Requirement,
   toleranceExample,
   toleranceRequirements,
@@ -17,7 +19,7 @@ import {
   viewportRequirements,
   withoutUndefined,
 } from './checks.js'
-import type { Tolerance, Viewport } from './define-config.js'
+import type { PageErrorCheck, Tolerance, Viewport } from './define-config.js'
 
 /**
  * A mode's definition: the globals and the viewport it sets.
@@ -75,6 +77,14 @@ export interface StoryOptions {
    * Whether to leave the story out.
    */
   disable?: boolean
+  /**
+   * What a page error that isn't expected does to the story's snapshots, in place of the config's.
+   */
+  pageErrors?: PageErrorCheck
+  /**
+   * The page errors the story raises on purpose, besides the config's.
+   */
+  expectedPageErrors?: (string | RegExp)[]
 }
 
 /**
@@ -231,6 +241,8 @@ const storyKeys = {
   masks: checkMasks,
   tolerance: checkTolerance,
   disable: optionalKey({ text: 'true or false', accepts: (value) => typeof value === 'boolean' }),
+  pageErrors: optionalKey(pageErrorsRequirement),
+  expectedPageErrors: optional(checkExpectedPageErrors),
   wait: orNull({
     text: "a function that takes the story's context, or null to turn an inherited one off",
     accepts: (value) => typeof value === 'function',

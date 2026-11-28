@@ -112,7 +112,29 @@ describe('optionsEncoderSource', () => {
     ['a Date by its class', 'new Date(0)', encodedInstance('Date')],
     ['a class instance by its class', 'new (class Mask {})()', encodedInstance('Mask')],
     ['a Map by its class', 'new Map()', encodedInstance('Map')],
-    ['a regular expression by its class', '/x/', encodedInstance('RegExp')],
+    ['a regular expression by its source and flags', '/a\\/b+/gi', { kind: 'regexp', source: 'a\\/b+', flags: 'gi' }],
+    ['a regular expression without flags', 'new RegExp("x")', { kind: 'regexp', source: 'x', flags: '' }],
+    [
+      'an instance of a class that extends RegExp as a regular expression',
+      'new (class Pattern extends RegExp {})("x", "y")',
+      { kind: 'regexp', source: 'x', flags: 'y' },
+    ],
+    [
+      'an object that only names itself a RegExp as a plain object',
+      "({ [Symbol.toStringTag]: 'RegExp' })",
+      { kind: 'object', entries: [] },
+    ],
+    [
+      'regular expressions in an array',
+      "['Failed to fetch', /timeout/]",
+      {
+        kind: 'array',
+        items: [
+          { kind: 'string', value: 'Failed to fetch' },
+          { kind: 'regexp', source: 'timeout', flags: '' },
+        ],
+      },
+    ],
     ['an instance of an anonymous class with an empty name', 'new (class {})()', encodedInstance('')],
     [
       'an object whose prototype has no constructor with an empty name',
@@ -121,6 +143,12 @@ describe('optionsEncoderSource', () => {
     ],
   ])('encodes %s', (_what, options, encoding) => {
     expect(encoded(options)).toEqual(encoding)
+  })
+
+  it('encodes a regular expression from another realm by its source and flags', () => {
+    const encode = runInNewContext(`(${optionsEncoderSource})`) as (value: unknown) => unknown
+
+    expect(encode(/x/m)).toEqual({ kind: 'regexp', source: 'x', flags: 'm' })
   })
 
   it('encodes an object or array met again inside itself as Circular', () => {

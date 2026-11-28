@@ -6,21 +6,22 @@ Everything a project sets for a Storybook, a stories file or a story lives in `p
 
 ## Where options live
 
-- **Keys:** `modes`, `viewport`, `element`, `growViewport`, `masks`, `tolerance`, `wait` and `disable`. Any other key exits 2.
+- **Keys:** `modes`, `viewport`, `element`, `growViewport`, `masks`, `tolerance`, `pageErrors`, `expectedPageErrors`, `wait` and `disable`. Any other key exits 2.
 - **Levels:** `preview` for every story of a Storybook, a stories file's meta for that file, and the story.
-- The project's config sits beneath `preview`, with defaults for `tolerance`, `viewport` and `maskColor` only. It holds no masks and no modes.
+- The project's config sits beneath `preview`, with defaults for `tolerance`, `viewport`, `maskColor` and `pageErrors` only, and an `expectedPageErrors` list added to every story's. It holds no masks and no modes.
 - visual-check reads no tags, not even Storybook's `!test`.
 - `play` gets no option. It finishes before the story is ready.
 
 How levels merge, through Storybook's own merging:
 
-| Key                                          | Merge                                                         |
-| -------------------------------------------- | ------------------------------------------------------------- |
-| `modes`                                      | The most specific level's list wins                           |
-| `viewport`                                   | Deep-merges, so a story can set `{ width: 375 }` alone        |
-| `tolerance`                                  | Deep-merges, so a level can set only `color` or only `pixels` |
-| `masks`                                      | Merges by name                                                |
-| `wait`, `element`, `growViewport`, `disable` | The most specific level wins                                  |
+| Key                                                        | Merge                                                                |
+| ---------------------------------------------------------- | -------------------------------------------------------------------- |
+| `modes`                                                    | The most specific level's list wins                                  |
+| `viewport`                                                 | Deep-merges, so a story can set `{ width: 375 }` alone               |
+| `tolerance`                                                | Deep-merges, so a level can set only `color` or only `pixels`        |
+| `masks`                                                    | Merges by name                                                       |
+| `wait`, `element`, `growViewport`, `disable`, `pageErrors` | The most specific level wins                                         |
+| `expectedPageErrors`                                       | The most specific level's list wins, then the config's list is added |
 
 ## The helper
 
@@ -54,7 +55,8 @@ Every story's merged options are checked before any capture. Each of these exits
 - a mode that sets a global the Storybook doesn't declare, which Storybook would silently drop. A global counts as declared when the running Storybook would accept it from the URL: on 9.1 and 10, a key in `initialGlobals` or `globalTypes`;
 - a global value with characters other than letters, digits, spaces, `_` and `-`;
 - a mode that sets a global the story or its meta pins in its own `globals`, because the pinned value wins and the snapshot would equal the default capture;
-- a `pixels` value that isn't a whole number of 0 or more, or a string from `'0%'` to `'100%'`.
+- a `pixels` value that isn't a whole number of 0 or more, or a string from `'0%'` to `'100%'`;
+- an `expectedPageErrors` entry that's an empty string, which would match every page error, or a regular expression Node.js can't run, such as one with a syntax the browser knows and Node.js doesn't yet.
 
 ## Modes
 
@@ -120,6 +122,63 @@ Every story's merged options are checked before any capture. Each of these exits
 - `tolerance: { color, pixels }` is the same object in the config, `preview`, a meta and a story. Its units and rules are in [Visual diff](09-visual-diff.md).
 - Retries and `update`'s stability checks use each story's own tolerance.
 
+## Page errors
+
+A snapshot whose page raised page errors is compared or written as usual, and has page errors besides. By default `test` fails on them ([ADR 0013](../adr/0013-page-errors-fail-test-without-breaking-the-story.md)).
+
+- **What counts:** a `console.error`, an uncaught error, an unhandled rejection, or a load from the Storybook's origin that failed at the network level or got an HTTP status of 400 or more ([Page error](../../GLOSSARY.md)).
+  - A response a service worker built, such as MSW's, counts like one from the server.
+  - `console.warn` and lower don't count. Neither do loads from other origins.
+- **Which loads:** every load of the snapshot in the run, retries and `update`'s loads included, each page error once. Each mode is its own snapshot, with its own page errors.
+- **Outcome:** page errors never change a snapshot's status. A broken story keeps its reason, and its entry lists its page errors too.
+- A snapshot the run didn't capture, such as a missing baseline in `test`, has none.
+
+### `pageErrors`
+
+- `'fail'`, the default: listed, and `test` exits 1 when any snapshot has a page error that isn't expected, even when every snapshot passed. `update` still writes the baseline, lists them and doesn't fail on them.
+- `'warn'`: listed, never fails a run. For a project moving over.
+- `'off'`: page errors aren't checked or listed, and no entry goes stale.
+- The config sets the default. `preview`, a meta or a story overrides it, and the most specific level wins.
+
+### `expectedPageErrors`
+
+- A list of strings and regular expressions. A page error an entry matches is expected: it isn't listed and doesn't count against the snapshot.
+- **Matching** is against the page error's text: the message for a `console.error`, an uncaught error or a rejection, and the full URL for a load.
+  - The message is cut to 500 characters. A `console.error`'s arguments are joined by spaces, and an error, thrown, rejected or logged, is its stack, whose first line is `Name: message`. So a regular expression anchored at the message's end with `$` doesn't match an error.
+  - A string matches a text that contains it.
+  - A regular expression matches a text it finds a match in. A `g` flag has no effect, and a `y` flag matches only at the text's start.
+- **Merging:** Storybook replaces arrays, so a story's list replaces its meta's or `preview`'s rather than adding to it. The config's list is always added. So put the entries every story needs in the config, and repeat a meta's entries in a story that sets its own list.
+- **Stale entries:** a story's own entry that matched none of a snapshot's page errors is a warning in its entry, never a failure, so an error-state story that stopped erroring is noticed.
+  - The config's entries never go stale, since most stories raise none of them.
+  - After Storybook merges the levels, a meta's or `preview`'s entries count as the story's own. An entry in `preview` goes stale on every story that doesn't raise it: put it in the config.
+  - Each snapshot checks its own, so an entry only one mode raises is stale in the others.
+  - A broken snapshot has none, since it may not have got as far as raising them.
+
+### An error-state story
+
+A story that shows a failed request declares the error it raises on purpose. With [MSW](https://mswjs.io) through `msw-storybook-addon`, and `mswLoader` in `preview`'s `loaders`:
+
+```tsx
+import { HttpResponse, http } from 'msw'
+import { visualCheck } from '../.storybook/visual-check'
+
+export const LoadFailed = {
+  parameters: {
+    msw: {
+      handlers: [http.get('/api/orders', () => HttpResponse.json({ message: 'Server error' }, { status: 500 }))],
+    },
+    ...visualCheck({
+      // The mocked 500 is what this story shows. The app also logs it.
+      expectedPageErrors: [/\/api\/orders/, 'Could not load orders'],
+    }),
+  },
+}
+```
+
+- The browser reports the mocked 500 as a failed load whose text is its URL, so `/\/api\/orders/` matches it.
+- When the app logs the failure with `console.error`, that message is a page error too. The second entry matches it.
+- If the story stops erroring, both entries go stale, and the report says so.
+
 ## `wait`
 
 - The `wait` hook is described in [Readiness and stability](06-readiness-and-stability.md).
@@ -155,8 +214,8 @@ Combined snapshots aren't deferred: they're removed from the design. Stories lay
 
 ## Sources
 
-- [Per-story options][37], [Reading per-story options][46], [Remote content that differs between machines][35], [Late network requests after storyFinished][25], [Combined snapshots and network paths in v1][47], [Storybook 9 floor and Storybook 11][48], [Config file shape and init wizard][38], [Feature and config landscape][6].
-- [ADR 0001](../adr/0001-baseline-key-excludes-platform.md), [ADR 0004](../adr/0004-per-story-options-in-storybook-parameters.md).
+- [Per-story options][37], [Reading per-story options][46], [Remote content that differs between machines][35], [Late network requests after storyFinished][25], [Combined snapshots and network paths in v1][47], [Storybook 9 floor and Storybook 11][48], [Config file shape and init wizard][38], [Feature and config landscape][6], [Page errors][177].
+- [ADR 0001](../adr/0001-baseline-key-excludes-platform.md), [ADR 0004](../adr/0004-per-story-options-in-storybook-parameters.md), [ADR 0013](../adr/0013-page-errors-fail-test-without-breaking-the-story.md).
 - Decided while writing this PRD: what the helper writes for modes, that a mode name means one thing inside a Storybook, and that a mode can't set the timezone, locale or colour scheme.
 
 [6]: https://github.com/visual-check/visual-check/issues/6
@@ -167,3 +226,4 @@ Combined snapshots aren't deferred: they're removed from the design. Stories lay
 [46]: https://github.com/visual-check/visual-check/issues/46
 [47]: https://github.com/visual-check/visual-check/issues/47
 [48]: https://github.com/visual-check/visual-check/issues/48
+[177]: https://github.com/visual-check/visual-check/issues/177

@@ -129,6 +129,8 @@ describe('runCli test report', () => {
       details: null,
       hints: [],
       console: [],
+      pageErrors: [],
+      staleExpectedPageErrors: [],
       baseline: '.visual-check/baselines/b.png',
       images: {
         baseline: 'images/web/b.baseline.png',

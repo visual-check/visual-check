@@ -269,7 +269,12 @@ describe('checkStory', () => {
 
   it("gives each entry as the report does, with the config's folder as its baseline's root", async () => {
     const { project, url } = await createRun(['a'])
-    const { options } = fakeLaunch({ a: { consoleMessages: [{ kind: 'console.warn', text: 'careful' }] } })
+    const { options } = fakeLaunch({
+      a: {
+        consoleMessages: [{ kind: 'console.warn', text: 'careful' }],
+        pageErrors: [{ kind: 'console.error', text: 'boom' }],
+      },
+    })
     const outcome = checkedOf(await checkStory(checkOf(project, url, options).check))
 
     expect(outcome.snapshots).toEqual([
@@ -290,6 +295,8 @@ describe('checkStory', () => {
         details: null,
         hints: [],
         console: [{ level: 'warn', text: 'careful' }],
+        pageErrors: [{ kind: 'console.error', text: 'boom', severity: 'fail' }],
+        staleExpectedPageErrors: [],
         baseline: '.visual-check/baselines/a.png',
         images: { baseline: null, snapshot: 'images/web/a.snapshot.png', diff: null },
       },

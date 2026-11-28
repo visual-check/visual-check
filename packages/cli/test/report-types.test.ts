@@ -5,6 +5,7 @@ import type {
   ReportConsoleLevel,
   ReportDiffReason,
   ReportHint,
+  ReportPageError,
   ReportPixels,
   ReportSelection,
   TestReport,
@@ -60,6 +61,8 @@ describe('the report types exported from the package entry', () => {
       | 'details'
       | 'hints'
       | 'console'
+      | 'pageErrors'
+      | 'staleExpectedPageErrors'
       | 'baseline'
       | 'images'
     >()
@@ -97,6 +100,17 @@ describe('the report types exported from the package entry', () => {
       fallback: string | null
     }>()
     expectTypeOf<TestReport['selection']>().toEqualTypeOf<ReportSelection>()
+  })
+
+  it('lists page errors by kind and severity, and stale expected page errors as written', () => {
+    expectTypeOf<ReportPageError>().toEqualTypeOf<{
+      kind: 'console.error' | 'error' | 'unhandledrejection' | 'load'
+      text: string
+      loadError?: string
+      severity: 'fail' | 'warn'
+    }>()
+    expectTypeOf<TestReportEntry['pageErrors']>().toEqualTypeOf<ReportPageError[]>()
+    expectTypeOf<UpdateReportEntry['staleExpectedPageErrors']>().toEqualTypeOf<string[]>()
   })
 
   it('writes the budget as a count or a percentage', () => {

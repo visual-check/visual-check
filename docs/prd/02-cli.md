@@ -66,7 +66,8 @@ Exit 1 covers:
 - a broken story, including one whose stories file fails to load;
 - a missing baseline;
 - an orphan;
-- an `update` capture that fails or isn't stable.
+- an `update` capture that fails or isn't stable;
+- in `test`, a page error that isn't expected, under `pageErrors: 'fail'`, even when every snapshot passed ([Per-story options](07-per-story-options.md#page-errors)). `update` never fails on page errors.
 
 Broken stories and visual diffs never stop a run: it finishes, then exits 1. The one early stop is a CI `test` whose consistency check finds something. It exits 1 before capturing ([Sharding and the consistency check](12-sharding-and-consistency.md)).
 

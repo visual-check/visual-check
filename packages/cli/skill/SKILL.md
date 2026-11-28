@@ -37,6 +37,7 @@ Read the JSON report on stdout and report:
 - The pass and fail counts, from `counts`.
 - For each failing snapshot, an entry of `snapshots` whose `status` is `differs` or `broken`: its story (`story`), its mode (`mode`, `null` for the default capture), the number of differing pixels (`pixels.differ`) and the visual diff's path, which is `reportDir` joined with `images.diff`. Both are relative to the folder that holds the config.
 - Missing baselines (`status: "missing"`), orphans (`status: "orphan"`) and flaky snapshots (`flaky: true`).
+- Page errors, whatever the entry's `status`: for each entry with a non-empty `pageErrors`, its story, its mode, and each page error's `kind`, `text` (the message, or a load's URL), `loadError` and `severity`. One with `severity: "fail"` makes `test` exit 1 even when every snapshot passed. Also each entry's `staleExpectedPageErrors`, which are warnings.
 - After `update`: every written and deleted path, the `baseline` of each entry whose `status` is `written` or `deleted`.
 - On exit 2: the error as printed, `error.message` in the report, or the script's own message on stderr when stdout is empty.
 - Any Storybook the script reused, from its `Reused Storybook` line on stderr.
@@ -48,9 +49,10 @@ Never open a snapshot, a baseline or a visual diff. Give their paths instead. Th
 ## When to troubleshoot
 
 - Always for broken stories.
+- Always for page errors with `severity: "fail"`.
 - For visual diffs, only when your own change can't explain them. Otherwise report them for the user to judge.
 
-While you troubleshoot a broken story, read its entry's console messages (`console`) and its `details`.
+While you troubleshoot a broken story, read its entry's console messages (`console`), its page errors (`pageErrors`) and its `details`.
 
 ## Fixes to offer, in this order
 
@@ -62,8 +64,13 @@ While you troubleshoot a broken story, read its entry's console messages (`conso
    - `too-tall`: `element`, or a smaller viewport;
    - a full-page snapshot whose `100vh` sections stretch to the page's height: `growViewport: false`, which keeps the viewport's height and paints fixed elements where they sit in it;
    - a grid that's too wide (`grid-too-wide`) or too tall: the story to fix, for example by splitting the grid into several stories.
-3. **The remote-content hint** (a `hints` entry of kind `remote-content`), **or `update`'s remote-content warning:** serve the image from Storybook, then mock it with MSW, then mask it by host.
-4. **A flaky snapshot, or a story that moves:** a mask by selector for timers, spinners and skeletons, or a `wait` hook.
+3. **A page error** (an entry of `pageErrors`), by its `kind` and `text`:
+   - a `console.error`, an uncaught error (`error`) or an unhandled rejection: the project's code to fix, so the story no longer raises it;
+   - a failed load (`load`), whose `text` is the URL and `loadError` its HTTP status or network error: the file or the request to fix, or a mock for a request the story needs;
+   - a page error the story raises on purpose, such as an error-state story's mocked error response: an `expectedPageErrors` entry on that story, a string the text contains or a regular expression;
+   - a stale entry (`staleExpectedPageErrors`): the story no longer raises that page error. Remove the entry, or fix the story when it should still raise it.
+4. **The remote-content hint** (a `hints` entry of kind `remote-content`), **or `update`'s remote-content warning:** serve the image from Storybook, then mock it with MSW, then mask it by host.
+5. **A flaky snapshot, or a story that moves:** a mask by selector for timers, spinners and skeletons, or a `wait` hook.
 
 Options go in `parameters` through the `visualCheck` helper the project exports from `visual-check.ts` in each Storybook's config folder: on a story, on a stories file's meta, or in `preview` for every story.
 
@@ -83,6 +90,8 @@ export const Default = {
       element: '#storybook-root > *',
       // A smaller viewport, in CSS pixels.
       viewport: { width: 375, height: 667 },
+      // Page errors the story raises on purpose, such as a mocked error response: a string or a regular expression.
+      expectedPageErrors: [/\/api\/orders/],
     }),
   },
 }
@@ -92,3 +101,4 @@ export const Default = {
 
 - Propose each fix with its snippet, and apply it only once the user agrees.
 - Never raise tolerance, disable a story or run `update` to make a failure pass without the user's explicit OK.
+- Never set `pageErrors` to `'warn'` or `'off'`, or declare an expected page error the story doesn't raise on purpose, to make a failure pass without the user's explicit OK.

@@ -1,8 +1,10 @@
 import { BaselineError } from '../baselines/baseline-error.js'
 import type { BrokenStory, StoryCapture, StoryHosts, StoryToCapture } from '../capture/capture-session.js'
-import type { ConsoleMessage } from '../capture/driver/driver.js'
+import { type ConsoleMessage, eachPageErrorOnce, type PageError } from '../capture/driver/driver.js'
 import type { StoryMask } from '../capture/prepare-capture.js'
 import type { StoryOptions } from '../config/story-options.js'
+import { type JudgedPageError, judgePageErrors } from '../page-errors/judge-page-errors.js'
+import type { PageErrorPolicy } from '../page-errors/page-error-policy.js'
 import type { ReportImages } from '../report/report-document.js'
 import { storyUrlOf } from '../storybook/read-stories.js'
 import {
@@ -32,7 +34,8 @@ export type ReportedComparison = Pick<
  * One snapshot's status, the text its line ends with, how many captures it took and, for a captured snapshot, how long
  * Storybook's `completing` render step took and, for `update`, the hosts its story reaches. It also carries what the
  * report lists of it: the comparison that differed, why it broke, the hosts a hint names, the console messages and the
- * images of the listed capture, and why `update` wrote it.
+ * images of the listed capture, and why `update` wrote it. It also lists the page errors of every load of it that aren't
+ * expected, and the story's expected page errors that went stale.
  */
 export interface SnapshotResult {
   /**
@@ -49,6 +52,19 @@ export interface SnapshotResult {
    * own retries of a story that navigates away aren't counted.
    */
   attempts: number
+  /**
+   * The page errors of every load of the snapshot in the run that no expected page error matches, each once, in the
+   * order first seen, with the severity its `pageErrors` gives them: `test`'s first capture and retries, `update`'s
+   * loads, broken or not, and the capture session's own retries of a story that navigates away. None for a snapshot
+   * that wasn't captured or whose `pageErrors` is `'off'`. They never change its status.
+   */
+  pageErrors: JudgedPageError[]
+  /**
+   * The story's own expected page errors that matched none of the snapshot's page errors, as written, such as
+   * `"Failed to fetch"` or `/timeout/i`. None for a snapshot that wasn't captured or is broken, or whose `pageErrors`
+   * is `'off'`.
+   */
+  staleExpectedPageErrors: string[]
   /**
    * How long Storybook's `completing` render step took for the story, in ms, on its first load for `update`.
    * `undefined` for a story that wasn't captured, or whose page didn't see the step.
@@ -95,6 +111,11 @@ export interface SnapshotResult {
    */
   writtenFor?: 'missing' | 'differs' | 'within-tolerance'
 }
+
+/**
+ * A snapshot's result before the page errors of its loads are gathered and judged onto it.
+ */
+export type UnjudgedResult = Omit<SnapshotResult, 'pageErrors' | 'staleExpectedPageErrors'>
 
 /**
  * What a broken snapshot's result keeps besides its broken story: how many captures it took and the console messages
@@ -154,6 +175,42 @@ export class SnapshotDecodeError extends Error {
 export type CaptureStory = (story: StoryToCapture, started?: () => void) => Promise<StoryCapture>
 
 /**
+ * Gives the result of a snapshot that took no capture: no page errors, and no expected page error gone stale.
+ */
+export function withNoPageErrors(result: UnjudgedResult): SnapshotResult {
+  return { ...result, pageErrors: [], staleExpectedPageErrors: [] }
+}
+
+/**
+ * Takes a snapshot with `take`, handing it a capture that keeps the page errors of every capture made through it, and
+ * gives the result with those page errors judged by `policy`: every load of the snapshot, each once, in the order
+ * first seen. A broken snapshot's expected page errors don't go stale, and one that took no capture has nothing judged.
+ */
+export async function withJudgedPageErrors(
+  captureStory: CaptureStory,
+  policy: PageErrorPolicy,
+  take: (captureStory: CaptureStory) => Promise<UnjudgedResult>,
+): Promise<SnapshotResult> {
+  const loads: PageError[][] = []
+  const result = await take(async (story, started) => {
+    const capture = await captureStory(story, started)
+
+    loads.push(capture.pageErrors)
+
+    return capture
+  })
+
+  if (loads.length === 0) {
+    return withNoPageErrors(result)
+  }
+
+  return {
+    ...result,
+    ...judgePageErrors(eachPageErrorOnce(...loads), policy, { broken: result.status === 'broken' }),
+  }
+}
+
+/**
  * Gives the masks a story's options set, in the order they are named, with the ones set to `null` dropped. Gives
  * nothing when the options set no masks or set them to `null`.
  */
@@ -183,7 +240,7 @@ export function storyToCaptureOf({ storybook, story, options, globals, viewport 
 /**
  * Gives the result of a snapshot whose baseline is missing, whose detail says to run `update`. It took no capture.
  */
-export function missingResultOf(): SnapshotResult {
+export function missingResultOf(): UnjudgedResult {
   return { status: 'missing', detail: 'missing: no baseline yet; run visual-check update to write it', attempts: 0 }
 }
 
@@ -191,7 +248,7 @@ export function missingResultOf(): SnapshotResult {
  * Gives a broken snapshot's result, whose detail is the broken story's message, with the broken story, how many
  * captures it took and, when given, the console messages of the capture that broke.
  */
-export function brokenResultOf(broken: BrokenStory, { attempts, console }: BrokenAttempts): SnapshotResult {
+export function brokenResultOf(broken: BrokenStory, { attempts, console }: BrokenAttempts): UnjudgedResult {
   return {
     status: 'broken',
     detail: `broken: ${broken.message}`,
