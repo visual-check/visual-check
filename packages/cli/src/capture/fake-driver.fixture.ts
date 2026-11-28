@@ -7,6 +7,7 @@ import type {
   Driver,
   FailedLoad,
   Page,
+  PageError,
   PageSetup,
   PageViewport,
 } from './driver/driver.js'
@@ -133,6 +134,10 @@ export interface FakePageBehaviour extends FakeEvaluation {
    * Answers `failedLoads`. No load of the page failed when it is left out.
    */
   failedLoads?: () => FailedLoad[]
+  /**
+   * Answers `pageErrors`. The page raised no page error when it is left out.
+   */
+  pageErrors?: () => PageError[]
 }
 
 /**
@@ -257,6 +262,7 @@ export class FakeDriver implements Driver {
       requestHosts: () => answers.requestHosts?.() ?? [],
       consoleMessages: () => answers.consoleMessages?.() ?? [],
       failedLoads: () => answers.failedLoads?.() ?? [],
+      pageErrors: () => answers.pageErrors?.() ?? [],
     }
   }
 

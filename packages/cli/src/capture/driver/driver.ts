@@ -276,6 +276,66 @@ export function readConsoleMessage(payload: string): ConsoleMessage | undefined 
 }
 
 /**
+ * How many page errors a page keeps: the first ones.
+ */
+export const keptPageErrors = 50
+
+/**
+ * A page error: a `console.error`, an uncaught error or an unhandled rejection a page raised, or a load of a file from
+ * its document's origin that failed at the network level or got an HTTP error status. See GLOSSARY.md.
+ *
+ * @public
+ */
+export interface PageError {
+  /**
+   * `console.error`, an uncaught error (`error`), an unhandled rejection (`unhandledrejection`), or a load of a file
+   * (`load`).
+   */
+  kind: 'console.error' | 'error' | 'unhandledrejection' | 'load'
+  /**
+   * The message, up to 500 characters, or a load's full URL. Expected page errors are matched against it.
+   */
+  text: string
+  /**
+   * A load's network error, such as `net::ERR_EMPTY_RESPONSE`, or its HTTP status, such as `HTTP 404`. Only on a load.
+   */
+  loadError?: string
+}
+
+/**
+ * Gives the page error a console message or error is, the same kind and text, or undefined for a message that's none:
+ * a `console.debug`, `console.info`, `console.log` or `console.warn`.
+ */
+export function pageErrorOf(message: ConsoleMessage): PageError | undefined {
+  const { kind, text } = message
+
+  return kind === 'console.error' || kind === 'error' || kind === 'unhandledrejection' ? { kind, text } : undefined
+}
+
+/**
+ * Says whether two page errors are the same one: the same kind, text and load error.
+ */
+function isSamePageError(one: PageError, other: PageError): boolean {
+  return one.kind === other.kind && one.text === other.text && one.loadError === other.loadError
+}
+
+/**
+ * Gives the page errors of every list, each once, in the order first seen: a page error the same as one before it, in
+ * its kind, text and load error, is left out.
+ */
+export function eachPageErrorOnce(...lists: readonly (readonly PageError[])[]): PageError[] {
+  const once: PageError[] = []
+
+  for (const error of lists.flat()) {
+    if (!once.some((kept: PageError) => isSamePageError(kept, error))) {
+      once.push(error)
+    }
+  }
+
+  return once
+}
+
+/**
  * A load of a file that failed at the network level on a page.
  *
  * @public
@@ -330,8 +390,14 @@ export interface FailedLoad {
  * MSW's mocks are, doesn't count, and fonts, stylesheets, images and scripts never do. A page that doesn't watch turns
  * on no request reporting and attaches to no service worker, so it costs nothing.
  *
- * Every page keeps the loads of its document's origin that failed at the network level, which `failedLoads` gives. The
- * browser's log reports only problems, so watching it costs a page nothing, unlike watching requests.
+ * Every page keeps its page errors, which `pageErrors` gives, and the loads of its document's origin that failed at the
+ * network level, which `failedLoads` gives. Both read loads from the browser's log, which reports only problems, so
+ * watching it costs a page nothing, unlike watching requests: no page turns on request reporting for them. The log
+ * reports an error status a service worker's own response gives just as it reports a server's, so an error response
+ * MSW mocks is a page error. Probed on 2026-11-28 with Chromium 157.0.8103.78's headless shell: a 404 or 500 response
+ * a worker built, to a `fetch` and to an `<img>`, is logged once, at the `error` level, with the full URL, as
+ * `Failed to load resource: the server responded with a status of 404 ()`, with no status text where a server's
+ * response gives one, such as `(Not Found)`.
  *
  * @public
  */
@@ -413,6 +479,17 @@ export interface Page {
    * kept after the page can no longer be used too, so a caller reads them once a call failed. Never fails.
    */
   failedLoads: () => FailedLoad[]
+  /**
+   * Gives the first 50 page errors the page raised since the last `goto` started, or since the page opened before any,
+   * each once, in order: the same kind, text and load error count once. The `console.error`, `error` and
+   * `unhandledrejection` messages count as `consoleMessages` takes them in, from the main frame's main world, but in a
+   * list of their own, so no number of other console messages ever crowds one out. A load counts when it failed at
+   * the network level, a cancellation (`net::ERR_ABORTED`) aside, or got an HTTP status of 400 or over, a response a
+   * service worker built included, and was of the origin of the document the main frame showed then, as for
+   * `failedLoads`: a load of another origin never counts. They are kept after the page can no longer be used too, so a
+   * caller reads them once a call failed, before it closes the page. Never fails.
+   */
+  pageErrors: () => PageError[]
   /**
    * Closes the page and its browser context. Every call in flight and every later call fails. Calling it again returns
    * the same promise.

@@ -10,6 +10,7 @@ import {
   BrowserLaunchError,
   type ConsoleMessage,
   type Driver,
+  type PageError,
   type PageSetup,
   type PageViewport,
 } from '../capture/driver/driver.js'
@@ -142,6 +143,10 @@ export interface FakeStory {
    * The console messages and errors its page sends. None when not given.
    */
   consoleMessages?: ConsoleMessage[]
+  /**
+   * The page errors its page raised. None when not given.
+   */
+  pageErrors?: PageError[]
   /**
    * Whether the browser exits while capturing it.
    */
@@ -562,6 +567,7 @@ export function fakeDriverOf({
         requestHosts: () => (setup.watchRequests ? (story.requestHosts ?? []) : []),
         consoleMessages: () => [...(story.consoleMessages ?? [])],
         failedLoads: () => [],
+        pageErrors: () => [...(story.pageErrors ?? [])],
       }
     },
     close: async () => {
