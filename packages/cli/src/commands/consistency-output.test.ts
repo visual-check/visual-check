@@ -177,7 +177,8 @@ describe('consistencyOutputOf', () => {
       items: [missingMode, broken, missingDocs],
       results: [missingResultOf(), brokenResultOf(loadFailed, { attempts: 0 }), missingResultOf()].map((result) => ({
         ...result,
-        gatheredPageErrors: [],
+        pageErrors: [],
+        staleExpectedPageErrors: [],
       })),
     })
   })

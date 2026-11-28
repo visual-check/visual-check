@@ -4,6 +4,7 @@ import type { BrokenReason, BrokenStory } from '../capture/capture-session.js'
 import type { ConsoleMessage } from '../capture/driver/driver.js'
 import type { Tolerance } from '../config/define-config.js'
 import type { ResolvedStorybook } from '../config/resolve-config.js'
+import type { JudgedPageError } from '../page-errors/judge-page-errors.js'
 import { displayPathOf } from '../report/display-path.js'
 import type {
   ReportBrokenDetails,
@@ -13,6 +14,7 @@ import type {
   ReportEntryFields,
   ReportHint,
   ReportImages,
+  ReportPageError,
   ReportPixels,
   ReportSize,
   TestReportCounts,
@@ -114,14 +116,19 @@ export type StoryUpdateEntry = ReportEntryFields &
 const noImages: ReportImages = { baseline: null, snapshot: null, diff: null }
 
 /**
- * Whether the report lists a snapshot: anything but a plain pass and a baseline `update` kept, or a flaky pass.
+ * Whether the report lists a snapshot: anything but a plain pass and a baseline `update` kept. A pass is listed when
+ * it's flaky, has page errors or has stale expected page errors. A kept baseline never is, since `update`'s document
+ * has no status for it.
  */
 export function isListed(result: SnapshotResult): boolean {
-  if (result.status === 'passed') {
-    return result.flaky === true
+  switch (result.status) {
+    case 'passed':
+      return result.flaky === true || result.pageErrors.length > 0 || result.staleExpectedPageErrors.length > 0
+    case 'kept':
+      return false
+    default:
+      return true
   }
-
-  return result.status !== 'kept'
 }
 
 /**
@@ -179,6 +186,18 @@ export function detailsOf(broken: BrokenStory): ReportBrokenDetails {
  */
 export function consoleOf(messages: readonly ConsoleMessage[]): ReportConsoleMessage[] {
   return messages.map(({ kind, text }) => ({ level: consoleLevels[kind], text: `${consolePrefixes[kind]}${text}` }))
+}
+
+/**
+ * Gives the report's page errors: each with its kind, text, load error when it's a load's, and severity.
+ */
+function reportPageErrorsOf(errors: readonly JudgedPageError[]): ReportPageError[] {
+  return errors.map(({ kind, text, loadError, severity }) => ({
+    kind,
+    text,
+    ...(loadError === undefined ? {} : { loadError }),
+    severity,
+  }))
 }
 
 /**
@@ -256,6 +275,8 @@ function tailOf(item: PlannedSnapshot, result: SnapshotResult, configFolder: str
     details: result.broken === undefined ? null : detailsOf(result.broken),
     hints: hintsOf(result),
     console: consoleOf(result.console ?? []),
+    pageErrors: reportPageErrorsOf(result.pageErrors),
+    staleExpectedPageErrors: result.staleExpectedPageErrors,
     baseline: displayPathOf(configFolder, baselinePathOf(item.storybook.baselines, item.key)),
     images: result.images ?? noImages,
   }
@@ -274,6 +295,8 @@ function baselineTailOf(path: string, configFolder: string, message: string, ima
     details: null,
     hints: [],
     console: [],
+    pageErrors: [],
+    staleExpectedPageErrors: [],
     baseline: displayPathOf(configFolder, path),
     images,
   }

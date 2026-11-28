@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import type { BrokenStory, StoryCapture } from '../capture/capture-session.js'
 import type { PageError } from '../capture/driver/driver.js'
+import type { JudgedPageError } from '../page-errors/judge-page-errors.js'
+import type { PageErrorPolicy } from '../page-errors/page-error-policy.js'
 import { greyPng, whitePixels } from '../visual-diff/images.fixture.js'
 import { createVisualDiff } from '../visual-diff/visual-diff.js'
 import type { SnapshotToCapture } from './plan-snapshots.js'
@@ -46,6 +48,13 @@ const missingLoad: PageError = { kind: 'load', text: 'http://web.test/missing.js
 const logged: PageError = { kind: 'console.error', text: 'Failed to fetch' }
 
 /**
+ * Gives a page error as listed when it fails the run.
+ */
+function failing(error: PageError): JudgedPageError {
+  return { ...error, severity: 'fail' }
+}
+
+/**
  * The broken story a capture gives when Storybook reports the story finished with an error.
  */
 const brokenStory: BrokenStory = { reason: 'error', message: 'Storybook reported the story finished with an error.' }
@@ -71,10 +80,15 @@ afterEach(() => {
 })
 
 /**
- * Builds the snapshot of story `a`, with a baselines folder of its own holding `baseline` as its baseline when given
- * and nothing when not.
+ * The page error policy of a story that sets no page error options under the default config.
  */
-function snapshotOf(baseline?: Uint8Array): SnapshotToCapture {
+const failOnAll: PageErrorPolicy = { check: 'fail', expected: [], storyExpected: [] }
+
+/**
+ * Builds the snapshot of story `a`, with a baselines folder of its own holding `baseline` as its baseline when given
+ * and nothing when not, judging its page errors by `pageErrorPolicy`.
+ */
+function snapshotOf(baseline?: Uint8Array, pageErrorPolicy = failOnAll): SnapshotToCapture {
   const folder = mkdtempSync(join(tmpdir(), 'visual-check-take-'))
 
   folders.push(folder)
@@ -91,7 +105,7 @@ function snapshotOf(baseline?: Uint8Array): SnapshotToCapture {
     selected: true,
     options: {},
     tolerance: { color: 0.01, pixels: 20 },
-    pageErrorPolicy: { check: 'fail', expected: [], storyExpected: [] },
+    pageErrorPolicy,
     viewport: { width: 10, height: 10, deviceScaleFactor: 1, touch: false },
     globals: {},
   }
@@ -175,14 +189,16 @@ describe('takeSnapshot', () => {
 
     expect(await takeSnapshot(item, captureStoryOf([]), testTools(2))).toMatchObject({
       status: 'broken',
-      gatheredPageErrors: [],
+      pageErrors: [],
+      staleExpectedPageErrors: [],
     })
   })
 
   it('gives a missing baseline it took no capture of no page errors', async () => {
     expect(await takeSnapshot(snapshotOf(), captureStoryOf([]), testTools(2))).toMatchObject({
       status: 'missing',
-      gatheredPageErrors: [],
+      pageErrors: [],
+      staleExpectedPageErrors: [],
     })
   })
 
@@ -191,7 +207,7 @@ describe('takeSnapshot', () => {
 
     expect(await takeSnapshot(snapshotOf(), captureStoryOf(captures), testTools(2, true))).toMatchObject({
       status: 'missing',
-      gatheredPageErrors: [thrown],
+      pageErrors: [failing(thrown)],
     })
   })
 
@@ -200,7 +216,7 @@ describe('takeSnapshot', () => {
 
     expect(await takeSnapshot(snapshotOf(black), captureStoryOf(captures), testTools(2))).toMatchObject({
       status: 'passed',
-      gatheredPageErrors: [thrown],
+      pageErrors: [failing(thrown)],
     })
   })
 
@@ -214,7 +230,7 @@ describe('takeSnapshot', () => {
     expect(await takeSnapshot(snapshotOf(black), captureStoryOf(captures), testTools(3))).toMatchObject({
       status: 'differs',
       attempts: 3,
-      gatheredPageErrors: [thrown, missingLoad, logged],
+      pageErrors: [failing(thrown), failing(missingLoad), failing(logged)],
     })
   })
 
@@ -227,7 +243,7 @@ describe('takeSnapshot', () => {
     expect(await takeSnapshot(snapshotOf(black), captureStoryOf(captures), testTools(2))).toMatchObject({
       status: 'passed',
       flaky: true,
-      gatheredPageErrors: [missingLoad],
+      pageErrors: [failing(missingLoad)],
     })
   })
 
@@ -239,7 +255,7 @@ describe('takeSnapshot', () => {
     ]
     const result = await takeSnapshot(snapshotOf(black), captureStoryOf(captures), testTools(2))
 
-    expect(result.gatheredPageErrors).toEqual([thrown, missingLoad])
+    expect(result.pageErrors).toEqual([failing(thrown), failing(missingLoad)])
   })
 
   it('gives the page errors of a broken first capture', async () => {
@@ -247,7 +263,7 @@ describe('takeSnapshot', () => {
 
     expect(await takeSnapshot(snapshotOf(black), captureStoryOf(captures), testTools(2))).toMatchObject({
       status: 'broken',
-      gatheredPageErrors: [thrown, missingLoad],
+      pageErrors: [failing(thrown), failing(missingLoad)],
     })
   })
 
@@ -261,7 +277,7 @@ describe('takeSnapshot', () => {
     expect(await takeSnapshot(snapshotOf(), captureStoryOf(captures), updateTools)).toMatchObject({
       status: 'written',
       attempts: 3,
-      gatheredPageErrors: [thrown, missingLoad, logged],
+      pageErrors: [failing(thrown), failing(missingLoad), failing(logged)],
     })
   })
 
@@ -274,7 +290,7 @@ describe('takeSnapshot', () => {
 
     expect(await takeSnapshot(snapshotOf(), captureStoryOf(captures), updateTools)).toMatchObject({
       status: 'broken',
-      gatheredPageErrors: [thrown, missingLoad, logged],
+      pageErrors: [failing(thrown), failing(missingLoad), failing(logged)],
     })
   })
 
@@ -283,7 +299,7 @@ describe('takeSnapshot', () => {
 
     expect(await takeSnapshot(snapshotOf(black), captureStoryOf(captures), updateTools)).toMatchObject({
       status: 'kept',
-      gatheredPageErrors: [thrown],
+      pageErrors: [failing(thrown)],
     })
   })
 
@@ -296,7 +312,52 @@ describe('takeSnapshot', () => {
     expect(await takeSnapshot(snapshotOf(), captureStoryOf(captures), updateTools)).toMatchObject({
       status: 'broken',
       attempts: 2,
-      gatheredPageErrors: [thrown, missingLoad],
+      pageErrors: [failing(thrown), failing(missingLoad)],
+    })
+  })
+
+  it("judges the page errors by the snapshot's policy, dropping expected ones and giving stale entries", async () => {
+    const policy: PageErrorPolicy = { check: 'warn', expected: ['Boom', 'Not raised'], storyExpected: ['Not raised'] }
+    const captures = [{ snapshot: threeWhite, pageErrors: [thrown, logged] }]
+
+    expect(await takeSnapshot(snapshotOf(black, policy), captureStoryOf(captures), testTools(2))).toMatchObject({
+      status: 'passed',
+      pageErrors: [{ ...logged, severity: 'warn' }],
+      staleExpectedPageErrors: ['"Not raised"'],
+    })
+  })
+
+  it('gives no stale entries for a broken snapshot', async () => {
+    const policy: PageErrorPolicy = { check: 'fail', expected: ['Not raised'], storyExpected: ['Not raised'] }
+    const captures = [{ broken: brokenStory, pageErrors: [thrown] }]
+
+    expect(await takeSnapshot(snapshotOf(black, policy), captureStoryOf(captures), testTools(2))).toMatchObject({
+      status: 'broken',
+      pageErrors: [failing(thrown)],
+      staleExpectedPageErrors: [],
+    })
+  })
+
+  it('gives no stale entries for a missing baseline it took no capture of', async () => {
+    const policy: PageErrorPolicy = { check: 'fail', expected: ['Not raised'], storyExpected: ['Not raised'] }
+
+    expect(await takeSnapshot(snapshotOf(undefined, policy), captureStoryOf([]), testTools(2))).toMatchObject({
+      status: 'missing',
+      staleExpectedPageErrors: [],
+    })
+  })
+
+  it("lists nothing by the policy's 'off'", async () => {
+    const policy: PageErrorPolicy = { check: 'off', expected: [], storyExpected: ['Not raised'] }
+    const captures = [
+      { snapshot: white, pageErrors: [thrown] },
+      { snapshot: white, pageErrors: [logged] },
+    ]
+
+    expect(await takeSnapshot(snapshotOf(undefined, policy), captureStoryOf(captures), updateTools)).toMatchObject({
+      status: 'written',
+      pageErrors: [],
+      staleExpectedPageErrors: [],
     })
   })
 })

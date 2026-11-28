@@ -281,6 +281,33 @@ export interface ReportConsoleMessage {
 }
 
 /**
+ * A page error of a snapshot that no expected page error matches: a `console.error`, an uncaught error or an unhandled
+ * rejection its page raised, or a load from its Storybook's origin that failed or got an HTTP error status.
+ *
+ * @public
+ */
+export interface ReportPageError {
+  /**
+   * `console.error`, an uncaught error (`error`), an unhandled rejection (`unhandledrejection`), or a load of a file
+   * (`load`).
+   */
+  kind: 'console.error' | 'error' | 'unhandledrejection' | 'load'
+  /**
+   * The message, cut to 500 characters, or a load's full URL.
+   */
+  text: string
+  /**
+   * A load's network error, such as `net::ERR_EMPTY_RESPONSE`, or its HTTP status, such as `HTTP 404`. Only on a load.
+   */
+  loadError?: string
+  /**
+   * `fail` when it fails `test`, by the story's or the config's `pageErrors: 'fail'`; `warn` when it's only listed, by
+   * `pageErrors: 'warn'`.
+   */
+  severity: 'fail' | 'warn'
+}
+
+/**
  * The paths of an entry's images, relative to the report folder, with `/`. `null` for an image the entry has none of.
  *
  * @public
@@ -364,6 +391,18 @@ export interface ReportEntryFields {
    * The console messages of the capture whose images are listed.
    */
   console: ReportConsoleMessage[]
+  /**
+   * The page errors of every load of the snapshot in the run that no expected page error matches, each once, in the
+   * order first seen. They never change its status. Empty for an orphan, a deleted baseline, and a snapshot whose
+   * `pageErrors` is `'off'`.
+   */
+  pageErrors: ReportPageError[]
+  /**
+   * The story's own expected page errors that matched none of the snapshot's page errors, as written: a string as JSON,
+   * such as `"Failed to fetch"`, and a regular expression as its literal, such as `/timeout/i`. A warning, never a
+   * failure. Empty for a broken snapshot, an orphan and a deleted baseline.
+   */
+  staleExpectedPageErrors: string[]
   /**
    * The baseline's path, relative to the config folder, with `/`.
    */

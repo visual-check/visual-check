@@ -11,7 +11,7 @@ import {
   missingResultOf,
   reportedComparisonOf,
   storyToCaptureOf,
-  type UngatheredResult,
+  type UnjudgedResult,
 } from './snapshot-result.js'
 
 /**
@@ -220,7 +220,7 @@ async function brokenFirstResultOf(
   item: SnapshotToCapture,
   first: BrokenCapture,
   writeImages: TestTools['writeImages'],
-): Promise<UngatheredResult> {
+): Promise<UnjudgedResult> {
   const brokenResult = brokenResultOf(first.broken, { attempts: 1, console: first.console })
 
   if (first.image === undefined) {
@@ -240,7 +240,7 @@ async function testMissing(
   item: SnapshotToCapture,
   captureStory: CaptureStory,
   { captureMissing, writeImages }: TestTools,
-): Promise<UngatheredResult> {
+): Promise<UnjudgedResult> {
   if (!captureMissing) {
     return missingResultOf()
   }
@@ -285,7 +285,7 @@ export async function testSnapshot(
   item: SnapshotToCapture,
   captureStory: CaptureStory,
   tools: TestTools,
-): Promise<UngatheredResult> {
+): Promise<UnjudgedResult> {
   const { visualDiff, retries, writeImages } = tools
   const path = baselinePathOf(item.storybook.baselines, item.key)
   const bytes = await readBaseline(path)

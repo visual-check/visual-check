@@ -62,9 +62,15 @@ function itemOf(storybook: ResolvedStorybook, id: string): SnapshotToCapture {
   }
 }
 
-const passed: SnapshotResult = { status: 'passed', detail: '12 ms', attempts: 1, gatheredPageErrors: [] }
+const passed: SnapshotResult = {
+  status: 'passed',
+  detail: '12 ms',
+  attempts: 1,
+  pageErrors: [],
+  staleExpectedPageErrors: [],
+}
 
-const missing: SnapshotResult = { ...missingResultOf(), gatheredPageErrors: [] }
+const missing: SnapshotResult = { ...missingResultOf(), pageErrors: [], staleExpectedPageErrors: [] }
 
 function factsOf(project: string, storybook: ResolvedStorybook, findings: RunFindings): TestReportFacts {
   return {
@@ -264,7 +270,8 @@ describe('updateReportFor', () => {
     status: 'written',
     detail: '',
     attempts: 2,
-    gatheredPageErrors: [],
+    pageErrors: [],
+    staleExpectedPageErrors: [],
     writtenFor: 'missing',
     hosts,
   }
@@ -272,7 +279,8 @@ describe('updateReportFor', () => {
     status: 'kept',
     detail: 'kept · flaky',
     attempts: 2,
-    gatheredPageErrors: [],
+    pageErrors: [],
+    staleExpectedPageErrors: [],
     flaky: true,
     hosts,
   }
@@ -280,7 +288,8 @@ describe('updateReportFor', () => {
     status: 'broken',
     detail: '',
     attempts: 3,
-    gatheredPageErrors: [],
+    pageErrors: [],
+    staleExpectedPageErrors: [],
     broken: { reason: 'unstable', message: "No two of the story's 3 loads agreed." },
   }
 

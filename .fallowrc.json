@@ -151,7 +151,7 @@
         "from": "cli/init",
         "allow": ["cli/agent-skill", "cli/baselines", "cli/config", "cli/container", "cli/docs-site", "cli/storybook"]
       },
-      { "from": "cli/page-errors", "allow": ["cli/config"] },
+      { "from": "cli/page-errors", "allow": ["cli/capture/driver", "cli/config"] },
       { "from": "cli/report", "allow": ["cli/system-error"] },
       { "from": "cli/reporter", "allow": ["cli/report"] },
       { "from": "cli/sharding", "allow": ["cli/baselines", "cli/storybook"] },

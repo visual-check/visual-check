@@ -1,5 +1,11 @@
 import type { PlannedSnapshot } from './plan-snapshots.js'
-import { brokenResultOf, type CaptureStory, type SnapshotResult, withGatheredPageErrors } from './snapshot-result.js'
+import {
+  brokenResultOf,
+  type CaptureStory,
+  type SnapshotResult,
+  withJudgedPageErrors,
+  withNoPageErrors,
+} from './snapshot-result.js'
 import { type TestTools, testSnapshot } from './test-snapshot.js'
 import { type UpdateTools, updateSnapshot } from './update-snapshot.js'
 
@@ -25,7 +31,8 @@ export type SnapshotTools =
 
 /**
  * Takes one snapshot: tests it for `test`, else updates its baseline, gathering the page errors of every capture it
- * asked for. A story whose stories file didn't load is broken, with no capture, no baseline read and no page errors.
+ * asked for and judging them by the snapshot's page error policy. A story whose stories file didn't load is broken,
+ * with no capture, no baseline read and no page errors.
  */
 export async function takeSnapshot(
   item: PlannedSnapshot,
@@ -33,10 +40,10 @@ export async function takeSnapshot(
   tools: SnapshotTools,
 ): Promise<SnapshotResult> {
   if ('broken' in item) {
-    return { ...brokenResultOf(item.broken, { attempts: 0 }), gatheredPageErrors: [] }
+    return withNoPageErrors(brokenResultOf(item.broken, { attempts: 0 }))
   }
 
-  return await withGatheredPageErrors(captureStory, (gathering) =>
+  return await withJudgedPageErrors(captureStory, item.pageErrorPolicy, (gathering) =>
     tools.command === 'test' ? testSnapshot(item, gathering, tools) : updateSnapshot(item, gathering, tools),
   )
 }

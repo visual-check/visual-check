@@ -328,7 +328,7 @@ function updateEndOf(run: SnapshotRun, snapshots: PlannedSnapshots, deleted: rea
 
 /**
  * Gives the exit code: 1 when any snapshot has a failing status for the command, or for `test` when any Storybook's
- * baselines hold an orphan, else 0.
+ * baselines hold an orphan or any snapshot has a page error that fails, whatever its status, else 0.
  */
 function exitCodeOf(
   command: SnapshotRun['command'],
@@ -339,8 +339,11 @@ function exitCodeOf(
     (result) => result !== undefined && failingStatuses[command].includes(result.status),
   )
   const orphaned = command === 'test' && hasOrphans(baselines)
+  const pageErrorsFailed =
+    command === 'test' &&
+    snapshots.results.some((result) => result?.pageErrors.some((error) => error.severity === 'fail') === true)
 
-  return failed || orphaned ? 1 : 0
+  return failed || orphaned || pageErrorsFailed ? 1 : 0
 }
 
 /**
