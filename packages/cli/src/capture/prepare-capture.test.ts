@@ -81,15 +81,17 @@ function boxed(box: FakeBox): object {
 }
 
 /**
- * Builds a `div` whose border box is `box`, with a border `border` wide on every side, whose content reaches `content`
- * wide and tall from its padding box's top left corner, as `scrollWidth` and `scrollHeight` give it, and whose computed
- * style is `styles`.
+ * Builds a `div` whose border box is drawn at `box`, with a border `border` wide on every side, whose content reaches
+ * `content` wide and tall from its padding box's top left corner, as `scrollWidth` and `scrollHeight` give it, and
+ * whose computed style is `styles`. Its layout size, as `offsetWidth` and `offsetHeight` give it, is `layout`, by
+ * default the drawn box's size rounded to whole pixels, as it is with no transform or zoom.
  */
 function spilling(
   box: FakeBox,
   content: { width: number; height: number },
   styles: Record<string, string> = {},
   border = 0,
+  layout = { width: Math.round(box.width), height: Math.round(box.height) },
 ): object {
   return fakeElement('div', {
     box,
@@ -99,6 +101,8 @@ function spilling(
       scrollHeight: content.height,
       clientLeft: border,
       clientTop: border,
+      offsetWidth: layout.width,
+      offsetHeight: layout.height,
     },
   })
 }
@@ -952,6 +956,40 @@ describe('the overflow', () => {
     })
   })
 
+  it('measures the spill in the layout of an element a transform or zoom draws at another size', async () => {
+    const shrunk = spilling({ x: 0, y: 0, width: 95, height: 47.5 }, { width: 100, height: 50 }, {}, 0, {
+      width: 100,
+      height: 50,
+    })
+    const halved = spilling({ x: 0, y: 0, width: 53, height: 28 }, { width: 300, height: 80 }, {}, 3, {
+      width: 106,
+      height: 56,
+    })
+    const { document } = fakeCaptureDocument({ matches: { '#shrunk': [shrunk], '#halved': [halved] } })
+    const page = openPreparation(document)
+
+    expect(await page.prepare({ element: '#shrunk' })).toStrictEqual({
+      outcome: 'ready',
+      box: { x: 0, y: 0, width: 95, height: 48 },
+    })
+    expect(await page.prepare({ element: '#halved' })).toStrictEqual({
+      outcome: 'ready',
+      box: { x: 0, y: 0, width: 53, height: 28 },
+      overflow: { top: 0, right: 99, bottom: 14, left: 0 },
+    })
+  })
+
+  it('gives none across a right-to-left element, whose scrollWidth counts content spilling left', async () => {
+    const element = spilling({ x: 300, y: 0, width: 100, height: 50 }, { width: 180, height: 80 }, { direction: 'rtl' })
+    const { document } = fakeCaptureDocument({ matches: { '#card': [element] } })
+
+    expect(await openPreparation(document).prepare({ element: '#card' })).toStrictEqual({
+      outcome: 'ready',
+      box: { x: 300, y: 0, width: 100, height: 50 },
+      overflow: { top: 0, right: 0, bottom: 30, left: 0 },
+    })
+  })
+
   it("gives how far an element reaches past the page's left and top edges, with the page's scroll", async () => {
     const element = boxed({ x: -20.5, y: -10, width: 100, height: 50 })
     const { document } = fakeCaptureDocument({ matches: { '#card': [element] }, scroll: { x: 5, y: 3 } })
@@ -978,11 +1016,21 @@ describe('the overflow', () => {
     ['its scrollWidth and scrollHeight cannot be read', { scrollWidth: undefined, scrollHeight: undefined }, {}],
     ['its scrollWidth and scrollHeight are text', { scrollWidth: '150', scrollHeight: '80' }, {}],
     ['its border width cannot be read', { clientLeft: undefined, clientTop: undefined }, {}],
+    ['its layout size cannot be read', { offsetWidth: undefined, offsetHeight: undefined }, {}],
+    ['its layout size is 0', { offsetWidth: 0, offsetHeight: 0 }, {}],
     ['its style cannot be read', {}, { stylesThrow: true }],
   ])('gives none for an element when %s', async (_what, properties, parts) => {
     const element = fakeElement('div', {
       box: { x: 0, y: 0, width: 100, height: 50 },
-      properties: { scrollWidth: 150, scrollHeight: 80, clientLeft: 0, clientTop: 0, ...properties },
+      properties: {
+        scrollWidth: 150,
+        scrollHeight: 80,
+        clientLeft: 0,
+        clientTop: 0,
+        offsetWidth: 100,
+        offsetHeight: 50,
+        ...properties,
+      },
       ...parts,
     })
     const { document } = fakeCaptureDocument({ matches: { '#card': [element] } })

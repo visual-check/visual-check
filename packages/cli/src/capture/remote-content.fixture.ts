@@ -40,7 +40,7 @@ export interface FakeBox {
 
 /**
  * Computed style values, by property name, such as `background-image`. A property not listed is `none`, a padding
- * `0px`, `overflow-x` and `overflow-y` `visible`, `visibility` `visible` on an element and its element's on a
+ * `0px`, `overflow-x` and `overflow-y` `visible`, `direction` `ltr`, `visibility` `visible` on an element and its element's on a
  * pseudo-element, which inherits it, and `content` `normal` on an element and `none` on a pseudo-element, as the
  * browser computes them by default.
  */
@@ -464,6 +464,10 @@ function defaultStyle(name: string, pseudoElement: string): string {
 
   if (name === 'visibility' || name === 'overflow-x' || name === 'overflow-y') {
     return 'visible'
+  }
+
+  if (name === 'direction') {
+    return 'ltr'
   }
 
   return name.startsWith('padding-') ? '0px' : 'none'

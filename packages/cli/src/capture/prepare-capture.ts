@@ -139,10 +139,13 @@ export interface PageOverflow {
  *    takes the content's full height, and content left of the page's edge can't be scrolled to. For the element, the
  *    left and top sides are how far its border box, with the page's scroll, reaches past the page's left and top
  *    edges, where its box is cut. The right side is how far its content spills past its border box's right edge,
- *    only when its computed `overflow-x` is `visible`: the content's right edge is its border box's left edge, with
- *    the page's scroll, plus its `clientLeft` and its `scrollWidth`. Both edges are kept within the document's
- *    scrollable area when its size can be read. The bottom side is the same with `overflow-y`, `clientTop` and
- *    `scrollHeight`. Chrome's `scrollWidth` and `scrollHeight` of an element that doesn't clip cover descendants
+ *    only when its computed `overflow-x` is `visible` and its `direction` is `ltr`, as a right-to-left element's
+ *    `scrollWidth` counts content spilling left: the content's right edge is its border box's left edge, with the
+ *    page's scroll, plus its `clientLeft` and its `scrollWidth`. Those are lengths of the element's own layout, so when
+ *    its border box is drawn a whole pixel or more wider or narrower than its `offsetWidth`, as a transform or zoom
+ *    draws it, they're scaled by the drawn width over `offsetWidth`. Both edges are kept within the document's
+ *    scrollable area when its size can be read. The bottom side is the same with `overflow-y`, `clientTop`,
+ *    `scrollHeight` and `offsetHeight`, whatever the direction. Chrome's `scrollWidth` and `scrollHeight` of an element that doesn't clip cover descendants
  *    spilling right or down, transformed or absolutely positioned ones included, but not `position: fixed` ones, the
  *    top layer or a `box-shadow`, and scrollable overflow never reaches left or up, so content spilling left or up
  *    from an element isn't measured. A side counts when it's at least one whole CSS pixel, as Chrome rounds
@@ -284,20 +287,40 @@ export const prepareCaptureFunction = `(context) => {
     return overflowOf({ top: 0, right: scrollWidth - clientWidth, bottom: 0, left: 0 })
   }
 
+  // Whether an element lets its content spill along an axis: its computed overflow on that axis is visible, and, along
+  // x, its direction is ltr, as a right-to-left element's scrollWidth counts content spilling left.
+  const spillsOn = (element, axis) =>
+    computedOf(element, axis === 'x' ? 'overflow-x' : 'overflow-y') === 'visible' &&
+    (axis === 'y' || computedOf(element, 'direction') === 'ltr')
+
+  // How a length in an element's own layout maps to the document along an axis: its border box's drawn extent over its
+  // layout size, offsetWidth or offsetHeight, when they differ by a whole pixel or more, as a transform or zoom makes
+  // them, and 1 otherwise, as the layout size is rounded to whole pixels. Undefined when the layout size can't be read.
+  const scaleOf = (element, axis, extent) => {
+    const layout = numberOf(() => (axis === 'x' ? element.offsetWidth : element.offsetHeight))
+    if (layout === undefined || layout <= 0) {
+      return undefined
+    }
+    return Math.abs(extent - layout) < 1 ? 1 : extent / layout
+  }
+
   // How far an element's content spills past its border box's far edge along an axis, from its border box's near and
-  // far edges in document coordinates, or undefined when the element clips it on that axis or it can't be read. Both
+  // far edges in document coordinates, or undefined when the element doesn't let it spill or it can't be read. The
+  // content's end is clientLeft and scrollWidth past the near edge, or clientTop and scrollHeight, lengths of the
+  // element's own layout, scaled to the document, so a transform or zoom neither makes a spill nor hides one. Both
   // ends are kept within the document's scrollable area, limit, when it's known.
   const spillOf = (element, axis, near, far, limit) => {
-    if (computedOf(element, axis === 'x' ? 'overflow-x' : 'overflow-y') !== 'visible') {
+    if (!spillsOn(element, axis)) {
       return undefined
     }
     const border = numberOf(() => (axis === 'x' ? element.clientLeft : element.clientTop))
     const content = numberOf(() => (axis === 'x' ? element.scrollWidth : element.scrollHeight))
-    if (border === undefined || content === undefined) {
+    const scale = scaleOf(element, axis, far - near)
+    if (border === undefined || content === undefined || scale === undefined) {
       return undefined
     }
     const within = (end) => (limit === undefined ? end : Math.min(end, limit))
-    return within(near + border + content) - within(far)
+    return within(near + (border + content) * scale) - within(far)
   }
 
   // An element's overflow, from its border box in document coordinates, or undefined when no side counts.

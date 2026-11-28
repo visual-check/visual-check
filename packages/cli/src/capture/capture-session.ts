@@ -1201,8 +1201,8 @@ interface CapturedSnapshot {
  * done, and the hosts of the remote content the story shows, from the same search as the host masks. A story whose page
  * shows a grid wider than the viewport, or too tall to capture, is broken before anything is captured, as
  * `gridProblemOf` says. Then one whose capture would cut content its page shows is broken, as `overflowProblemOf` says,
- * unless it sets `allowOverflow: true`; a capture too tall is only found as it's taken, after that. Gives the area the snapshot was captured from beside it, and leaves the story's
- * `captureAgainIf` to the caller. A story that can't be captured comes back as a broken story. Either way it comes with
+ * unless it sets `allowOverflow: true`; a capture too tall is only found as it's taken, after that. Gives the area the
+ * snapshot was captured from beside it, and leaves the story's `captureAgainIf` to the caller. A story that can't be captured comes back as a broken story. Either way it comes with
  * the console messages and errors the page sent, read once the capture is done or the story broke, while the page is
  * still open, and a broken story with the loads of Storybook's files that failed on the page. Rejects only with a
  * `BrowserExitedError`.
@@ -1591,8 +1591,8 @@ export function pageSetupOf(settings: CaptureSettings): PageSetup {
  *
  * A story that asks for it with `imageWhenBroken` and breaks while its page still shows something, for the reasons
  * `error`, `play-threw`, `timeout`, `fonts-not-loaded`, `wait-threw`, `element-missing`, `grid-too-wide` and
- * `overflows`, comes with an image of the full page, captured before the page is closed, unless that capture fails or takes longer than
- * the settings' `brokenImageTimeLimitMs`. A browser exit during it rejects the capture with a `BrowserExitedError`.
+ * `overflows`, comes with an image of the full page, captured before the page is closed, unless that capture fails or
+ * takes longer than the settings' `brokenImageTimeLimitMs`. A browser exit during it rejects the capture with a `BrowserExitedError`.
  *
  * When a story has `captureAgainIf`, each attempt that captured a snapshot calls it with the snapshot, the page left as
  * it is, and captures the same area again at once when it resolves true. A second capture that fails makes the story
