@@ -29,6 +29,14 @@ export type ColorScheme = 'light' | 'dark'
 export type PageErrorCheck = 'fail' | 'warn' | 'off'
 
 /**
+ * What a real network request to a host `silenceHosts` doesn't match does to a snapshot in `test`: `'fail'` lists it
+ * and fails `test`, `'warn'` lists it without failing, and `'off'` doesn't watch the snapshot's requests.
+ *
+ * @public
+ */
+export type RealRequestCheck = 'fail' | 'warn' | 'off'
+
+/**
  * How much a snapshot may differ from its baseline before it fails.
  *
  * @public
@@ -183,8 +191,10 @@ export interface Config {
    */
   retries?: number
   /**
-   * Exact hosts or `*.example.com` patterns. `update`'s end-of-run warnings about requests to these hosts (real network
-   * requests and remote content) stay silent. Defaults to `[]`.
+   * Exact hosts or `*.example.com` patterns, the hosts a story may reach. `update`'s end-of-run warnings about requests
+   * to these hosts (real network requests and remote content) stay silent, and `test` neither fails on nor lists a real
+   * network request to one, whatever `realRequests` says. An exact host matches with or without its port. Defaults to
+   * `[]`.
    */
   silenceHosts?: string[]
   /**
@@ -200,6 +210,13 @@ export interface Config {
    * the message's end with `$` doesn't match it. Defaults to `[]`.
    */
   expectedPageErrors?: (string | RegExp)[]
+  /**
+   * What a real network request to a host `silenceHosts` doesn't match does to a snapshot in `test`, which `preview`, a
+   * meta or a story can override: `'fail'` lists it and fails `test`, `'warn'` lists it without failing, and `'off'`
+   * doesn't watch the snapshot's requests. `update` warns about every story's requests whatever it says. Defaults to
+   * `'off'`.
+   */
+  realRequests?: RealRequestCheck
   /**
    * Which changed files select every story or none. Defaults to no globs.
    */

@@ -10,6 +10,7 @@ import {
 import { countsLineOf, orphanLabelOf } from './counts-line.js'
 import { durationOf } from './duration.js'
 import { pageErrorsBlockOf } from './page-errors-block.js'
+import { realRequestsBlockOf } from './real-requests-block.js'
 
 /**
  * What `test`'s end block needs besides the report.
@@ -135,6 +136,14 @@ function testPageErrorsBlockOf(report: TestReport): string[] {
 }
 
 /**
+ * Lists the snapshots that have real network requests, whatever their status, in the report's order, by name, under a
+ * heading that says how many fail the run. Gives no line when none has any.
+ */
+function testRealRequestsBlockOf(report: TestReport): string[] {
+  return realRequestsBlockOf(report.snapshots.map((entry) => ({ ...entry, name: entryNameOf(entry) })))
+}
+
+/**
  * Lists the snapshots that passed on a retry by name under a heading, each indented by two spaces. Gives no line when
  * none did.
  */
@@ -166,8 +175,9 @@ export function testCountsLineOf(counts: TestReportCounts): string {
  * Builds the lines a `test` that captured ends with, from its report: the failures, each snapshot that differs, is
  * broken or missing and each orphan, in the report's order, with the detail of each, the path of its visual diff, its
  * hints and a broken story's last 5 console errors and warnings; then the snapshots with page errors, each with its
- * first 5 page errors and their severity and its stale expected page errors; then the snapshots that passed on a retry;
- * then the counts and how long the run took.
+ * first 5 page errors and their severity and its stale expected page errors; then the snapshots with real network
+ * requests, each with its first 5 hosts and their severity; then the snapshots that passed on a retry; then the counts
+ * and how long the run took.
  *
  * @public
  */
@@ -175,6 +185,7 @@ export function testEndLinesOf(report: TestReport, context: EndBlockContext): st
   return [
     ...failuresBlockOf(report, context),
     ...testPageErrorsBlockOf(report),
+    ...testRealRequestsBlockOf(report),
     ...flakyBlockOf(report),
     `${testCountsLineOf(report.counts)} · ${durationOf(context.elapsedMs)}`,
   ]

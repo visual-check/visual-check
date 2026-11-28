@@ -57,6 +57,7 @@ function itemOf(storybook: ResolvedStorybook, id: string): SnapshotToCapture {
     options: {},
     tolerance: { color: 0.01, pixels: 20 },
     pageErrorPolicy: { check: 'fail', expected: [], storyExpected: [] },
+    realRequestPolicy: { check: 'off', silenceHosts: [] },
     viewport: { width: 1280, height: 720, deviceScaleFactor: 1, touch: false },
     globals: {},
   }
@@ -68,9 +69,10 @@ const passed: SnapshotResult = {
   attempts: 1,
   pageErrors: [],
   staleExpectedPageErrors: [],
+  realRequests: [],
 }
 
-const missing: SnapshotResult = { ...missingResultOf(), pageErrors: [], staleExpectedPageErrors: [] }
+const missing: SnapshotResult = { ...missingResultOf(), pageErrors: [], staleExpectedPageErrors: [], realRequests: [] }
 
 function factsOf(project: string, storybook: ResolvedStorybook, findings: RunFindings): TestReportFacts {
   return {
@@ -272,6 +274,7 @@ describe('updateReportFor', () => {
     attempts: 2,
     pageErrors: [],
     staleExpectedPageErrors: [],
+    realRequests: [],
     writtenFor: 'missing',
     hosts,
   }
@@ -281,6 +284,7 @@ describe('updateReportFor', () => {
     attempts: 2,
     pageErrors: [],
     staleExpectedPageErrors: [],
+    realRequests: [],
     flaky: true,
     hosts,
   }
@@ -290,6 +294,7 @@ describe('updateReportFor', () => {
     attempts: 3,
     pageErrors: [],
     staleExpectedPageErrors: [],
+    realRequests: [],
     broken: { reason: 'unstable', message: "No two of the story's 3 loads agreed." },
   }
 

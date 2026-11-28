@@ -10,7 +10,7 @@ import {
   missingResultOf,
   type SnapshotResult,
   type SnapshotStatus,
-  withNoPageErrors,
+  withNothingJudged,
 } from './snapshot-result.js'
 
 /**
@@ -89,10 +89,10 @@ export function orphanLinesOf(cwd: string, storybooks: readonly StorybookBaselin
 export function consistencyOutputOf({ version, cwd, planned, check }: CheckedPlan): ConsistencyOutput {
   const findings = planned.flatMap((item): { item: PlannedSnapshot; result: SnapshotResult }[] => {
     if ('broken' in item) {
-      return [{ item, result: withNoPageErrors(brokenResultOf(item.broken, { attempts: 0 })) }]
+      return [{ item, result: withNothingJudged(brokenResultOf(item.broken, { attempts: 0 })) }]
     }
 
-    return check.missing.has(item) ? [{ item, result: withNoPageErrors(missingResultOf()) }] : []
+    return check.missing.has(item) ? [{ item, result: withNothingJudged(missingResultOf()) }] : []
   })
   const results = findings.map(({ result }) => result)
   const orphanLines = orphanLinesOf(cwd, check.storybooks)

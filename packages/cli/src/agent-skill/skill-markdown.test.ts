@@ -74,6 +74,8 @@ describe('the SKILL.md template', () => {
     'One with `severity: "fail"` makes `test` exit 1 even when every snapshot passed.',
     'an `expectedPageErrors` entry on that story',
     "Never set `pageErrors` to `'warn'` or `'off'`, or declare an expected page error the story doesn't raise on purpose, to make a failure pass without the user's explicit OK.",
+    'for each entry with a non-empty `realRequests`',
+    "Never set `realRequests` to `'warn'` or `'off'`, or add a host to `silenceHosts`, to make a failure pass without the user's explicit OK.",
   ])('tells the agent: %s', (text) => {
     expect(frontmatter.body).toContain(text)
   })
@@ -96,8 +98,9 @@ describe('the SKILL.md template', () => {
       '1. **Exit 2:**',
       '2. **A broken story',
       '3. **A page error',
-      '4. **The remote-content hint',
-      '5. **A flaky snapshot',
+      '4. **A real network request',
+      '5. **The remote-content hint',
+      '6. **A flaky snapshot',
     ].map((text) => frontmatter.body.indexOf(text))
 
     expect(positions.every((position) => position >= 0)).toBe(true)

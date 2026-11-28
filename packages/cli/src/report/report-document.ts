@@ -340,6 +340,25 @@ export interface ReportPageError {
 }
 
 /**
+ * A host a snapshot's page sent real network requests to in `test`, which the config's `silenceHosts` doesn't match: a
+ * `fetch`, XHR, EventSource or WebSocket request to an origin other than the story's document's, over the network or
+ * passed on by a service worker.
+ *
+ * @public
+ */
+export interface ReportRealRequest {
+  /**
+   * The host, such as `api.example.com` or `127.0.0.1:6007`, with its port when it isn't the scheme's default.
+   */
+  host: string
+  /**
+   * `fail` when it fails `test`, by the story's or the config's `realRequests: 'fail'`; `warn` when it's only listed,
+   * by `realRequests: 'warn'`.
+   */
+  severity: 'fail' | 'warn'
+}
+
+/**
  * The paths of an entry's images, relative to the report folder, with `/`. `null` for an image the entry has none of.
  *
  * @public
@@ -502,7 +521,14 @@ export type TestReportEntry = ReportEntryFields &
          */
         reason: null
       }
-  )
+  ) & {
+    /**
+     * The hosts of the real network requests of every load of the snapshot in the run, each once, in the order first
+     * seen, apart from those `silenceHosts` matches. They never change its status. Empty for an orphan, and for a
+     * snapshot whose `realRequests` is `'off'`, the default.
+     */
+    realRequests: ReportRealRequest[]
+  }
 
 /**
  * An entry of an `update` report, by status.

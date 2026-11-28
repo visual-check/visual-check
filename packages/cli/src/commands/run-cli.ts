@@ -282,15 +282,17 @@ export async function runCli(
  * stories that aren't disabled and the snapshots outside the selection whose baselines are missing, then deletes the
  * orphans of the required Storybooks. A finished `update` ends stderr with a warning for the hosts its stories send
  * real network requests to and the hosts whose remote content they show, grouped by host with the first story IDs of
- * each. The config's `silenceHosts` leaves hosts out. `test` never watches requests. The warning never changes the exit
- * code.
+ * each. The config's `silenceHosts` leaves hosts out. The warning never changes the exit code. `test` watches the
+ * requests of the snapshots whose `realRequests` isn't `'off'` only, and exits 1 on a real network request to a host
+ * `silenceHosts` doesn't match under `'fail'`.
  *
  * Right after the config loads, `test` clears the report folder, `.visual-check/report` beside the config file; one it
  * can't clear exits 2. Every `test` that exits 0 or 1, `test --consistency`, a CI stop and each shard included, then
  * writes `report.json` there and gives the report's path, relative to the folder the CLI runs in, as the report line
  * for stdout. Each of them that captured, so neither `test --consistency` nor a CI stop, ends stdout with its end
- * block, built from the report: its failures, its snapshots with page errors, its flaky snapshots, and its counts with
- * how long the run took, counted from the start of the run by `now`. A `test` that exits 2 with its config found, or named by the config error,
+ * block, built from the report: its failures, its snapshots with page errors, its snapshots with real network
+ * requests, its flaky snapshots, and its counts with how long the run took, counted from the start of the run by
+ * `now`. A `test` that exits 2 with its config found, or named by the config error,
  * replaces the folder with a `report.json` holding only the error, naming the Storybooks where nothing answers, and
  * gives the report line for stderr; with no config found, or when the report folder itself is what failed, nothing is
  * written. With `--reporter json`, stdout then holds the error document alone. `update` never touches the report
@@ -815,8 +817,9 @@ async function clearReportProblemOf(
 
 /**
  * Writes the report of a `test` that exits 0 or 1, then, unless the run stopped after its consistency check, ends
- * stdout with the end block built from the report: the failures, the snapshots with page errors, the flaky snapshots,
- * and the counts with how long the run took. It gives the report's path as the report line for stdout. With `--reporter json` stdout holds the report's
+ * stdout with the end block built from the report: the failures, the snapshots with page errors, the snapshots with
+ * real network requests, the flaky snapshots, and the counts with how long the run took. It gives the report's path as
+ * the report line for stdout. With `--reporter json` stdout holds the report's
  * JSON document alone, the human lines, the end block included, move to stderr, and the report line is for stderr.
  * When the report can't be written, the run stops with exit 2 with what went wrong after its stderr, and no error
  * report is written. An error that is a bug stops it too, after what it printed.

@@ -44,6 +44,7 @@ function itemOf(overrides: Partial<SnapshotToCapture> = {}): SnapshotToCapture {
     options: {},
     tolerance: { color: 0.01, pixels: 20 },
     pageErrorPolicy: { check: 'fail', expected: [], storyExpected: [] },
+    realRequestPolicy: { check: 'off', silenceHosts: [] },
     viewport: { width: 1280, height: 720, deviceScaleFactor: 2, touch: false },
     globals: {},
     ...overrides,
@@ -99,6 +100,8 @@ const entryKeys = [
   'images',
 ]
 
+const testEntryKeys = [...entryKeys, 'realRequests']
+
 const updateEntryKeys = [...entryKeys, 'realRequestHosts', 'remoteContentHosts']
 
 const differsResult: SnapshotResult = {
@@ -107,6 +110,7 @@ const differsResult: SnapshotResult = {
   attempts: 3,
   pageErrors: [],
   staleExpectedPageErrors: [],
+  realRequests: [],
   comparison: pixelsComparison,
   console: [{ kind: 'console.log', text: 'rendered' }],
   images,
@@ -119,6 +123,7 @@ const flakyResult: SnapshotResult = {
   attempts: 3,
   pageErrors: [],
   staleExpectedPageErrors: [],
+  realRequests: [],
   comparison: pixelsComparison,
   console: [],
   images,
@@ -156,6 +161,7 @@ describe('isListed', () => {
         attempts: 1,
         pageErrors: [],
         staleExpectedPageErrors: [],
+        realRequests: [],
         ...(flaky === undefined ? {} : { flaky }),
       })
 
@@ -176,6 +182,7 @@ describe('isListed', () => {
       attempts: 1,
       pageErrors: [],
       staleExpectedPageErrors: [],
+      realRequests: [],
     }
     const pageErrors = [{ kind: 'console.error' as const, text: 'Boom', severity: 'warn' as const }]
 
@@ -208,6 +215,7 @@ describe('testEntryOf', () => {
       staleExpectedPageErrors: [],
       baseline: 'web/baselines/button--primary.png',
       images,
+      realRequests: [],
     })
   })
 
@@ -248,6 +256,7 @@ describe('testEntryOf', () => {
       attempts: 1,
       pageErrors: [],
       staleExpectedPageErrors: [],
+      realRequests: [],
       broken: { reason: 'timeout', message: 'Not ready.', readyTimeoutMs: 10_000, failedLoads },
     }
 
@@ -263,6 +272,7 @@ describe('testEntryOf', () => {
       attempts: 1,
       pageErrors: [],
       staleExpectedPageErrors: [],
+      realRequests: [],
       broken: brokenStory,
     }
 
@@ -279,6 +289,7 @@ describe('testEntryOf', () => {
         { kind: 'load', text: 'http://web.test/api', loadError: 'HTTP 500', severity: 'fail' },
       ],
       staleExpectedPageErrors: ['"gone"', '/timeout/i'],
+      realRequests: [],
     }
     const entry = testEntryOf(itemOf(), result, configFolder)
 
@@ -310,7 +321,15 @@ describe('testEntryOf', () => {
     expect(
       testEntryOf(
         itemOf(),
-        { status: 'passed', detail: '120 ms', attempts: 1, pageErrors: [], staleExpectedPageErrors: [], console: [] },
+        {
+          status: 'passed',
+          detail: '120 ms',
+          attempts: 1,
+          pageErrors: [],
+          staleExpectedPageErrors: [],
+          realRequests: [],
+          console: [],
+        },
         configFolder,
       ),
     ).toMatchObject({
@@ -336,6 +355,7 @@ describe('testEntryOf', () => {
           attempts: 0,
           pageErrors: [],
           staleExpectedPageErrors: [],
+          realRequests: [],
         },
         configFolder,
       ),
@@ -357,6 +377,7 @@ describe('testEntryOf', () => {
       attempts: 1,
       pageErrors: [],
       staleExpectedPageErrors: [],
+      realRequests: [],
       broken: brokenStory,
       console: [{ kind: 'error', text: 'Error: Boom' }],
       images: { baseline: null, snapshot: 'images/web/button--primary.snapshot.png', diff: null },
@@ -377,7 +398,15 @@ describe('testEntryOf', () => {
   it("describes a story whose stories file didn't load, with no attempt and its load error alone", () => {
     const entry = testEntryOf(
       brokenItem,
-      { status: 'broken', detail: '', attempts: 0, pageErrors: [], staleExpectedPageErrors: [], broken: loadFailed },
+      {
+        status: 'broken',
+        detail: '',
+        attempts: 0,
+        pageErrors: [],
+        staleExpectedPageErrors: [],
+        realRequests: [],
+        broken: loadFailed,
+      },
       configFolder,
     )
 
@@ -406,23 +435,37 @@ describe('testEntryOf', () => {
   })
 
   it.each<[string, SnapshotResult]>([
-    ['passed', { status: 'passed', detail: '', attempts: 1, pageErrors: [], staleExpectedPageErrors: [] }],
+    [
+      'passed',
+      { status: 'passed', detail: '', attempts: 1, pageErrors: [], staleExpectedPageErrors: [], realRequests: [] },
+    ],
     ['passed flaky', flakyResult],
     ['differs', differsResult],
-    ['missing', { status: 'missing', detail: '', attempts: 0, pageErrors: [], staleExpectedPageErrors: [] }],
+    [
+      'missing',
+      { status: 'missing', detail: '', attempts: 0, pageErrors: [], staleExpectedPageErrors: [], realRequests: [] },
+    ],
     [
       'broken',
-      { status: 'broken', detail: '', attempts: 0, pageErrors: [], staleExpectedPageErrors: [], broken: loadFailed },
+      {
+        status: 'broken',
+        detail: '',
+        attempts: 0,
+        pageErrors: [],
+        staleExpectedPageErrors: [],
+        realRequests: [],
+        broken: loadFailed,
+      },
     ],
   ])('builds the keys of a %s entry in the order of the document', (_, result) => {
-    expect(Object.keys(testEntryOf(itemOf(), result, configFolder))).toEqual(entryKeys)
+    expect(Object.keys(testEntryOf(itemOf(), result, configFolder))).toEqual(testEntryKeys)
   })
 
   it("rejects an update's result", () => {
     expect(() =>
       testEntryOf(
         itemOf(),
-        { status: 'kept', detail: 'kept', attempts: 1, pageErrors: [], staleExpectedPageErrors: [] },
+        { status: 'kept', detail: 'kept', attempts: 1, pageErrors: [], staleExpectedPageErrors: [], realRequests: [] },
         configFolder,
       ),
     ).toThrow()
@@ -455,8 +498,9 @@ describe('orphanEntryOf', () => {
       staleExpectedPageErrors: [],
       baseline: 'web/baselines/old--story.png',
       images: { baseline: 'images/web/old--story.baseline.png', snapshot: null, diff: null },
+      realRequests: [],
     })
-    expect(Object.keys(entry)).toEqual(entryKeys)
+    expect(Object.keys(entry)).toEqual(testEntryKeys)
   })
 
   it('has no image when its baseline was not copied', () => {
@@ -474,6 +518,7 @@ describe('updateEntryOf', () => {
       attempts: 2,
       pageErrors: [],
       staleExpectedPageErrors: [],
+      realRequests: [],
       writtenFor: 'missing',
       hosts,
       console: [{ kind: 'console.warn', text: 'careful' }],
@@ -513,6 +558,7 @@ describe('updateEntryOf', () => {
       attempts: 3,
       pageErrors: [],
       staleExpectedPageErrors: [],
+      realRequests: [],
       writtenFor: 'differs',
       comparison: pixelsComparison,
       hosts,
@@ -533,7 +579,15 @@ describe('updateEntryOf', () => {
     const unstable: BrokenStory = { reason: 'unstable', message: "No two of the story's 3 loads agreed." }
     const entry = updateEntryOf(
       itemOf(),
-      { status: 'broken', detail: '', attempts: 3, pageErrors: [], staleExpectedPageErrors: [], broken: unstable },
+      {
+        status: 'broken',
+        detail: '',
+        attempts: 3,
+        pageErrors: [],
+        staleExpectedPageErrors: [],
+        realRequests: [],
+        broken: unstable,
+      },
       configFolder,
     )
 
@@ -557,12 +611,21 @@ describe('updateEntryOf', () => {
         attempts: 2,
         pageErrors: [],
         staleExpectedPageErrors: [],
+        realRequests: [],
         writtenFor: 'missing',
       },
     ],
     [
       'broken',
-      { status: 'broken', detail: '', attempts: 0, pageErrors: [], staleExpectedPageErrors: [], broken: loadFailed },
+      {
+        status: 'broken',
+        detail: '',
+        attempts: 0,
+        pageErrors: [],
+        staleExpectedPageErrors: [],
+        realRequests: [],
+        broken: loadFailed,
+      },
     ],
   ])('builds the keys of a %s entry in the order of the document', (_, result) => {
     expect(Object.keys(updateEntryOf(itemOf(), result, configFolder))).toEqual(updateEntryKeys)
@@ -572,7 +635,7 @@ describe('updateEntryOf', () => {
     expect(() =>
       updateEntryOf(
         itemOf(),
-        { status: 'kept', detail: 'kept', attempts: 1, pageErrors: [], staleExpectedPageErrors: [] },
+        { status: 'kept', detail: 'kept', attempts: 1, pageErrors: [], staleExpectedPageErrors: [], realRequests: [] },
         configFolder,
       ),
     ).toThrow()
@@ -586,6 +649,7 @@ describe('updateEntryOf', () => {
       attempts: 2,
       pageErrors: [],
       staleExpectedPageErrors: [],
+      realRequests: [],
       writtenFor: 'within-tolerance',
     }
 
@@ -613,6 +677,7 @@ describe('storyUpdateEntryOf', () => {
       attempts: 2,
       pageErrors: [],
       staleExpectedPageErrors: [],
+      realRequests: [],
       hosts,
       ...fields,
     }
@@ -636,6 +701,7 @@ describe('storyUpdateEntryOf', () => {
       attempts: 3,
       pageErrors: [],
       staleExpectedPageErrors: [],
+      realRequests: [],
       flaky: true,
       hosts,
     }
@@ -658,6 +724,7 @@ describe('storyUpdateEntryOf', () => {
       attempts: 1,
       pageErrors: [],
       staleExpectedPageErrors: [],
+      realRequests: [],
       broken: brokenStory,
     }
 
@@ -703,12 +770,12 @@ describe('deletedEntryOf', () => {
 describe('testCountsOf', () => {
   it('counts each status, flaky passes among the passed, and the orphans', () => {
     const results: SnapshotResult[] = [
-      { status: 'passed', detail: '', attempts: 1, pageErrors: [], staleExpectedPageErrors: [] },
+      { status: 'passed', detail: '', attempts: 1, pageErrors: [], staleExpectedPageErrors: [], realRequests: [] },
       flakyResult,
       differsResult,
-      { status: 'broken', detail: '', attempts: 1, pageErrors: [], staleExpectedPageErrors: [] },
-      { status: 'missing', detail: '', attempts: 0, pageErrors: [], staleExpectedPageErrors: [] },
-      { status: 'missing', detail: '', attempts: 0, pageErrors: [], staleExpectedPageErrors: [] },
+      { status: 'broken', detail: '', attempts: 1, pageErrors: [], staleExpectedPageErrors: [], realRequests: [] },
+      { status: 'missing', detail: '', attempts: 0, pageErrors: [], staleExpectedPageErrors: [], realRequests: [] },
+      { status: 'missing', detail: '', attempts: 0, pageErrors: [], staleExpectedPageErrors: [], realRequests: [] },
     ]
 
     expect(testCountsOf(results, 3)).toStrictEqual({
@@ -725,11 +792,27 @@ describe('testCountsOf', () => {
 describe('updateCountsOf', () => {
   it('counts written, deleted, kept and broken, and the flaky ones written or kept', () => {
     const results: SnapshotResult[] = [
-      { status: 'written', detail: '', attempts: 2, pageErrors: [], staleExpectedPageErrors: [] },
-      { status: 'written', detail: '', attempts: 3, pageErrors: [], staleExpectedPageErrors: [], flaky: true },
-      { status: 'kept', detail: '', attempts: 1, pageErrors: [], staleExpectedPageErrors: [] },
-      { status: 'kept', detail: '', attempts: 2, pageErrors: [], staleExpectedPageErrors: [], flaky: true },
-      { status: 'broken', detail: '', attempts: 3, pageErrors: [], staleExpectedPageErrors: [] },
+      { status: 'written', detail: '', attempts: 2, pageErrors: [], staleExpectedPageErrors: [], realRequests: [] },
+      {
+        status: 'written',
+        detail: '',
+        attempts: 3,
+        pageErrors: [],
+        staleExpectedPageErrors: [],
+        realRequests: [],
+        flaky: true,
+      },
+      { status: 'kept', detail: '', attempts: 1, pageErrors: [], staleExpectedPageErrors: [], realRequests: [] },
+      {
+        status: 'kept',
+        detail: '',
+        attempts: 2,
+        pageErrors: [],
+        staleExpectedPageErrors: [],
+        realRequests: [],
+        flaky: true,
+      },
+      { status: 'broken', detail: '', attempts: 3, pageErrors: [], staleExpectedPageErrors: [], realRequests: [] },
     ]
 
     expect(updateCountsOf(results, 4)).toStrictEqual({ written: 2, deleted: 4, kept: 2, broken: 1, flaky: 2 })

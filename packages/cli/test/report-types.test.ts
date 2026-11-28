@@ -7,6 +7,7 @@ import type {
   ReportHint,
   ReportPageError,
   ReportPixels,
+  ReportRealRequest,
   ReportSelection,
   TestReport,
   TestReportCounts,
@@ -43,7 +44,7 @@ describe('the report types exported from the package entry', () => {
     expectTypeOf<keyof UpdateReport>().toEqualTypeOf<keyof TestReport>()
   })
 
-  it('has the entry fields of the spec, and update adds the two host lists', () => {
+  it('has the entry fields of the spec, test adds its real network requests and update the two host lists', () => {
     expectTypeOf<keyof TestReportEntry>().toEqualTypeOf<
       | 'storybook'
       | 'id'
@@ -65,11 +66,12 @@ describe('the report types exported from the package entry', () => {
       | 'staleExpectedPageErrors'
       | 'baseline'
       | 'images'
+      | 'realRequests'
     >()
     expectTypeOf<Exclude<keyof UpdateReportEntry, keyof TestReportEntry>>().toEqualTypeOf<
       'realRequestHosts' | 'remoteContentHosts'
     >()
-    expectTypeOf<Exclude<keyof TestReportEntry, keyof UpdateReportEntry>>().toEqualTypeOf<never>()
+    expectTypeOf<Exclude<keyof TestReportEntry, keyof UpdateReportEntry>>().toEqualTypeOf<'realRequests'>()
   })
 
   it('lists the statuses and reasons of the spec', () => {
@@ -111,6 +113,11 @@ describe('the report types exported from the package entry', () => {
     }>()
     expectTypeOf<TestReportEntry['pageErrors']>().toEqualTypeOf<ReportPageError[]>()
     expectTypeOf<UpdateReportEntry['staleExpectedPageErrors']>().toEqualTypeOf<string[]>()
+  })
+
+  it("lists a test entry's real network requests by host and severity", () => {
+    expectTypeOf<ReportRealRequest>().toEqualTypeOf<{ host: string; severity: 'fail' | 'warn' }>()
+    expectTypeOf<TestReportEntry['realRequests']>().toEqualTypeOf<ReportRealRequest[]>()
   })
 
   it('writes the budget as a count or a percentage', () => {

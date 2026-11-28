@@ -115,9 +115,10 @@ export interface PageSetup {
    */
   initScript: string
   /**
-   * Whether the page watches the real network requests it makes, for `requestHosts`. Only `update` turns it on, since
-   * watching has a cost: the browser reports every request, and the page attaches to the service workers of its
-   * browser context. A page that doesn't watch turns on no request reporting and attaches to no service worker.
+   * Whether the page watches the real network requests it makes, for `requestHosts`. `update` turns it on for every
+   * page, and `test` only for the snapshots that check real network requests, since watching has a cost: the browser
+   * reports every request, and the page attaches to the service workers of its browser context. A page that doesn't
+   * watch turns on no request reporting and attaches to no service worker.
    */
   watchRequests: boolean
 }

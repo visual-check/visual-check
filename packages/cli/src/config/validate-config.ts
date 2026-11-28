@@ -16,6 +16,7 @@ import {
   optional,
   pageErrorsRequirement,
   type Requirement,
+  realRequestsRequirement,
   toleranceExample,
   toleranceRequirements,
   viewportExample,
@@ -203,6 +204,7 @@ const configKeys = {
   ),
   pageErrors: oneValue(pageErrorsRequirement),
   expectedPageErrors: noPair(checkExpectedPageErrors),
+  realRequests: oneValue(realRequestsRequirement),
   affected: noPair(
     objectOf(
       {

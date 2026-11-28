@@ -40,6 +40,7 @@ function snapshotOf(storybook: ResolvedStorybook, id: string, mode?: string): Pl
     options: {},
     tolerance: { color: 0.01, pixels: 20 },
     pageErrorPolicy: { check: 'fail', expected: [], storyExpected: [] },
+    realRequestPolicy: { check: 'off', silenceHosts: [] },
     viewport: { width: 1280, height: 720, deviceScaleFactor: 1, touch: false },
     globals: {},
   }
@@ -179,6 +180,7 @@ describe('consistencyOutputOf', () => {
         ...result,
         pageErrors: [],
         staleExpectedPageErrors: [],
+        realRequests: [],
       })),
     })
   })

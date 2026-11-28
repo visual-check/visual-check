@@ -4,6 +4,7 @@ import type { OptionsRequest, StorybookOptionsRead } from '../capture/read-optio
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
 import type { StoryOptions } from '../config/story-options.js'
 import { pageErrorPolicyOf } from '../page-errors/page-error-policy.js'
+import { realRequestPolicyOf } from '../real-network-requests/real-request-policy.js'
 import type { FileOptions } from '../storybook/options-read.js'
 import type { Story } from '../storybook/read-stories.js'
 import { type PlannedSnapshot, planSnapshots } from './plan-snapshots.js'
@@ -104,7 +105,8 @@ const fixLine =
 const disableIssue = 'visualCheck.disable: must be true or false. Got 1.'
 
 /**
- * The config most cases plan with: its readyTimeout, its viewport, its tolerance, and the defaults for page errors.
+ * The config most cases plan with: its readyTimeout, its viewport, its tolerance, and the defaults for page errors and
+ * real network requests.
  */
 const config = {
   readyTimeout: 5_000,
@@ -112,12 +114,22 @@ const config = {
   tolerance: { color: 0.01, pixels: 20 },
   pageErrors: 'fail',
   expectedPageErrors: [],
-} satisfies Pick<ResolvedConfig, 'readyTimeout' | 'viewport' | 'tolerance' | 'pageErrors' | 'expectedPageErrors'>
+  realRequests: 'off',
+  silenceHosts: [],
+} satisfies Pick<
+  ResolvedConfig,
+  'readyTimeout' | 'viewport' | 'tolerance' | 'pageErrors' | 'expectedPageErrors' | 'realRequests' | 'silenceHosts'
+>
 
 /**
  * The page error policy of a story whose options set neither `pageErrors` nor `expectedPageErrors`, under `config`.
  */
 const defaultPageErrorPolicy = { check: 'fail', expected: [], storyExpected: [] }
+
+/**
+ * The real network request policy of a story whose options don't set `realRequests`, under `config`.
+ */
+const defaultRealRequestPolicy = { check: 'off', silenceHosts: [] }
 
 /**
  * Builds the planned default capture of a story with the given options, at the config's tolerance under the story's,
@@ -145,6 +157,7 @@ function defaultCaptureOf(
     options,
     tolerance,
     pageErrorPolicy: pageErrorPolicyOf(config, options),
+    realRequestPolicy: realRequestPolicyOf(config, options),
     viewport,
     globals: {},
   }
@@ -695,6 +708,7 @@ describe('planSnapshots modes', () => {
         options,
         tolerance: config.tolerance,
         pageErrorPolicy: defaultPageErrorPolicy,
+        realRequestPolicy: defaultRealRequestPolicy,
         viewport: config.viewport,
         globals: { theme: 'dark', density: 2, animated: false },
       },
@@ -707,6 +721,7 @@ describe('planSnapshots modes', () => {
         options,
         tolerance: config.tolerance,
         pageErrorPolicy: defaultPageErrorPolicy,
+        realRequestPolicy: defaultRealRequestPolicy,
         viewport: { width: 375, height: 667, deviceScaleFactor: 2, touch: true },
         globals: {},
       },
@@ -800,6 +815,26 @@ describe('planSnapshots modes', () => {
         },
       ],
       ['b', { check: 'off', expected: ['ResizeObserver', /timeout/], storyExpected: [] }],
+    ])
+  })
+
+  it("gives each snapshot the story's realRequests over the config's and the config's silenceHosts, a mode sharing the story's", async () => {
+    const plan = await planSnapshots(
+      [allSelected(web, [storyOf('a'), storyOf('b')])],
+      readerOf({ a: { realRequests: 'fail', modes: { dark } } }).read,
+      { ...config, realRequests: 'warn', silenceHosts: ['*.example.com'] },
+    )
+    const snapshots = 'snapshots' in plan ? plan.snapshots : expect.fail(`The plan has a problem: ${plan.problem}`)
+
+    expect(
+      snapshots.map(({ key, ...snapshot }) => [
+        key,
+        'realRequestPolicy' in snapshot ? snapshot.realRequestPolicy : null,
+      ]),
+    ).toEqual([
+      ['a', { check: 'fail', silenceHosts: ['*.example.com'] }],
+      ['a.dark', { check: 'fail', silenceHosts: ['*.example.com'] }],
+      ['b', { check: 'warn', silenceHosts: ['*.example.com'] }],
     ])
   })
 

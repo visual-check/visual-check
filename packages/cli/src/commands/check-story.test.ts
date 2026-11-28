@@ -299,6 +299,7 @@ describe('checkStory', () => {
         staleExpectedPageErrors: [],
         baseline: '.visual-check/baselines/a.png',
         images: { baseline: null, snapshot: 'images/web/a.snapshot.png', diff: null },
+        realRequests: [],
       },
     ])
   })

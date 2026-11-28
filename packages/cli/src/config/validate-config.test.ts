@@ -94,6 +94,7 @@ describe('the config object', () => {
       silenceHosts: ['fonts.example.com', '*.cdn.example.com'],
       pageErrors: 'warn',
       expectedPageErrors: ['Failed to fetch', /ResizeObserver/i],
+      realRequests: 'fail',
       affected: { selectAll: ['package.json'], ignore: ['**/*.md'] },
     })
   })
@@ -142,7 +143,7 @@ describe('the config object', () => {
   it('reports an unknown key, listing the known ones', () => {
     expect(issuesOf(withRoot({ browser: 'firefox' }))).toEqual([
       'browser: unknown key. Known keys: storybooks, platform, image, tolerance, viewport, maskColor, timezone, ' +
-        'locale, colorScheme, workers, readyTimeout, retries, silenceHosts, pageErrors, expectedPageErrors, affected.',
+        'locale, colorScheme, workers, readyTimeout, retries, silenceHosts, pageErrors, expectedPageErrors, realRequests, affected.',
     ])
   })
 
@@ -403,6 +404,7 @@ describe('{ local, ci } on a key that takes one value', () => {
     ['silenceHosts', withRoot({ silenceHosts: { ci: ['a.test'] } })],
     ['pageErrors', withRoot({ pageErrors: { local: 'warn', ci: 'fail' } })],
     ['expectedPageErrors', withRoot({ expectedPageErrors: { ci: ['Failed to fetch'] } })],
+    ['realRequests', withRoot({ realRequests: { local: 'warn', ci: 'fail' } })],
     ['storybooks.web.dir', withStorybook({ dir: { local: 'a', ci: 'b' } })],
   ])('reports %s in %j', (path, config) => {
     expect(issuesOf(config)).toEqual([`${path}: ${cantTakePair}`])
@@ -660,6 +662,22 @@ describe('pageErrors', () => {
   it('says what pageErrors takes', () => {
     expect(issuesOf(withRoot({ pageErrors: 'error' }))).toEqual([
       "pageErrors: must be 'fail', 'warn' or 'off'. Got \"error\".",
+    ])
+  })
+})
+
+describe('realRequests', () => {
+  it.each(['fail', 'warn', 'off'])('accepts %s', (realRequests) => {
+    expectValid(withRoot({ realRequests }))
+  })
+
+  it.each(['Fail', 'error', true, null])('rejects %j', (realRequests) => {
+    expect(issuesOf(withRoot({ realRequests }))).toEqual([wrongValue('realRequests')])
+  })
+
+  it('says what realRequests takes', () => {
+    expect(issuesOf(withRoot({ realRequests: 'error' }))).toEqual([
+      "realRequests: must be 'fail', 'warn' or 'off'. Got \"error\".",
     ])
   })
 })

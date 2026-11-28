@@ -34,6 +34,7 @@ function differingSnapshot(stem: string): AddonSnapshot {
       snapshot: `snapshots/web/${stem}.snapshot.png`,
       diff: null,
     },
+    realRequests: [],
   }
 }
 

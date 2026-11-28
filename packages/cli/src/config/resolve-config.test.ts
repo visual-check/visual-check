@@ -68,6 +68,7 @@ describe('resolveConfig defaults', () => {
       silenceHosts: [],
       pageErrors: 'fail',
       expectedPageErrors: [],
+      realRequests: 'off',
       affected: { selectAll: [], ignore: [] },
     })
   })
@@ -85,6 +86,7 @@ describe('resolveConfig defaults', () => {
       silenceHosts: ['*.example.com'],
       pageErrors: 'off',
       expectedPageErrors: ['Failed to fetch', /timeout/i],
+      realRequests: 'warn',
     })
 
     expect(resolved).toMatchObject({
@@ -98,6 +100,7 @@ describe('resolveConfig defaults', () => {
       silenceHosts: ['*.example.com'],
       pageErrors: 'off',
       expectedPageErrors: ['Failed to fetch', /timeout/i],
+      realRequests: 'warn',
     })
   })
 
