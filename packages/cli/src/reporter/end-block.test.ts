@@ -210,7 +210,7 @@ describe('testEndLinesOf', () => {
       '── 1 failure ──',
       'web  a',
       '  differs: 5 differ, 0 allowed',
-      '── 2 snapshots with page errors ──',
+      '── 2 snapshots with page errors, which fail the run ──',
       'web  a',
       '  page error (fail): uncaught error Uncaught Error: boom',
       'web  c  dark',
@@ -230,7 +230,7 @@ describe('testEndLinesOf', () => {
     })
 
     expect(testEndLinesOf(testReportWith([entry]), { ...atConfig, elapsedMs: 0 })).toEqual([
-      '── 1 snapshot with page errors ──',
+      '── 1 snapshot with page errors, which fails the run ──',
       'web  a',
       '  page error (fail): console.error TypeError: Failed to fetch',
       '1 passed · 0 ms',

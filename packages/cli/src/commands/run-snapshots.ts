@@ -416,8 +416,9 @@ function plannedSnapshotsOf(run: SnapshotRun, share: RunShare | undefined, items
 
 /**
  * Lists `update`'s snapshots that have page errors or stale expected page errors, written, kept or broken, in the
- * snapshots' order, by name under a heading that counts them. A kept one is listed here only, as `update`'s report
- * has no entry for it. Gives no line when none has either.
+ * snapshots' order, by name under a heading that counts them, each page error that would fail `test` marked
+ * `fails test`. A kept one is listed here only, as `update`'s report has no entry for it. Gives no line when none has
+ * either.
  */
 function updatePageErrorLinesOf({ items, results }: PlannedSnapshots): string[] {
   return pageErrorsBlockOf(
@@ -426,6 +427,7 @@ function updatePageErrorLinesOf({ items, results }: PlannedSnapshots): string[] 
 
       return result === undefined ? [] : [{ ...result, name: snapshotNameOf(item) }]
     }),
+    'update',
   )
 }
 

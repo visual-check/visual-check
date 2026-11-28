@@ -125,10 +125,13 @@ function failuresBlockOf(report: TestReport, context: EndBlockContext): string[]
 
 /**
  * Lists the snapshots that have page errors or stale expected page errors, whatever their status, in the report's
- * order, by name. Gives no line when none has either.
+ * order, by name, under a heading that says how many fail the run. Gives no line when none has either.
  */
 function testPageErrorsBlockOf(report: TestReport): string[] {
-  return pageErrorsBlockOf(report.snapshots.map((entry) => ({ ...entry, name: entryNameOf(entry) })))
+  return pageErrorsBlockOf(
+    report.snapshots.map((entry) => ({ ...entry, name: entryNameOf(entry) })),
+    'test',
+  )
 }
 
 /**

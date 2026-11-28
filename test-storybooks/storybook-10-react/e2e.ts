@@ -3310,9 +3310,10 @@ function pageErrorsEntryProblems(
 /**
  * With the page errors script in every page, `test` of every page errors story against the committed baselines exits
  * 1, though every snapshot passes, since some have page errors that fail it. Its end block heads the page errors block
- * with how many snapshots have page errors or stale expected ones, and its report counts every snapshot passed and
- * lists those snapshots alone, passed, each with its page errors: kind, text or URL, load error and severity. Of the
- * story with two modes, only the `dark` snapshot is listed, since only that mode's globals raise its error.
+ * with how many snapshots have page errors or stale expected ones and how many of them fail the run, and its report
+ * counts every snapshot passed and lists those snapshots alone, passed, each with its page errors: kind, text or URL,
+ * load error and severity. Of the story with two modes, only the `dark` snapshot is listed, since only that mode's
+ * globals raise its error.
  */
 async function checkPageErrors(expected: Outcomes): Promise<string[]> {
   const outcomes = outcomesMatching(expected, pageErrors.filter)
@@ -3320,11 +3321,15 @@ async function checkPageErrors(expected: Outcomes): Promise<string[]> {
   return await withStorybookServer({ injectIntoIframe: pageErrors.script }, async (server) => {
     const run = await runCli(['test', '--filter', pageErrors.filter.source, '--url', server.url])
     const listed = listedPageErrorsOf(server.url)
+    const failing = Object.values(listed).filter(({ pageErrors }) =>
+      pageErrors.some(({ severity }) => severity === 'fail'),
+    ).length
+    const heading = `── ${Object.keys(listed).length} snapshots with page errors, ${failing} of which fail the run ──`
 
     return [
       ...exitCodeProblems('test', run, 1),
       ...outcomeProblems('test', run.outcomes, outcomes),
-      ...stdoutSaysProblems(run, [`── ${Object.keys(listed).length} snapshots with page errors ──`]),
+      ...stdoutSaysProblems(run, [heading]),
       ...reportProblems(packageDir, (report) => [
         ...reportCountsProblems(report, outcomes, 0),
         ...pageErrorsEntriesProblems(report.snapshots, listed),
@@ -3414,7 +3419,8 @@ async function checkPageErrorsExpectedByConfig(expected: Outcomes): Promise<stri
  * With the page errors script in every page, on a server whose `index.json` lists only `MissingFile`, `update
  * --reporter json` of that story into an empty baselines folder writes its baseline, byte-identical to the committed
  * one, and exits 0, since page errors never fail `update`. Its lines, on standard error, end with the page errors
- * block, and its document lists the story `written`, `missing`, with its page error.
+ * block, whose heading never says it fails the run and whose line marks the page error `fails test`, and its document
+ * lists the story `written`, `missing`, with its page error.
  */
 async function checkPageErrorsUpdate(): Promise<string[]> {
   const storyId = pageErrors.updateStoryId
@@ -3432,7 +3438,7 @@ async function checkPageErrorsUpdate(): Promise<string[]> {
 
       return [
         ...expectedRunProblems('update', lines, { [storyId]: 'written' }),
-        ...stdoutSaysProblems(lines, ['── 1 snapshot with page errors ──']),
+        ...stdoutSaysProblems(lines, ['── 1 snapshot with page errors ──', '  page error (fails test): failed load ']),
         ...updateDocumentProblems(run.stdout, (document) => [
           ...updateCountsProblems(document.counts, { written: 1, deleted: 0, kept: 0, broken: 0, flaky: 0 }),
           ...entryFieldProblems(document.snapshots, storyId, { status: 'written', reason: 'missing' }),

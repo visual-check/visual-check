@@ -2,7 +2,7 @@ import { appendFile, stat } from 'node:fs/promises'
 import type { Report, ReportEntryFields } from '../report/report-document.js'
 import { countsLineOf } from '../reporter/counts-line.js'
 import { failureStatuses, testCountsLineOf } from '../reporter/end-block.js'
-import { pageErrorTextOf } from '../reporter/page-errors-block.js'
+import { pageErrorTextOf, snapshotsWithPageErrorsOf } from '../reporter/page-errors-block.js'
 import { systemReasonOf } from '../system-error/system-reason.js'
 
 /**
@@ -23,7 +23,7 @@ const listedFlakyCount = 100
 /**
  * The most snapshots with page errors the summary names.
  */
-const listedPageErrorsCount = 5
+const listedPageErrorSnapshotCount = 5
 
 /**
  * What starts a summary appended after what the file already holds: a blank line, so its heading is one.
@@ -124,7 +124,7 @@ export function stepSummaryOf(report: Report, budgetBytes: number, localUpdate?:
     return errorSummaryOf(heading, report.error.message, budgetBytes)
   }
 
-  const blocks = [heading, countsOf(report), ...flakyBlockOf(report), ...pageErrorsBlockOf(report)]
+  const blocks = [heading, countsOf(report), ...flakyBlockOf(report), ...pageErrorSnapshotsBlockOf(report)]
   const failures = failuresOf(report)
 
   if (failures.length === 0) {
@@ -256,7 +256,7 @@ function flakyBlockOf(report: Report): string[] {
  * each with its first page error, else its first stale expected page error, then how many more there are. Gives no
  * block when no snapshot has either.
  */
-function pageErrorsBlockOf(report: Report): string[] {
+function pageErrorSnapshotsBlockOf(report: Report): string[] {
   const entries: readonly ListedEntry[] = report.snapshots
   const listed = entries.filter((entry) => entry.pageErrors.length > 0 || entry.staleExpectedPageErrors.length > 0)
 
@@ -264,48 +264,32 @@ function pageErrorsBlockOf(report: Report): string[] {
     return []
   }
 
-  const items = listed.slice(0, listedPageErrorsCount).map((entry) => {
+  const items = listed.slice(0, listedPageErrorSnapshotCount).map((entry) => {
     const [first] = entry.pageErrors
     const problem =
       first === undefined ? `stale expected page error ${entry.staleExpectedPageErrors[0]}` : pageErrorTextOf(first)
 
     return `- ${entryNameOf(entry)}: ${inlineTextOf(problem)}`
   })
-  const more = listed.length > listedPageErrorsCount ? [`- …and ${listed.length - listedPageErrorsCount} more`] : []
+  const more =
+    listed.length > listedPageErrorSnapshotCount ? [`- …and ${listed.length - listedPageErrorSnapshotCount} more`] : []
 
   return ['**Page errors**', pageErrorsCountsOf(report, entries), [...items, ...more].join('\n')]
 }
 
 /**
- * Gives the page errors block's counts: how many snapshots have page errors, for `test` how many of them fail the run,
- * and how many stale expected page errors there are, leaving out zero counts.
+ * Gives the page errors block's counts: how many snapshots have page errors and, for `test`, how many of them fail the
+ * run, then how many stale expected page errors there are, leaving out zero counts.
  */
 function pageErrorsCountsOf(report: Report, entries: readonly ListedEntry[]): string {
   const withErrors = entries.filter((entry) => entry.pageErrors.length > 0)
-  const failing =
-    report.command === 'test'
-      ? withErrors.filter((entry) => entry.pageErrors.some(({ severity }) => severity === 'fail')).length
-      : 0
   const stale = entries.reduce((sum, entry) => sum + entry.staleExpectedPageErrors.length, 0)
   const counts = [
-    ...(withErrors.length === 0 ? [] : [snapshotsCountOf(withErrors.length, failing)]),
+    ...(withErrors.length === 0 ? [] : [snapshotsWithPageErrorsOf(withErrors, report.command)]),
     ...(stale === 0 ? [] : [`${stale} stale expected ${stale === 1 ? 'page error' : 'page errors'}`]),
   ]
 
   return counts.join(' · ')
-}
-
-/**
- * Says how many snapshots have page errors, and how many of them fail the run: all of them, some, or none.
- */
-function snapshotsCountOf(count: number, failing: number): string {
-  const have = count === 1 ? '1 snapshot has page errors' : `${count} snapshots have page errors`
-
-  if (failing === 0) {
-    return have
-  }
-
-  return failing === count ? `${have}, which fail the run` : `${have}, ${failing} of which fail the run`
 }
 
 /**

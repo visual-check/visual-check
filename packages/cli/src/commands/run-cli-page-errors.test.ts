@@ -226,7 +226,7 @@ describe('runCli page errors', () => {
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toContain(
       [
-        '── 1 snapshot with page errors ──',
+        '── 1 snapshot with page errors, which fails the run ──',
         'web  a',
         '  page error (fail): console.error TypeError: Failed to fetch',
         '1 passed · ',
@@ -249,9 +249,9 @@ describe('runCli page errors', () => {
         'written .visual-check/baselines/b.png',
         '── 3 snapshots with page errors ──',
         'web  a',
-        '  page error (fail): console.error TypeError: Failed to fetch',
+        '  page error (fails test): console.error TypeError: Failed to fetch',
         'web  b',
-        '  page error (fail): uncaught error Uncaught Error: Request timeout',
+        '  page error (fails test): uncaught error Uncaught Error: Request timeout',
         'web  c',
         '  stale expected page error: "Not raised"',
         '',

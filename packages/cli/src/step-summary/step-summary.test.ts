@@ -407,7 +407,7 @@ describe('stepSummaryOf page errors', () => {
         '',
         '**Page errors**',
         '',
-        '2 snapshots have page errors, 1 of which fail the run · 2 stale expected page errors',
+        '2 snapshots with page errors, 1 of which fails the run · 2 stale expected page errors',
         '',
         '- web · b · dark: failed load http://localhost:6006/api/orders · HTTP 500',
         '- web · c: stale expected page error "Not raised"',
@@ -424,8 +424,8 @@ describe('stepSummaryOf page errors', () => {
   })
 
   it.each([
-    ['1 snapshot has page errors, which fail the run', [loggedError('A')]],
-    ['1 snapshot has page errors', [loggedError('A', 'warn')]],
+    ['1 snapshot with page errors, which fails the run', [loggedError('A')]],
+    ['1 snapshot with page errors', [loggedError('A', 'warn')]],
   ])('says %s', (counts, pageErrors) => {
     const report = testReportWith([testEntryWith({ id: 'a', status: 'passed', reason: null, pageErrors })])
 
@@ -440,7 +440,7 @@ describe('stepSummaryOf page errors', () => {
     )
     const lines = stepSummaryOf(report, roomy).split('\n')
 
-    expect(lines).toContain('7 snapshots have page errors, which fail the run')
+    expect(lines).toContain('7 snapshots with page errors, which fail the run')
     expect(lines.filter((line) => line.startsWith('- '))).toEqual([
       '- web · s0: console.error E0',
       '- web · s1: console.error E1',
@@ -465,7 +465,7 @@ describe('stepSummaryOf page errors', () => {
         '',
         '**Page errors**',
         '',
-        '1 snapshot has page errors',
+        '1 snapshot with page errors',
         '',
         '- web · a: console.error A',
         '',
