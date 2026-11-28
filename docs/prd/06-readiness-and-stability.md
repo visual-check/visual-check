@@ -125,6 +125,7 @@ A broken story counts toward exit 1, and the run goes on. Errors and timeouts ar
 | `element-missing`       | The `element` selector matched nothing, or a box of zero size                                                                       |
 | `too-tall`              | The capture, or a grid, is over 32,767 device pixels on a side                                                                      |
 | `grid-too-wide`         | A grid is wider than the viewport ([Grid stories](08-grid-stories.md))                                                              |
+| `overflows`             | The capture would cut content the page shows, unless `allowOverflow` ([Per-story options](07-per-story-options.md))                 |
 | `crashed`               | The page crashed. The message points to memory and the worker count                                                                 |
 | `browser-exited`        | The browser exited while the story was in flight                                                                                    |
 | `changed-after-capture` | `update` only: the page changed in the second after capture                                                                         |

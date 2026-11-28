@@ -149,6 +149,12 @@ export interface VisualCheckOptions<ModeName extends string> {
    */
   growViewport?: boolean | undefined
   /**
+   * Whether the capture may cut content the page shows: wider than the viewport for the full page, or spilling past
+   * the `element` box. Defaults to `false`, which makes such a story broken, `overflows`. Set it only when the cut is
+   * intended.
+   */
+  allowOverflow?: boolean | undefined
+  /**
    * The regions to paint over, by name. A name set to `null` drops the inherited mask. `null` drops them all.
    */
   masks?: Record<string, Mask | null> | null | undefined
@@ -204,6 +210,10 @@ export interface VisualCheckParameter {
    */
   growViewport?: boolean
   /**
+   * Whether the capture may cut content the page shows.
+   */
+  allowOverflow?: boolean
+  /**
    * The regions to paint over, by name, or `null` for none.
    */
   masks?: Record<string, WrittenMask | null> | null
@@ -252,7 +262,7 @@ export type VisualCheck<ModeName extends string> = (options: VisualCheckOptions<
  * - `modes`: the most specific list.
  * - `viewport` and `tolerance`: merged key by key.
  * - `masks`: merged by name. A name set to `null` drops one mask, and `masks: null` drops all of them.
- * - `wait`, `element`, `growViewport`, `disable` and `pageErrors`: the most specific value.
+ * - `wait`, `element`, `growViewport`, `allowOverflow`, `disable` and `pageErrors`: the most specific value.
  * - `expectedPageErrors`: the most specific list, since Storybook replaces arrays: a story's list replaces its meta's or
  *   `preview`'s. The config's list is then added to it, so put the entries every story needs in the config.
  *

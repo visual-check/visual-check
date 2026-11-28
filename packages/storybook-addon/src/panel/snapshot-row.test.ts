@@ -98,6 +98,14 @@ describe('detailLinesOf', () => {
     [['Page size: 1280 × 40000 device pixels'], { size: [1280, 40_000] }],
     [['Pending fonts: Inter normal 400, Lato italic 700'], { pendingFonts: ['Inter normal 400', 'Lato italic 700'] }],
     [['Grid width: 1600 px, viewport width: 1280 px'], { grid: { width: 1600, viewportWidth: 1280 } }],
+    [
+      ['Full-page overflow: right 197 px, viewport width: 1280 px'],
+      { overflow: { area: 'full-page', top: 0, right: 197, bottom: 0, left: 0, viewportWidth: 1280 } },
+    ],
+    [
+      ['Element overflow: top 12 px, bottom 30 px, left 4 px, viewport width: 375 px'],
+      { overflow: { area: 'element', top: 12, right: 0, bottom: 30, left: 4, viewportWidth: 375 } },
+    ],
     [['SyntaxError: Unexpected token', '  at a.ts:1'], { loadError: 'SyntaxError: Unexpected token\n  at a.ts:1' }],
     [['Timeout: 15000 ms', 'Pending fonts: Inter'], { pendingFonts: ['Inter'], timeoutMs: 15_000 }],
   ])('gives %j', (lines, details) => {

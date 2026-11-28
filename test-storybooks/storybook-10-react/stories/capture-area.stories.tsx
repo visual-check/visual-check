@@ -259,6 +259,109 @@ function EmptyElementBelowNote() {
 }
 
 /**
+ * How wide the wide page is, in px: 220 px wider than the default 1280 px viewport.
+ */
+const widePageWidth = 1500
+
+/**
+ * What the wide page shows.
+ */
+interface WidePageProps {
+  /**
+   * Whether `body` clips what's past the viewport's right edge with `overflow-x: hidden`.
+   */
+  clipped?: boolean
+}
+
+/**
+ * A page 1500 px wide and 200 px tall: three bands of 500 px, each labelled, so a capture cut at the viewport's
+ * right edge shows the third band 280 px wide. `clipped` puts `overflow-x: hidden` on `body` with a stylesheet that
+ * goes with the story.
+ */
+function WidePage({ clipped = false }: WidePageProps) {
+  return (
+    <div style={{ display: 'flex', width: widePageWidth, height: 200, fontFamily: 'sans-serif', fontSize: 16 }}>
+      {clipped ? <style>{'body { overflow-x: hidden; }'}</style> : null}
+      {['#dbeafe', '#dcfce7', '#fee2e2'].map((background, index) => (
+        <div key={background} style={{ boxSizing: 'border-box', width: 500, padding: 24, background }}>
+          Band {index + 1} of 3
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * What the spilling card shows.
+ */
+interface SpillingCardProps {
+  /**
+   * The card's `overflow`: `visible`, so its content spills, or a value that clips it.
+   */
+  overflow?: 'visible' | 'hidden'
+  /**
+   * How far left of its place the card sits, in px, past the page's left edge: 0 by default.
+   */
+  shiftLeft?: number
+}
+
+/**
+ * A card, 320 × 160 px, 24 px down and in, holding a bar 400 px wide, 80 px past the card's right edge, and 200 px
+ * tall, 40 px past its bottom edge. With `overflow: 'hidden'` the card clips the bar. `shiftLeft` moves the card that
+ * far left, past the page's left edge, and its content with it.
+ */
+function SpillingCard({ overflow = 'visible', shiftLeft = 0 }: SpillingCardProps) {
+  return (
+    <div style={{ padding: 24, fontFamily: 'sans-serif', fontSize: 16 }}>
+      <div
+        data-spilling-card
+        style={{
+          boxSizing: 'border-box',
+          width: 320,
+          height: 160,
+          marginLeft: -shiftLeft,
+          overflow,
+          border: '4px solid #1d4ed8',
+          background: '#dbeafe',
+        }}
+      >
+        <div style={{ boxSizing: 'border-box', width: 396, height: 196, padding: 16, background: '#fde68a' }}>
+          The bar inside the card
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * A card, 320 × 160 px, 24 px down and in, drawn at 95% of its size from its top left corner, holding a bar that fills
+ * it: its layout says the bar is 320 px wide while its box is drawn 304 px wide, so measuring one against the other
+ * would make a spill that isn't there.
+ */
+function ScaledCard() {
+  return (
+    <div style={{ padding: 24, fontFamily: 'sans-serif', fontSize: 16 }}>
+      <div
+        data-spilling-card
+        style={{
+          boxSizing: 'border-box',
+          width: 320,
+          height: 160,
+          border: '4px solid #1d4ed8',
+          background: '#dbeafe',
+          transform: 'scale(0.95)',
+          transformOrigin: '0 0',
+        }}
+      >
+        <div style={{ boxSizing: 'border-box', width: 312, height: 152, padding: 16, background: '#fde68a' }}>
+          The bar fills the card
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
  * Every story is laid out with no padding, so the page is as tall as its content. The meta captures the card, which
  * `Element` inherits; every other story sets an element of its own, or `null` for the full page.
  */
@@ -588,4 +691,70 @@ export const ElementZeroSize: Story = {
 export const TooTall: Story = {
   parameters: { ...visualCheck({ element: null }) },
   render: () => <TooTallBlock />,
+}
+
+/**
+ * The full page is 1500 px wide, 220 px wider than the 1280 px viewport, so the capture would cut it: the story is
+ * broken, `overflows`, with `details.overflow.right` of 220, and its line says the content reaches past the viewport's
+ * right edge. Its committed baseline is `AllowsOverflow`'s, the page cut at the viewport's right edge.
+ */
+export const WiderThanViewport: Story = {
+  parameters: { ...visualCheck({ element: null }) },
+  render: () => <WidePage />,
+}
+
+/**
+ * The same page as `WiderThanViewport`, but `body` clips it with `overflow-x: hidden`, so the page cuts it itself and
+ * the story passes. Its baseline is byte-identical to `AllowsOverflow`'s.
+ */
+export const WiderThanViewportClipped: Story = {
+  parameters: { ...visualCheck({ element: null }) },
+  render: () => <WidePage clipped />,
+}
+
+/**
+ * The same page as `WiderThanViewport`, with `allowOverflow: true`, so the cut is intended and the story passes: the
+ * snapshot is the page cut at the viewport's right edge, 1280 × 720, as the viewport doesn't shrink to the 200 px page.
+ */
+export const AllowsOverflow: Story = {
+  parameters: { ...visualCheck({ element: null, allowOverflow: true }) },
+  render: () => <WidePage />,
+}
+
+/**
+ * The card's bar spills 80 px past its right edge and 40 px past its bottom edge, which the card doesn't clip, so the
+ * capture would cut it: the story is broken, `overflows`, with `details.overflow` of 80 right and 40 bottom. Its
+ * committed baseline is the card's box with `allowOverflow: true`, 320 × 160.
+ */
+export const ElementSpills: Story = {
+  parameters: { ...visualCheck({ element: '[data-spilling-card]' }) },
+  render: () => <SpillingCard />,
+}
+
+/**
+ * The same card as `ElementSpills`, but with `overflow: hidden`, so the card clips its bar and the story passes. Its
+ * snapshot is the card's box, 320 × 160.
+ */
+export const ElementClips: Story = {
+  parameters: { ...visualCheck({ element: '[data-spilling-card]' }) },
+  render: () => <SpillingCard overflow="hidden" />,
+}
+
+/**
+ * The card, which clips its bar, sits 64 px left of its place, 40 px past the page's left edge, so the capture would
+ * cut it: the story is broken, `overflows`, with `details.overflow.left` of 40. Its committed baseline is the card's
+ * box with `allowOverflow: true`, the 280 px of it on the page.
+ */
+export const ElementPastLeftEdge: Story = {
+  parameters: { ...visualCheck({ element: '[data-spilling-card]' }) },
+  render: () => <SpillingCard overflow="hidden" shiftLeft={64} />,
+}
+
+/**
+ * A card drawn at 95% of its size, whose bar fills it, so nothing spills and the story passes. Its snapshot is the
+ * card's drawn box, 304 × 152.
+ */
+export const ElementScaled: Story = {
+  parameters: { ...visualCheck({ element: '[data-spilling-card]' }) },
+  render: () => <ScaledCard />,
 }

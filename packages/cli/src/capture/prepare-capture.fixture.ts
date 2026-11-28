@@ -1,4 +1,4 @@
-import { elementsMatching, type FakeShadowRoot, fakePageDocument } from './remote-content.fixture.js'
+import { elementsMatching, type FakeShadowRoot, fakeElement, fakePageDocument } from './remote-content.fixture.js'
 
 /**
  * A stylesheet a fake window's `CSSStyleSheet` made.
@@ -72,6 +72,19 @@ interface FakeCaptureDocumentParts {
    */
   size?: { width: number; height: number }
   /**
+   * The width of the viewport, as the root element's `clientWidth` gives it, in CSS pixels: the width of the scrollable
+   * area by default, so nothing reaches past it.
+   */
+  viewportWidth?: number
+  /**
+   * The computed style of the root element, by property name, such as `overflow-x`: the defaults by default.
+   */
+  rootStyles?: Record<string, string>
+  /**
+   * The computed style of `body`, by property name, such as `overflow-x`: the defaults by default.
+   */
+  bodyStyles?: Record<string, string>
+  /**
    * What `showPopover()` does on the elements the document creates: it shows the popover by default.
    */
   popover?: FakePopover
@@ -106,8 +119,8 @@ function invalidSelectorError(selector: string): Error {
 /**
  * Builds a fake document for the capture preparation: the remote content search's fake document, with its elements and
  * scroll, given what the preparation uses too. That's the elements each selector matches, the window's
- * `CSSStyleSheet`, the root element with the size of the scrollable area, and the elements it creates, each recording
- * what's done to it.
+ * `CSSStyleSheet`, the root element with the size of the scrollable area and the viewport's width, `body`, both with
+ * their computed styles, and the elements it creates, each recording what's done to it.
  */
 export function fakeCaptureDocument({
   name = 'top',
@@ -116,6 +129,9 @@ export function fakeCaptureDocument({
   invalid = [],
   scroll = { x: 0, y: 0 },
   size = { width: 800, height: 600 },
+  viewportWidth = size.width,
+  rootStyles = {},
+  bodyStyles = {},
   popover = 'works',
 }: FakeCaptureDocumentParts = {}): FakeCaptureDocument {
   const created: FakeCreatedElement[] = []
@@ -151,17 +167,23 @@ export function fakeCaptureDocument({
 
     return element
   }
-  const documentElement = {
-    scrollWidth: size.width,
-    scrollHeight: size.height,
-    appendChild: (child: FakeCreatedElement) => {
-      events.push(`append ${child.localName} to html`)
+  const documentElement = fakeElement('html', {
+    styles: rootStyles,
+    properties: {
+      scrollWidth: size.width,
+      scrollHeight: size.height,
+      clientWidth: viewportWidth,
+      appendChild: (child: FakeCreatedElement) => {
+        events.push(`append ${child.localName} to html`)
+      },
     },
-  }
+  })
+  const body = fakeElement('body', { styles: bodyStyles })
   const { document: pageDocument } = fakePageDocument({ elements, scroll })
   const document = Object.assign(pageDocument, {
     adoptedStyleSheets: [],
     documentElement,
+    body,
     querySelector: (selector: string) => matching(selector)[0] ?? null,
     querySelectorAll: matching,
     createElement,

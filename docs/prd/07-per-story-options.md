@@ -6,7 +6,7 @@ Everything a project sets for a Storybook, a stories file or a story lives in `p
 
 ## Where options live
 
-- **Keys:** `modes`, `viewport`, `element`, `growViewport`, `masks`, `tolerance`, `pageErrors`, `expectedPageErrors`, `wait` and `disable`. Any other key exits 2.
+- **Keys:** `modes`, `viewport`, `element`, `growViewport`, `allowOverflow`, `masks`, `tolerance`, `pageErrors`, `expectedPageErrors`, `wait` and `disable`. Any other key exits 2.
 - **Levels:** `preview` for every story of a Storybook, a stories file's meta for that file, and the story.
 - The project's config sits beneath `preview`, with defaults for `tolerance`, `viewport`, `maskColor` and `pageErrors` only, and an `expectedPageErrors` list added to every story's. It holds no masks and no modes.
 - visual-check reads no tags, not even Storybook's `!test`.
@@ -14,14 +14,14 @@ Everything a project sets for a Storybook, a stories file or a story lives in `p
 
 How levels merge, through Storybook's own merging:
 
-| Key                                                        | Merge                                                                |
-| ---------------------------------------------------------- | -------------------------------------------------------------------- |
-| `modes`                                                    | The most specific level's list wins                                  |
-| `viewport`                                                 | Deep-merges, so a story can set `{ width: 375 }` alone               |
-| `tolerance`                                                | Deep-merges, so a level can set only `color` or only `pixels`        |
-| `masks`                                                    | Merges by name                                                       |
-| `wait`, `element`, `growViewport`, `disable`, `pageErrors` | The most specific level wins                                         |
-| `expectedPageErrors`                                       | The most specific level's list wins, then the config's list is added |
+| Key                                                                         | Merge                                                                |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `modes`                                                                     | The most specific level's list wins                                  |
+| `viewport`                                                                  | Deep-merges, so a story can set `{ width: 375 }` alone               |
+| `tolerance`                                                                 | Deep-merges, so a level can set only `color` or only `pixels`        |
+| `masks`                                                                     | Merges by name                                                       |
+| `wait`, `element`, `growViewport`, `allowOverflow`, `disable`, `pageErrors` | The most specific level wins                                         |
+| `expectedPageErrors`                                                        | The most specific level's list wins, then the config's list is added |
 
 ## The helper
 
@@ -92,6 +92,12 @@ Every story's merged options are checked before any capture. Each of these exits
   - No match, or a box of zero size, makes a broken story (`element-missing`).
   - An invalid CSS selector makes a broken story (`error`). The page learns it only at capture, so it isn't an exit 2.
   - The viewport never grows for it, so `growViewport` does nothing with it.
+- **Overflow** makes a broken story (`overflows`): content the page shows, or lets you scroll to, that the capture would cut ([ADR 0014](../adr/0014-overflow-breaks-a-story.md)).
+  - For the full page, content past the viewport's right edge: the document's scrollable width over the viewport's, unless the root element or `body` clips it with `overflow-x: hidden` or `clip`. The bottom is never cut.
+  - For `element`, its content past its border box's right or bottom edge, on an axis where the element doesn't clip it (`overflow` is `visible`), and the element past the page's top or left edge. Content spilling left or up out of the element, content spilling sideways out of a right-to-left element, and content in a layer of its own, such as `position: fixed`, a popover or the top layer, aren't measured.
+  - A side counts from one whole CSS pixel. The details carry each side, rounded up, the capture area and the viewport's width. The message says to fix the layout, then to give the story a wider viewport or list modes without the narrow ones for the full page, or to capture an element that holds the content, and last to set `allowOverflow`.
+  - `allowOverflow: true` captures the story as it is, cut. It's a per-story option only, like `growViewport`.
+  - `element-missing`, `grid-too-wide` and a grid's `too-tall` win over it.
 - A capture over 32,767 device pixels on either side makes a broken story (`too-tall`). The message says to set `element` or a smaller viewport, or to capture a smaller element when `element` is already set. For a grid too tall, the message says to split the grid into several stories ([Grid stories](08-grid-stories.md)).
 
 ## Leaving stories out

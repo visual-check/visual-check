@@ -63,7 +63,8 @@ While you troubleshoot a broken story, read its entry's console messages (`conso
    - `navigated-away`, `play-threw` or `load-failed`: the project's code to fix. For a story that navigates away, await the new page before clicking, or render `MemoryRouter` with `useTransitions={false}`;
    - `too-tall`: `element`, or a smaller viewport;
    - a full-page snapshot whose `100vh` sections stretch to the page's height: `growViewport: false`, which keeps the viewport's height and paints fixed elements where they sit in it;
-   - a grid that's too wide (`grid-too-wide`) or too tall: the story to fix, for example by splitting the grid into several stories.
+   - a grid that's too wide (`grid-too-wide`) or too tall: the story to fix, for example by splitting the grid into several stories;
+   - `overflows`, content the capture would cut (`details.overflow` says how far past each side): first the layout, so the content fits; then, for the full page, a wider `viewport` or modes without the narrow ones, and for `element`, an element that holds the content; last, and only when the user says the cut is intended, `allowOverflow: true`.
 3. **A page error** (an entry of `pageErrors`), by its `kind` and `text`:
    - a `console.error`, an uncaught error (`error`) or an unhandled rejection: the project's code to fix, so the story no longer raises it;
    - a failed load (`load`), whose `text` is the URL and `loadError` its HTTP status or network error: the file or the request to fix, or a mock for a request the story needs;
@@ -90,6 +91,8 @@ export const Default = {
       element: '#storybook-root > *',
       // A smaller viewport, in CSS pixels.
       viewport: { width: 375, height: 667 },
+      // Lets the capture cut content past the viewport or the element, which otherwise breaks the story. Only when the cut is intended.
+      allowOverflow: true,
       // Page errors the story raises on purpose, such as a mocked error response: a string or a regular expression.
       expectedPageErrors: [/\/api\/orders/],
     }),
@@ -100,5 +103,5 @@ export const Default = {
 ## Rules
 
 - Propose each fix with its snippet, and apply it only once the user agrees.
-- Never raise tolerance, disable a story or run `update` to make a failure pass without the user's explicit OK.
+- Never raise tolerance, disable a story, set `allowOverflow` or run `update` to make a failure pass without the user's explicit OK.
 - Never set `pageErrors` to `'warn'` or `'off'`, or declare an expected page error the story doesn't raise on purpose, to make a failure pass without the user's explicit OK.

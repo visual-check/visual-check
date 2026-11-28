@@ -193,6 +193,11 @@ export interface FakeStory {
    * top document. The page gives none, leaving the remote content unknown, when not given.
    */
   remote?: { host: string; x: number; y: number; width: number; height: number }[]
+  /**
+   * How far content the capture would cut reaches past each side of the capture, in CSS pixels, as the capture
+   * preparation gives it. The capture would cut nothing when not given.
+   */
+  overflow?: { top: number; right: number; bottom: number; left: number }
 }
 
 /**
@@ -521,7 +526,12 @@ export function fakeDriverOf({
             {
               storyWait: async () => finishedAnswer({ status, completingMs }),
               optionsRead: async () => await answerOptionsReadExpression(expression, answerRead),
-              capturePrep: async () => ({ outcome: 'ready', box: null, ...(remote === undefined ? {} : { remote }) }),
+              capturePrep: async () => ({
+                outcome: 'ready',
+                box: null,
+                ...(remote === undefined ? {} : { remote }),
+                ...(story.overflow === undefined ? {} : { overflow: story.overflow }),
+              }),
             },
             expression,
             timeoutMs,

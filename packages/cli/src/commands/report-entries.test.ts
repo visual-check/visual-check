@@ -780,6 +780,15 @@ describe('detailsOf', () => {
       { grid: { width: 1400, viewportWidth: 1280 } },
     ],
     [
+      'overflows',
+      {
+        reason: 'overflows',
+        message: '',
+        overflow: { area: 'element', top: 12, right: 197, bottom: 30, left: 4, viewportWidth: 1280 },
+      },
+      { overflow: { area: 'element', top: 12, right: 197, bottom: 30, left: 4, viewportWidth: 1280 } },
+    ],
+    [
       'load-failed that timed out',
       { reason: 'load-failed', message: '', loadError: undefined, readyTimeoutMs: 15_000 },
       { timeoutMs: 15_000 },

@@ -585,13 +585,16 @@ const perStoryOptionsLines: [storyId: string, says: string][] = [
 
 /**
  * What the line of each broken capture area story says, in its reason's own wording: that the element selector matched
- * nothing or a box of zero size, and that the full page is over the most a capture can be, with the hint to set
- * `element`.
+ * nothing or a box of zero size, that the full page is over the most a capture can be, with the hint to set
+ * `element`, and how far content the capture would cut reaches past the viewport, the element or the page.
  */
 const captureAreaLines: [storyId: string, says: string][] = [
   ['capture-area--element-missing', 'matched nothing'],
   ['capture-area--element-zero-size', 'box of zero size'],
   ['capture-area--too-tall', 'over 32,767 on a side. Set element'],
+  ['capture-area--wider-than-viewport', '220 px past the right edge of the 1280 px viewport'],
+  ['capture-area--element-spills', '80 px past its right edge and 40 px past its bottom edge'],
+  ['capture-area--element-past-left-edge', "40 px past the page's left edge"],
 ]
 
 /**
@@ -602,7 +605,8 @@ const gridLines: [storyId: string, says: string][] = [['grid--too-wide', 'wider 
 /**
  * What the report's entry of each broken readiness, per-story options, capture area and grid story holds: its reason,
  * an image of its page but for the story too tall to capture and the ones whose file failed to load, and the details
- * its reason gives: the grid too wide gives its width and the viewport's. The story whose `play` threw has its stack,
+ * its reason gives: the grid too wide gives its width and the viewport's, and each story that overflows how far its
+ * content reaches past each side of its capture area. The story whose `play` threw has its stack,
  * which shows the stack reaches visual-check through Storybook's channel, and the one whose `play` left an unhandled
  * error keeps it as a console message of level `error` and lists it as an uncaught error page error that fails, as a
  * broken story keeps its reason and lists its page errors.
@@ -658,6 +662,51 @@ const brokenEntries: BrokenEntry[] = [
     pageImage: true,
     holds: 'details.grid of 1400 and 1280',
     has: (entry) => entry.details?.grid?.width === 1400 && entry.details.grid.viewportWidth === 1280,
+  },
+  {
+    storyId: 'capture-area--wider-than-viewport',
+    reason: 'overflows',
+    pageImage: true,
+    holds: 'details.overflow of 220 right of the full page, at a 1280 px viewport',
+    has: (entry) =>
+      isDeepStrictEqual(entry.details?.overflow, {
+        area: 'full-page',
+        top: 0,
+        right: 220,
+        bottom: 0,
+        left: 0,
+        viewportWidth: 1280,
+      }),
+  },
+  {
+    storyId: 'capture-area--element-spills',
+    reason: 'overflows',
+    pageImage: true,
+    holds: 'details.overflow of 80 right and 40 bottom of the element',
+    has: (entry) =>
+      isDeepStrictEqual(entry.details?.overflow, {
+        area: 'element',
+        top: 0,
+        right: 80,
+        bottom: 40,
+        left: 0,
+        viewportWidth: 1280,
+      }),
+  },
+  {
+    storyId: 'capture-area--element-past-left-edge',
+    reason: 'overflows',
+    pageImage: true,
+    holds: 'details.overflow of 40 left of the element',
+    has: (entry) =>
+      isDeepStrictEqual(entry.details?.overflow, {
+        area: 'element',
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 40,
+        viewportWidth: 1280,
+      }),
   },
   ...['load-fails--first', 'load-fails--second'].map(
     (storyId): BrokenEntry => ({

@@ -109,7 +109,8 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
    - `changed-after-capture`, `unstable` or `timeout`: a `wait` hook on the story, or in `preview` when many stories share the cause;
    - `navigated-away`, `play-threw` or `load-failed`: the project's code to fix. For a story that navigates away, await the new page before clicking, or render `MemoryRouter` with `useTransitions={false}`;
    - `too-tall`: `element`, or a smaller viewport;
-   - a grid that's too wide or too tall: the story to fix, for example by splitting the grid.
+   - a grid that's too wide or too tall: the story to fix, for example by splitting the grid;
+   - `overflows`: first the layout, then a wider viewport or modes without the narrow ones for the full page, or an element that holds the content; last, and only when the user says the cut is intended, `allowOverflow: true`.
 
    The agent reads the entry's console messages and page errors while it troubleshoots.
 3. **A page error,** by kind and text:
@@ -123,7 +124,7 @@ Part of the [v1 PRD](README.md). Terms come from the [glossary](../../GLOSSARY.m
 **Rules**
 
 - The agent proposes each fix with its snippet and applies it only once the user agrees.
-- It never raises tolerance, disables a story or runs `update` to make a failure pass without the user's explicit OK.
+- It never raises tolerance, disables a story, sets `allowOverflow` or runs `update` to make a failure pass without the user's explicit OK.
 - It never sets `pageErrors` to `'warn'` or `'off'`, or declares an expected page error the story doesn't raise on purpose, to make a failure pass without the user's explicit OK.
 
 ## Checks by hand

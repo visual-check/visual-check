@@ -43,6 +43,7 @@ export const reportReasons: Record<BrokenReason, ReportBrokenReason> = {
   'too-tall': 'too-tall',
   'element-missing': 'element-missing',
   'grid-too-wide': 'grid-too-wide',
+  overflows: 'overflows',
   'browser-exited': 'browser-exited',
   'changed-after-capture': 'changed-after-capture',
   unstable: 'unstable',
@@ -170,6 +171,11 @@ export function detailsOf(broken: BrokenStory): ReportBrokenDetails {
       return { size: [broken.size.width, broken.size.height] }
     case 'grid-too-wide':
       return { grid: { width: broken.grid.width, viewportWidth: broken.grid.viewportWidth } }
+    case 'overflows': {
+      const { area, top, right, bottom, left, viewportWidth } = broken.overflow
+
+      return { overflow: { area, top, right, bottom, left, viewportWidth } }
+    }
     case 'load-failed':
       return {
         ...(broken.readyTimeoutMs === undefined ? {} : { timeoutMs: broken.readyTimeoutMs }),

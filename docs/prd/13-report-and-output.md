@@ -36,7 +36,7 @@ Other plain passes are only counted. A passed entry has the same shape, so a lat
 A broken story also carries:
 
 - an image of the page at the moment it broke, when the page still shows something. A crash and a too-tall capture have none;
-- its details: the URL it navigated to, `play`'s message and first stack lines, the timeout, the size, the font faces still pending, a grid's width and the viewport's, or a stories file's load error.
+- its details: the URL it navigated to, `play`'s message and first stack lines, the timeout, the size, the font faces still pending, a grid's width and the viewport's, how far content the capture would cut reaches past each side with the capture area and the viewport's width, or a stories file's load error.
 
 Console messages:
 
