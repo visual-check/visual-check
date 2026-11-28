@@ -48,6 +48,7 @@ function updateReportWith(entries: UpdateReportEntry[], counts: Partial<UpdateRe
     visualCheck: '0.1.0',
     exitCode: entries.some((entry) => entry.status === 'broken') ? 1 : 0,
     selection: { by: 'all', base: null, changedFiles: null, fallback: null },
+    reportDir: '.visual-check/report',
     storybooks: [{ name: 'web', url: 'http://localhost:6006' }],
     counts: { ...emptyUpdateCounts(), ...counts },
     snapshots: entries,

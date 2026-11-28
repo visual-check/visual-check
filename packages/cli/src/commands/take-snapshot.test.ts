@@ -133,7 +133,7 @@ function testTools(retries: number, captureMissing = false): SnapshotTools {
     visualDiff,
     retries,
     captureMissing,
-    writeImages: async () => ({ baseline: null, snapshot: null, diff: null }),
+    writeImages: async () => ({ baseline: null, snapshot: null, diff: null, compared: null }),
   }
 }
 

@@ -3,8 +3,9 @@ import { baselinePathOf, baselineStemOf } from '../baselines/baseline-files.js'
 import type { BrowserPackage } from '../browser/read-browser-package.js'
 import { runWorkerPool } from '../capture/worker-pool.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
-import type { ReportWarning } from '../report/report-document.js'
-import { ReportError, reportFolderOf, writeReportImages } from '../report/report-folder.js'
+import type { ReportImages, ReportWarning } from '../report/report-document.js'
+import { ReportError, type ReportImageBytes, reportFolderOf, writeReportImages } from '../report/report-folder.js'
+import { type UpdateBrokenSnapshot, updateBrokenLinesOf } from '../reporter/end-block.js'
 import { pageErrorsBlockOf } from '../reporter/page-errors-block.js'
 import type { RunEvent } from '../reporter/run-event.js'
 import type { Shard } from '../sharding/shard.js'
@@ -16,7 +17,7 @@ import { captureSettingsOf } from './capture-settings.js'
 import { hasOrphans, type StorybookBaselines } from './consistency-check.js'
 import type { LaunchBrowser } from './launch-browser.js'
 import { networkWarningsOf, warningsTextOf } from './network-warning.js'
-import { type PlannedSnapshot, planSnapshots } from './plan-snapshots.js'
+import { type PlannedSnapshot, planSnapshots, type SnapshotToCapture } from './plan-snapshots.js'
 import { type RunBrowser, runBrowserOf } from './run-browser.js'
 import { markOf, snapshotCountOf, snapshotLineOf, snapshotNameOf } from './run-output.js'
 import type { RunFindings } from './run-report.js'
@@ -312,8 +313,9 @@ function longPathWarningsOf(run: SnapshotRun, snapshots: PlannedSnapshots): stri
 
 /**
  * Builds the lines that end a finished `update`'s output: the counts of written, deleted and kept baselines and broken
- * snapshots, then the path of each baseline written, in the snapshots' order, and of each orphan deleted, then the
- * snapshots with page errors, then the flaky snapshots under its heading, when there are any.
+ * snapshots, then the path of each baseline written, in the snapshots' order, and of each orphan deleted, then each
+ * broken snapshot with the path of its visual diff or snapshot, then the snapshots with page errors, then the flaky
+ * snapshots under its heading, when there are any.
  */
 function updateEndOf(run: SnapshotRun, snapshots: PlannedSnapshots, deleted: readonly DeletedBaseline[]): string[] {
   const statuses = snapshots.results.flatMap((result) => (result === undefined ? [] : [result.status]))
@@ -324,7 +326,23 @@ function updateEndOf(run: SnapshotRun, snapshots: PlannedSnapshots, deleted: rea
     broken: countOf(statuses, 'broken'),
   }
 
-  return [...updateEndLinesOf(run.cwd, summary), ...updatePageErrorLinesOf(snapshots), ...updateFlakyLinesOf(snapshots)]
+  return [
+    ...updateEndLinesOf(run.cwd, summary),
+    ...updateBrokenLinesOf(brokenSnapshotsOf(snapshots), { cwd: run.cwd, configFolder: dirname(run.config.path) }),
+    ...updatePageErrorLinesOf(snapshots),
+    ...updateFlakyLinesOf(snapshots),
+  ]
+}
+
+/**
+ * Gives `update`'s broken snapshots, in the snapshots' order, each by name with the images it keeps.
+ */
+function brokenSnapshotsOf({ items, results }: PlannedSnapshots): UpdateBrokenSnapshot[] {
+  return items.flatMap((item, index) => {
+    const result = results[index]
+
+    return result?.status === 'broken' ? [{ name: snapshotNameOf(item), images: result.images }] : []
+  })
 }
 
 /**
@@ -525,8 +543,9 @@ async function takeSnapshots(
  * planned snapshot calls for, selected or not, apart from any that could belong to a story whose stories file didn't
  * load. An orphan the file system takes for an expected baseline is that baseline, so it stays. Its counts are of
  * written, deleted and kept baselines and broken snapshots, followed by the path of each baseline written and each
- * orphan deleted, then its flaky snapshots by name under a heading of their own, when there are any. A flaky snapshot
- * never fails `update`. `update` never touches the report folder.
+ * orphan deleted, each broken snapshot with the path of its visual diff, else of its snapshot, then its flaky snapshots
+ * by name under a heading of their own, when there are any. A flaky snapshot never fails `update`. A broken snapshot's
+ * images go to the report folder.
  *
  * Each Storybook with stories gets one options read, in config order, on a page of its own, covering every story its
  * `index.json` lists whatever the selection. So the browser is launched at the first read, even when no story then
@@ -575,17 +594,12 @@ export async function runSnapshots(run: SnapshotRun): Promise<SnapshotRunResult>
   })
   const visualDiff = createVisualDiff()
   const reportFolder = reportFolderOf(run.config.path)
+  const writeImages = (item: SnapshotToCapture, images: Partial<ReportImageBytes>): Promise<ReportImages> =>
+    writeReportImages(reportFolder, item.storybook.name, baselineStemOf(item.key), images)
   const tools: SnapshotTools =
     run.command === 'test'
-      ? {
-          command: 'test',
-          visualDiff,
-          retries: run.config.retries,
-          captureMissing: false,
-          writeImages: (item, images) =>
-            writeReportImages(reportFolder, item.storybook.name, baselineStemOf(item.key), images),
-        }
-      : { command: 'update', visualDiff, recaptureDelayMs: run.recaptureDelayMs }
+      ? { command: 'test', visualDiff, retries: run.config.retries, captureMissing: false, writeImages }
+      : { command: 'update', visualDiff, recaptureDelayMs: run.recaptureDelayMs, writeImages }
   let snapshots: PlannedSnapshots | undefined
   let baselines: StorybookBaselines[] = []
   let deleted: DeletedBaseline[] = []

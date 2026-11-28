@@ -4,9 +4,9 @@ import { systemReasonOf } from '../system-error/system-reason.js'
 import { type Report, type ReportImages, reportImagePathOf, reportJsonOf } from './report-document.js'
 
 /**
- * The images a differing snapshot leaves in the report, in the order they are written.
+ * The images a snapshot leaves in the report, in the order they are written.
  */
-const imageKinds = ['baseline', 'snapshot', 'diff'] as const
+const imageKinds = ['baseline', 'snapshot', 'diff', 'compared'] as const
 
 /**
  * The report folder couldn't be cleared, or a report image couldn't be written, such as for a folder that isn't
@@ -49,7 +49,7 @@ export class ReportError extends Error {
 }
 
 /**
- * The images of one snapshot that differs from its baseline, each a PNG file.
+ * The images of one snapshot the report lists, each a PNG file.
  *
  * @public
  */
@@ -66,6 +66,10 @@ export interface ReportImageBytes {
    * The visual diff.
    */
   diff: Uint8Array
+  /**
+   * The capture the snapshot was compared with, for a broken story whose captures disagreed.
+   */
+  compared: Uint8Array
 }
 
 /**
@@ -93,8 +97,8 @@ export async function clearReport(folder: string): Promise<void> {
 }
 
 /**
- * Writes the given images to `images/<storybook>/<stem>.baseline.png`, `.snapshot.png` and `.diff.png` in the report
- * folder, each exactly as given, creating the folders first. The stem is its baseline's: the snapshot's key, shortened
+ * Writes the given images to `images/<storybook>/<stem>.baseline.png`, `.snapshot.png`, `.diff.png` and
+ * `.compared.png` in the report folder, each exactly as given, creating the folders first. The stem is its baseline's: the snapshot's key, shortened
  * when long. Images left out aren't written.
  *
  * @returns The written images' paths relative to the report folder, `null` for the rest.
@@ -109,7 +113,7 @@ export async function writeReportImages(
   stem: string,
   images: Partial<ReportImageBytes>,
 ): Promise<ReportImages> {
-  const paths: ReportImages = { baseline: null, snapshot: null, diff: null }
+  const paths: ReportImages = { baseline: null, snapshot: null, diff: null, compared: null }
   const imagesFolder = join(folder, 'images', storybook)
 
   await makeFolder(imagesFolder)

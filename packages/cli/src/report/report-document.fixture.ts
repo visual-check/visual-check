@@ -48,7 +48,7 @@ export function testEntryWith(
     pageErrors: [],
     staleExpectedPageErrors: [],
     baseline: `.visual-check/baselines/${id}.png`,
-    images: { baseline: null, snapshot: null, diff: null },
+    images: { baseline: null, snapshot: null, diff: null, compared: null },
     realRequests: [],
     ...fields,
   }

@@ -169,10 +169,14 @@ describe('stoppedTestOf', () => {
 })
 
 describe('stoppedUpdateOf', () => {
-  it('prints what the run printed, writing no report', () => {
+  it('replaces the report folder with the error report, keeping both streams and giving the report line for stderr', async () => {
     const project = createProject()
-    const output = stoppedUpdateOf(stopIn(project), {
+
+    mkdirSync(join(project, '.visual-check', 'report', 'images'), { recursive: true })
+
+    const output = await stoppedUpdateOf(stopIn(project), {
       version: '1.2.3',
+      cwd: project,
       options: { selection: { kind: 'default' }, reporter: undefined },
     })
 
@@ -180,30 +184,50 @@ describe('stoppedUpdateOf', () => {
       exitCode: 2,
       stdout: '✓ web  a  12 ms\n',
       stderr: 'Warning.\nThe browser exited.\n',
-      report: expect.objectContaining({ command: 'update', error: { message: 'The browser exited.', storybooks: [] } }),
+      reportLine,
+      report: readReport(project),
     })
-    expect(readdirSync(project).sort()).toEqual(['.git', 'visual-check.config.mjs'])
+    expect(readdirSync(join(project, '.visual-check', 'report'))).toEqual(['report.json'])
+    expect(readReport(project)).toMatchObject({
+      command: 'update',
+      exitCode: 2,
+      reportDir: '.visual-check/report',
+      error: { message: 'The browser exited.', storybooks: [] },
+    })
   })
 
-  it("prints update's error document alone on stdout with --reporter json, the human lines on stderr", () => {
+  it("prints update's error document alone on stdout with --reporter json, the human lines on stderr", async () => {
     const project = createProject()
-    const output = stoppedUpdateOf(stopIn(project), {
+    const output = await stoppedUpdateOf(stopIn(project), {
       version: '1.2.3',
+      cwd: project,
       options: { selection: { kind: 'all' }, reporter: 'json' },
     })
     const report = JSON.parse(output.stdout) as UpdateReport
 
     expect(output.stderr).toBe('✓ web  a  12 ms\nWarning.\nThe browser exited.\n')
     expect(output.stdout.trimEnd().split('\n')).toHaveLength(1)
+    expect(report).toEqual(readReport(project))
     expect(report).toMatchObject({
       command: 'update',
       visualCheck: '1.2.3',
       exitCode: 2,
-      reportDir: null,
+      reportDir: '.visual-check/report',
       storybooks: [{ name: 'web', url: 'http://web.test' }],
       snapshots: [],
       error: { message: 'The browser exited.', storybooks: [] },
     })
+  })
+
+  it('writes nothing for a stop that names no config, and gives no report folder', async () => {
+    const project = createProject()
+    const output = await stoppedUpdateOf(
+      { ...stopIn(project), configPath: undefined },
+      { version: '1.2.3', cwd: project, options: { selection: { kind: 'default' }, reporter: 'json' } },
+    )
+
+    expect(output.reportLine).toBeUndefined()
+    expect(JSON.parse(output.stdout)).toMatchObject({ command: 'update', reportDir: null })
     expect(readdirSync(project).sort()).toEqual(['.git', 'visual-check.config.mjs'])
   })
 })
@@ -220,7 +244,7 @@ describe('usageFailureOf', () => {
     expect(readdirSync(project).sort()).toEqual(['.git', 'visual-check.config.mjs'])
   })
 
-  it('prints the message and the hint, writing no report, for update', async () => {
+  it('prints the message and the hint, writing the error report of update beside the config the search finds', async () => {
     const project = createProject()
     const error = new UsageError('--shard applies only to test.', {
       command: 'update',
@@ -232,15 +256,17 @@ describe('usageFailureOf', () => {
       exitCode: 2,
       stdout: '',
       stderr: '--shard applies only to test.\nRun visual-check --help to see the commands and options.\n',
-      report: expect.objectContaining({
-        command: 'update',
-        error: { message: '--shard applies only to test.', storybooks: [] },
-      }),
+      reportLine,
+      report: readReport(project),
     })
-    expect(readdirSync(project).sort()).toEqual(['.git', 'visual-check.config.mjs'])
+    expect(readReport(project)).toMatchObject({
+      command: 'update',
+      reportDir: '.visual-check/report',
+      error: { message: '--shard applies only to test.', storybooks: [] },
+    })
   })
 
-  it("prints update's error document with --reporter json, without the hint, writing no report", async () => {
+  it("prints update's error document with --reporter json, without the hint", async () => {
     const project = createProject()
     const error = new UsageError('--shard applies only to test.', {
       command: 'update',
@@ -255,10 +281,9 @@ describe('usageFailureOf', () => {
     expect(JSON.parse(output.stdout)).toMatchObject({
       command: 'update',
       exitCode: 2,
-      reportDir: null,
+      reportDir: '.visual-check/report',
       error: { message: '--shard applies only to test.', storybooks: [] },
     })
-    expect(readdirSync(project).sort()).toEqual(['.git', 'visual-check.config.mjs'])
   })
 
   it('writes the error report of test beside the config the search finds, without the hint', async () => {

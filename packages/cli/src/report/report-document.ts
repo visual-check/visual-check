@@ -376,6 +376,11 @@ export interface ReportImages {
    * The visual diff.
    */
   diff: string | null
+  /**
+   * The capture the snapshot was compared with, for a broken story whose captures disagreed: `update`'s first capture
+   * of a story that changed after it, or its first load of an unstable one. `null` everywhere else.
+   */
+  compared: string | null
 }
 
 /**
@@ -789,9 +794,10 @@ export interface UpdateReport {
    */
   selection: ReportSelection
   /**
-   * Always `null`, because `update` writes no report folder.
+   * The report folder, relative to the config folder, or `null` when it isn't written: no config was found, or the
+   * folder itself failed.
    */
-  reportDir: null
+  reportDir: string | null
   /**
    * The Storybooks of the run.
    */
@@ -833,7 +839,7 @@ export type TestReportInput = Omit<TestReport, 'version' | 'command' | 'warnings
  *
  * @public
  */
-export type UpdateReportInput = Omit<UpdateReport, 'version' | 'command' | 'consistencyOnly' | 'shard' | 'reportDir'>
+export type UpdateReportInput = Omit<UpdateReport, 'version' | 'command' | 'consistencyOnly' | 'shard'>
 
 /**
  * Assembles a `test` report. The keys follow the document's order, which `JSON.stringify` keeps.
@@ -872,7 +878,7 @@ export function updateReportOf(input: UpdateReportInput): UpdateReport {
     exitCode: input.exitCode,
     shard: null,
     selection: input.selection,
-    reportDir: null,
+    reportDir: input.reportDir,
     storybooks: input.storybooks,
     counts: input.counts,
     snapshots: input.snapshots,
@@ -914,6 +920,6 @@ export function reportJsonOf(report: Report): string {
  *
  * @public
  */
-export function reportImagePathOf(storybook: string, stem: string, image: 'baseline' | 'snapshot' | 'diff'): string {
+export function reportImagePathOf(storybook: string, stem: string, image: keyof ReportImages): string {
   return `images/${storybook}/${stem}.${image}.png`
 }

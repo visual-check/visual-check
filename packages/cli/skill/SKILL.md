@@ -39,7 +39,7 @@ Read the JSON report on stdout and report:
 - Missing baselines (`status: "missing"`), orphans (`status: "orphan"`) and flaky snapshots (`flaky: true`).
 - Page errors, whatever the entry's `status`: for each entry with a non-empty `pageErrors`, its story, its mode, and each page error's `kind`, `text` (the message, or a load's URL), `loadError` and `severity`. One with `severity: "fail"` makes `test` exit 1 even when every snapshot passed. Also each entry's `staleExpectedPageErrors`, which are warnings.
 - Real network requests, whatever the entry's `status`: for each entry with a non-empty `realRequests`, its story, its mode, and each `host` with its `severity`. One with `severity: "fail"` makes `test` exit 1 even when every snapshot passed.
-- After `update`: every written and deleted path, the `baseline` of each entry whose `status` is `written` or `deleted`.
+- After `update`: every written and deleted path, the `baseline` of each entry whose `status` is `written` or `deleted`. For each `broken` entry, its images' paths, each `reportDir` joined with the image: `images.snapshot`, `images.diff` and, for `changed-after-capture` and `unstable`, `images.compared`, the capture the snapshot disagreed with.
 - On exit 2: the error as printed, `error.message` in the report, or the script's own message on stderr when stdout is empty.
 - Any Storybook the script reused, from its `Reused Storybook` line on stderr.
 

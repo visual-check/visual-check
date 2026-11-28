@@ -73,9 +73,10 @@ const images = {
   baseline: 'images/web/button--primary.baseline.png',
   snapshot: 'images/web/button--primary.snapshot.png',
   diff: 'images/web/button--primary.diff.png',
+  compared: null,
 }
 
-const noImages = { baseline: null, snapshot: null, diff: null }
+const noImages = { baseline: null, snapshot: null, diff: null, compared: null }
 
 const entryKeys = [
   'storybook',
@@ -380,7 +381,7 @@ describe('testEntryOf', () => {
       realRequests: [],
       broken: brokenStory,
       console: [{ kind: 'error', text: 'Error: Boom' }],
-      images: { baseline: null, snapshot: 'images/web/button--primary.snapshot.png', diff: null },
+      images: { baseline: null, snapshot: 'images/web/button--primary.snapshot.png', diff: null, compared: null },
     }
 
     expect(testEntryOf(itemOf(), result, configFolder)).toMatchObject({
@@ -391,7 +392,7 @@ describe('testEntryOf', () => {
       pixels: null,
       details: { play: { message: 'Error: Boom', stack: ['at play (a.ts:1:1)'] } },
       console: [{ level: 'error', text: 'Uncaught Error: Boom' }],
-      images: { baseline: null, snapshot: 'images/web/button--primary.snapshot.png', diff: null },
+      images: { baseline: null, snapshot: 'images/web/button--primary.snapshot.png', diff: null, compared: null },
     })
   })
 
@@ -497,7 +498,7 @@ describe('orphanEntryOf', () => {
       pageErrors: [],
       staleExpectedPageErrors: [],
       baseline: 'web/baselines/old--story.png',
-      images: { baseline: 'images/web/old--story.baseline.png', snapshot: null, diff: null },
+      images: { baseline: 'images/web/old--story.baseline.png', snapshot: null, diff: null, compared: null },
       realRequests: [],
     })
     expect(Object.keys(entry)).toEqual(testEntryKeys)
@@ -600,6 +601,33 @@ describe('updateEntryOf', () => {
       realRequestHosts: [],
       remoteContentHosts: [],
     })
+  })
+
+  it('lists the images of a broken story, the capture it was compared with included, in their order', () => {
+    const unstable: BrokenStory = { reason: 'unstable', message: "No two of the story's 3 loads agreed." }
+    const images = {
+      baseline: 'images/web/button--primary.baseline.png',
+      snapshot: 'images/web/button--primary.snapshot.png',
+      diff: 'images/web/button--primary.diff.png',
+      compared: 'images/web/button--primary.compared.png',
+    }
+    const entry = updateEntryOf(
+      itemOf(),
+      {
+        status: 'broken',
+        detail: '',
+        attempts: 3,
+        pageErrors: [],
+        staleExpectedPageErrors: [],
+        realRequests: [],
+        broken: unstable,
+        images,
+      },
+      configFolder,
+    )
+
+    expect(entry.images).toEqual(images)
+    expect(Object.keys(entry.images)).toEqual(['baseline', 'snapshot', 'diff', 'compared'])
   })
 
   it.each<[string, SnapshotResult]>([
