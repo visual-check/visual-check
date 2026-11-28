@@ -9,4 +9,4 @@ A snapshot whose page raised page errors — a `console.error`, an uncaught erro
 - A mocked error response counts as one from the server, so every error-state story needs an expected entry.
 - Page errors belong to a snapshot, from every load of it in the run, each once, so an error raised on one load of several is not hidden.
 - A story broken for another reason keeps that reason; its entry still lists its page errors, since they often explain why it broke.
-- Loads from other origins aren't page errors. Real network requests are checked on their own ([#178](https://github.com/visual-check/visual-check/issues/178)).
+- Loads from other origins aren't page errors. Real network requests are checked on their own, with the same semantics ([#178](https://github.com/visual-check/visual-check/issues/178)): `realRequests: 'fail' | 'warn' | 'off'` in config and in `parameters.visualCheck`, `'off'` by default since watching requests has a cost, the config's `silenceHosts` as the allow list, never a broken story or a changed outcome, gathered per snapshot over every load of it.

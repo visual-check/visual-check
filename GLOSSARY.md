@@ -81,7 +81,7 @@ What a story shows from an origin other than its Storybook's: images and embedde
 _Avoid_: External assets, third-party content, CDN images
 
 **Real network request**:
-A `fetch`, XHR, WebSocket or EventSource request a story sends to an origin other than its Storybook's that goes over the network or to the HTTP cache, not one a service worker answers itself.
+A `fetch`, XHR, WebSocket or EventSource request a story's page sends to an origin other than its document's, another loopback port included, that goes over the network or to the HTTP cache, or that a service worker passes on there. A response a service worker builds itself, as MSW's mocks are, isn't one, and fonts, stylesheets, images and scripts never are: they're remote content. `update` warns about them, and `test` lists or fails on them by `realRequests`, both apart from the hosts `silenceHosts` allows.
 _Avoid_: External request, live request, unmocked request, third-party request
 
 **Broken story**:

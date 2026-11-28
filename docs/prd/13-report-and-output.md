@@ -30,6 +30,7 @@ When it's written:
 - Orphans, with their baseline.
 - Flaky snapshots, with the first attempt's images.
 - Snapshots with page errors or stale expected page errors, even when they passed.
+- In `test`, snapshots with real network requests, even when they passed.
 
 Other plain passes are only counted. A passed entry has the same shape, so a later tool can list every snapshot without a new report version.
 
@@ -51,6 +52,13 @@ Page errors ([Per-story options](07-per-story-options.md#page-errors)):
 - The entry also lists the story's stale expected page errors, as written.
 - A page error with severity `fail` makes `test` exit 1, whatever the snapshot's status. One with `warn`, and a stale entry, never fail a run, and `update` never fails on page errors.
 - `update`'s document lists written and broken snapshots that have them. A kept baseline has no entry, so its page errors show only in `update`'s end text.
+
+Real network requests ([Per-story options](07-per-story-options.md#real-network-requests)):
+
+- In `test`, each entry holds the hosts its snapshot's pages sent real network requests to, from every load of it in the run, each once, in the order first seen, apart from those `silenceHosts` matches. None when its `realRequests` is `'off'`, the default.
+- Each has its host, with its port when it isn't the scheme's default, and its severity: `fail` or `warn`, by the snapshot's `realRequests`.
+- A host with severity `fail` makes `test` exit 1, whatever the snapshot's status. One with `warn` never fails a run.
+- `update`'s entries keep their own `realRequestHosts`, whatever `realRequests` says.
 
 ## The JSON document
 
@@ -97,6 +105,7 @@ Each entry:
 | `staleExpectedPageErrors`                | The story's own expected page errors that matched none of its page errors, as written: a string as JSON, `"Failed to fetch"`, and a regular expression as its literal, `/timeout/i`. Empty for a broken snapshot, an orphan and a deleted baseline                                                   |
 | `baseline`                               | The baseline's path, relative to the config folder                                                                                                                                                                                                                                                   |
 | `images`                                 | `{ baseline, snapshot, diff }`, relative to the report folder. A broken story's image is `images.snapshot`                                                                                                                                                                                           |
+| `realRequests`                           | In `test` only: `[{ host, severity }]`, with `severity` `fail` or `warn`. Empty for an orphan                                                                                                                                                                                                        |
 | `realRequestHosts`, `remoteContentHosts` | In `update` only                                                                                                                                                                                                                                                                                     |
 
 Rules:
@@ -146,12 +155,14 @@ Both `log` and `live` end with the same block:
 
 1. `── N failures ──`, then for each failure: the Storybook, story and mode, then `differs: …` or `broken: …`. A visual diff adds its `diff:` path and any `hint:`. A broken story adds up to 5 console error and warning lines.
 2. The snapshots with page errors or stale expected page errors, whatever their status, under a heading that counts them and says how many fail the run.
-3. The flaky snapshots, by name.
-4. The counts, for example `248 passed (2 flaky) · 1 differs · 1 broken · 3m 12s`.
-5. `Report: .visual-check/report/report.json`.
+3. The snapshots with real network requests, whatever their status, under a heading that counts them and says how many fail the run, such as `── 2 snapshots with real network requests, 1 of which fails the run ──`.
+4. The flaky snapshots, by name.
+5. The counts, for example `248 passed (2 flaky) · 1 differs · 1 broken · 3m 12s`.
+6. `Report: .visual-check/report/report.json`.
 
 - A failure is its name line, `web  button--primary  dark`, then lines indented two spaces: `differs: <message>`, `broken: <message>`, `missing: no baseline yet; …` or `orphan: no story calls for <path>; …`, then `diff: <path>`, one `hint: <message>` per hint, and a broken story's last 5 `console error:` and `console warn:` messages, each by its first line. Failures follow the report's order. Paths are relative to the folder the CLI runs in.
 - A snapshot with page errors is its name line, then lines indented two spaces: its first 5 page errors, such as `page error (fail): failed load http://127.0.0.1:6006/api/orders · HTTP 500` or `page error (warn): console.error Could not load orders`, each by its first line, how many more it has, then one `stale expected page error: /timeout/i` per stale entry.
+- A snapshot with real network requests is its name line, then lines indented two spaces: its first 5 hosts, such as `real network request (fail): api.example.com`, then how many more it has.
 - Durations read `142 ms` under a second, `12.3s` under a minute, then `3m 12s`.
 - `test --consistency` and a CI `test` stopped by its consistency check print the consistency output instead, with no block. A run that exits 2 gets none either.
 
@@ -171,8 +182,8 @@ Both `log` and `live` end with the same block:
 ## GitHub step summary
 
 - The CLI writes it whenever `GITHUB_STEP_SUMMARY` is set, under any reporter. It works from a plain `run:` step, the Action and the reusable workflow alike.
-- It holds the shard, the counts, the flaky snapshots, the page errors and a table of failures: Storybook, story, mode, status and message. The table is cut to stay under GitHub's 1 MiB per step.
-- Layout: a heading with the version, command and shard, the counts, up to 100 flaky snapshots, then a **Page errors** block when any snapshot has page errors or stale expected page errors: how many, in `test` how many fail the run, and the first 5 such snapshots, each with its first page error. Then, in a `test` with a snapshot that differs, a missing baseline or an orphan, how to update the baselines locally, then the table. A cut table keeps its first rows and ends with a note counting the rest. 1 KiB stays free for the Action's artifact link.
+- It holds the shard, the counts, the flaky snapshots, the page errors, `test`'s real network requests and a table of failures: Storybook, story, mode, status and message. The table is cut to stay under GitHub's 1 MiB per step.
+- Layout: a heading with the version, command and shard, the counts, up to 100 flaky snapshots, then a **Page errors** block when any snapshot has page errors or stale expected page errors: how many, in `test` how many fail the run, and the first 5 such snapshots, each with its first page error. Then, in `test`, a **Real network requests** block when any snapshot has one: how many, how many fail the run, and the first 5 such snapshots, each with its first 3 hosts. Then, in a `test` with a snapshot that differs, a missing baseline or an orphan, how to update the baselines locally, then the table. A cut table keeps its first rows and ends with a note counting the rest. 1 KiB stays free for the Action's artifact link.
 - The update note names the root script whose command is exactly `visual-check update`, else `visual-check update`, and says Docker must be up unless the platform is `host`.
 - A summary that can't be written adds a warning on stderr and never changes the exit code.
 - On a `test` or `update` run's exit 2, once the command line names one, it holds the error.
