@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.0](https://github.com/visual-check/visual-check/compare/storybook-addon-v0.1.2...storybook-addon-v0.2.0) (2026-11-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **cli:** test fails on page errors that aren't expected ([#190](https://github.com/visual-check/visual-check/issues/190))
+
+### Features
+
+* **cli:** a story whose capture would cut its content is broken as overflows ([#189](https://github.com/visual-check/visual-check/issues/189)) ([46c8df3](https://github.com/visual-check/visual-check/commit/46c8df3d2239800087c20b8ab0c4e2d8276a99bb)), closes [#179](https://github.com/visual-check/visual-check/issues/179)
+* **cli:** test fails on page errors that aren't expected ([#190](https://github.com/visual-check/visual-check/issues/190)) ([a1526a6](https://github.com/visual-check/visual-check/commit/a1526a6e019f43f3680a279b6869e29a8b50294a)), closes [#177](https://github.com/visual-check/visual-check/issues/177)
+* **cli:** update keeps the images of a story it marks broken ([#200](https://github.com/visual-check/visual-check/issues/200)) ([aaf17fe](https://github.com/visual-check/visual-check/commit/aaf17fed99745c2e503120ee1c11fcc188be2b09))
+
 ## [0.1.2](https://github.com/visual-check/visual-check/compare/storybook-addon-v0.1.1...storybook-addon-v0.1.2) (2026-11-27)
 
 
