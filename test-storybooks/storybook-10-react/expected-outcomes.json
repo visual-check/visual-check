@@ -66,6 +66,8 @@
   "modes--inherits-meta-modes": "passed",
   "modes--inherits-meta-modes.dark": "passed",
   "modes--invalid-mode-when-asked": "passed",
+  "modes--modes-only.dark": "passed",
+  "modes--modes-only.narrow": "passed",
   "modes--own-modes-only": "passed",
   "modes--own-modes-only.narrow": "passed",
   "modes--tall-touch": "passed",

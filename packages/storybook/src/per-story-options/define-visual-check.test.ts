@@ -21,6 +21,7 @@ describe('defineVisualCheck', () => {
   it('copies every key it is given under visualCheck', () => {
     const wait = () => undefined
     const result = visualCheck({
+      defaultCapture: false,
       viewport: { width: 800 },
       element: '#root',
       growViewport: false,
@@ -35,6 +36,7 @@ describe('defineVisualCheck', () => {
 
     expect(result).toEqual({
       visualCheck: {
+        defaultCapture: false,
         viewport: { width: 800 },
         element: '#root',
         growViewport: false,
@@ -265,6 +267,13 @@ describe('merging through Storybook', () => {
       element: '#story',
       disable: true,
     })
+  })
+
+  it('lets the most specific defaultCapture win', () => {
+    const meta = visualCheck({ defaultCapture: false, modes: ['dark'] })
+
+    expect(merge(meta, visualCheck({ defaultCapture: true })).defaultCapture).toBe(true)
+    expect(merge(meta, visualCheck({ disable: false })).defaultCapture).toBe(false)
   })
 
   it('lets the most specific pageErrors win', () => {

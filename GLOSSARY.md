@@ -37,7 +37,7 @@ Comparing the baselines the current stories and config call for with the ones th
 _Avoid_: Integrity check, baseline check
 
 **Check**:
-What the Storybook addon does with the current story when asked: it captures the story's default capture and every mode it lists, those with no baseline too, and compares each snapshot with its baseline. It writes no baseline.
+What the Storybook addon does with the current story when asked: it captures the story's default capture, unless the story sets `defaultCapture: false`, and every mode it lists, those with no baseline too, and compares each snapshot with its baseline. It writes no baseline.
 _Avoid_: Test (the command), run
 
 **Stale result**:
@@ -57,11 +57,11 @@ How a snapshot shows anything that moves: every finite animation and transition 
 _Avoid_: Frozen frame, final frame, paused animation
 
 **Mode**:
-A named set of globals and viewport, declared once per Storybook, that a story can be captured in besides its default capture, which has no mode.
+A named set of globals and viewport, declared once per Storybook, that a story can be captured in besides its default capture, which has no mode. A story that sets `defaultCapture: false` is captured in its modes only.
 _Avoid_: Variant, configuration, breakpoint, extra shot
 
 **Per-story options**:
-What a project sets for a Storybook, a stories file or a story in `parameters.visualCheck`: modes, viewport, capture element, `growViewport`, masks, tolerance, `pageErrors`, `expectedPageErrors`, `wait` and `disable`. Storybook merges the levels, and visual-check reads the result before it captures.
+What a project sets for a Storybook, a stories file or a story in `parameters.visualCheck`: modes, `defaultCapture`, viewport, capture element, `growViewport`, masks, tolerance, `pageErrors`, `expectedPageErrors`, `wait` and `disable`. Storybook merges the levels, and visual-check reads the result before it captures.
 _Avoid_: Story config, story settings, visual-check parameters
 
 **Visual diff**:

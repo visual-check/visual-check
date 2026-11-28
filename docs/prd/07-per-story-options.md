@@ -6,7 +6,7 @@ Everything a project sets for a Storybook, a stories file or a story lives in `p
 
 ## Where options live
 
-- **Keys:** `modes`, `viewport`, `element`, `growViewport`, `allowOverflow`, `masks`, `tolerance`, `pageErrors`, `expectedPageErrors`, `wait` and `disable`. Any other key exits 2.
+- **Keys:** `modes`, `defaultCapture`, `viewport`, `element`, `growViewport`, `allowOverflow`, `masks`, `tolerance`, `pageErrors`, `expectedPageErrors`, `wait` and `disable`. Any other key exits 2.
 - **Levels:** `preview` for every story of a Storybook, a stories file's meta for that file, and the story.
 - The project's config sits beneath `preview`, with defaults for `tolerance`, `viewport`, `maskColor` and `pageErrors` only, and an `expectedPageErrors` list added to every story's. It holds no masks and no modes.
 - visual-check reads no tags, not even Storybook's `!test`.
@@ -14,14 +14,14 @@ Everything a project sets for a Storybook, a stories file or a story lives in `p
 
 How levels merge, through Storybook's own merging:
 
-| Key                                                                         | Merge                                                                |
-| --------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `modes`                                                                     | The most specific level's list wins                                  |
-| `viewport`                                                                  | Deep-merges, so a story can set `{ width: 375 }` alone               |
-| `tolerance`                                                                 | Deep-merges, so a level can set only `color` or only `pixels`        |
-| `masks`                                                                     | Merges by name                                                       |
-| `wait`, `element`, `growViewport`, `allowOverflow`, `disable`, `pageErrors` | The most specific level wins                                         |
-| `expectedPageErrors`                                                        | The most specific level's list wins, then the config's list is added |
+| Key                                                                                           | Merge                                                                |
+| --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `modes`                                                                                       | The most specific level's list wins                                  |
+| `viewport`                                                                                    | Deep-merges, so a story can set `{ width: 375 }` alone               |
+| `tolerance`                                                                                   | Deep-merges, so a level can set only `color` or only `pixels`        |
+| `masks`                                                                                       | Merges by name                                                       |
+| `defaultCapture`, `wait`, `element`, `growViewport`, `allowOverflow`, `disable`, `pageErrors` | The most specific level wins                                         |
+| `expectedPageErrors`                                                                          | The most specific level's list wins, then the config's list is added |
 
 ## The helper
 
@@ -54,6 +54,7 @@ Every story's merged options are checked before any capture. Each of these exits
 - one mode name with different settings in two stories of the same Storybook. The message names both stories;
 - a mode that sets a global the Storybook doesn't declare, which Storybook would silently drop. A global counts as declared when the running Storybook would accept it from the URL: on 9.1 and 10, a key in `initialGlobals` or `globalTypes`;
 - a global value with characters other than letters, digits, spaces, `_` and `-`;
+- `defaultCapture: false` on a story that isn't disabled and lists no mode, which would leave it with no snapshot. The message says to list a mode or set `disable: true`;
 - a mode that sets a global the story or its meta pins in its own `globals`, because the pinned value wins and the snapshot would equal the default capture;
 - a `pixels` value that isn't a whole number of 0 or more, or a string from `'0%'` to `'100%'`;
 - an `expectedPageErrors` entry that's an empty string, which would match every page error, or a regular expression Node.js can't run, such as one with a syntax the browser knows and Node.js doesn't yet.
@@ -65,7 +66,10 @@ Every story's merged options are checked before any capture. Each of these exits
 - **Picking modes:** `modes: ['dark', 'mobile']` in `preview`, a meta or a story is the exact set for those stories.
   - `modes: []` means the default capture only.
   - A newly declared mode doesn't reach stories that list their own modes.
-- **The default capture is always taken.** Each listed mode adds one snapshot. So adding or removing a mode never renames another baseline.
+- **The default capture is taken unless the story sets `defaultCapture: false`.** Each listed mode adds one snapshot. So adding or removing a mode never renames another baseline.
+  - `defaultCapture: false` captures the listed modes only, for a story that exists to show them, such as a theme gallery. Its modes keep their keys, `<story-id>.<mode>`, and their viewport still merges over the story's `viewport`, though no capture is taken at it. Only `<story-id>` goes missing.
+  - It's a per-story option only, set in `preview`, a meta or a story, and the most specific level wins.
+  - The default capture's baseline then becomes an orphan: the consistency check fails until `update` deletes it, as for `disable`.
 - There's no matrix. A combination such as `dark-mobile` is declared by hand.
 - **Names** take lowercase letters, digits and `-`. `chromium`, `webkit` and `firefox` are reserved.
 - A mode's globals go into the story's URL.
@@ -103,7 +107,7 @@ Every story's merged options are checked before any capture. Each of these exits
 ## Leaving stories out
 
 - `disable: true` at any level skips a story or a file. `disable: false` brings one story of a disabled file back.
-- A disabled story's baselines become orphans, and `update` deletes them.
+- A disabled story's baselines become orphans, and `update` deletes them. So does the default capture's baseline of a story with `defaultCapture: false`.
 
 ## Masks
 

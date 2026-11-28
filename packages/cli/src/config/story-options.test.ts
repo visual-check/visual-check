@@ -11,7 +11,13 @@ const newerHint = ' If a newer @visual-check/storybook wrote it, install @visual
  * The known keys an unknown-key issue lists at the top level.
  */
 const topKeys =
-  'modes, viewport, element, growViewport, allowOverflow, masks, tolerance, disable, pageErrors, expectedPageErrors, wait'
+  'modes, defaultCapture, viewport, element, growViewport, allowOverflow, masks, tolerance, disable, pageErrors, expectedPageErrors, wait'
+
+/**
+ * The issue of a story that sets `defaultCapture: false` and lists no mode.
+ */
+const noSnapshotIssue =
+  'visualCheck.defaultCapture: false leaves the story with no snapshot, since it lists no mode. List a mode in its modes, or set disable: true to leave it out.'
 
 /**
  * Checks a value that must be valid and returns its options.
@@ -367,6 +373,45 @@ describe('checkStoryOptions', () => {
     })
   })
 
+  describe('defaultCapture', () => {
+    it('takes true, and false with a listed mode', () => {
+      expect(optionsOf({ defaultCapture: true })).toStrictEqual({ defaultCapture: true })
+      expect(
+        optionsOf({ defaultCapture: false, modes: { dark: { globals: { theme: 'dark' } }, mobile: null } }),
+      ).toStrictEqual({
+        defaultCapture: false,
+        modes: { dark: { globals: { theme: 'dark' } }, mobile: null },
+      })
+    })
+
+    it.each([null, 'false', 0, {}])('rejects %j', (defaultCapture) => {
+      expect(issuesOf({ defaultCapture, modes: { dark: {} } })).toStrictEqual([
+        expect.stringMatching(/^visualCheck\.defaultCapture: must be true or false\. Got /),
+      ])
+    })
+
+    it.each([
+      ['no modes', {}],
+      ['empty modes', { modes: {} }],
+      ['every mode left out', { modes: { dark: null, mobile: null } }],
+    ])('rejects false with %s, since the story would have no snapshot', (_, options) => {
+      expect(issuesOf({ defaultCapture: false, ...options })).toStrictEqual([noSnapshotIssue])
+    })
+
+    it('takes false with no listed mode on a disabled story', () => {
+      expect(optionsOf({ defaultCapture: false, disable: true })).toStrictEqual({
+        defaultCapture: false,
+        disable: true,
+      })
+    })
+
+    it('reports only the type issues of a value that has them', () => {
+      expect(issuesOf({ defaultCapture: false, element: '' })).toStrictEqual([
+        'visualCheck.element: must be a non-empty string, or null. Got "".',
+      ])
+    })
+  })
+
   describe('disable', () => {
     it('takes true and false', () => {
       expect(optionsOf({ disable: true })).toStrictEqual({ disable: true })
@@ -467,6 +512,7 @@ describe('checkStoryOptions', () => {
     it('returns typed options without wait', () => {
       const options = {
         modes: { dark: { globals: { theme: 'dark' } }, mobile: null },
+        defaultCapture: false,
         viewport: { width: 375, height: 667, deviceScaleFactor: 2, touch: true },
         element: null,
         growViewport: false,
@@ -482,6 +528,7 @@ describe('checkStoryOptions', () => {
 
       expect(optionsOf(options)).toStrictEqual({
         modes: { dark: { globals: { theme: 'dark' } }, mobile: null },
+        defaultCapture: false,
         viewport: { width: 375, height: 667, deviceScaleFactor: 2, touch: true },
         element: null,
         growViewport: false,
