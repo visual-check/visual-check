@@ -325,6 +325,7 @@ function snapshotOf(baseline?: Uint8Array, tolerance: Required<Tolerance> = defa
       selected: true,
       options: {},
       tolerance,
+      pageErrorPolicy: { check: 'fail', expected: [], storyExpected: [] },
       viewport: { width: 10, height: 10, deviceScaleFactor: 1, touch: false },
       globals: {},
     },

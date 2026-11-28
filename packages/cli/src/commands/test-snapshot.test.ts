@@ -113,6 +113,7 @@ function setupOf(baseline: Uint8Array | undefined, retries: number): TestSetup {
       selected: true,
       options: {},
       tolerance: { color: 0.01, pixels: 20 },
+      pageErrorPolicy: { check: 'fail', expected: [], storyExpected: [] },
       viewport: { width: 10, height: 10, deviceScaleFactor: 1, touch: false },
       globals: {},
     },

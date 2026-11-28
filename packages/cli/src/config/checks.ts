@@ -1,5 +1,7 @@
-import type { Tolerance, Viewport } from './define-config.js'
+import { isRegExp } from 'node:util/types'
+import type { PageErrorCheck, Tolerance, Viewport } from './define-config.js'
 import { mayHoldLogin } from './find-storybook-url-problem.js'
+import { UnrunnableRegExp } from './unrunnable-regexp.js'
 
 /**
  * Checks the value at a key path and returns one issue per problem, each starting with its key path. A key that is
@@ -93,21 +95,27 @@ export function render(value: unknown): string {
 }
 
 /**
- * The issue for a value at `path` that isn't what `text` says, showing the value briefly. A value that may hold a login
- * isn't shown, so no issue prints a password.
+ * The reason a value isn't what `text` says, showing `rendered`, the value as an issue renders it, briefly. A value
+ * that may hold a login isn't shown, so no issue prints a password.
  */
-export function mustBe(path: string, text: string, value: unknown): string {
-  const rendered = render(value)
-
+function mustBeReason(text: string, rendered: string): string {
   if (mayHoldLogin(rendered)) {
-    return `${path}: must be ${text}.`
+    return `must be ${text}.`
   }
 
   const characters = Array.from(rendered)
   const brief =
     characters.length > maxShownLength ? `${characters.slice(0, maxShownLength - 1).join('')}…` : characters.join('')
 
-  return `${path}: must be ${text}. Got ${brief}.`
+  return `must be ${text}. Got ${brief}.`
+}
+
+/**
+ * The issue for a value at `path` that isn't what `text` says, showing the value briefly. A value that may hold a login
+ * isn't shown, so no issue prints a password.
+ */
+export function mustBe(path: string, text: string, value: unknown): string {
+  return `${path}: ${mustBeReason(text, render(value))}`
 }
 
 /**
@@ -181,6 +189,32 @@ export function objectOf(keys: Keys, example: string): Check {
 }
 
 /**
+ * Checks an array whose items each meet `item`, one issue per item that doesn't. `text` says what the array must be. An
+ * absent value isn't an array, so a caller that allows one wraps this in `optional`.
+ */
+export function listOf(item: Requirement, text: string): Check {
+  const checkItem = meets(item)
+
+  return (value, path) =>
+    Array.isArray(value)
+      ? Array.from(value).flatMap((entry, index) => checkItem(entry, `${path}[${index}]`))
+      : [mustBe(path, text, value)]
+}
+
+/**
+ * One of the keys of `members`. Pass the union as the type argument, so a missing member fails to compile.
+ */
+export function oneOf<Member extends string>(members: Record<Member, true>): Requirement {
+  const values = Object.keys(members)
+  const quoted = values.map((value) => `'${value}'`)
+
+  return {
+    text: `${quoted.slice(0, -1).join(', ')} or ${quoted.at(-1)}`,
+    accepts: (value) => values.some((allowed) => allowed === value),
+  }
+}
+
+/**
  * The example a tolerance's issue shows.
  */
 export const toleranceExample = '{ color: 0.01, pixels: 20 }'
@@ -240,6 +274,34 @@ export const viewportRequirements: Record<keyof Viewport, Requirement> = {
   },
   touch: { text: 'true or false', accepts: (value) => typeof value === 'boolean' },
 }
+
+/**
+ * What `pageErrors` must be. The config and a story's options share it.
+ */
+export const pageErrorsRequirement: Requirement = oneOf<PageErrorCheck>({ fail: true, warn: true, off: true })
+
+/**
+ * What one entry of `expectedPageErrors` must be: a string that isn't empty, since an empty one would match every page
+ * error, or a regular expression, from any realm. The config and a story's options share it. A regular expression from
+ * the page that Node.js couldn't build is named as such, as a literal.
+ */
+const expectedPageError: Requirement = {
+  text: 'a non-empty string or a regular expression',
+  accepts: (value) => nonEmptyString.accepts(value) || isRegExp(value),
+  explain: (value) =>
+    value instanceof UnrunnableRegExp
+      ? mustBeReason('a regular expression Node.js can run', `/${value.source}/${value.flags}`)
+      : undefined,
+}
+
+/**
+ * Checks `expectedPageErrors`: an array of entries, each a non-empty string or a regular expression. The config and a
+ * story's options share it. An absent value isn't an array, so a caller that allows one wraps this in `optional`.
+ */
+export const checkExpectedPageErrors: Check = listOf(
+  expectedPageError,
+  "an array of strings or regular expressions, such as ['Failed to fetch', /ResizeObserver/]",
+)
 
 /**
  * The checks for an object's keys: each requirement wrapped by `wrap`, in the order the requirements list them.

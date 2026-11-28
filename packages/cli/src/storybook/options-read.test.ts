@@ -1,5 +1,6 @@
 import { runInNewContext } from 'node:vm'
 import { describe, expect, it, vi } from 'vitest'
+import { UnrunnableRegExp } from '../config/unrunnable-regexp.js'
 import { optionsReadAnswer } from './options-read.fixture.js'
 import { type OptionsRead, optionsReadExpression, readOptionsAnswer, type StoriesFile } from './options-read.js'
 
@@ -245,6 +246,30 @@ describe('readOptionsAnswer', () => {
     expect(className(value)).toBe('Date')
   })
 
+  it('gives back a regular expression as one, with its source and flags', () => {
+    const value = decoded(/\/api\/orders?/gi)
+
+    expect(value).toBeInstanceOf(RegExp)
+    expect(value).toStrictEqual(/\/api\/orders?/gi)
+  })
+
+  it.each([
+    ['a source', '(', ''],
+    ['a group syntax', '(?i:timeout)', ''],
+    ['flags', 'x', 'q'],
+  ])('gives back a regular expression with %s Node.js cannot build as an UnrunnableRegExp', (_what, source, flags) => {
+    const value = firstOptions(readOptionsAnswer(loadedWith({ kind: 'regexp', source, flags })))
+
+    expect(value).toBeInstanceOf(UnrunnableRegExp)
+    expect(value).toStrictEqual(new UnrunnableRegExp(source, flags))
+  })
+
+  it('gives back regular expressions in an array, beside strings', () => {
+    expect(decoded({ expectedPageErrors: ['Failed to fetch', /timeout/] })).toStrictEqual({
+      expectedPageErrors: ['Failed to fetch', /timeout/],
+    })
+  })
+
   it('gives back an instance of a class with an empty name as one of a class with an empty name', () => {
     expect(className(decoded(new (class {})()))).toBe('')
   })
@@ -314,6 +339,9 @@ describe('readOptionsAnswer', () => {
     ['an object whose entries are not pairs', loadedWith({ kind: 'object', entries: [['a']] })],
     ['an object with a key that is not text', loadedWith({ kind: 'object', entries: [[1, { kind: 'null' }]] })],
     ['an instance without a name', loadedWith({ kind: 'instance' })],
+    ['a regular expression without flags', loadedWith({ kind: 'regexp', source: 'x' })],
+    ['a regular expression without a source', loadedWith({ kind: 'regexp', flags: '' })],
+    ['a regular expression whose flags are not text', loadedWith({ kind: 'regexp', source: 'x', flags: 1 })],
   ])('throws on %s, quoting it', (_what, value) => {
     expect(() => readOptionsAnswer(value)).toThrow(
       `The options read in the page gave an answer visual-check doesn't know: ${JSON.stringify(value)}.`,

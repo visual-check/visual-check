@@ -21,6 +21,14 @@ export type Platform = 'linux/amd64' | 'linux/arm64' | 'host'
 export type ColorScheme = 'light' | 'dark'
 
 /**
+ * What a page error that isn't expected does to a snapshot: `'fail'` lists it and fails `test`, `'warn'` lists it
+ * without failing, and `'off'` doesn't check page errors.
+ *
+ * @public
+ */
+export type PageErrorCheck = 'fail' | 'warn' | 'off'
+
+/**
  * How much a snapshot may differ from its baseline before it fails.
  *
  * @public
@@ -179,6 +187,18 @@ export interface Config {
    * requests and remote content) stay silent. Defaults to `[]`.
    */
   silenceHosts?: string[]
+  /**
+   * What a page error that isn't expected does to a snapshot, which `preview`, a meta or a story can override: `'fail'`
+   * lists it and fails `test`, `'warn'` lists it without failing, and `'off'` doesn't check page errors. `update` never
+   * fails on them. Defaults to `'fail'`.
+   */
+  pageErrors?: PageErrorCheck
+  /**
+   * The page errors every story raises on purpose, added to each story's own list. A string matches a page error whose
+   * text contains it, and a regular expression one whose text it matches. The text is the message, or the URL for a
+   * load. Defaults to `[]`.
+   */
+  expectedPageErrors?: (string | RegExp)[]
   /**
    * Which changed files select every story or none. Defaults to no globs.
    */

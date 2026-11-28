@@ -5,6 +5,7 @@ import type {
   ColorScheme,
   Config,
   LocalAndCi,
+  PageErrorCheck,
   Platform,
   StorybookSettings,
   Tolerance,
@@ -109,6 +110,14 @@ export interface ResolvedConfig {
    */
   silenceHosts: string[]
   /**
+   * What a page error that isn't expected does to a snapshot, unless the story's options say otherwise.
+   */
+  pageErrors: PageErrorCheck
+  /**
+   * The page errors every story raises on purpose, which each snapshot expects besides its story's own.
+   */
+  expectedPageErrors: (string | RegExp)[]
+  /**
    * The globs that select every story or none, as written: relative to the config file's folder.
    */
   affected: Required<AffectedSettings>
@@ -156,6 +165,8 @@ const configDefaults = {
   readyTimeout: 10_000,
   retries: 1,
   silenceHosts: [],
+  pageErrors: 'fail',
+  expectedPageErrors: [],
   affected: { selectAll: [], ignore: [] },
 } as const satisfies Omit<ResolvedConfig, 'path' | 'storybooks' | 'baselinesFolders' | 'image'>
 
@@ -356,6 +367,8 @@ export function resolveConfig(config: Config, options: ResolveOptions): Resolved
     readyTimeout: pickSide(config.readyTimeout, options.ci) ?? configDefaults.readyTimeout,
     retries: config.retries ?? configDefaults.retries,
     silenceHosts: [...(config.silenceHosts ?? configDefaults.silenceHosts)],
+    pageErrors: config.pageErrors ?? configDefaults.pageErrors,
+    expectedPageErrors: [...(config.expectedPageErrors ?? configDefaults.expectedPageErrors)],
     affected: {
       selectAll: [...(config.affected?.selectAll ?? configDefaults.affected.selectAll)],
       ignore: [...(config.affected?.ignore ?? configDefaults.affected.ignore)],

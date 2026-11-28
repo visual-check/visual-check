@@ -43,6 +43,7 @@ function itemOf(overrides: Partial<SnapshotToCapture> = {}): SnapshotToCapture {
     selected: true,
     options: {},
     tolerance: { color: 0.01, pixels: 20 },
+    pageErrorPolicy: { check: 'fail', expected: [], storyExpected: [] },
     viewport: { width: 1280, height: 720, deviceScaleFactor: 2, touch: false },
     globals: {},
     ...overrides,

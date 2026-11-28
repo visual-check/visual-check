@@ -56,6 +56,7 @@ function itemOf(storybook: ResolvedStorybook, id: string): SnapshotToCapture {
     selected: true,
     options: {},
     tolerance: { color: 0.01, pixels: 20 },
+    pageErrorPolicy: { check: 'fail', expected: [], storyExpected: [] },
     viewport: { width: 1280, height: 720, deviceScaleFactor: 1, touch: false },
     globals: {},
   }
