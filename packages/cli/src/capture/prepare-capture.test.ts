@@ -81,6 +81,29 @@ function boxed(box: FakeBox): object {
 }
 
 /**
+ * Builds a `div` whose border box is `box`, with a border `border` wide on every side, whose content reaches `content`
+ * wide and tall from its padding box's top left corner, as `scrollWidth` and `scrollHeight` give it, and whose computed
+ * style is `styles`.
+ */
+function spilling(
+  box: FakeBox,
+  content: { width: number; height: number },
+  styles: Record<string, string> = {},
+  border = 0,
+): object {
+  return fakeElement('div', {
+    box,
+    styles,
+    properties: {
+      scrollWidth: content.width,
+      scrollHeight: content.height,
+      clientLeft: border,
+      clientTop: border,
+    },
+  })
+}
+
+/**
  * Builds the inline style of a painted box at these document coordinates, in `#FF00FF` unless told otherwise.
  */
 function maskStyle(box: FakeBox, maskColor = '#FF00FF'): string {
@@ -119,13 +142,14 @@ describe('the element', () => {
     })
   })
 
-  it('keeps the left and top edges at 0 or more', async () => {
+  it('keeps the left and top edges at 0 or more, giving what is cut as overflow', async () => {
     const element = boxed({ x: -20.5, y: -10, width: 50, height: 30 })
     const { document } = fakeCaptureDocument({ matches: { '#card': [element] } })
 
     expect(await openPreparation(document).prepare({ element: '#card' })).toEqual({
       outcome: 'ready',
       box: { x: 0, y: 0, width: 30, height: 20 },
+      overflow: { top: 10, right: 0, bottom: 0, left: 21 },
     })
   })
 
@@ -830,6 +854,169 @@ describe('the grids', () => {
   })
 })
 
+describe('the overflow', () => {
+  it("gives how far the full page's content reaches past the viewport's right edge", async () => {
+    const { document } = fakeCaptureDocument({ size: { width: 1000, height: 2400 }, viewportWidth: 800 })
+
+    expect(await openPreparation(document).prepare({})).toStrictEqual({
+      outcome: 'ready',
+      box: null,
+      overflow: { top: 0, right: 200, bottom: 0, left: 0 },
+    })
+  })
+
+  it.each([
+    ['the root element', 'hidden'],
+    ['the root element', 'clip'],
+    ['body', 'hidden'],
+    ['body', 'clip'],
+  ])('gives none for the full page when %s has overflow-x: %s', async (whose, value) => {
+    const styles = { 'overflow-x': value }
+    const { document } = fakeCaptureDocument({
+      size: { width: 1000, height: 600 },
+      viewportWidth: 800,
+      ...(whose === 'body' ? { bodyStyles: styles } : { rootStyles: styles }),
+    })
+
+    expect(await openPreparation(document).prepare({})).toStrictEqual({ outcome: 'ready', box: null })
+  })
+
+  it.each([
+    ['the viewport width cannot be read', 'clientWidth'],
+    ["the root element's style cannot be read", 'getComputedStyle'],
+  ])('gives none for the full page when %s', async (_what, unreadable) => {
+    const { document } = fakeCaptureDocument({ size: { width: 1000, height: 600 }, viewportWidth: 800 })
+    const throwing = () => {
+      throw new Error('TypeError: Illegal invocation.')
+    }
+
+    if (unreadable === 'clientWidth') {
+      Object.defineProperty(Reflect.get(document, 'documentElement'), 'clientWidth', { get: throwing })
+    } else {
+      Object.assign(Reflect.get(document, 'defaultView'), { getComputedStyle: throwing })
+    }
+    expect(await openPreparation(document).prepare({})).toStrictEqual({ outcome: 'ready', box: null })
+  })
+
+  it("gives how far an element's content spills past its right and bottom edges, with the page's scroll", async () => {
+    const element = spilling({ x: 10, y: 20, width: 100, height: 50 }, { width: 150, height: 80 }, {}, 2)
+    const { document } = fakeCaptureDocument({ matches: { '#card': [element] }, scroll: { x: 5, y: 30 } })
+
+    expect(await openPreparation(document).prepare({ element: '#card' })).toStrictEqual({
+      outcome: 'ready',
+      box: { x: 15, y: 50, width: 100, height: 50 },
+      overflow: { top: 0, right: 52, bottom: 32, left: 0 },
+    })
+  })
+
+  it.each(['hidden', 'clip', 'auto'])(
+    'gives none on an axis the element clips with overflow %s, still giving the other',
+    async (value) => {
+      const box = { x: 0, y: 0, width: 100, height: 50 }
+      const content = { width: 150, height: 80 }
+      const { document } = fakeCaptureDocument({
+        matches: {
+          '#x': [spilling(box, content, { 'overflow-x': value })],
+          '#y': [spilling(box, content, { 'overflow-y': value })],
+        },
+      })
+      const page = openPreparation(document)
+
+      expect(await page.prepare({ element: '#x' })).toStrictEqual({
+        outcome: 'ready',
+        box,
+        overflow: { top: 0, right: 0, bottom: 30, left: 0 },
+      })
+      expect(await page.prepare({ element: '#y' })).toStrictEqual({
+        outcome: 'ready',
+        box,
+        overflow: { top: 0, right: 50, bottom: 0, left: 0 },
+      })
+    },
+  )
+
+  it('gives none for less than a whole pixel, and rounds a side that counts up', async () => {
+    const under = spilling({ x: 0, y: 0, width: 99.2, height: 49.5 }, { width: 100, height: 50 })
+    const over = spilling({ x: 0, y: 0, width: 98.8, height: 50 }, { width: 100, height: 50 })
+    const { document } = fakeCaptureDocument({ matches: { '#under': [under], '#over': [over] } })
+    const page = openPreparation(document)
+
+    expect(await page.prepare({ element: '#under' })).toStrictEqual({
+      outcome: 'ready',
+      box: { x: 0, y: 0, width: 100, height: 50 },
+    })
+    expect(await page.prepare({ element: '#over' })).toStrictEqual({
+      outcome: 'ready',
+      box: { x: 0, y: 0, width: 99, height: 50 },
+      overflow: { top: 0, right: 2, bottom: 0, left: 0 },
+    })
+  })
+
+  it("gives how far an element reaches past the page's left and top edges, with the page's scroll", async () => {
+    const element = boxed({ x: -20.5, y: -10, width: 100, height: 50 })
+    const { document } = fakeCaptureDocument({ matches: { '#card': [element] }, scroll: { x: 5, y: 3 } })
+
+    expect(await openPreparation(document).prepare({ element: '#card' })).toStrictEqual({
+      outcome: 'ready',
+      box: { x: 0, y: 0, width: 85, height: 43 },
+      overflow: { top: 7, right: 0, bottom: 0, left: 16 },
+    })
+  })
+
+  it("keeps an element's content within the document's scrollable area", async () => {
+    const element = spilling({ x: 600, y: 400, width: 100, height: 100 }, { width: 300, height: 300 })
+    const { document } = fakeCaptureDocument({ matches: { '#card': [element] } })
+
+    expect(await openPreparation(document).prepare({ element: '#card' })).toStrictEqual({
+      outcome: 'ready',
+      box: { x: 600, y: 400, width: 100, height: 100 },
+      overflow: { top: 0, right: 100, bottom: 100, left: 0 },
+    })
+  })
+
+  it.each([
+    ['its scrollWidth and scrollHeight cannot be read', { scrollWidth: undefined, scrollHeight: undefined }, {}],
+    ['its scrollWidth and scrollHeight are text', { scrollWidth: '150', scrollHeight: '80' }, {}],
+    ['its border width cannot be read', { clientLeft: undefined, clientTop: undefined }, {}],
+    ['its style cannot be read', {}, { stylesThrow: true }],
+  ])('gives none for an element when %s', async (_what, properties, parts) => {
+    const element = fakeElement('div', {
+      box: { x: 0, y: 0, width: 100, height: 50 },
+      properties: { scrollWidth: 150, scrollHeight: 80, clientLeft: 0, clientTop: 0, ...properties },
+      ...parts,
+    })
+    const { document } = fakeCaptureDocument({ matches: { '#card': [element] } })
+
+    expect(await openPreparation(document).prepare({ element: '#card' })).toStrictEqual({
+      outcome: 'ready',
+      box: { x: 0, y: 0, width: 100, height: 50 },
+    })
+  })
+
+  it("gives none for an element whose content fits, though the full page's would not", async () => {
+    const element = spilling({ x: 0, y: 0, width: 100, height: 50 }, { width: 100, height: 50 })
+    const { document } = fakeCaptureDocument({
+      matches: { '#card': [element] },
+      size: { width: 1000, height: 600 },
+      viewportWidth: 800,
+    })
+
+    expect(await openPreparation(document).prepare({ element: '#card' })).toStrictEqual({
+      outcome: 'ready',
+      box: { x: 0, y: 0, width: 100, height: 50 },
+    })
+  })
+
+  it('gives none when the element is missing', async () => {
+    const { document } = fakeCaptureDocument({ size: { width: 1000, height: 600 }, viewportWidth: 800 })
+
+    expect(await openPreparation(document).prepare({ element: '#card' })).toStrictEqual({
+      outcome: 'element-missing',
+      found: 'nothing',
+    })
+  })
+})
+
 describe('readCapturePrep', () => {
   it('reads a capture ready for the full page', () => {
     expect(readCapturePrep({ outcome: 'ready', box: null })).toEqual({ outcome: 'ready', box: null })
@@ -869,6 +1056,20 @@ describe('readCapturePrep', () => {
     expect(
       readCapturePrep({ outcome: 'ready', box: null, grid: { width: 300.5, height: 900.25, extra: true } }),
     ).toStrictEqual({ outcome: 'ready', box: null, grid: { width: 300.5, height: 900.25 } })
+  })
+
+  it('reads a capture ready with its overflow, keeping only its four sides', () => {
+    expect(
+      readCapturePrep({
+        outcome: 'ready',
+        box: { x: 0, y: 0, width: 10, height: 20 },
+        overflow: { top: 0, right: 52, bottom: 32.5, left: 0, extra: true },
+      }),
+    ).toStrictEqual({
+      outcome: 'ready',
+      box: { x: 0, y: 0, width: 10, height: 20 },
+      overflow: { top: 0, right: 52, bottom: 32.5, left: 0 },
+    })
   })
 
   it.each(['nothing', 'zero-size'])('reads an element that is missing, having found %s', (found) => {
@@ -933,6 +1134,20 @@ describe('readCapturePrep', () => {
     ['a grid of negative width', { outcome: 'ready', box: null, grid: { width: -1, height: 2 } }],
     ['a grid whose width is text', { outcome: 'ready', box: null, grid: { width: 'x', height: 2 } }],
     ['a grid that is null', { outcome: 'ready', box: null, grid: null }],
+    ['overflow that is null', { outcome: 'ready', box: null, overflow: null }],
+    ['overflow with a side missing', { outcome: 'ready', box: null, overflow: { top: 0, right: 1, bottom: 0 } }],
+    [
+      'overflow with a negative side',
+      { outcome: 'ready', box: null, overflow: { top: 0, right: -1, bottom: 0, left: 0 } },
+    ],
+    [
+      'overflow with a side that is text',
+      { outcome: 'ready', box: null, overflow: { top: 0, right: '1', bottom: 0, left: 0 } },
+    ],
+    [
+      'overflow with a side that is not finite',
+      { outcome: 'ready', box: null, overflow: { top: 0, right: Infinity, bottom: 0, left: 0 } },
+    ],
     ['a missing element that found something else', { outcome: 'element-missing', found: 'hidden' }],
     ['an invalid selector of something else', { outcome: 'invalid-selector', of: 'story', message: 'bad' }],
     ['an invalid element selector without a message', { outcome: 'invalid-selector', of: 'element' }],
