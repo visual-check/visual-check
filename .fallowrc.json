@@ -81,6 +81,7 @@
       { "name": "cli/docs-site", "patterns": ["packages/cli/src/docs-site/**"] },
       { "name": "cli/init", "patterns": ["packages/cli/src/init/**"] },
       { "name": "cli/page-errors", "patterns": ["packages/cli/src/page-errors/**"] },
+      { "name": "cli/real-network-requests", "patterns": ["packages/cli/src/real-network-requests/**"] },
       { "name": "cli/report", "patterns": ["packages/cli/src/report/**"] },
       { "name": "cli/reporter", "patterns": ["packages/cli/src/reporter/**"] },
       { "name": "cli/sharding", "patterns": ["packages/cli/src/sharding/**"] },
@@ -140,6 +141,7 @@
           "cli/docs-site",
           "cli/init",
           "cli/page-errors",
+          "cli/real-network-requests",
           "cli/report",
           "cli/reporter",
           "cli/sharding",
@@ -156,6 +158,7 @@
         "allow": ["cli/agent-skill", "cli/baselines", "cli/config", "cli/container", "cli/docs-site", "cli/storybook"]
       },
       { "from": "cli/page-errors", "allow": ["cli/capture/driver", "cli/config"] },
+      { "from": "cli/real-network-requests", "allow": ["cli/config"] },
       { "from": "cli/report", "allow": ["cli/system-error"] },
       { "from": "cli/reporter", "allow": ["cli/report"] },
       { "from": "cli/sharding", "allow": ["cli/baselines", "cli/storybook"] },
