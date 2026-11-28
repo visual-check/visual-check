@@ -604,7 +604,8 @@ const gridLines: [storyId: string, says: string][] = [['grid--too-wide', 'wider 
  * an image of its page but for the story too tall to capture and the ones whose file failed to load, and the details
  * its reason gives: the grid too wide gives its width and the viewport's. The story whose `play` threw has its stack,
  * which shows the stack reaches visual-check through Storybook's channel, and the one whose `play` left an unhandled
- * error keeps it as a console message of level `error`.
+ * error keeps it as a console message of level `error` and lists it as an uncaught error page error that fails, as a
+ * broken story keeps its reason and lists its page errors.
  */
 const brokenEntries: BrokenEntry[] = [
   { storyId: 'readiness--render-throws', reason: 'error', pageImage: true },
@@ -620,8 +621,12 @@ const brokenEntries: BrokenEntry[] = [
     storyId: 'readiness--play-leaves-unhandled-error',
     reason: 'play-threw',
     pageImage: true,
-    holds: 'a console message of level error',
-    has: (entry) => entry.console.some(({ level }) => level === 'error'),
+    holds: 'a console message of level error and an uncaught error page error that fails',
+    has: (entry) =>
+      entry.console.some(({ level }) => level === 'error') &&
+      entry.pageErrors.some(
+        ({ kind, text, severity }) => kind === 'error' && /unhandled during play/.test(text) && severity === 'fail',
+      ),
   },
   {
     storyId: 'readiness--never-ready',

@@ -9,7 +9,9 @@ declare global {
   /**
    * `true` when the end-to-end check's page errors cases run, through a script the check's server adds to every
    * `iframe.html` before Storybook imports any stories file. Each story here raises its page errors only then, apart
-   * from those it expects, so every other run lists none of these stories.
+   * from those it expects itself, which it raises always, and `Stale`, which raises its expected error only when this
+   * isn't set. `ExpectedByConfig`'s are expected only by the page errors config case's config. So every run but the
+   * page errors cases lists none of these stories.
    */
   var __visualCheckE2ePageErrors: boolean | undefined
 }
