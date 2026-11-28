@@ -746,16 +746,36 @@ function readOverflow(value: unknown): { overflow: PageOverflow | undefined } | 
 }
 
 /**
+ * Reads what the page gives besides the box with an answer that's ready: the remote content, the grids and the
+ * overflow, each only when the page gives it. Gives `undefined` when any of them isn't what the page gives.
+ */
+function readExtras(
+  answer: Record<string, unknown>,
+): Pick<Extract<CapturePrep, { outcome: 'ready' }>, 'remote' | 'grid' | 'overflow'> | undefined {
+  const read = readRemote(answer.remote)
+  const readGrids = readGrid(answer.grid)
+  const readOverflows = readOverflow(answer.overflow)
+
+  if (read === undefined || readGrids === undefined || readOverflows === undefined) {
+    return undefined
+  }
+
+  return {
+    ...(read.remote === undefined ? {} : { remote: read.remote }),
+    ...(readGrids.grid === undefined ? {} : { grid: readGrids.grid }),
+    ...(readOverflows.overflow === undefined ? {} : { overflow: readOverflows.overflow }),
+  }
+}
+
+/**
  * Reads an answer of the page that's ready, with the element's box or none, and the remote content, the grids and the
  * overflow when it gives them. Gives `undefined` for any other answer.
  */
 function readReady(answer: Record<string, unknown>): CapturePrep | undefined {
   const { box } = answer
-  const read = readRemote(answer.remote)
-  const readGrids = readGrid(answer.grid)
-  const readOverflows = readOverflow(answer.overflow)
+  const extras = readExtras(answer)
 
-  if (answer.outcome !== 'ready' || read === undefined || readGrids === undefined || readOverflows === undefined) {
+  if (answer.outcome !== 'ready' || extras === undefined) {
     return undefined
   }
 
@@ -763,16 +783,10 @@ function readReady(answer: Record<string, unknown>): CapturePrep | undefined {
     return undefined
   }
 
-  const ready: Extract<CapturePrep, { outcome: 'ready' }> = {
+  return {
     outcome: 'ready',
     box: box === null ? null : { x: box.x, y: box.y, width: box.width, height: box.height },
-  }
-
-  return {
-    ...ready,
-    ...(read.remote === undefined ? {} : { remote: read.remote }),
-    ...(readGrids.grid === undefined ? {} : { grid: readGrids.grid }),
-    ...(readOverflows.overflow === undefined ? {} : { overflow: readOverflows.overflow }),
+    ...extras,
   }
 }
 
