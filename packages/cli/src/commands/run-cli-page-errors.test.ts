@@ -247,7 +247,7 @@ describe('runCli page errors', () => {
       [
         '1 written · 2 kept',
         'written .visual-check/baselines/b.png',
-        '── 3 snapshots with page errors ──',
+        '── 2 snapshots with page errors · 1 stale expected page error ──',
         'web  a',
         '  page error (fails test): console.error TypeError: Failed to fetch',
         'web  b',

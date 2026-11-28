@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ReportPageError } from '../report/report-document.js'
-import { pageErrorsBlockOf, pageErrorTextOf, snapshotsWithPageErrorsOf } from './page-errors-block.js'
+import { pageErrorCountsOf, pageErrorsBlockOf, pageErrorTextOf } from './page-errors-block.js'
 
 /**
  * A `console.error` that fails the run, with the text given.
@@ -48,22 +48,34 @@ describe('pageErrorTextOf', () => {
   })
 })
 
-describe('snapshotsWithPageErrorsOf', () => {
+describe('pageErrorCountsOf', () => {
   it.each([
     [[[failing('A')]], 'test', '1 snapshot with page errors, which fails the run'],
     [[[failing('A')], [failing('B')]], 'test', '2 snapshots with page errors, which fail the run'],
-    [[[failing('A')], [warning('B')], []], 'test', '3 snapshots with page errors, 1 of which fails the run'],
+    [[[failing('A')], [warning('B')], []], 'test', '2 snapshots with page errors, 1 of which fails the run'],
     [[[failing('A')], [failing('B')], [warning('C')]], 'test', '3 snapshots with page errors, 2 of which fail the run'],
     [[[warning('A')], [warning('B')]], 'test', '2 snapshots with page errors'],
     [[[failing('A')]], 'update', '1 snapshot with page errors'],
     [[[failing('A')], [warning('B')]], 'update', '2 snapshots with page errors'],
   ] as const)('counts snapshots with %o in %s as %s', (errors, command, text) => {
+    const snapshots = errors.map((pageErrors) => ({ pageErrors, staleExpectedPageErrors: [] }))
+
+    expect(pageErrorCountsOf(snapshots, command)).toBe(text)
+  })
+
+  it('counts the stale expected page errors apart, after the snapshots with page errors, leaving out a zero count', () => {
     expect(
-      snapshotsWithPageErrorsOf(
-        errors.map((pageErrors) => ({ pageErrors })),
-        command,
+      pageErrorCountsOf(
+        [
+          { pageErrors: [failing('A')], staleExpectedPageErrors: ['"x"'] },
+          { pageErrors: [], staleExpectedPageErrors: ['"y"', '/z/'] },
+        ],
+        'test',
       ),
-    ).toBe(text)
+    ).toBe('1 snapshot with page errors, which fails the run · 3 stale expected page errors')
+    expect(pageErrorCountsOf([{ pageErrors: [], staleExpectedPageErrors: ['"y"'] }], 'test')).toBe(
+      '1 stale expected page error',
+    )
   })
 })
 
@@ -101,7 +113,7 @@ describe('pageErrorsBlockOf', () => {
     )
 
     expect(block).toEqual([
-      '── 3 snapshots with page errors, 1 of which fails the run ──',
+      '── 2 snapshots with page errors, 1 of which fails the run · 3 stale expected page errors ──',
       'web  a',
       '  page error (fail): console.error TypeError: Failed to fetch',
       '  page error (fail): failed load http://localhost:6006/x.png · net::ERR_EMPTY_RESPONSE',
@@ -144,7 +156,12 @@ describe('pageErrorsBlockOf', () => {
     ]
 
     expect(blockOf(5)).toEqual(firstFive)
-    expect(blockOf(6, ['"x"'])).toEqual([...firstFive, '  …and 1 more page error', '  stale expected page error: "x"'])
+    expect(blockOf(6, ['"x"'])).toEqual([
+      '── 1 snapshot with page errors, which fails the run · 1 stale expected page error ──',
+      ...firstFive.slice(1),
+      '  …and 1 more page error',
+      '  stale expected page error: "x"',
+    ])
     expect(blockOf(7)).toEqual([...firstFive, '  …and 2 more page errors'])
   })
 })

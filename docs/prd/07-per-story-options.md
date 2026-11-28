@@ -144,6 +144,7 @@ A snapshot whose page raised page errors is compared or written as usual, and ha
 
 - A list of strings and regular expressions. A page error an entry matches is expected: it isn't listed and doesn't count against the snapshot.
 - **Matching** is against the page error's text: the message for a `console.error`, an uncaught error or a rejection, and the full URL for a load.
+  - The message is cut to 500 characters. A `console.error`'s arguments are joined by spaces, and an error, thrown, rejected or logged, is its stack, whose first line is `Name: message`. So a regular expression anchored at the message's end with `$` doesn't match an error.
   - A string matches a text that contains it.
   - A regular expression matches a text it finds a match in. A `g` flag has no effect, and a `y` flag matches only at the text's start.
 - **Merging:** Storybook replaces arrays, so a story's list replaces its meta's or `preview`'s rather than adding to it. The config's list is always added. So put the entries every story needs in the config, and repeat a meta's entries in a story that sets its own list.

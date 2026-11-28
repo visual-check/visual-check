@@ -293,7 +293,8 @@ export interface ReportPageError {
    */
   kind: 'console.error' | 'error' | 'unhandledrejection' | 'load'
   /**
-   * The message, cut to 500 characters, or a load's full URL.
+   * The message, cut to 500 characters, or a load's full URL. A `console.error`'s arguments are joined by spaces, and
+   * an error, thrown, rejected or logged, is described by its stack, whose first line is `Name: message`.
    */
   text: string
   /**

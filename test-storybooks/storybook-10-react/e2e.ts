@@ -3315,10 +3315,10 @@ function pageErrorsEntryProblems(
 /**
  * With the page errors script in every page, `test` of every page errors story against the committed baselines exits
  * 1, though every snapshot passes, since some have page errors that fail it. Its end block heads the page errors block
- * with how many snapshots have page errors or stale expected ones and how many of them fail the run, and its report
- * counts every snapshot passed and lists those snapshots alone, passed, each with its page errors: kind, text or URL,
- * load error and severity. Of the story with two modes, only the `dark` snapshot is listed, since only that mode's
- * globals raise its error.
+ * with how many snapshots have page errors and how many of them fail the run, then how many stale expected page
+ * errors there are, and its report counts every snapshot passed and lists those snapshots alone, passed, each with its
+ * page errors: kind, text or URL, load error and severity. Of the story with two modes, only the `dark` snapshot is
+ * listed, since only that mode's globals raise its error.
  */
 async function checkPageErrors(expected: Outcomes): Promise<string[]> {
   const outcomes = outcomesMatching(expected, pageErrors.filter)
@@ -3326,10 +3326,13 @@ async function checkPageErrors(expected: Outcomes): Promise<string[]> {
   return await withStorybookServer({ injectIntoIframe: pageErrors.script }, async (server) => {
     const run = await runCli(['test', '--filter', pageErrors.filter.source, '--url', server.url])
     const listed = listedPageErrorsOf(server.url)
-    const failing = Object.values(listed).filter(({ pageErrors }) =>
-      pageErrors.some(({ severity }) => severity === 'fail'),
-    ).length
-    const heading = `── ${Object.keys(listed).length} snapshots with page errors, ${failing} of which fail the run ──`
+    const entries = Object.values(listed)
+    const withErrors = entries.filter(({ pageErrors }) => pageErrors.length > 0).length
+    const failing = entries.filter(({ pageErrors }) => pageErrors.some(({ severity }) => severity === 'fail')).length
+    const stale = entries.reduce((sum, entry) => sum + entry.stale.length, 0)
+    const heading =
+      `── ${withErrors} snapshots with page errors, ${failing} of which fail the run · ` +
+      `${stale} stale expected ${stale === 1 ? 'page error' : 'page errors'} ──`
 
     return [
       ...exitCodeProblems('test', run, 1),

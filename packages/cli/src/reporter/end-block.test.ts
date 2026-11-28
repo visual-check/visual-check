@@ -210,7 +210,7 @@ describe('testEndLinesOf', () => {
       '── 1 failure ──',
       'web  a',
       '  differs: 5 differ, 0 allowed',
-      '── 2 snapshots with page errors, which fail the run ──',
+      '── 2 snapshots with page errors, which fail the run · 1 stale expected page error ──',
       'web  a',
       '  page error (fail): uncaught error Uncaught Error: boom',
       'web  c  dark',

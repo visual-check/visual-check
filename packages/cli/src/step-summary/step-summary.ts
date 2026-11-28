@@ -2,7 +2,7 @@ import { appendFile, stat } from 'node:fs/promises'
 import type { Report, ReportEntryFields } from '../report/report-document.js'
 import { countsLineOf } from '../reporter/counts-line.js'
 import { failureStatuses, testCountsLineOf } from '../reporter/end-block.js'
-import { pageErrorTextOf, snapshotsWithPageErrorsOf } from '../reporter/page-errors-block.js'
+import { pageErrorCountsOf, pageErrorTextOf } from '../reporter/page-errors-block.js'
 import { systemReasonOf } from '../system-error/system-reason.js'
 
 /**
@@ -274,22 +274,7 @@ function pageErrorSnapshotsBlockOf(report: Report): string[] {
   const more =
     listed.length > listedPageErrorSnapshotCount ? [`- …and ${listed.length - listedPageErrorSnapshotCount} more`] : []
 
-  return ['**Page errors**', pageErrorsCountsOf(report, entries), [...items, ...more].join('\n')]
-}
-
-/**
- * Gives the page errors block's counts: how many snapshots have page errors and, for `test`, how many of them fail the
- * run, then how many stale expected page errors there are, leaving out zero counts.
- */
-function pageErrorsCountsOf(report: Report, entries: readonly ListedEntry[]): string {
-  const withErrors = entries.filter((entry) => entry.pageErrors.length > 0)
-  const stale = entries.reduce((sum, entry) => sum + entry.staleExpectedPageErrors.length, 0)
-  const counts = [
-    ...(withErrors.length === 0 ? [] : [snapshotsWithPageErrorsOf(withErrors, report.command)]),
-    ...(stale === 0 ? [] : [`${stale} stale expected ${stale === 1 ? 'page error' : 'page errors'}`]),
-  ]
-
-  return counts.join(' · ')
+  return ['**Page errors**', pageErrorCountsOf(entries, report.command), [...items, ...more].join('\n')]
 }
 
 /**

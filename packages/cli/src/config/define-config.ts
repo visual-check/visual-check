@@ -196,7 +196,8 @@ export interface Config {
   /**
    * The page errors every story raises on purpose, added to each story's own list. A string matches a page error whose
    * text contains it, and a regular expression one whose text it matches. The text is the message, or the URL for a
-   * load. Defaults to `[]`.
+   * load. An error's message is its stack, whose first line is `Name: message`, so a regular expression anchored at
+   * the message's end with `$` doesn't match it. Defaults to `[]`.
    */
   expectedPageErrors?: (string | RegExp)[]
   /**

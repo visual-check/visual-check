@@ -57,12 +57,11 @@ export function pageErrorTextOf({ kind, text, loadError }: Omit<ReportPageError,
 }
 
 /**
- * Counts the snapshots in words, such as `3 snapshots with page errors, 2 of which fail the run`: for `test`, how many
- * of them have a page error that fails it, all of them, some, or none; `update` never fails on page errors.
- *
- * @public
+ * Counts the snapshots with page errors in words, such as `3 snapshots with page errors, 2 of which fail the run`: for
+ * `test`, how many of them have a page error that fails it, all of them, some, or none; `update` never fails on page
+ * errors.
  */
-export function snapshotsWithPageErrorsOf(
+function snapshotsWithPageErrorsOf(
   snapshots: readonly Pick<NamedPageErrors, 'pageErrors'>[],
   command: PageErrorsCommand,
 ): string {
@@ -79,6 +78,26 @@ export function snapshotsWithPageErrorsOf(
   }
 
   return failing === count ? `${counted}, which ${fail} the run` : `${counted}, ${failing} of which ${fail} the run`
+}
+
+/**
+ * Counts the snapshots' page errors in words, a `·` apart, leaving out a zero count: the snapshots that have page
+ * errors and, for `test`, how many of them fail the run, then the stale expected page errors, such as
+ * `3 snapshots with page errors, 2 of which fail the run · 1 stale expected page error`.
+ *
+ * @public
+ */
+export function pageErrorCountsOf(
+  snapshots: readonly Pick<NamedPageErrors, 'pageErrors' | 'staleExpectedPageErrors'>[],
+  command: PageErrorsCommand,
+): string {
+  const withErrors = snapshots.filter(({ pageErrors }) => pageErrors.length > 0)
+  const stale = snapshots.reduce((sum, { staleExpectedPageErrors }) => sum + staleExpectedPageErrors.length, 0)
+
+  return [
+    ...(withErrors.length === 0 ? [] : [snapshotsWithPageErrorsOf(withErrors, command)]),
+    ...(stale === 0 ? [] : [`${stale} stale expected ${stale === 1 ? 'page error' : 'page errors'}`]),
+  ].join(' · ')
 }
 
 /**
@@ -111,7 +130,8 @@ function snapshotLinesOf(
 
 /**
  * Lists the snapshots that have page errors or stale expected page errors, in the order given, under a heading that
- * counts them and, for `test`, how many fail the run: each by its name, then indented its first 5 page errors with
+ * counts the snapshots with page errors and, for `test`, how many fail the run, then the stale expected page errors:
+ * each by its name, then indented its first 5 page errors with
  * their severity, how many more it has, and its stale expected page errors. Gives no line when none has either.
  *
  * @public
@@ -126,7 +146,7 @@ export function pageErrorsBlockOf(snapshots: readonly NamedPageErrors[], command
   }
 
   return [
-    `── ${snapshotsWithPageErrorsOf(listed, command)} ──`,
+    `── ${pageErrorCountsOf(listed, command)} ──`,
     ...listed.flatMap((snapshot) => snapshotLinesOf(snapshot, command)),
   ]
 }
