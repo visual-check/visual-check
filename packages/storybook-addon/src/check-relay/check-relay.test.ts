@@ -26,6 +26,8 @@ function differingSnapshot(stem: string): AddonSnapshot {
     details: null,
     hints: [],
     console: [],
+    pageErrors: [],
+    staleExpectedPageErrors: [],
     baseline: `.visual-check/baselines/${stem}.png`,
     images: {
       baseline: `snapshots/web/${stem}.baseline.png`,

@@ -5,7 +5,13 @@ import { countsLineOf, orphanLabelOf } from '../reporter/counts-line.js'
 import { type ConsistencyCheck, isConsistent, type StorybookBaselines } from './consistency-check.js'
 import type { PlannedSnapshot } from './plan-snapshots.js'
 import { failMark, snapshotCountOf, snapshotLineOf } from './run-output.js'
-import { brokenResultOf, missingResultOf, type SnapshotResult, type SnapshotStatus } from './snapshot-result.js'
+import {
+  brokenResultOf,
+  missingResultOf,
+  type SnapshotResult,
+  type SnapshotStatus,
+  withNoPageErrors,
+} from './snapshot-result.js'
 
 /**
  * What the consistency output is built from.
@@ -83,10 +89,10 @@ export function orphanLinesOf(cwd: string, storybooks: readonly StorybookBaselin
 export function consistencyOutputOf({ version, cwd, planned, check }: CheckedPlan): ConsistencyOutput {
   const findings = planned.flatMap((item): { item: PlannedSnapshot; result: SnapshotResult }[] => {
     if ('broken' in item) {
-      return [{ item, result: brokenResultOf(item.broken, { attempts: 0 }) }]
+      return [{ item, result: withNoPageErrors(brokenResultOf(item.broken, { attempts: 0 })) }]
     }
 
-    return check.missing.has(item) ? [{ item, result: missingResultOf() }] : []
+    return check.missing.has(item) ? [{ item, result: withNoPageErrors(missingResultOf()) }] : []
   })
   const results = findings.map(({ result }) => result)
   const orphanLines = orphanLinesOf(cwd, check.storybooks)

@@ -1,16 +1,20 @@
 import {
   type Check,
+  checkExpectedPageErrors,
   checkKeys,
   checksOf,
   isPlainObject,
   join,
   type Keys,
+  listOf,
   lowercaseNamePattern,
   meets,
   mustBe,
   nonEmptyString,
   objectOf,
+  oneOf,
   optional,
+  pageErrorsRequirement,
   type Requirement,
   toleranceExample,
   toleranceRequirements,
@@ -108,26 +112,7 @@ function pairOf(requirement: Requirement): Check {
  * Checks a key that takes an array of items meeting `item`. `text` says what the array must be.
  */
 function arrayOf(item: Requirement, text: string): Check {
-  const checkItem = meets(item)
-
-  return noPair((value, path) =>
-    Array.isArray(value)
-      ? Array.from(value).flatMap((entry, index) => checkItem(entry, `${path}[${index}]`))
-      : [mustBe(path, text, value)],
-  )
-}
-
-/**
- * One of the keys of `members`. Pass the union as the type argument, so a missing member fails to compile.
- */
-function oneOf<Member extends string>(members: Record<Member, true>): Requirement {
-  const values = Object.keys(members)
-  const quoted = values.map((value) => `'${value}'`)
-
-  return {
-    text: `${quoted.slice(0, -1).join(', ')} or ${quoted.at(-1)}`,
-    accepts: (value) => values.some((allowed) => allowed === value),
-  }
+  return noPair(listOf(item, text))
 }
 
 /**
@@ -216,6 +201,8 @@ const configKeys = {
     },
     "an array of hosts, such as ['example.com', '*.example.com']",
   ),
+  pageErrors: oneValue(pageErrorsRequirement),
+  expectedPageErrors: noPair(checkExpectedPageErrors),
   affected: noPair(
     objectOf(
       {

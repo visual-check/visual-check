@@ -59,6 +59,7 @@ import type {
   ReportConsoleMessage,
   ReportFailedLoad,
   ReportImages,
+  ReportPageError,
   ReportSize,
   TestReport,
   TestReportCounts,
@@ -195,7 +196,7 @@ const hostStoryId = 'card--default'
  */
 const affectedHelper = {
   name: 'mocking-worker.ts',
-  importedBy: ['network--mocked-fetch', 'remote-content--every-kind'],
+  importedBy: ['network--mocked-fetch', 'page-errors--console-error', 'remote-content--every-kind'],
 }
 
 /**
@@ -527,6 +528,26 @@ const hazards = {
 const neverAnsweredPath = '/visual-check-e2e/never-loads.woff2'
 
 /**
+ * The path the server answers with a 500, which the page errors story `ServerError` fetches.
+ */
+const serverErrorPath = '/visual-check-e2e/server-error'
+
+/**
+ * The path whose connection the server destroys, answering nothing, which the page errors story `DroppedLoad` fetches.
+ */
+const droppedPath = '/visual-check-e2e/dropped'
+
+/**
+ * How the server answers the paths it never serves from the build, by path: the font file it never answers, the 500
+ * and the connection it destroys.
+ */
+const fixedAnswers: Record<string, (request: IncomingMessage, response: ServerResponse) => void> = {
+  [neverAnsweredPath]: () => undefined,
+  [serverErrorPath]: (_request, response) => response.writeHead(500).end(),
+  [droppedPath]: (request) => request.socket.destroy(),
+}
+
+/**
  * What the line of each broken readiness story says, a story once for each text it must hold. The CLI's line gives no
  * reason code, so each text is in its reason's own wording, pinning the reason as well as what the story threw or what
  * it was still waiting for when readyTimeout ran out.
@@ -587,7 +608,8 @@ const gridLines: [storyId: string, says: string][] = [['grid--too-wide', 'wider 
  * its reason gives: the grid too wide gives its width and the viewport's, and each story that overflows how far its
  * content reaches past each side of its capture area. The story whose `play` threw has its stack,
  * which shows the stack reaches visual-check through Storybook's channel, and the one whose `play` left an unhandled
- * error keeps it as a console message of level `error`.
+ * error keeps it as a console message of level `error` and lists it as an uncaught error page error that fails, as a
+ * broken story keeps its reason and lists its page errors.
  */
 const brokenEntries: BrokenEntry[] = [
   { storyId: 'readiness--render-throws', reason: 'error', pageImage: true },
@@ -603,8 +625,12 @@ const brokenEntries: BrokenEntry[] = [
     storyId: 'readiness--play-leaves-unhandled-error',
     reason: 'play-threw',
     pageImage: true,
-    holds: 'a console message of level error',
-    has: (entry) => entry.console.some(({ level }) => level === 'error'),
+    holds: 'a console message of level error and an uncaught error page error that fails',
+    has: (entry) =>
+      entry.console.some(({ level }) => level === 'error') &&
+      entry.pageErrors.some(
+        ({ kind, text, severity }) => kind === 'error' && /unhandled during play/.test(text) && severity === 'fail',
+      ),
   },
   {
     storyId: 'readiness--never-ready',
@@ -1476,7 +1502,8 @@ function storyPageMarkupOf(options: ServeOptions, storyId: string, load: number)
  * pages. While it holds them, it keeps each one's answer until they're released. Once asked for the page of the story
  * `dropAfterStoryPage` names, it drops the connection of every request for the files it names. The options-reading
  * page is never held or recorded, so a run reads every story's options before it asks for a story page. It never
- * answers a request for the font file the font readiness story asks for, until it stops.
+ * answers a request for the font file the font readiness story asks for, until it stops. It answers the page errors
+ * story `ServerError`'s path with a 500, and destroys the connection of `DroppedLoad`'s.
  */
 async function serveStorybook(options: ServeOptions = {}): Promise<StorybookServer> {
   const storyPageRequests: string[] = []
@@ -1523,7 +1550,11 @@ async function serveStorybook(options: ServeOptions = {}): Promise<StorybookServ
     const { pathname, searchParams } = new URL(request.url ?? '/', 'http://127.0.0.1')
     const storyId = storyPageIdOf(pathname, searchParams)
 
-    if (pathname === neverAnsweredPath) {
+    const fixedAnswer = fixedAnswers[pathname]
+
+    if (fixedAnswer !== undefined) {
+      fixedAnswer(request, response)
+
       return
     }
 
@@ -1819,25 +1850,41 @@ interface ConfigOptions {
    * the subset of the CLI's `Tolerance` this check writes: counts of pixels, not shares.
    */
   tolerance?: { color?: number; pixels?: number }
+  /**
+   * The project's expected page errors, which every story's are added to. The config's default when not given.
+   */
+  expectedPageErrors?: (string | RegExp)[]
 }
 
 /**
  * Writes a config for this Storybook, served at the URL, with its baselines in the given folder, that captures with 2
- * workers, and the platform, `readyTimeout`, `retries` and `tolerance` the options give. Gives its path. `test`'s report
- * goes into `.visual-check/report` in that folder.
+ * workers, and the platform, `readyTimeout`, `retries`, `tolerance` and `expectedPageErrors` the options give. Gives its
+ * path. `test`'s report goes into `.visual-check/report` in that folder.
  */
 function writeConfig(folder: string, url: string, baselines: string, options: ConfigOptions = {}): string {
   const path = join(folder, 'visual-check.config.mjs')
+  const { expectedPageErrors, ...jsonOptions } = options
   const config = {
     storybooks: { react: { url, dir: packageDir, baselines } },
     image,
     workers: parallelWorkers,
-    ...options,
+    ...jsonOptions,
   }
+  const json = JSON.stringify(config, null, 2)
+  // JSON has no regular expressions, so the expected page errors are written as literals after the rest.
+  const source =
+    expectedPageErrors === undefined ? json : `{ ...${json}, expectedPageErrors: ${literalsOf(expectedPageErrors)} }`
 
-  writeFileSync(path, `export default ${JSON.stringify(config, null, 2)}\n`)
+  writeFileSync(path, `export default ${source}\n`)
 
   return path
+}
+
+/**
+ * Writes a list of strings and regular expressions as a JavaScript array literal.
+ */
+function literalsOf(entries: (string | RegExp)[]): string {
+  return `[${entries.map((entry) => (typeof entry === 'string' ? JSON.stringify(entry) : String(entry))).join(', ')}]`
 }
 
 /**
@@ -3089,6 +3136,378 @@ function linesAfterProblems(run: CliRun, storyId: string, expected: string[]): s
   return after.join('\n') === expected.join('\n')
     ? []
     : [`test: the lines after ${storyId}'s are ${JSON.stringify(after)}, expected ${JSON.stringify(expected)}`]
+}
+
+/**
+ * The page errors stories and what their cases run: see the README's section on them.
+ */
+const pageErrors = {
+  /**
+   * Matches the keys of every page errors story's snapshots.
+   */
+  filter: /^page-errors--/,
+  /**
+   * The script, added to every `iframe.html`, that makes each page errors story raise its page errors. Without it,
+   * each raises only those it expects, so every other case lists none of them.
+   */
+  script: '<script>globalThis.__visualCheckE2ePageErrors = true</script>',
+  /**
+   * The stories that each raise one kind of page error that nothing expects, each case alone.
+   */
+  failingKinds: [
+    'page-errors--console-error',
+    'page-errors--uncaught-error',
+    'page-errors--unhandled-rejection',
+    'page-errors--missing-file',
+    'page-errors--server-error',
+    'page-errors--dropped-load',
+    'page-errors--worker-error',
+  ],
+  /**
+   * Matches the stories whose page errors, or the page errors they raise, don't fail `test`.
+   */
+  notFailing: /^page-errors--(console-warn|other-origin|expected-worker-error|expected-errors|stale|warn|off)$/,
+  /**
+   * The stories of `notFailing` that `test` lists all the same: the stale entry's and the warning's.
+   */
+  notFailingListed: ['page-errors--stale', 'page-errors--warn'],
+  /**
+   * Matches the story whose page errors the config case's config expects, and a story that raises none, which shows
+   * that a config's expected page errors never go stale.
+   */
+  byConfig: /^page-errors--(expected-by-config|console-warn)$/,
+  /**
+   * The config case's expected page errors: a string in `ExpectedByConfig`'s message and a regular expression that
+   * matches the URL of the file it fetches.
+   */
+  configExpected: ['expected by the config', /\/visual-check-e2e\/expected-by-config\.json$/],
+  /**
+   * The story the update case writes.
+   */
+  updateStoryId: 'page-errors--missing-file',
+}
+
+/**
+ * What a page error in a report entry must be: its kind and severity, and its text and load error, each exactly a
+ * string or matching a regular expression. A pattern without a load error matches a page error without one.
+ */
+interface PageErrorPattern {
+  /**
+   * The page error's kind.
+   */
+  kind: ReportPageError['kind']
+  /**
+   * The page error's text, exactly, or a pattern it matches.
+   */
+  text: string | RegExp
+  /**
+   * The page error's severity.
+   */
+  severity: ReportPageError['severity']
+  /**
+   * A load's error, exactly, or a pattern it matches.
+   */
+  loadError?: string | RegExp
+}
+
+/**
+ * What a report entry of a snapshot with page errors holds of them.
+ */
+interface PageErrorsOfEntry {
+  /**
+   * Its page errors, in order.
+   */
+  pageErrors: PageErrorPattern[]
+  /**
+   * Its stale expected page errors, as the report writes them.
+   */
+  stale: string[]
+}
+
+/**
+ * Gives what the report entry of each page errors snapshot that has page errors or stale expected page errors holds of
+ * them, by key, when the server at the URL serves the Storybook and the page errors script is in every page. A load's
+ * text is its full URL on the server.
+ */
+function listedPageErrorsOf(url: string): Record<string, PageErrorsOfEntry> {
+  const failing = (kind: ReportPageError['kind'], text: string | RegExp): PageErrorPattern => ({
+    kind,
+    text,
+    severity: 'fail',
+  })
+  const load = (path: string, loadError: string | RegExp): PageErrorPattern => ({
+    kind: 'load',
+    text: `${url}${path}`,
+    severity: 'fail',
+    loadError,
+  })
+  const failingWith = (...patterns: PageErrorPattern[]): PageErrorsOfEntry => ({ pageErrors: patterns, stale: [] })
+
+  return {
+    'page-errors--console-error': failingWith(failing('console.error', 'visual-check e2e: a console.error')),
+    'page-errors--uncaught-error': failingWith(failing('error', /visual-check e2e: an uncaught error/)),
+    'page-errors--unhandled-rejection': failingWith(
+      failing('unhandledrejection', /visual-check e2e: an unhandled rejection/),
+    ),
+    'page-errors--missing-file': failingWith(load('/visual-check-e2e/missing.json', 'HTTP 404')),
+    'page-errors--server-error': failingWith(load(serverErrorPath, 'HTTP 500')),
+    'page-errors--dropped-load': failingWith(load(droppedPath, /^net::ERR_/)),
+    'page-errors--worker-error': failingWith(load('/visual-check-e2e/orders?visual-check-e2e-status=500', 'HTTP 500')),
+    'page-errors--expected-by-config': failingWith(
+      failing('console.error', 'visual-check e2e: expected by the config'),
+      load('/visual-check-e2e/expected-by-config.json', 'HTTP 404'),
+    ),
+    'page-errors--stale': { pageErrors: [], stale: ['"an error this story stopped raising"'] },
+    'page-errors--warn': {
+      pageErrors: [{ kind: 'console.error', text: 'visual-check e2e: a console.error that warns', severity: 'warn' }],
+      stale: [],
+    },
+    'page-errors--two-modes.dark': failingWith(
+      failing('console.error', 'visual-check e2e: a console.error in the dark mode'),
+    ),
+  }
+}
+
+/**
+ * Keeps the listed page errors of these keys.
+ */
+function listedPageErrorsAmong(
+  listed: Record<string, PageErrorsOfEntry>,
+  keys: string[],
+): Record<string, PageErrorsOfEntry> {
+  return Object.fromEntries(Object.entries(listed).filter(([key]) => keys.includes(key)))
+}
+
+/**
+ * Whether a value is undefined where the pattern is, equals it where it's a string, or matches it where it's a regular
+ * expression.
+ */
+function matchesPattern(value: string | undefined, pattern: string | RegExp | undefined): boolean {
+  if (value === undefined || pattern === undefined) {
+    return value === pattern
+  }
+
+  return typeof pattern === 'string' ? value === pattern : pattern.test(value)
+}
+
+/**
+ * Whether a report's page error is what the pattern says.
+ */
+function pageErrorMatches(error: ReportPageError | undefined, pattern: PageErrorPattern): boolean {
+  if (error === undefined) {
+    return false
+  }
+
+  const fields: [value: string | undefined, pattern: string | RegExp | undefined][] = [
+    [error.kind, pattern.kind],
+    [error.severity, pattern.severity],
+    [error.text, pattern.text],
+    [error.loadError, pattern.loadError],
+  ]
+
+  return fields.every(([value, fieldPattern]) => matchesPattern(value, fieldPattern))
+}
+
+/**
+ * Writes page error patterns as JSON, each regular expression as its literal.
+ */
+function patternsJsonOf(patterns: PageErrorPattern[]): string {
+  return JSON.stringify(patterns, (_key, value: unknown) => (value instanceof RegExp ? String(value) : value))
+}
+
+/**
+ * Gives the problems with the page errors of a report's or an `update` document's entries: the entries, by key, are
+ * exactly those `listed` has, and each holds the page errors and stale expected page errors it gives, in order.
+ */
+function pageErrorsEntriesProblems(
+  entries: readonly (TestReportEntry | UpdateReportEntry)[],
+  listed: Record<string, PageErrorsOfEntry>,
+): string[] {
+  const keys = entries.map(({ id }) => id).sort()
+  const expectedKeys = Object.keys(listed).sort()
+
+  return [
+    ...problemUnless(
+      isDeepStrictEqual(keys, expectedKeys),
+      `it lists ${JSON.stringify(keys)}, expected ${JSON.stringify(expectedKeys)}`,
+    ),
+    ...entries.flatMap((entry) => {
+      const expected = listed[entry.id]
+
+      return expected === undefined ? [] : pageErrorsEntryProblems(entry, expected)
+    }),
+  ]
+}
+
+/**
+ * Gives the problems with an entry whose page errors or stale expected page errors aren't these, or none.
+ */
+function pageErrorsEntryProblems(
+  { id, pageErrors: actual, staleExpectedPageErrors }: TestReportEntry | UpdateReportEntry,
+  { pageErrors: expected, stale }: PageErrorsOfEntry,
+): string[] {
+  const matching =
+    actual.length === expected.length && expected.every((pattern, index) => pageErrorMatches(actual[index], pattern))
+
+  return [
+    ...problemUnless(
+      matching,
+      `${id}'s pageErrors are ${JSON.stringify(actual)}, expected ${patternsJsonOf(expected)}`,
+    ),
+    ...problemUnless(
+      isDeepStrictEqual(staleExpectedPageErrors, stale),
+      `${id}'s staleExpectedPageErrors are ${JSON.stringify(staleExpectedPageErrors)}, expected ${JSON.stringify(stale)}`,
+    ),
+  ]
+}
+
+/**
+ * With the page errors script in every page, `test` of every page errors story against the committed baselines exits
+ * 1, though every snapshot passes, since some have page errors that fail it. Its end block heads the page errors block
+ * with how many snapshots have page errors and how many of them fail the run, then how many stale expected page
+ * errors there are, and its report counts every snapshot passed and lists those snapshots alone, passed, each with its
+ * page errors: kind, text or URL, load error and severity. Of the story with two modes, only the `dark` snapshot is
+ * listed, since only that mode's globals raise its error.
+ */
+async function checkPageErrors(expected: Outcomes): Promise<string[]> {
+  const outcomes = outcomesMatching(expected, pageErrors.filter)
+
+  return await withStorybookServer({ injectIntoIframe: pageErrors.script }, async (server) => {
+    const run = await runCli(['test', '--filter', pageErrors.filter.source, '--url', server.url])
+    const listed = listedPageErrorsOf(server.url)
+    const entries = Object.values(listed)
+    const withErrors = entries.filter(({ pageErrors }) => pageErrors.length > 0).length
+    const failing = entries.filter(({ pageErrors }) => pageErrors.some(({ severity }) => severity === 'fail')).length
+    const stale = entries.reduce((sum, entry) => sum + entry.stale.length, 0)
+    const heading =
+      `── ${withErrors} snapshots with page errors, ${failing} of which fail the run · ` +
+      `${stale} stale expected ${stale === 1 ? 'page error' : 'page errors'} ──`
+
+    return [
+      ...exitCodeProblems('test', run, 1),
+      ...outcomeProblems('test', run.outcomes, outcomes),
+      ...stdoutSaysProblems(run, [heading]),
+      ...reportProblems(packageDir, (report) => [
+        ...reportCountsProblems(report, outcomes, 0),
+        ...pageErrorsEntriesProblems(report.snapshots, listed),
+      ]),
+    ]
+  })
+}
+
+/**
+ * With the page errors script in every page, `test` of each story that raises one kind of page error nothing expects,
+ * alone, exits 1 though the story passes, and its report lists the story with that page error alone. Each problem
+ * starts with the story's ID.
+ */
+async function checkEachPageErrorKind(): Promise<string[]> {
+  return await withStorybookServer({ injectIntoIframe: pageErrors.script }, async (server) => {
+    const listed = listedPageErrorsOf(server.url)
+    const problems: string[] = []
+
+    for (const storyId of pageErrors.failingKinds) {
+      const run = await runCli(['test', '--filter', `^${storyId}$`, '--url', server.url])
+      const runProblems = [
+        ...exitCodeProblems('test', run, 1),
+        ...outcomeProblems('test', run.outcomes, { [storyId]: 'passed' }),
+        ...reportProblems(packageDir, (report) =>
+          pageErrorsEntriesProblems(report.snapshots, listedPageErrorsAmong(listed, [storyId])),
+        ),
+      ]
+
+      problems.push(...runProblems.map((problem) => `${storyId}: ${problem}`))
+    }
+
+    return problems
+  })
+}
+
+/**
+ * With the page errors script in every page, `test` of the stories whose page errors don't fail it exits 0 with every
+ * snapshot passed. Its report lists only the story whose expected page error went stale and the one with
+ * `pageErrors: 'warn'`: a `console.warn`, a failed load from another origin, the page errors a story expects, by a
+ * string or a regular expression, in a message or a URL, the worker-built 500 among them, and those of the story with
+ * `pageErrors: 'off'` aren't listed.
+ */
+async function checkPageErrorsThatDontFail(expected: Outcomes): Promise<string[]> {
+  const outcomes = outcomesMatching(expected, pageErrors.notFailing)
+
+  return await withStorybookServer({ injectIntoIframe: pageErrors.script }, async (server) => {
+    const run = await runCli(['test', '--filter', pageErrors.notFailing.source, '--url', server.url])
+    const listed = listedPageErrorsAmong(listedPageErrorsOf(server.url), pageErrors.notFailingListed)
+
+    return [
+      ...expectedRunProblems('test', run, outcomes),
+      ...reportProblems(packageDir, (report) => [
+        ...reportCountsProblems(report, outcomes, 0),
+        ...pageErrorsEntriesProblems(report.snapshots, listed),
+      ]),
+    ]
+  })
+}
+
+/**
+ * With the page errors script in every page and a config that expects `ExpectedByConfig`'s page errors, a message by a
+ * string and a URL by a regular expression, `test` of that story and one that raises no page error exits 0 with both
+ * passed, and its report lists neither: the config's entries expect the first's page errors and never go stale.
+ */
+async function checkPageErrorsExpectedByConfig(expected: Outcomes): Promise<string[]> {
+  const outcomes = outcomesMatching(expected, pageErrors.byConfig)
+
+  return await withStorybookServer({ injectIntoIframe: pageErrors.script }, (server) =>
+    withTemporaryFolder(async (folder) => {
+      const config = writeConfig(folder, server.url, committedBaselines, {
+        expectedPageErrors: pageErrors.configExpected,
+      })
+      const run = await runCli(['test', '--filter', pageErrors.byConfig.source, '--config', config])
+
+      return [
+        ...expectedRunProblems('test', run, outcomes),
+        ...reportProblems(folder, (report) => [
+          ...reportCountsProblems(report, outcomes, 0),
+          ...pageErrorsEntriesProblems(report.snapshots, {}),
+        ]),
+      ]
+    }),
+  )
+}
+
+/**
+ * With the page errors script in every page, on a server whose `index.json` lists only `MissingFile`, `update
+ * --reporter json` of that story into an empty baselines folder writes its baseline, byte-identical to the committed
+ * one, and exits 0, since page errors never fail `update`. Its lines, on standard error, end with the page errors
+ * block, whose heading never says it fails the run and whose line marks the page error `fails test`, and its document
+ * lists the story `written`, `missing`, with its page error.
+ */
+async function checkPageErrorsUpdate(): Promise<string[]> {
+  const storyId = pageErrors.updateStoryId
+  const serveOptions = { injectIntoIframe: pageErrors.script, onlyStory: storyId }
+
+  return await withStorybookServer(serveOptions, (server) =>
+    withTemporaryFolder(async (folder) => {
+      const baselines = join(folder, 'baselines')
+
+      mkdirSync(baselines)
+
+      const config = writeConfig(folder, server.url, baselines)
+      const run = await runCli(['update', '--reporter', 'json', '--filter', `^${storyId}$`, '--config', config])
+      const lines = humanLinesOf(run)
+
+      return [
+        ...expectedRunProblems('update', lines, { [storyId]: 'written' }),
+        ...stdoutSaysProblems(lines, ['── 1 snapshot with page errors ──', '  page error (fails test): failed load ']),
+        ...updateDocumentProblems(run.stdout, (document) => [
+          ...updateCountsProblems(document.counts, { written: 1, deleted: 0, kept: 0, broken: 0, flaky: 0 }),
+          ...entryFieldProblems(document.snapshots, storyId, { status: 'written', reason: 'missing' }),
+          ...pageErrorsEntriesProblems(
+            document.snapshots,
+            listedPageErrorsAmong(listedPageErrorsOf(server.url), [storyId]),
+          ),
+        ]),
+        ...onlyCommittedBaselineProblems(baselines, `${storyId}.png`, join(diagnosticsDir, 'page-errors-update')),
+      ]
+    }),
+  )
 }
 
 /**
@@ -4968,6 +5387,26 @@ if (setupProblems.length > 0) {
     {
       name: 'report json and errors: test --reporter json prints report.json alone, lists a snapshot that differs by size with both sizes and its three images, and an orphan with its baseline; with the server stopped, test exits 2 leaving a report of the error naming react and its URL, with no image; update --reporter json prints its own document listing a baseline written because it differed and an orphan deleted, and leaves the report folder alone',
       run: checkReportJsonAndErrors,
+    },
+    {
+      name: "page errors: with the page errors script, test of every page errors story exits 1 though each passes, its end block counts the snapshots with page errors, its report lists those snapshots alone, passed, each with its page errors' kind, text or URL, load error and severity, the two-modes story's dark snapshot alone",
+      run: () => checkPageErrors(expected),
+    },
+    {
+      name: 'page errors by kind: with the page errors script, test of each story raising one kind of page error nothing expects, alone, exits 1 though it passes, its report lists it with that page error',
+      run: checkEachPageErrorKind,
+    },
+    {
+      name: "page errors that don't fail: with the page errors script, test of the stories with a console.warn, a failed load from another origin, expected page errors, a stale expected page error, pageErrors: 'warn' and pageErrors: 'off' exits 0, its report lists only the stale entry's story and the warning's",
+      run: () => checkPageErrorsThatDontFail(expected),
+    },
+    {
+      name: "expected page errors in config: with the page errors script and a config expecting a message by a string and a URL by a regular expression, test exits 0 and its report lists nothing, the config's entries never going stale",
+      run: () => checkPageErrorsExpectedByConfig(expected),
+    },
+    {
+      name: 'page errors with update: with the page errors script, update --reporter json of a story with a page error writes its baseline, byte-identical to the committed one, exits 0, lists it in its page errors block and its document lists it written with its page error',
+      run: checkPageErrorsUpdate,
     },
     ...(insideImage ? insideImageCases(expected) : outsideImageCases(expected)),
   ])

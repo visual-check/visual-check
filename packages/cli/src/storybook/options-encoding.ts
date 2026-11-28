@@ -95,6 +95,20 @@ export type Encoded =
     }
   | {
       /**
+       * A regular expression, from any realm, which JSON can't carry.
+       */
+      kind: 'regexp'
+      /**
+       * Its source.
+       */
+      source: string
+      /**
+       * Its flags.
+       */
+      flags: string
+    }
+  | {
+      /**
        * An array.
        */
       kind: 'array'
@@ -130,10 +144,10 @@ export type Encoded =
  * still sees what they were. It encodes `null`, `undefined`, booleans, strings and finite numbers as they are, `NaN`,
  * `Infinity` and `-Infinity`, bigints and symbols by their text, and any function as a function. It encodes an array
  * item by item, and a plain object, one whose prototype is `Object.prototype` or `null`, by its own enumerable string
- * keys in order. Any other object is an instance, named by its constructor, or with an empty name when it has none. An
- * object met again inside itself is the instance `Circular`, one nested more than 16 levels deep is `Deep`, a value
- * past the limit of 10 000 is `Large`, and an object or a property that can't be read is `Unreadable`. It never
- * throws.
+ * keys in order. It encodes a regular expression, from any realm, by its source and flags. Any other object is an
+ * instance, named by its constructor, or with an empty name when it has none. An object met again inside itself is the
+ * instance `Circular`, one nested more than 16 levels deep is `Deep`, a value past the limit of 10 000 is `Large`, and
+ * an object or a property that can't be read is `Unreadable`. It never throws.
  *
  * The page runs it as part of its script, and a test fixture evaluates the same source in Node.
  */
@@ -159,6 +173,11 @@ export const optionsEncoderSource = `(value) => {
     const name = typeof constructorFunction === 'function' ? constructorFunction.name : undefined
     return typeof name === 'string' ? name : ''
   }
+
+  const isRegExp = (object) =>
+    Object.prototype.toString.call(object) === '[object RegExp]' &&
+    typeof object.source === 'string' &&
+    typeof object.flags === 'string'
 
   const encodeProperty = (container, key, ancestors) => {
     let property
@@ -201,6 +220,9 @@ export const optionsEncoderSource = `(value) => {
     try {
       if (Array.isArray(object)) {
         return encodeArray(object, inner)
+      }
+      if (isRegExp(object)) {
+        return { kind: 'regexp', source: object.source, flags: object.flags }
       }
       const prototype = Object.getPrototypeOf(object)
       if (prototype !== Object.prototype && prototype !== null) {

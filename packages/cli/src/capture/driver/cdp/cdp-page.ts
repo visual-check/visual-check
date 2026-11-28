@@ -4,18 +4,22 @@ import {
   CaptureTooLargeError,
   type ConsoleMessage,
   consoleMessageFunction,
+  eachPageErrorOnce,
   type FailedLoad,
   keptConsoleMessages,
+  keptPageErrors,
   maxCaptureSide,
   type Page,
   PageCrashedError,
+  type PageError,
   type PageSetup,
   PageTimeoutError,
   type PageViewport,
+  pageErrorOf,
   readConsoleMessage,
 } from '../driver.js'
 import { type CdpConnection, type CdpEvent, isRecord } from './cdp-connection.js'
-import { failedLoadOf } from './failed-loads.js'
+import { failedLoadOf, loadPageErrorOf } from './failed-loads.js'
 import { LoadedDocument } from './loaded-document.js'
 import { MainFrameNavigation } from './main-frame-navigation.js'
 import { RequestWatch } from './request-watch.js'
@@ -408,6 +412,13 @@ class CdpPage implements Page {
   private recentFailedLoads: FailedLoad[] = []
 
   /**
+   * The first 50 page errors since the last `goto` started, or since the page opened before any, each once, in order:
+   * the error messages the page script sent, and the loads that went wrong, each of the origin of the document the
+   * main frame had committed then.
+   */
+  private recentPageErrors: PageError[] = []
+
+  /**
    * Watches the page's session for a crash, a detach, its main frame's navigations and its dialogs, the browser for its
    * popups, and the connection for its close. Watches the page's requests and service workers too when `watchRequests`
    * says so.
@@ -537,7 +548,7 @@ class CdpPage implements Page {
    * stops listening once it settles. Forgets the document the last `goto` loaded at once, and follows the new one from
    * the moment its load event is taken in, so a commit right behind that event already counts. Once it has settled, it
    * stops the navigation, so a load that a late answer to `Page.navigate` reveals after the `goto` failed doesn't count.
-   * Forgets the messages the page sent and the loads that failed before it.
+   * Forgets the messages the page sent, the loads that failed and the page errors before it.
    */
   async goto(url: string, timeoutMs: number): Promise<void> {
     this.throwIfFailed()
@@ -546,6 +557,7 @@ class CdpPage implements Page {
     this.requestWatch?.reset()
     this.recentConsoleMessages = []
     this.recentFailedLoads = []
+    this.recentPageErrors = []
     this.messageContexts.clear()
 
     const navigation = new MainFrameNavigation(url, this.ids.targetId, this.loaderIds, (later: readonly CdpEvent[]) =>
@@ -650,6 +662,13 @@ class CdpPage implements Page {
   }
 
   /**
+   * Gives a copy of the first 50 page errors since the last `goto` started, each once, in order.
+   */
+  pageErrors(): PageError[] {
+    return [...this.recentPageErrors]
+  }
+
+  /**
    * Closes the page: fails every call in flight and every later one, stops listening, and disposes the page's browser
    * context. Resolves once the browser has answered, either way, or after 5 s. Calling it again returns the same
    * promise.
@@ -676,8 +695,8 @@ class CdpPage implements Page {
 
   /**
    * Fails the page when an event says it can no longer be used or that it navigated away from the document its last
-   * `goto` loaded, keeps a message the page script sent and a load that failed, handles its dialogs and popups, and,
-   * when it watches requests, tells the watch about the event.
+   * `goto` loaded, keeps a message the page script sent, a load that failed and a page error, handles its dialogs and
+   * popups, and, when it watches requests, tells the watch about the event.
    */
   private watch(event: CdpEvent): void {
     const failure = pageFailureOf(event, this.ids.sessionId)
@@ -688,6 +707,7 @@ class CdpPage implements Page {
 
     this.keepMessage(event)
     this.keepFailedLoad(event)
+    this.keepLoadPageError(event)
 
     if (event.sessionId === this.ids.sessionId) {
       this.followMainFrame(event)
@@ -738,6 +758,7 @@ class CdpPage implements Page {
   /**
    * Notes the main world of each new document of the main frame that the page's session reports, and keeps the message
    * a `Runtime.bindingCalled` event of the session carries from one of those, if it carries one, with the 49 before it.
+   * Keeps it as a page error too when it is one.
    */
   private keepMessage(event: CdpEvent): void {
     if (event.sessionId !== this.ids.sessionId) {
@@ -758,6 +779,12 @@ class CdpPage implements Page {
 
     this.recentConsoleMessages.push(message)
     this.recentConsoleMessages.splice(0, this.recentConsoleMessages.length - keptConsoleMessages)
+
+    const pageError = pageErrorOf(message)
+
+    if (pageError !== undefined) {
+      this.keepPageError(pageError)
+    }
   }
 
   /**
@@ -770,8 +797,7 @@ class CdpPage implements Page {
 
     if (
       load === undefined ||
-      this.gotoOrigin === undefined ||
-      tupleOriginOf(load.url) !== this.gotoOrigin ||
+      !this.isOfGotoOrigin(load.url) ||
       this.recentFailedLoads.length >= keptFailedLoads ||
       this.recentFailedLoads.some((kept: FailedLoad) => kept.url === load.url)
     ) {
@@ -779,6 +805,36 @@ class CdpPage implements Page {
     }
 
     this.recentFailedLoads.push(load)
+  }
+
+  /**
+   * Keeps the page error a `Log.entryAdded` event of the page's session reports for a load, if it reports one of the
+   * origin of the document the main frame last committed. None counts before that document commits, or when its
+   * origin is opaque.
+   */
+  private keepLoadPageError(event: CdpEvent): void {
+    const pageError = loadPageErrorOf(event, this.ids.sessionId)
+
+    if (pageError !== undefined && this.isOfGotoOrigin(pageError.text)) {
+      this.keepPageError(pageError)
+    }
+  }
+
+  /**
+   * Keeps a page error, unless the same one is kept already or 50 are.
+   */
+  private keepPageError(pageError: PageError): void {
+    if (this.recentPageErrors.length < keptPageErrors) {
+      this.recentPageErrors = eachPageErrorOnce(this.recentPageErrors, [pageError])
+    }
+  }
+
+  /**
+   * Says whether a URL is of the origin of the document the main frame last committed: never before that document
+   * commits, or when its origin is opaque.
+   */
+  private isOfGotoOrigin(url: string): boolean {
+    return this.gotoOrigin !== undefined && tupleOriginOf(url) === this.gotoOrigin
   }
 
   /**

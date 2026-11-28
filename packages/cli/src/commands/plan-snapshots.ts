@@ -6,6 +6,7 @@ import type { Tolerance, Viewport } from '../config/define-config.js'
 import { checkModeRules, type ModeRulesStory } from '../config/mode-rules.js'
 import type { ResolvedConfig, ResolvedStorybook } from '../config/resolve-config.js'
 import { checkStoryOptions, type ModeDefinition, type StoryOptions } from '../config/story-options.js'
+import { type PageErrorPolicy, pageErrorPolicyOf } from '../page-errors/page-error-policy.js'
 import type { FileOptions, StoriesFile } from '../storybook/options-read.js'
 import { previewUrlOf, type Story } from '../storybook/read-stories.js'
 
@@ -51,13 +52,15 @@ type StoryOptionsOf =
     }
 
 /**
- * What planning needs of the config: its readyTimeout, in ms, its viewport and its tolerance.
+ * What planning needs of the config: its readyTimeout, in ms, its viewport, its tolerance, and what it says of page
+ * errors.
  */
-type PlanConfig = Pick<ResolvedConfig, 'readyTimeout' | 'viewport' | 'tolerance'>
+type PlanConfig = Pick<ResolvedConfig, 'readyTimeout' | 'viewport' | 'tolerance' | 'pageErrors' | 'expectedPageErrors'>
 
 /**
  * A snapshot the run can capture: the default capture or a listed mode of a story that isn't disabled, selected or
- * not, with its Storybook, its key, the story's options and tolerance, and the snapshot's viewport and globals.
+ * not, with its Storybook, its key, the story's options, tolerance and page error policy, and the snapshot's viewport
+ * and globals.
  */
 export interface SnapshotToCapture {
   /**
@@ -88,6 +91,11 @@ export interface SnapshotToCapture {
    * The story's tolerance: the config's under the story's, key by key. A mode shares it.
    */
   tolerance: Required<Tolerance>
+  /**
+   * How the snapshot checks its page errors: the story's `pageErrors`, or the config's, and the config's expected page
+   * errors, then the story's. A mode shares it.
+   */
+  pageErrorPolicy: PageErrorPolicy
   /**
    * The size the snapshot is laid out and captured at.
    */
@@ -366,8 +374,8 @@ function checkSelectionListed(stories: readonly Story[], allStories: readonly St
  * Plans a taken story's snapshots, each marked as selected or not: its default capture, at the config's viewport under
  * the story's, key by key, with no globals, then each mode it lists, in the order its options hold them, at the default
  * capture's viewport under the mode's, with the mode's globals. Each has the config's tolerance under the story's, key
- * by key. A mode the story leaves out, `null`, isn't planned. A story whose stories file didn't load gives one broken
- * snapshot with no mode, since its modes are unknown.
+ * by key, and the story's page error policy. A mode the story leaves out, `null`, isn't planned. A story whose stories
+ * file didn't load gives one broken snapshot with no mode, since its modes are unknown.
  */
 function storySnapshotsOf(
   storybook: ResolvedStorybook,
@@ -389,6 +397,7 @@ function storySnapshotsOf(
     selected,
     options,
     tolerance: { ...config.tolerance, ...options.tolerance },
+    pageErrorPolicy: pageErrorPolicyOf(config, options),
     viewport: { ...config.viewport, ...options.viewport },
     globals: {},
   }

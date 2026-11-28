@@ -1,3 +1,4 @@
+import { runInNewContext } from 'node:vm'
 import { describe, expect, it } from 'vitest'
 import { ConfigError } from './config-error.js'
 import { validateConfig } from './validate-config.js'
@@ -91,6 +92,8 @@ describe('the config object', () => {
       readyTimeout: { ci: 20_000 },
       retries: 0,
       silenceHosts: ['fonts.example.com', '*.cdn.example.com'],
+      pageErrors: 'warn',
+      expectedPageErrors: ['Failed to fetch', /ResizeObserver/i],
       affected: { selectAll: ['package.json'], ignore: ['**/*.md'] },
     })
   })
@@ -139,7 +142,7 @@ describe('the config object', () => {
   it('reports an unknown key, listing the known ones', () => {
     expect(issuesOf(withRoot({ browser: 'firefox' }))).toEqual([
       'browser: unknown key. Known keys: storybooks, platform, image, tolerance, viewport, maskColor, timezone, ' +
-        'locale, colorScheme, workers, readyTimeout, retries, silenceHosts, affected.',
+        'locale, colorScheme, workers, readyTimeout, retries, silenceHosts, pageErrors, expectedPageErrors, affected.',
     ])
   })
 
@@ -398,6 +401,8 @@ describe('{ local, ci } on a key that takes one value', () => {
     ['viewport', withRoot({ viewport: { local: { width: 1 } } })],
     ['platform', withRoot({ platform: { local: 'host', ci: 'linux/amd64' } })],
     ['silenceHosts', withRoot({ silenceHosts: { ci: ['a.test'] } })],
+    ['pageErrors', withRoot({ pageErrors: { local: 'warn', ci: 'fail' } })],
+    ['expectedPageErrors', withRoot({ expectedPageErrors: { ci: ['Failed to fetch'] } })],
     ['storybooks.web.dir', withStorybook({ dir: { local: 'a', ci: 'b' } })],
   ])('reports %s in %j', (path, config) => {
     expect(issuesOf(config)).toEqual([`${path}: ${cantTakePair}`])
@@ -640,6 +645,71 @@ describe('silenceHosts', () => {
 
   it.each(['example.com', { host: 'example.com' }])('rejects silenceHosts %j', (silenceHosts) => {
     expect(issuesOf(withRoot({ silenceHosts }))).toEqual([wrongValue('silenceHosts')])
+  })
+})
+
+describe('pageErrors', () => {
+  it.each(['fail', 'warn', 'off'])('accepts %s', (pageErrors) => {
+    expectValid(withRoot({ pageErrors }))
+  })
+
+  it.each(['Fail', 'error', true, null])('rejects %j', (pageErrors) => {
+    expect(issuesOf(withRoot({ pageErrors }))).toEqual([wrongValue('pageErrors')])
+  })
+
+  it('says what pageErrors takes', () => {
+    expect(issuesOf(withRoot({ pageErrors: 'error' }))).toEqual([
+      "pageErrors: must be 'fail', 'warn' or 'off'. Got \"error\".",
+    ])
+  })
+})
+
+describe('expectedPageErrors', () => {
+  it('accepts strings and regular expressions, and an empty array', () => {
+    expectValid(withRoot({ expectedPageErrors: ['Failed to fetch', /\/api\/orders/, /timeout/gi] }))
+    expectValid(withRoot({ expectedPageErrors: [] }))
+  })
+
+  it('keeps each regular expression as it is', () => {
+    const pattern = /ResizeObserver/
+    const result = validateConfig(withRoot({ expectedPageErrors: [pattern] }), 'visual-check.config.ts')
+
+    expect(result.expectedPageErrors?.[0]).toBe(pattern)
+  })
+
+  it('accepts a regular expression from another realm, as a worker thread gives it', () => {
+    const pattern = runInNewContext('/ResizeObserver/')
+
+    expect(pattern).not.toBeInstanceOf(RegExp)
+    expectValid(withRoot({ expectedPageErrors: [pattern] }))
+  })
+
+  it.each([
+    ['an empty string', ''],
+    ['a number', 1],
+    ['null', null],
+    ['a plain object', { source: 'x', flags: '' }],
+    ['a Date', new Date(0)],
+    ['an instance of a class named RegExp', new { RegExp: class {} }.RegExp()],
+    ['an object that calls itself a RegExp', { [Symbol.toStringTag]: 'RegExp' }],
+  ])('rejects %s as an entry', (_label, entry) => {
+    expect(issuesOf(withRoot({ expectedPageErrors: ['Failed to fetch', entry] }))).toEqual([
+      wrongValue('expectedPageErrors[1]'),
+    ])
+  })
+
+  it('says what an entry takes', () => {
+    expect(issuesOf(withRoot({ expectedPageErrors: [1] }))).toEqual([
+      'expectedPageErrors[0]: must be a non-empty string or a regular expression. Got 1.',
+    ])
+  })
+
+  it.each(['Failed to fetch', /Failed/])('rejects expectedPageErrors %j that is not an array', (expectedPageErrors) => {
+    expect(issuesOf(withRoot({ expectedPageErrors }))).toEqual([
+      expect.stringMatching(
+        /^expectedPageErrors: must be an array of strings or regular expressions, such as \['Failed to fetch', \/ResizeObserver\/\]\. Got /,
+      ),
+    ])
   })
 })
 

@@ -19,6 +19,7 @@
     "fallow-graph.json",
     "skill"
   ],
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

@@ -133,6 +133,7 @@ A broken story counts toward exit 1, and the run goes on. Errors and timeouts ar
 
 - A stories file that fails to load also fails the consistency check. Its baselines are never orphans, and `update` never deletes them.
 - These aren't broken stories but exit 2: a preview that fails to load, an `index.json` that fails, and invalid options.
+- Page errors don't make a story broken: its snapshot is still compared or written, and lists them besides. A story broken for another reason keeps that reason, and its entry lists its page errors too ([ADR 0013](../adr/0013-page-errors-fail-test-without-breaking-the-story.md), [Per-story options](07-per-story-options.md#page-errors)).
 - A broken story whose page couldn't load Storybook's own files at the network level (a dropped or refused connection, never a cancellation or an HTTP status) says so in its message, naming the first and the browser's error, and carries the `failed-loads` hint, which points at the server. The browser's log reports them, so `test` still watches no request.
 
 ## Remote content

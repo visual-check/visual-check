@@ -1,3 +1,4 @@
+import { UnrunnableRegExp } from '../config/unrunnable-regexp.js'
 import type { Encoded } from './options-encoding.js'
 import { stateCallExpression } from './preview-script.js'
 
@@ -42,8 +43,9 @@ interface StoryOptionsRead {
    */
   id: string
   /**
-   * The story's merged `parameters.visualCheck`, as JS values again: a function stands for a function, and an object
-   * that wasn't plain is an instance of a class with the name of the original's class.
+   * The story's merged `parameters.visualCheck`, as JS values again: a function stands for a function, a regular
+   * expression is one again, or an `UnrunnableRegExp` when Node.js can't build it, and any other object that wasn't
+   * plain is an instance of a class with the name of the original's class.
    */
   options: unknown
   /**
@@ -235,6 +237,22 @@ function decodeBigint({ text }: Record<string, unknown>): bigint {
 }
 
 /**
+ * Decodes a regular expression from the source and flags the page read of one. One Node.js can't build, such as one
+ * with a syntax the browser knows and Node.js doesn't yet, is kept as an `UnrunnableRegExp`, which validation rejects
+ * at its key path.
+ */
+function decodeRegExp({ source, flags }: Record<string, unknown>): RegExp | UnrunnableRegExp {
+  const sourceText = textOf(source)
+  const flagsText = textOf(flags)
+
+  try {
+    return new RegExp(sourceText, flagsText)
+  } catch {
+    return new UnrunnableRegExp(sourceText, flagsText)
+  }
+}
+
+/**
  * Decodes one entry of a plain object as a key and its value.
  */
 function decodeEntry(entry: unknown): [string, unknown] {
@@ -268,6 +286,7 @@ const decoders: Record<Encoded['kind'], (encoded: Record<string, unknown>) => un
   bigint: decodeBigint,
   symbol: ({ text }) => Symbol(textOf(text)),
   function: () => () => undefined,
+  regexp: decodeRegExp,
   array: ({ items }) => listOf(items).map(decode),
   object: ({ entries }) => Object.fromEntries(listOf(entries).map(decodeEntry)),
   instance: ({ name }) => instanceNamed(textOf(name)),

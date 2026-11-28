@@ -2875,3 +2875,153 @@ describe('Page.failedLoads', () => {
     expect(page.failedLoads()).toEqual([{ url: chunkUrl, error: 'net::ERR_EMPTY_RESPONSE' }])
   })
 })
+
+/**
+ * The payload the page script sends for a message of `kind` with `text`.
+ */
+function payloadOf(kind: ConsoleMessage['kind'], text: string): string {
+  return JSON.stringify({ kind, text })
+}
+
+describe('Page.pageErrors', () => {
+  const missingUrl = `${storyOrigin}/api/orders`
+  const notFound = 'Failed to load resource: the server responded with a status of 404 ()'
+
+  it('gives none before the page raised any, and no load before any goto', async () => {
+    const { browser, page } = await openPage()
+
+    expect(page.pageErrors()).toEqual([])
+    logLoad(browser, missingUrl, notFound)
+    await flush()
+    expect(page.pageErrors()).toEqual([])
+  })
+
+  it("keeps the main world's console.error, uncaught errors and unhandled rejections, in order", async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    sendMessage(browser, payloadOf('console.warn', 'deprecated'), 1)
+    sendMessage(browser, payloadOf('console.error', 'Failed to fetch'), 1)
+    sendMessage(browser, logged('a routine line'), 1)
+    sendMessage(browser, payloadOf('error', 'Uncaught TypeError: x is undefined'), 1)
+    sendMessage(browser, payloadOf('unhandledrejection', 'nope'), 1)
+    sendMessage(browser, payloadOf('console.info', 'ready'), 1)
+    sendMessage(browser, payloadOf('console.debug', 'details'), 1)
+    sendMessage(browser, payloadOf('console.error', 'an unknown context'), 42)
+    await flush()
+    expect(page.pageErrors()).toEqual([
+      { kind: 'console.error', text: 'Failed to fetch' },
+      { kind: 'error', text: 'Uncaught TypeError: x is undefined' },
+      { kind: 'unhandledrejection', text: 'nope' },
+    ])
+  })
+
+  it('keeps an error however many console messages come after it', async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    sendMessage(browser, payloadOf('console.error', 'Failed to fetch'), 1)
+    for (let index = 1; index <= 60; index += 1) {
+      sendMessage(browser, logged(`line ${index}`), 1)
+    }
+
+    await flush()
+    expect(page.consoleMessages()).not.toContainEqual({ kind: 'console.error', text: 'Failed to fetch' })
+    expect(page.pageErrors()).toEqual([{ kind: 'console.error', text: 'Failed to fetch' }])
+  })
+
+  it('keeps only the first 50', async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    for (let index = 1; index <= 60; index += 1) {
+      sendMessage(browser, payloadOf('console.error', `error ${index}`), 1)
+    }
+
+    await flush()
+
+    const kept = page.pageErrors()
+
+    expect(kept).toHaveLength(50)
+    expect(kept[0]).toEqual({ kind: 'console.error', text: 'error 1' })
+    expect(kept[49]).toEqual({ kind: 'console.error', text: 'error 50' })
+  })
+
+  it('keeps each once: the same kind, text and load error', async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    sendMessage(browser, payloadOf('console.error', 'Failed to fetch'), 1)
+    sendMessage(browser, payloadOf('console.error', 'Failed to fetch'), 1)
+    sendMessage(browser, payloadOf('error', 'Failed to fetch'), 1)
+    logLoad(browser, missingUrl, notFound)
+    logLoad(browser, missingUrl, notFound)
+    logLoad(browser, missingUrl, 'Failed to load resource: the server responded with a status of 500 ()')
+    await flush()
+    expect(page.pageErrors()).toEqual([
+      { kind: 'console.error', text: 'Failed to fetch' },
+      { kind: 'error', text: 'Failed to fetch' },
+      { kind: 'load', text: missingUrl, loadError: 'HTTP 404' },
+      { kind: 'load', text: missingUrl, loadError: 'HTTP 500' },
+    ])
+  })
+
+  it("keeps an error status and a network error of the goto document's origin, and drops another origin's", async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    logLoad(browser, missingUrl, notFound)
+    logLoad(browser, 'https://api.example.com/users', notFound)
+    logLoad(browser, 'https://fonts.example.com/inter.woff2')
+    logLoad(browser, `${storyOrigin}/assets/card.js`)
+    logLoad(browser, `${storyOrigin}/aborted.js`, 'Failed to load resource: net::ERR_ABORTED')
+    logLoad(browser, `${storyOrigin}/another-session.js`, notFound, 'session-9')
+    await flush()
+    expect(page.pageErrors()).toEqual([
+      { kind: 'load', text: missingUrl, loadError: 'HTTP 404' },
+      { kind: 'load', text: `${storyOrigin}/assets/card.js`, loadError: 'net::ERR_EMPTY_RESPONSE' },
+    ])
+  })
+
+  it('forgets them once a goto starts', async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    sendMessage(browser, payloadOf('console.error', 'the earlier story'), 1)
+    logLoad(browser, missingUrl, notFound)
+    await flush()
+    await page.goto(burgersUrl, 1000)
+    sendMessage(browser, payloadOf('console.error', 'this story'), 2)
+    await flush()
+    expect(page.pageErrors()).toEqual([{ kind: 'console.error', text: 'this story' }])
+  })
+
+  it('keeps them once the page can no longer be used', async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    sendMessage(browser, payloadOf('error', 'Boom'), 1)
+    logLoad(browser, missingUrl, notFound)
+    browser.emit('Inspector.targetCrashed', {}, sessionId)
+    await flush()
+    await expect(page.evaluate('1', 1000)).rejects.toMatchObject({ name: 'PageCrashedError' })
+    expect(page.pageErrors()).toEqual([
+      { kind: 'error', text: 'Boom' },
+      { kind: 'load', text: missingUrl, loadError: 'HTTP 404' },
+    ])
+  })
+
+  it('gives a copy, which the page never changes', async () => {
+    const { browser, page } = await openPage()
+
+    await page.goto(storyUrl, 1000)
+    sendMessage(browser, payloadOf('console.error', 'first'), 1)
+    await flush()
+
+    const given = page.pageErrors()
+
+    sendMessage(browser, payloadOf('console.error', 'second'), 1)
+    await flush()
+    expect(given).toEqual([{ kind: 'console.error', text: 'first' }])
+  })
+})

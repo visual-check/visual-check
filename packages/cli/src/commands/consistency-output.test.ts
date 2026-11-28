@@ -39,6 +39,7 @@ function snapshotOf(storybook: ResolvedStorybook, id: string, mode?: string): Pl
     selected: true,
     options: {},
     tolerance: { color: 0.01, pixels: 20 },
+    pageErrorPolicy: { check: 'fail', expected: [], storyExpected: [] },
     viewport: { width: 1280, height: 720, deviceScaleFactor: 1, touch: false },
     globals: {},
   }
@@ -174,7 +175,11 @@ describe('consistencyOutputOf', () => {
         '2 missing · 1 broken · 2 orphans',
       ),
       items: [missingMode, broken, missingDocs],
-      results: [missingResultOf(), brokenResultOf(loadFailed, { attempts: 0 }), missingResultOf()],
+      results: [missingResultOf(), brokenResultOf(loadFailed, { attempts: 0 }), missingResultOf()].map((result) => ({
+        ...result,
+        pageErrors: [],
+        staleExpectedPageErrors: [],
+      })),
     })
   })
 

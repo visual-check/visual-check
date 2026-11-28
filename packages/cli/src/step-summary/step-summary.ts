@@ -2,6 +2,7 @@ import { appendFile, stat } from 'node:fs/promises'
 import type { Report, ReportEntryFields } from '../report/report-document.js'
 import { countsLineOf } from '../reporter/counts-line.js'
 import { failureStatuses, testCountsLineOf } from '../reporter/end-block.js'
+import { pageErrorCountsOf, pageErrorTextOf } from '../reporter/page-errors-block.js'
 import { systemReasonOf } from '../system-error/system-reason.js'
 
 /**
@@ -18,6 +19,11 @@ const actionBytes = 1024
  * The most flaky snapshots the summary names.
  */
 const listedFlakyCount = 100
+
+/**
+ * The most snapshots with page errors the summary names.
+ */
+const listedPageErrorSnapshotCount = 5
 
 /**
  * What starts a summary appended after what the file already holds: a blank line, so its heading is one.
@@ -101,12 +107,13 @@ export class StepSummaryError extends Error {
 
 /**
  * Builds the run's step summary in Markdown, under `budgetBytes` in UTF-8: a heading naming the version, the command,
- * the shard and whether only the consistency check ran, then the counts, the flaky snapshots, at most 100, then, for a
- * `test` with a snapshot that differs, a missing baseline or an orphan and a `localUpdate` given, how to update the
- * baselines locally, and a table of the failures in the report's order, the names and cells escaped. The table keeps
- * its first rows that fit, and a note says how many it leaves out. A run that exited 2 gives the heading and its error
- * instead, cut to fit with a note that says so, or the heading alone when not even the note fits. Gives `''` when even
- * the part before the table's rows, or the heading, doesn't fit.
+ * the shard and whether only the consistency check ran, then the counts, the flaky snapshots, at most 100, the
+ * snapshots with page errors, how many and the first 5 with the first of each, then, for a `test` with a snapshot that
+ * differs, a missing baseline or an orphan and a `localUpdate` given, how to update the baselines locally, and a table
+ * of the failures in the report's order, the names and cells escaped. The table keeps its first rows that fit, and a
+ * note says how many it leaves out. A run that exited 2 gives the heading and its error instead, cut to fit with a note
+ * that says so, or the heading alone when not even the note fits. Gives `''` when even the part before the table's
+ * rows, or the heading, doesn't fit.
  *
  * @public
  */
@@ -117,7 +124,7 @@ export function stepSummaryOf(report: Report, budgetBytes: number, localUpdate?:
     return errorSummaryOf(heading, report.error.message, budgetBytes)
   }
 
-  const blocks = [heading, countsOf(report), ...flakyBlockOf(report)]
+  const blocks = [heading, countsOf(report), ...flakyBlockOf(report), ...pageErrorSnapshotsBlockOf(report)]
   const failures = failuresOf(report)
 
   if (failures.length === 0) {
@@ -237,12 +244,45 @@ function flakyBlockOf(report: Report): string[] {
     return []
   }
 
-  const names = flaky.slice(0, listedFlakyCount).map(({ storybook, story, id, mode }) => {
-    return `- ${[storybook, story ?? id, ...(mode === null ? [] : [mode])].map(inlineTextOf).join(' · ')}`
-  })
+  const names = flaky.slice(0, listedFlakyCount).map((entry) => `- ${entryNameOf(entry)}`)
   const more = flaky.length > listedFlakyCount ? [`- …and ${flaky.length - listedFlakyCount} more`] : []
 
   return ['**Flaky snapshots**', [...names, ...more].join('\n')]
+}
+
+/**
+ * Gives the page errors block: how many snapshots have page errors and, for `test`, how many of them fail the run, then
+ * how many stale expected page errors there are, then the first 5 snapshots that have either, whatever their status,
+ * each with its first page error, else its first stale expected page error, then how many more there are. Gives no
+ * block when no snapshot has either.
+ */
+function pageErrorSnapshotsBlockOf(report: Report): string[] {
+  const entries: readonly ListedEntry[] = report.snapshots
+  const listed = entries.filter((entry) => entry.pageErrors.length > 0 || entry.staleExpectedPageErrors.length > 0)
+
+  if (listed.length === 0) {
+    return []
+  }
+
+  const items = listed.slice(0, listedPageErrorSnapshotCount).map((entry) => {
+    const [first] = entry.pageErrors
+    const problem =
+      first === undefined ? `stale expected page error ${entry.staleExpectedPageErrors[0]}` : pageErrorTextOf(first)
+
+    return `- ${entryNameOf(entry)}: ${inlineTextOf(problem)}`
+  })
+  const more =
+    listed.length > listedPageErrorSnapshotCount ? [`- …and ${listed.length - listedPageErrorSnapshotCount} more`] : []
+
+  return ['**Page errors**', pageErrorCountsOf(entries, report.command), [...items, ...more].join('\n')]
+}
+
+/**
+ * Names an entry by its Storybook, its story ID or an orphan's stem, and its mode when it has one, each escaped, a `·`
+ * apart.
+ */
+function entryNameOf({ storybook, story, id, mode }: ListedEntry): string {
+  return [storybook, story ?? id, ...(mode === null ? [] : [mode])].map(inlineTextOf).join(' · ')
 }
 
 /**
