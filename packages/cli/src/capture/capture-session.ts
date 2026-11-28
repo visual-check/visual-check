@@ -31,6 +31,7 @@ import {
 import {
   type CapturePrep,
   type PageGrid,
+  type PageOverflow,
   type PageRemoteContent,
   readCapturePrep,
   type StoryMask,
@@ -128,6 +129,12 @@ export interface StoryToCapture {
    */
   growViewport?: boolean
   /**
+   * Whether content the capture would cut doesn't break the story: content wider than the viewport for the full page,
+   * spilling past the `element` box, or the element past the page's top or left edge. When true, the story is
+   * captured as it is. Without it, such a story is broken with `overflows`.
+   */
+  allowOverflow?: boolean
+  /**
    * The masks painted over the story before its capture, in order. None without it.
    */
   masks?: readonly StoryMask[]
@@ -139,8 +146,8 @@ export interface StoryToCapture {
   findRemoteContent?: boolean
   /**
    * Whether a story that breaks while its page still shows something comes with an image of that page: for the
-   * reasons `error`, `play-threw`, `timeout`, `fonts-not-loaded`, `wait-threw`, `element-missing` and
-   * `grid-too-wide`, the full page, captured at once, before the page is closed. Without it, a broken story comes
+   * reasons `error`, `play-threw`, `timeout`, `fonts-not-loaded`, `wait-threw`, `element-missing`, `grid-too-wide`
+   * and `overflows`, the full page, captured at once, before the page is closed. Without it, a broken story comes
    * without one.
    */
   imageWhenBroken?: boolean
@@ -204,6 +211,8 @@ export interface RemoteContentBox {
  * - `too-tall`: the capture, or a grid on the story's page, is over 32,767 device pixels on a side.
  * - `element-missing`: the story's `element` selector matched nothing, or an element whose box is of zero size.
  * - `grid-too-wide`: a grid on the story's page is wider than the viewport.
+ * - `overflows`: the story's capture would cut content its page shows: wider than the viewport for the full page,
+ *   spilling past the `element` box, or the element past the page's top or left edge.
  * - `browser-exited`: the browser exited while the story was in flight. The run's browser gives it; a capture session
  *   rejects with a `BrowserExitedError` instead.
  * - `changed-after-capture`: the story's page, captured again a second after its first capture on one load, had
@@ -225,6 +234,7 @@ export type BrokenReason =
   | 'too-tall'
   | 'element-missing'
   | 'grid-too-wide'
+  | 'overflows'
   | 'browser-exited'
   | 'changed-after-capture'
   | 'unstable'
@@ -235,8 +245,8 @@ export type BrokenReason =
  * stories file that didn't load. `update` gives one for a story that doesn't render the same way twice. Some reasons
  * keep details besides: the stories file's load error or the time it had, `play`'s stack, the readyTimeout that ran
  * out, the font faces still loading, where a story that navigated away went, the size of a capture too tall to take,
- * and the width of a grid wider than the viewport. A broken story whose page couldn't load some of Storybook's own
- * files keeps those too.
+ * the width of a grid wider than the viewport, and how far content the capture would cut reaches past each side. A
+ * broken story whose page couldn't load some of Storybook's own files keeps those too.
  *
  * @public
  */
@@ -247,7 +257,14 @@ export type BrokenStory = (
        */
       reason: Exclude<
         BrokenReason,
-        'load-failed' | 'play-threw' | 'timeout' | 'fonts-not-loaded' | 'navigated-away' | 'too-tall' | 'grid-too-wide'
+        | 'load-failed'
+        | 'play-threw'
+        | 'timeout'
+        | 'fonts-not-loaded'
+        | 'navigated-away'
+        | 'too-tall'
+        | 'grid-too-wide'
+        | 'overflows'
       >
       /**
        * One line for people saying why.
@@ -384,6 +401,48 @@ export type BrokenStory = (
         width: number
         /**
          * The viewport's width, in CSS pixels.
+         */
+        viewportWidth: number
+      }
+    }
+  | {
+      /**
+       * Why the story can't be captured: its capture would cut content its page shows.
+       */
+      reason: 'overflows'
+      /**
+       * One line for people saying why, with how far the content reaches past each side that counts.
+       */
+      message: string
+      /**
+       * What the capture would cut: its area, how far content reaches past each side, and the viewport's width, in CSS
+       * pixels.
+       */
+      overflow: {
+        /**
+         * What the capture takes: the full page, or the `element` box.
+         */
+        area: 'full-page' | 'element'
+        /**
+         * How far the element reaches past the page's top edge, in CSS pixels, rounded up. 0 for the full page.
+         */
+        top: number
+        /**
+         * How far content reaches past the capture's right edge, in CSS pixels, rounded up: the full page's past the
+         * viewport's right edge, or the element's past its border box's.
+         */
+        right: number
+        /**
+         * How far the element's content reaches past its border box's bottom edge, in CSS pixels, rounded up. 0 for
+         * the full page.
+         */
+        bottom: number
+        /**
+         * How far the element reaches past the page's left edge, in CSS pixels, rounded up. 0 for the full page.
+         */
+        left: number
+        /**
+         * The snapshot's viewport width, in CSS pixels: its mode's when it has one.
          */
         viewportWidth: number
       }
@@ -996,6 +1055,72 @@ export function gridProblemOf(grid: PageGrid | undefined, viewport: PageViewport
 }
 
 /**
+ * Lists `items` in a sentence: two with ` and `, three or more with commas and ` and ` before the last.
+ */
+function listOf(items: readonly string[]): string {
+  if (items.length <= 2) {
+    return items.join(' and ')
+  }
+
+  return `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`
+}
+
+/**
+ * Says how far an element's capture would cut content, as the clauses of a sentence, in the order top, right, bottom,
+ * left, one for each side that counts: the element past the page's top edge, its content past its right and bottom
+ * edges, in one clause when both count, and the element past the page's left edge. The content's clause names the
+ * element when it comes first.
+ */
+function elementOverflowClausesOf({ top, right, bottom, left }: PageOverflow): string[] {
+  const contentEdges = [
+    ...(right > 0 ? [`${right} px past the element's right edge`] : []),
+    ...(bottom > 0 ? [`${bottom} px past ${right > 0 ? 'its' : "the element's"} bottom edge`] : []),
+  ]
+  const contentSubject = top > 0 ? 'its content' : "the element's content"
+
+  return [
+    ...(top > 0 ? [`the element reaches ${top} px past the page's top edge`] : []),
+    ...(contentEdges.length > 0 ? [`${contentSubject} reaches ${contentEdges.join(' and ')}`] : []),
+    ...(left > 0 ? [`the element reaches ${left} px past the page's left edge`] : []),
+  ]
+}
+
+/**
+ * Says why a story whose capture would cut content its page shows can't be captured, or gives nothing when it would cut
+ * nothing or the story sets `allowOverflow: true`. For the full page, it names how far content reaches past the
+ * viewport's right edge; for an element's box, each side that counts. `area` is what the capture takes, and the
+ * story's viewport is the snapshot's: its mode's when it has one.
+ */
+export function overflowProblemOf(
+  overflow: PageOverflow | undefined,
+  area: CaptureArea,
+  story: StoryToCapture,
+): BrokenStory | undefined {
+  if (overflow === undefined || story.allowOverflow === true) {
+    return undefined
+  }
+
+  const viewportWidth = story.viewport.width
+  const { top, right, bottom, left } = overflow
+
+  if (area === 'full-page') {
+    return {
+      reason: 'overflows',
+      message: `Content reaches ${right} px past the right edge of the ${viewportWidth} px viewport, so the capture would cut it. Fix the layout, give the story a wider viewport or list modes without the narrow ones, or set allowOverflow when the cut is intended.`,
+      overflow: { area: 'full-page', top, right, bottom, left, viewportWidth },
+    }
+  }
+
+  const sentence = listOf(elementOverflowClausesOf(overflow))
+
+  return {
+    reason: 'overflows',
+    message: `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}, so the capture would cut it. Fix the layout, capture an element that holds the content, or set allowOverflow when the cut is intended.`,
+    overflow: { area: 'element', top, right, bottom, left, viewportWidth },
+  }
+}
+
+/**
  * What the page prepared a capture with.
  */
 interface PreparedCapture {
@@ -1012,6 +1137,11 @@ interface PreparedCapture {
    * The grids the page shows: the widest grid's width and the tallest grid's height. Without it, the page shows none.
    */
   grid: PageGrid | undefined
+  /**
+   * How far content the capture would cut reaches past each side of the capture. Without it, the capture would cut
+   * nothing.
+   */
+  overflow: PageOverflow | undefined
 }
 
 /**
@@ -1068,7 +1198,8 @@ interface CapturedSnapshot {
  * When the settings ask to list hosts, it also gives the hosts the page sent requests to, read once the capture is
  * done, and the hosts of the remote content the story shows, from the same search as the host masks. A story whose page
  * shows a grid wider than the viewport, or too tall to capture, is broken before anything is captured, as
- * `gridProblemOf` says. Gives the area the snapshot was captured from beside it, and leaves the story's
+ * `gridProblemOf` says. Then one whose capture would cut content its page shows is broken, as `overflowProblemOf` says,
+ * unless it sets `allowOverflow: true`; a capture too tall is only found as it's taken, after that. Gives the area the snapshot was captured from beside it, and leaves the story's
  * `captureAgainIf` to the caller. A story that can't be captured comes back as a broken story. Either way it comes with
  * the console messages and errors the page sent, read once the capture is done or the story broke, while the page is
  * still open, and a broken story with the loads of Storybook's files that failed on the page. Rejects only with a
@@ -1240,7 +1371,12 @@ async function captureOnPage(
       return { broken: describeCapturePrep(prep, element, settings.readyTimeoutMs) }
     }
 
-    return { area: prep.box ?? 'full-page', remote: request.findRemote ? prep.remote : undefined, grid: prep.grid }
+    return {
+      area: prep.box ?? 'full-page',
+      remote: request.findRemote ? prep.remote : undefined,
+      grid: prep.grid,
+      overflow: prep.overflow,
+    }
   }
 
   try {
@@ -1271,6 +1407,12 @@ async function captureOnPage(
 
     if (gridBroken !== undefined) {
       return brokenBy(gridBroken)
+    }
+
+    const overflowBroken = overflowProblemOf(prepared.overflow, prepared.area, story)
+
+    if (overflowBroken !== undefined) {
+      return brokenBy(overflowBroken)
     }
 
     step = 'capture'
@@ -1308,6 +1450,7 @@ const imagedReasons: readonly BrokenReason[] = [
   'wait-threw',
   'element-missing',
   'grid-too-wide',
+  'overflows',
 ]
 
 /**
@@ -1437,15 +1580,16 @@ export function pageSetupOf(settings: CaptureSettings): PageSetup {
  * retried.
  *
  * A story whose page shows a grid wider than the viewport, or too tall to capture, is broken with `grid-too-wide` or
- * `too-tall` before anything is captured.
+ * `too-tall` before anything is captured. Then a story whose capture would cut content its page shows is broken with
+ * `overflows`, unless it sets `allowOverflow: true`.
  *
  * A broken story whose page couldn't load some of Storybook's own files at the network level, such as a connection the
  * server dropped, keeps them as `failedLoads`, and its message gains a sentence naming the first and the browser's
  * error, with how many there were when more than one. Its reason stays as it was, and nothing more is retried.
  *
  * A story that asks for it with `imageWhenBroken` and breaks while its page still shows something, for the reasons
- * `error`, `play-threw`, `timeout`, `fonts-not-loaded`, `wait-threw`, `element-missing` and `grid-too-wide`, comes
- * with an image of the full page, captured before the page is closed, unless that capture fails or takes longer than
+ * `error`, `play-threw`, `timeout`, `fonts-not-loaded`, `wait-threw`, `element-missing`, `grid-too-wide` and
+ * `overflows`, comes with an image of the full page, captured before the page is closed, unless that capture fails or takes longer than
  * the settings' `brokenImageTimeLimitMs`. A browser exit during it rejects the capture with a `BrowserExitedError`.
  *
  * When a story has `captureAgainIf`, each attempt that captured a snapshot calls it with the snapshot, the page left as

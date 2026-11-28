@@ -85,6 +85,13 @@ const detailLines: { [Key in keyof Required<BrokenDetails>]: (value: Required<Br
   size: ([width, height]) => [`Page size: ${width} × ${height} device pixels`],
   pendingFonts: (faces) => [`Pending fonts: ${faces.join(', ')}`],
   grid: ({ width, viewportWidth }) => [`Grid width: ${width} px, viewport width: ${viewportWidth} px`],
+  overflow: ({ area, top, right, bottom, left, viewportWidth }) => {
+    const sides = { top, right, bottom, left }
+    const reaches = Object.entries(sides).flatMap(([side, pixels]) => (pixels > 0 ? [`${side} ${pixels} px`] : []))
+    const label = area === 'full-page' ? 'Full-page overflow' : 'Element overflow'
+
+    return [`${label}: ${[...reaches, `viewport width: ${viewportWidth} px`].join(', ')}`]
+  },
   loadError: (error) => error.split('\n'),
 }
 

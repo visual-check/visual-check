@@ -28,6 +28,7 @@ export type ReportBrokenReason =
   | 'element-missing'
   | 'too-tall'
   | 'grid-too-wide'
+  | 'overflows'
   | 'crashed'
   | 'browser-exited'
   | 'changed-after-capture'
@@ -183,6 +184,36 @@ export interface ReportBrokenDetails {
      * The grid's width, in CSS pixels.
      */
     width: number
+    /**
+     * The viewport's width, in CSS pixels.
+     */
+    viewportWidth: number
+  }
+  /**
+   * What a capture would cut: its area, how far content reaches past each side, and the viewport's width.
+   */
+  overflow?: {
+    /**
+     * What the capture takes: the full page, or the `element` box.
+     */
+    area: 'full-page' | 'element'
+    /**
+     * How far the element reaches past the page's top edge, in CSS pixels. 0 for the full page.
+     */
+    top: number
+    /**
+     * How far content reaches past the capture's right edge, in CSS pixels: the full page's past the viewport's right
+     * edge, or the element's past its border box's.
+     */
+    right: number
+    /**
+     * How far the element's content reaches past its border box's bottom edge, in CSS pixels. 0 for the full page.
+     */
+    bottom: number
+    /**
+     * How far the element reaches past the page's left edge, in CSS pixels. 0 for the full page.
+     */
+    left: number
     /**
      * The viewport's width, in CSS pixels.
      */

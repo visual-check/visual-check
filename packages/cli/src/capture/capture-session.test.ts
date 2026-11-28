@@ -6,6 +6,7 @@ import {
   type CaptureSettings,
   gridProblemOf,
   openCaptureSession,
+  overflowProblemOf,
   remoteContentBoxesOf,
   remoteHostsOf,
 } from './capture-session.js'
@@ -2475,6 +2476,224 @@ describe('a grid', () => {
   })
 })
 
+describe('an overflow', () => {
+  /**
+   * The end of the message of an element's overflow.
+   */
+  const elementFix =
+    ', so the capture would cut it. Fix the layout, capture an element that holds the content, or set allowOverflow when the cut is intended.'
+
+  /**
+   * The message of a full-page overflow of 197 px past the 1280 px viewport.
+   */
+  const fullPageMessage =
+    'Content reaches 197 px past the right edge of the 1280 px viewport, so the capture would cut it. Fix the layout, give the story a wider viewport or list modes without the narrow ones, or set allowOverflow when the cut is intended.'
+
+  /**
+   * The box of the element most tests capture.
+   */
+  const box = { x: 0, y: 0, width: 300, height: 200 }
+
+  /**
+   * A page whose capture preparation answers that its capture would cut content by this much, with this box.
+   */
+  const overflowing = (
+    overflow: { top: number; right: number; bottom: number; left: number },
+    prepBox: object | null = null,
+  ): FakePageBehaviour => ({
+    capturePrep: async () => ({ outcome: 'ready', box: prepBox, overflow }),
+  })
+
+  it('is no problem when the capture would cut nothing', () => {
+    expect(overflowProblemOf(undefined, 'full-page', primary)).toBeUndefined()
+  })
+
+  it('is no problem when the story allows it', () => {
+    const overflow = { top: 0, right: 197, bottom: 0, left: 0 }
+
+    expect(overflowProblemOf(overflow, 'full-page', { ...primary, allowOverflow: true })).toBeUndefined()
+  })
+
+  it("breaks a full-page capture, naming the content past the viewport's right edge", () => {
+    expect(overflowProblemOf({ top: 0, right: 197, bottom: 0, left: 0 }, 'full-page', primary)).toEqual({
+      reason: 'overflows',
+      message: fullPageMessage,
+      overflow: { area: 'full-page', top: 0, right: 197, bottom: 0, left: 0, viewportWidth: 1280 },
+    })
+  })
+
+  it('breaks a story whose allowOverflow is false', () => {
+    const overflow = { top: 0, right: 197, bottom: 0, left: 0 }
+
+    expect(overflowProblemOf(overflow, 'full-page', { ...primary, allowOverflow: false })).toMatchObject({
+      reason: 'overflows',
+    })
+  })
+
+  it("names the snapshot's own viewport width", () => {
+    expect(overflowProblemOf({ top: 0, right: 25, bottom: 0, left: 0 }, 'full-page', secondary)).toEqual({
+      reason: 'overflows',
+      message:
+        'Content reaches 25 px past the right edge of the 375 px viewport, so the capture would cut it. Fix the layout, give the story a wider viewport or list modes without the narrow ones, or set allowOverflow when the cut is intended.',
+      overflow: { area: 'full-page', top: 0, right: 25, bottom: 0, left: 0, viewportWidth: 375 },
+    })
+  })
+
+  it.each([
+    [{ top: 12, right: 0, bottom: 0, left: 0 }, "The element reaches 12 px past the page's top edge"],
+    [{ top: 0, right: 197, bottom: 0, left: 0 }, "The element's content reaches 197 px past the element's right edge"],
+    [{ top: 0, right: 0, bottom: 30, left: 0 }, "The element's content reaches 30 px past the element's bottom edge"],
+    [{ top: 0, right: 0, bottom: 0, left: 4 }, "The element reaches 4 px past the page's left edge"],
+    [
+      { top: 12, right: 197, bottom: 0, left: 0 },
+      "The element reaches 12 px past the page's top edge and its content reaches 197 px past the element's right edge",
+    ],
+    [
+      { top: 12, right: 0, bottom: 30, left: 0 },
+      "The element reaches 12 px past the page's top edge and its content reaches 30 px past the element's bottom edge",
+    ],
+    [
+      { top: 12, right: 0, bottom: 0, left: 4 },
+      "The element reaches 12 px past the page's top edge and the element reaches 4 px past the page's left edge",
+    ],
+    [
+      { top: 0, right: 197, bottom: 30, left: 0 },
+      "The element's content reaches 197 px past the element's right edge and 30 px past its bottom edge",
+    ],
+    [
+      { top: 0, right: 197, bottom: 0, left: 4 },
+      "The element's content reaches 197 px past the element's right edge and the element reaches 4 px past the page's left edge",
+    ],
+    [
+      { top: 0, right: 0, bottom: 30, left: 4 },
+      "The element's content reaches 30 px past the element's bottom edge and the element reaches 4 px past the page's left edge",
+    ],
+    [
+      { top: 12, right: 197, bottom: 30, left: 0 },
+      "The element reaches 12 px past the page's top edge and its content reaches 197 px past the element's right edge and 30 px past its bottom edge",
+    ],
+    [
+      { top: 12, right: 197, bottom: 0, left: 4 },
+      "The element reaches 12 px past the page's top edge, its content reaches 197 px past the element's right edge and the element reaches 4 px past the page's left edge",
+    ],
+    [
+      { top: 12, right: 0, bottom: 30, left: 4 },
+      "The element reaches 12 px past the page's top edge, its content reaches 30 px past the element's bottom edge and the element reaches 4 px past the page's left edge",
+    ],
+    [
+      { top: 0, right: 197, bottom: 30, left: 4 },
+      "The element's content reaches 197 px past the element's right edge and 30 px past its bottom edge and the element reaches 4 px past the page's left edge",
+    ],
+    [
+      { top: 12, right: 197, bottom: 30, left: 4 },
+      "The element reaches 12 px past the page's top edge, its content reaches 197 px past the element's right edge and 30 px past its bottom edge and the element reaches 4 px past the page's left edge",
+    ],
+  ])("breaks an element's capture cut by %j, naming each side that counts", (overflow, sentence) => {
+    expect(overflowProblemOf(overflow, box, { ...primary, element: '#card' })).toEqual({
+      reason: 'overflows',
+      message: `${sentence}${elementFix}`,
+      overflow: { area: 'element', ...overflow, viewportWidth: 1280 },
+    })
+  })
+
+  it('breaks a story whose full-page capture would cut content, capturing nothing, and its page is closed', async () => {
+    const driver = new FakeDriver({ pages: [overflowing({ top: 0, right: 197, bottom: 0, left: 0 })] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      broken: {
+        reason: 'overflows',
+        message: fullPageMessage,
+        overflow: { area: 'full-page', top: 0, right: 197, bottom: 0, left: 0, viewportWidth: 1280 },
+      },
+      console: [],
+    })
+    expect(driver.methods().filter((method) => method.endsWith(':capture'))).toEqual([])
+    expect(driver.methods()).toContain('1:close')
+  })
+
+  it("breaks a story whose element's capture would cut content, capturing nothing", async () => {
+    const driver = new FakeDriver({ pages: [overflowing({ top: 0, right: 197, bottom: 30, left: 0 }, box)] })
+
+    expect(await openCaptureSession(driver, settings).capture({ ...primary, element: '#card' })).toEqual({
+      broken: {
+        reason: 'overflows',
+        message: `The element's content reaches 197 px past the element's right edge and 30 px past its bottom edge${elementFix}`,
+        overflow: { area: 'element', top: 0, right: 197, bottom: 30, left: 0, viewportWidth: 1280 },
+      },
+      console: [],
+    })
+    expect(driver.methods().filter((method) => method.endsWith(':capture'))).toEqual([])
+  })
+
+  it('captures a story that allows its capture to cut content, as it would capture any', async () => {
+    const driver = new FakeDriver({ pages: [overflowing({ top: 0, right: 197, bottom: 30, left: 0 }, box)] })
+    const story = { ...primary, element: '#card', allowOverflow: true }
+
+    expect(await openCaptureSession(driver, settings).capture(story)).toEqual({
+      snapshot: defaultSnapshot,
+      console: [],
+    })
+    expect(driver.calls.filter((call) => call.method === 'capture').map((call) => call.args)).toEqual([[box]])
+  })
+
+  it('captures a story whose capture would cut nothing', async () => {
+    const driver = new FakeDriver({ pages: [{ capturePrep: async () => ({ outcome: 'ready', box: null }) }] })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toEqual({
+      snapshot: defaultSnapshot,
+      console: [],
+    })
+  })
+
+  it('breaks a story whose page shows a grid too wide as grid-too-wide, even when its capture would cut content', async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          capturePrep: async () => ({
+            outcome: 'ready',
+            box: null,
+            grid: { width: 1400, height: 500 },
+            overflow: { top: 0, right: 120, bottom: 0, left: 0 },
+          }),
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toMatchObject({
+      broken: { reason: 'grid-too-wide' },
+    })
+  })
+
+  it('breaks a story whose page shows a grid too tall as too-tall, even when its capture would cut content', async () => {
+    const driver = new FakeDriver({
+      pages: [
+        {
+          capturePrep: async () => ({
+            outcome: 'ready',
+            box: null,
+            grid: { width: 600, height: 20_000 },
+            overflow: { top: 0, right: 120, bottom: 0, left: 0 },
+          }),
+        },
+      ],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture(primary)).toMatchObject({
+      broken: { reason: 'too-tall' },
+    })
+  })
+
+  it('breaks a story whose element is missing as element-missing', async () => {
+    const driver = new FakeDriver({
+      pages: [{ capturePrep: async () => ({ outcome: 'element-missing', found: 'nothing' }) }],
+    })
+
+    expect(await openCaptureSession(driver, settings).capture({ ...primary, element: '#card' })).toMatchObject({
+      broken: { reason: 'element-missing' },
+    })
+  })
+})
+
 describe('a story that navigates away', () => {
   /**
    * A page whose story navigates away to `url` as it loads.
@@ -3279,6 +3498,16 @@ describe('the image of a broken story', () => {
     [
       'grid-too-wide',
       { capturePrep: async () => ({ outcome: 'ready', box: null, grid: { width: 1400, height: 500 } }) },
+    ],
+    [
+      'overflows',
+      {
+        capturePrep: async () => ({
+          outcome: 'ready',
+          box: { x: 0, y: 0, width: 300, height: 200 },
+          overflow: { top: 0, right: 197, bottom: 0, left: 0 },
+        }),
+      },
     ],
   ])(
     'is the full page captured once a story is broken with %s, before its page is closed',

@@ -64,6 +64,11 @@ export interface StoryOptions {
    */
   growViewport?: boolean
   /**
+   * Whether content the capture would cut doesn't break the story. Without it, or `false`, such a story is broken with
+   * `overflows`.
+   */
+  allowOverflow?: boolean
+  /**
    * The regions to paint over, by name, or `null` for none. A name set to `null` drops one mask.
    */
   masks?: Record<string, StoryMask | null> | null
@@ -228,6 +233,7 @@ const storyKeys = {
   viewport: checkViewport,
   element: orNull({ ...nonEmptyString, text: 'a non-empty string, or null' }),
   growViewport: optionalKey({ text: 'true or false', accepts: (value) => typeof value === 'boolean' }),
+  allowOverflow: optionalKey({ text: 'true or false', accepts: (value) => typeof value === 'boolean' }),
   masks: checkMasks,
   tolerance: checkTolerance,
   disable: optionalKey({ text: 'true or false', accepts: (value) => typeof value === 'boolean' }),

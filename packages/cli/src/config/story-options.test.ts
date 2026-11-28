@@ -9,7 +9,7 @@ const newerHint = ' If a newer @visual-check/storybook wrote it, install @visual
 /**
  * The known keys an unknown-key issue lists at the top level.
  */
-const topKeys = 'modes, viewport, element, growViewport, masks, tolerance, disable, wait'
+const topKeys = 'modes, viewport, element, growViewport, allowOverflow, masks, tolerance, disable, wait'
 
 /**
  * Checks a value that must be valid and returns its options.
@@ -348,6 +348,18 @@ describe('checkStoryOptions', () => {
     })
   })
 
+  describe('allowOverflow', () => {
+    it('takes true and false', () => {
+      expect(optionsOf({ allowOverflow: true })).toStrictEqual({ allowOverflow: true })
+      expect(optionsOf({ allowOverflow: false })).toStrictEqual({ allowOverflow: false })
+    })
+
+    it.each([null, 'true', 1, 0, {}])('rejects %j', (allowOverflow) => {
+      expect(issuesOf({ allowOverflow })).toHaveLength(1)
+      expect(issuesOf({ allowOverflow })[0]).toMatch(/^visualCheck\.allowOverflow: must be true or false\. Got /)
+    })
+  })
+
   describe('disable', () => {
     it('takes true and false', () => {
       expect(optionsOf({ disable: true })).toStrictEqual({ disable: true })
@@ -395,6 +407,7 @@ describe('checkStoryOptions', () => {
         viewport: { width: 375, height: 667, deviceScaleFactor: 2, touch: true },
         element: null,
         growViewport: false,
+        allowOverflow: true,
         masks: { ad: { selector: '.ad', host: null }, old: null },
         tolerance: { color: 0.02, pixels: '1%' },
         disable: false,
@@ -407,6 +420,7 @@ describe('checkStoryOptions', () => {
         viewport: { width: 375, height: 667, deviceScaleFactor: 2, touch: true },
         element: null,
         growViewport: false,
+        allowOverflow: true,
         masks: { ad: { selector: '.ad' }, old: null },
         tolerance: { color: 0.02, pixels: '1%' },
         disable: false,
