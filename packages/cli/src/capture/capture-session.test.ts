@@ -2541,52 +2541,52 @@ describe('an overflow', () => {
 
   it.each([
     [{ top: 12, right: 0, bottom: 0, left: 0 }, "The element reaches 12 px past the page's top edge"],
-    [{ top: 0, right: 197, bottom: 0, left: 0 }, "The element's content reaches 197 px past the element's right edge"],
-    [{ top: 0, right: 0, bottom: 30, left: 0 }, "The element's content reaches 30 px past the element's bottom edge"],
+    [{ top: 0, right: 197, bottom: 0, left: 0 }, "The element's content reaches 197 px past its right edge"],
+    [{ top: 0, right: 0, bottom: 30, left: 0 }, "The element's content reaches 30 px past its bottom edge"],
     [{ top: 0, right: 0, bottom: 0, left: 4 }, "The element reaches 4 px past the page's left edge"],
     [
       { top: 12, right: 197, bottom: 0, left: 0 },
-      "The element reaches 12 px past the page's top edge and its content reaches 197 px past the element's right edge",
+      "The element reaches 12 px past the page's top edge and its content reaches 197 px past its right edge",
     ],
     [
       { top: 12, right: 0, bottom: 30, left: 0 },
-      "The element reaches 12 px past the page's top edge and its content reaches 30 px past the element's bottom edge",
+      "The element reaches 12 px past the page's top edge and its content reaches 30 px past its bottom edge",
     ],
     [
       { top: 12, right: 0, bottom: 0, left: 4 },
-      "The element reaches 12 px past the page's top edge and the element reaches 4 px past the page's left edge",
+      "The element reaches 12 px past the page's top edge and 4 px past its left edge",
     ],
     [
       { top: 0, right: 197, bottom: 30, left: 0 },
-      "The element's content reaches 197 px past the element's right edge and 30 px past its bottom edge",
+      "The element's content reaches 197 px past its right edge and 30 px past its bottom edge",
     ],
     [
       { top: 0, right: 197, bottom: 0, left: 4 },
-      "The element's content reaches 197 px past the element's right edge and the element reaches 4 px past the page's left edge",
+      "The element reaches 4 px past the page's left edge and its content reaches 197 px past its right edge",
     ],
     [
       { top: 0, right: 0, bottom: 30, left: 4 },
-      "The element's content reaches 30 px past the element's bottom edge and the element reaches 4 px past the page's left edge",
+      "The element reaches 4 px past the page's left edge and its content reaches 30 px past its bottom edge",
     ],
     [
       { top: 12, right: 197, bottom: 30, left: 0 },
-      "The element reaches 12 px past the page's top edge and its content reaches 197 px past the element's right edge and 30 px past its bottom edge",
+      "The element reaches 12 px past the page's top edge, and its content reaches 197 px past its right edge and 30 px past its bottom edge",
     ],
     [
       { top: 12, right: 197, bottom: 0, left: 4 },
-      "The element reaches 12 px past the page's top edge, its content reaches 197 px past the element's right edge and the element reaches 4 px past the page's left edge",
+      "The element reaches 12 px past the page's top edge and 4 px past its left edge, and its content reaches 197 px past its right edge",
     ],
     [
       { top: 12, right: 0, bottom: 30, left: 4 },
-      "The element reaches 12 px past the page's top edge, its content reaches 30 px past the element's bottom edge and the element reaches 4 px past the page's left edge",
+      "The element reaches 12 px past the page's top edge and 4 px past its left edge, and its content reaches 30 px past its bottom edge",
     ],
     [
       { top: 0, right: 197, bottom: 30, left: 4 },
-      "The element's content reaches 197 px past the element's right edge and 30 px past its bottom edge and the element reaches 4 px past the page's left edge",
+      "The element reaches 4 px past the page's left edge, and its content reaches 197 px past its right edge and 30 px past its bottom edge",
     ],
     [
       { top: 12, right: 197, bottom: 30, left: 4 },
-      "The element reaches 12 px past the page's top edge, its content reaches 197 px past the element's right edge and 30 px past its bottom edge and the element reaches 4 px past the page's left edge",
+      "The element reaches 12 px past the page's top edge and 4 px past its left edge, and its content reaches 197 px past its right edge and 30 px past its bottom edge",
     ],
   ])("breaks an element's capture cut by %j, naming each side that counts", (overflow, sentence) => {
     expect(overflowProblemOf(overflow, box, { ...primary, element: '#card' })).toEqual({
@@ -2617,7 +2617,7 @@ describe('an overflow', () => {
     expect(await openCaptureSession(driver, settings).capture({ ...primary, element: '#card' })).toEqual({
       broken: {
         reason: 'overflows',
-        message: `The element's content reaches 197 px past the element's right edge and 30 px past its bottom edge${elementFix}`,
+        message: `The element's content reaches 197 px past its right edge and 30 px past its bottom edge${elementFix}`,
         overflow: { area: 'element', top: 0, right: 197, bottom: 30, left: 0, viewportWidth: 1280 },
       },
       console: [],

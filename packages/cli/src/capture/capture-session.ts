@@ -1055,34 +1055,38 @@ export function gridProblemOf(grid: PageGrid | undefined, viewport: PageViewport
 }
 
 /**
- * Lists `items` in a sentence: two with ` and `, three or more with commas and ` and ` before the last.
+ * Says how far content reaches past each edge that counts, such as `12 px past the page's top edge`, from pairs of a
+ * distance in CSS pixels and an edge. An edge whose distance is 0 doesn't count.
  */
-function listOf(items: readonly string[]): string {
-  if (items.length <= 2) {
-    return items.join(' and ')
-  }
-
-  return `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`
+function edgePhrasesOf(edges: readonly [distance: number, edge: string][]): string[] {
+  return edges.filter(([distance]) => distance > 0).map(([distance, edge]) => `${distance} px past ${edge}`)
 }
 
 /**
- * Says how far an element's capture would cut content, as the clauses of a sentence, in the order top, right, bottom,
- * left, one for each side that counts: the element past the page's top edge, its content past its right and bottom
- * edges, in one clause when both count, and the element past the page's left edge. The content's clause names the
- * element when it comes first.
+ * Says how far an element's capture would cut content, as a sentence of at most two clauses: first the element past
+ * the page's top and left edges, then its content past its right and bottom edges, each clause naming only the sides
+ * that count. The content's clause names the element when it comes first. Two clauses are joined with `, and` when
+ * either names two sides, and with `and` otherwise.
  */
-function elementOverflowClausesOf({ top, right, bottom, left }: PageOverflow): string[] {
-  const contentEdges = [
-    ...(right > 0 ? [`${right} px past the element's right edge`] : []),
-    ...(bottom > 0 ? [`${bottom} px past ${right > 0 ? 'its' : "the element's"} bottom edge`] : []),
+function elementOverflowSentenceOf({ top, right, bottom, left }: PageOverflow): string {
+  const pageEdges = edgePhrasesOf([
+    [top, "the page's top edge"],
+    [left, top > 0 ? 'its left edge' : "the page's left edge"],
+  ])
+  const contentEdges = edgePhrasesOf([
+    [right, 'its right edge'],
+    [bottom, 'its bottom edge'],
+  ])
+  const contentSubject = pageEdges.length > 0 ? 'its content' : "the element's content"
+  const clauses = [
+    { subject: 'the element', edges: pageEdges },
+    { subject: contentSubject, edges: contentEdges },
   ]
-  const contentSubject = top > 0 ? 'its content' : "the element's content"
+    .filter(({ edges }) => edges.length > 0)
+    .map(({ subject, edges }) => `${subject} reaches ${edges.join(' and ')}`)
+  const sentence = clauses.join(pageEdges.length > 1 || contentEdges.length > 1 ? ', and ' : ' and ')
 
-  return [
-    ...(top > 0 ? [`the element reaches ${top} px past the page's top edge`] : []),
-    ...(contentEdges.length > 0 ? [`${contentSubject} reaches ${contentEdges.join(' and ')}`] : []),
-    ...(left > 0 ? [`the element reaches ${left} px past the page's left edge`] : []),
-  ]
+  return `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}`
 }
 
 /**
@@ -1111,11 +1115,9 @@ export function overflowProblemOf(
     }
   }
 
-  const sentence = listOf(elementOverflowClausesOf(overflow))
-
   return {
     reason: 'overflows',
-    message: `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}, so the capture would cut it. Fix the layout, capture an element that holds the content, or set allowOverflow when the cut is intended.`,
+    message: `${elementOverflowSentenceOf(overflow)}, so the capture would cut it. Fix the layout, capture an element that holds the content, or set allowOverflow when the cut is intended.`,
     overflow: { area: 'element', top, right, bottom, left, viewportWidth },
   }
 }
