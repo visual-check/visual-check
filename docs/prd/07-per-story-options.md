@@ -203,7 +203,7 @@ export const LoadFailed = {
 - `'fail'`: listed, and `test` exits 1 when any snapshot made a real network request to a host `silenceHosts` doesn't match, even when every snapshot passed.
 - `'warn'`: listed, never fails a run.
 - The config sets the default. `preview`, a meta or a story overrides it, and the most specific level wins.
-- **Cost:** a page that watches has the browser report every request and attaches to the service workers of its browser context. <<OVERHEAD>>
+- **Cost:** a page that watches has the browser report every request and attaches to the service workers of its browser context. On the test Storybook, `test` of its 116 snapshots took a median of 43.5 s with `realRequests: 'fail'` and 42.7 s with `'off'`, over 3 runs of each (2 workers, the amd64 image under emulation on an arm64 Mac): about 2 %.
 
 ### Blind spots
 
