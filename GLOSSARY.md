@@ -85,8 +85,12 @@ A `fetch`, XHR, WebSocket or EventSource request a story sends to an origin othe
 _Avoid_: External request, live request, unmocked request, third-party request
 
 **Broken story**:
-A story that can't be captured: its stories file fails to load, or it errors, crashes its page, is in flight when the browser exits, never becomes ready, navigates away, or doesn't render the same way twice.
+A story that can't be captured: its stories file fails to load, or it errors, crashes its page, is in flight when the browser exits, never becomes ready, navigates away, overflows its capture, or doesn't render the same way twice.
 _Avoid_: Failed story, errored story
+
+**Overflow**:
+Content a story's page shows, or lets you scroll to, that its capture would cut: past the viewport's right edge for the full page, or past the capture element's box where the element doesn't clip it, or past the page's top or left edge. Content the page clips itself, or draws in a layer of its own such as a popover, isn't overflow.
+_Avoid_: Clipping, cut-off, bleed, spill
 
 **Flaky snapshot**:
 A snapshot whose captures didn't agree within one run but settled on another try, so it still passed, was kept or was written.
